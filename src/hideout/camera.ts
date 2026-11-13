@@ -25,7 +25,7 @@ export class CamRig {
 
   constructor(cam: THREE.PerspectiveCamera) {
     this.cam = cam;
-    this.user = { target: new THREE.Vector3(0, 0.7, 0.2), yaw: Math.PI / 4, pitch: 0.62, dist: 26, fov: 20 };
+    this.user = { target: new THREE.Vector3(0, 0.7, 0.3), yaw: Math.PI / 4, pitch: 0.62, dist: 23.5, fov: 20 };
     this.cur = { ...this.user, target: this.user.target.clone() };
   }
 

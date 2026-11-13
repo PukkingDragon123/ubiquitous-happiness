@@ -154,10 +154,7 @@ export class RunScreen implements Screen {
   private devExtras(q: URLSearchParams) {
     const wave = Number(q.get('wave') || 1);
     if (wave > 1) { this.wavesCleared = Math.min(areaWaves(this.areaIdx), wave - 1); if (this.wavesCleared >= areaWaves(this.areaIdx)) this.setPhase('cleared'); }
-    if (q.get('rich') === '1') {
-      for (let i = 0; i < 4; i++) for (const [id, n] of Object.entries(this.area.shipwreck.needs())) for (let k = 0; k < n; k++) this.bag.push(id);
-      for (const id of ['driftwood', 'kelp', 'copperOre', 'ironOre', 'seaGlass', 'pearl', 'manaCrystal', 'goldNugget', 'amethyst']) if (ITEMS[id]) for (let k = 0; k < 4; k++) this.bag.push(id);
-    }
+    if (q.get('rich') === '1') for (const d of Object.values(ITEMS)) if (d.kind === 'material' && !d.craftOnly) for (let k = 0; k < 4; k++) this.bag.push(d.id);
     const st = Number(q.get('stage') || 0);
     for (let i = 0; i < st; i++) this.area.shipwreck.repair(this.area.shipwreck.needs());
     if (q.get('inter')) this.interT = this.interMax = Number(q.get('inter'));
@@ -321,8 +318,8 @@ export class RunScreen implements Screen {
     w.on('repair', (d) => {
       this.tally.repairs++;
       const wk = this.area.shipwreck;
-      if (d.ready) this.hud.banner('SEAWORTHY!', this.phase === 'cleared' ? 'SET SAIL AT THE WRECK' : 'SURVIVE THE WAVES, THEN SET SAIL', '#aaf08a', 3.2);
-      else this.hud.banner('WRECK REPAIRED', `STAGE ${wk.stage}/4 · NEXT: ${wk.stageName.toUpperCase()}`, '#ffe7a0', 2.6);
+      if (d.ready) this.hud.banner('SEAWORTHY!', this.phase === 'cleared' ? 'SET SAIL AT THE WRECK' : 'SURVIVE THE WAVES, THEN SET SAIL', '#aaf08a', 3.2, true);
+      else this.hud.banner('WRECK REPAIRED', `STAGE ${wk.stage}/4 · NEXT: ${wk.stageName.toUpperCase()}`, '#ffe7a0', 2.6, true);
       this.save();
     });
     w.on('wreckDestroyed', () => this.die('sunk'));
@@ -427,11 +424,13 @@ export class RunScreen implements Screen {
     const gear = this.looseGear();
     const ids = [...this.bag, ...gear.map((g) => g.id)];
     if (!ids.length) return;
+    // empty the bag first: the 'extract' handler saves the run, and must not save what just went home
+    const bag = this.bag, items = this.run.items;
     this.pendingGear = gear.map((g) => ({ ...g }));
-    const sent = mb.deposit(ids);
-    if (!sent.length) { this.pendingGear = []; return; }
     this.bag = [];
-    this.run.items = this.run.items.filter((i) => i.gx >= 0);
+    this.run.items = items.filter((i) => i.gx >= 0);
+    const sent = mb.deposit(ids);
+    if (!sent.length) { this.bag = bag; this.run.items = items; }
     this.pendingGear = [];
   }
 

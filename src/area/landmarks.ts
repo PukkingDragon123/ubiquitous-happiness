@@ -75,7 +75,7 @@ function reef(scen: Scenery, r: Rng) {
     for (let i = 0; i < 10; i++) {
       const u = r.range(-0.7, 0.7), xx = x + u * half;
       const yy = y - 0.4 + Math.cos(u * Math.PI / 2 * 0.95) * top * 0.98;
-      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'seafan', 'softcoral', 'tubesponge', 'sargassum']), xx, yy, z + r.range(-0.6, 0.6), r.range(0.7, 1.2));
+      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'seafan', 'softcoral', 'tubesponge']), xx, yy, z + r.range(-0.6, 0.6), r.range(0.7, 1.2));
     }
   }
   // bommies: coral heads on rock mounds
@@ -86,7 +86,7 @@ function reef(scen: Scenery, r: Rng) {
     scen.addRock(r.pick(scen.shapes('bigboulder')), x, y - R * 0.3, z, R, H, R, r.range(0, 6), { topK: 1.2 });
     for (let k = 0; k < 9; k++) {
       const a = r.range(0, TAU), d = r.range(0, R * 0.7);
-      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'brain', 'table', 'seafan', 'softcoral', 'tubesponge', 'anemoneSmall', 'featheralgae']), x + Math.cos(a) * d, y - R * 0.3 + H * 0.85, z + Math.sin(a) * d * 0.8, r.range(0.8, 1.3));
+      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'brain', 'table', 'seafan', 'softcoral', 'tubesponge', 'anemone', 'redweed']), x + Math.cos(a) * d, y - R * 0.3 + H * 0.85, z + Math.sin(a) * d * 0.8, r.range(0.8, 1.3));
     }
   }
 }
@@ -106,7 +106,11 @@ function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
       const zz = z + r.range(-0.8, 0.8), y = scen.heightAt(x, zz);
       const reach = -y - r.range(0.3, 1.2);
       if (reach < 3) continue;
-      scen.placeSprite(r.chance(0.18) ? 'bullkelp' : 'giantkelp', x, y - 0.05, zz, 1, r, reach);
+      const far = zz < -9, sp = r.chance(0.15) ? 'bullkelp' : 'giantkelp';
+      const v = r.pick(scen.flora.get(sp, far ? 2 : 3, far ? 1 : 0));
+      const t = r.range(0.8, 1.1), ch = scen.chunk(x);
+      const sy = sp === 'giantkelp' ? reach / 10 : (reach * 0.65) / 10;
+      (zz < -7 ? ch.floraFar : ch.flora).append(v, mat4(x, y - 0.05, zz, r.range(0.9, 1.3), sy, r.range(0.9, 1.3), r.range(0, TAU)), { sway: true, tint: [t, t, t * 0.95] });
     }
   }
   // the canopy: kelp fronds matting the surface cast it in gold; shafts down the aisles

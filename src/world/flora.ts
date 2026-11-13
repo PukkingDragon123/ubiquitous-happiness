@@ -216,7 +216,7 @@ export const SPECIES: Record<string, Species> = {
     id: 'seagrass', size: [0.8, 1.4],
     build(k, A, a) {
       const pal = a.id === 'kelp' ? ['#1e2a10', '#3a5218', '#5e7a26', '#8aa040'] : ['#1a2e12', '#2e5a1e', '#4e8a2a', '#86b848'];
-      const r = A.paint('seagrass', 8, 40, (p, w, h) => blade(p, w, h, pal, { tip: '#a89a5a', rib: 0.2, ruffle: 0.05, base: 0.05 }));
+      const r = pixBlade(A, 'simGrass', 6, 40, a.id === 'kelp' ? '#4a7a2e' : '#3e8a34', { rib: 'light', taper: 0.25 });
       const s = new Soup();
       grassBlades(s, new Rng(k * 19 + 3), r, 9 + k * 2, 0.3, 0.75, 0.06, 0.12, 0.2);
       return s;
@@ -370,8 +370,8 @@ export const SPECIES: Record<string, Species> = {
   giantkelp: {
     id: 'giantkelp', size: [1, 1], tall: true,
     build(k, A, _a, lod = 0) {
-      const rb = A.paint('kelpblade', 12, 40, (p, w, h) => blade(p, w, h, ['#3a2c0e', '#6a541c', '#9a822e', '#c8aa44', '#e8d070'], { bladder: true, wrinkle: 1.3, ruffle: 0.22, rib: 0.08, base: 0.5, seed: 4 }));
-      const rs = A.paint('kelpstipe', 4, 16, (p, w, h) => solid(p, w, h, ['#2a2008', '#4a3a12', '#6a5a20'], 3, 0.2));
+      const rb = pixBlade(A, 'simBlade', 14, 48, A.regions.has('simBlade') ? '#9a7424' : '#9a7424', { wrinkle: 3, serrate: 3, rib: null });
+      const rs = pixBlade(A, 'simStipe', 6, 32, '#5e4a1c', { rib: 'light', taper: 0.01, tones: 4 });
       const s = new Soup();
       const rng = new Rng(k * 23 + 11);
       // unit height 10 m; scenery rescales y to the water column
@@ -380,7 +380,7 @@ export const SPECIES: Record<string, Species> = {
       const path: V3[] = [];
       for (let j = 0; j <= segs; j++) { const t = j / segs; path.push([Math.sin(t * 2.2 + k) * 0.25 + sway * t * t, t * H, Math.cos(t * 1.7 + k) * 0.15]); }
       const fl = (t: number) => Math.pow(t, 1.3) * 1.1;
-      s.tube(path, (t) => 0.045 * (1 - t * 0.3), 3, rs, { flex: fl });
+      s.tube(path, (t) => 0.05 * (1 - t * 0.3), 5, rs, { flex: fl });
       // blades alternate up the stipe
       for (let y = 0.5; y < H; y += rng.range(0.2, 0.32) * (lod ? 2.4 : 1)) {
         const t = y / H, side = Math.floor(y * 4) % 2 ? 1 : -1;
@@ -392,6 +392,7 @@ export const SPECIES: Record<string, Species> = {
         const bp: V3[] = [];
         for (let i = 0; i <= 3; i++) { const u = i / 3; bp.push([q[0] + dir[0] * L * u, y + dir[1] * L * u - 0.25 * u * u, q[2] + dir[2] * L * u]); }
         s.ribbon(bp, (u) => 0.34 * Math.sin(Math.min(1, u * 1.2 + 0.15) * Math.PI) + 0.04, rb, { side: [0, 1, 0], twist: rng.range(-0.6, 0.6), flex: (u) => fl(t) + u * 0.12, shade: () => 0.85 + t * 0.35, ruffle: 0.3 });
+        if (!lod) { const fb = s.count; s.flex(fl(t)).lathe([[0.001, -0.06], [0.06, 0], [0, 0.07]], 4, pixBlade(A, 'simStipe', 6, 32, '#5e4a1c', { rib: 'light', taper: 0.01, tones: 4 })); s.transformSince(fb, mat4(q[0], y, q[2], 1, 1, 1, rng.range(0, 3))); s.flex(0); }
       }
       // the surface canopy: a mat of fronds streaming in the current
       for (let i = 0; i < (lod ? 3 : 7); i++) {
@@ -405,8 +406,8 @@ export const SPECIES: Record<string, Species> = {
   bullkelp: {
     id: 'bullkelp', size: [1, 1], tall: true,
     build(k, A) {
-      const rb = A.paint('bullblade', 8, 48, (p, w, h) => blade(p, w, h, ['#20180a', '#4a3a14', '#7a6224', '#a88a3a'], { wrinkle: 0.7, ruffle: 0.25, base: 0.2, seed: 9 }));
-      const rs = A.paint('kelpstipe', 4, 16, (p, w, h) => solid(p, w, h, ['#2a2008', '#4a3a12', '#6a5a20'], 3, 0.2));
+      const rb = pixBlade(A, 'simBull', 8, 56, '#8e722c', { wrinkle: 4, rib: null, taper: 0.2 });
+      const rs = pixBlade(A, 'simStipe', 6, 32, '#5e4a1c', { rib: 'light', taper: 0.01, tones: 4 });
       const s = new Soup();
       const rng = new Rng(k * 29 + 5);
       const H = 10, path: V3[] = [];
@@ -430,7 +431,7 @@ export const SPECIES: Record<string, Species> = {
   sealettuce: {
     id: 'sealettuce', size: [0.5, 0.9],
     build(k, A) {
-      const r = A.paint('lettuce', 20, 24, (p, w, h) => blade(p, w, h, ['#1a3a10', '#3a7a20', '#6ab038', '#a8e060'], { wrinkle: 2.1, ruffle: 0.3, rib: 0, base: 0.3, seed: 12 }));
+      const r = pixBlade(A, 'simLettuce', 20, 28, '#5abb3e', { wrinkle: 4, rib: null, taper: 0.3 });
       const s = new Soup();
       const rng = new Rng(k * 3 + 1);
       for (let i = 0; i < 6; i++) {
@@ -445,7 +446,7 @@ export const SPECIES: Record<string, Species> = {
     id: 'seapalm', size: [0.5, 0.9],
     build(k, A) {
       const rb = A.paint('palmblade', 6, 24, (p, w, h) => blade(p, w, h, ['#2a2008', '#5a4a14', '#8a7424', '#c0a43a'], { wrinkle: 2, ruffle: 0.2, base: 0.1, seed: 2 }));
-      const rs = A.paint('kelpstipe', 4, 16, (p, w, h) => solid(p, w, h, ['#2a2008', '#4a3a12', '#6a5a20'], 3, 0.2));
+      const rs = pixBlade(A, 'simStipe', 6, 32, '#5e4a1c', { rib: 'light', taper: 0.01, tones: 4 });
       const s = new Soup();
       const rng = new Rng(k * 7 + 3);
       const H = rng.range(0.4, 0.6);
@@ -760,3 +761,128 @@ export class FloraKit {
     return v;
   }
 }
+
+// ------------------------------------------------------------------ hand-painted pixel textures for strips + simulated plants
+import { Pix, hueRamp } from './pixart';
+import type { SimRegions } from './plantsim';
+
+/** paint a straight blade texture (tip at the top) with the pixel-art blade primitive: midrib, wrinkles, serration, warm translucent edges, 1 px outline */
+export function pixBlade(A: Atlas, name: string, w: number, h: number, base: string, o: { wrinkle?: number; serrate?: number; rib?: 'dark' | 'light' | null; taper?: number; tones?: number; bladder?: string } = {}): UVR {
+  return A.paint(name, w, h, (reg) => {
+    const S = new Pix(w, h);
+    const m = S.mat(hueRamp(base, o.tones ?? 5));
+    const cx = w / 2;
+    S.blade([[cx, h - 1], [cx, h * 0.5], [cx, 0]], (t) => (w - 2) * (t > 1 - (o.taper ?? 0.12) ? Math.max(0.3, (1 - t) / (o.taper ?? 0.12)) : 1), m, { wrinkle: o.wrinkle, serrate: o.serrate, rib: o.rib === undefined ? 'dark' : o.rib });
+    if (o.bladder) { const b = S.mat(hueRamp(o.bladder, 4)); S.ball(cx, h - 3, Math.min(3, w * 0.25), b, { ry: 2.6 }); }
+    S.outline();
+    S.toRegion(reg);
+  });
+}
+
+/** the texture set for the simulated seaweed of an area */
+export function simRegions(A: Atlas, a: AreaDef): SimRegions {
+  const kelp = a.id === 'arctic' ? '#7a6a3a' : '#9a7424';
+  return {
+    stipe: pixBlade(A, 'simStipe', 6, 32, '#5e4a1c', { rib: 'light', taper: 0.01, tones: 4 }),
+    blade: pixBlade(A, 'simBlade', 14, 48, kelp, { wrinkle: 3, serrate: 3, rib: null }),
+    bladder: A.paint('simBladder', 8, 8, (reg) => { const S = new Pix(8, 8); S.ball(4, 4, 3.6, S.mat(hueRamp('#b89834', 4))); S.toRegion(reg); }),
+    bull: pixBlade(A, 'simBull', 8, 56, '#8e722c', { wrinkle: 4, rib: null, taper: 0.2 }),
+    bulb: A.paint('simBulb', 12, 12, (reg) => { const S = new Pix(12, 12); S.ball(6, 6, 5.6, S.mat(hueRamp('#7e622a', 5))); S.toRegion(reg); }),
+    grass: pixBlade(A, 'simGrass', 6, 40, a.id === 'kelp' ? '#4a7a2e' : '#3e8a34', { rib: 'light', taper: 0.25 }),
+    lettuce: pixBlade(A, 'simLettuce', 20, 28, '#5abb3e', { wrinkle: 4, rib: null, taper: 0.3 }),
+    whip: pixBlade(A, 'simWhip', 6, 32, a.id === 'graveyard' ? '#c88a3a' : '#d86a2a', { rib: 'light', taper: 0.05, tones: 4 }),
+    wrack: pixBlade(A, 'simWrack', 8, 40, a.id === 'arctic' ? '#7a6a3a' : '#7a6420', { rib: 'dark', taper: 0.2 }),
+  };
+}
+
+// ------------------------------------------------------------------ 3D replacements for the old card plants
+function flatFan(s: Soup, rng: Rng, r: UVR, size: number) {
+  // a gorgonian: branching thin prisms grown in one plane, joined by anastomosing cross-links
+  const tips: V3[] = [];
+  const grow = (p: V3, ang: number, L: number, d: number) => {
+    const e: V3 = [p[0] + Math.cos(ang) * L, p[1] + Math.sin(ang) * L, p[2] + rng.range(-0.02, 0.02)];
+    s.tube([p, e], (t) => (0.035 - d * 0.005) * (1 - t * 0.3) * size, 3, r, { flex: (t) => (p[1] + t * (e[1] - p[1])) * 0.08 });
+    if (d >= 4 || L < 0.06) { tips.push(e); return; }
+    const sp = 0.42 - d * 0.04;
+    grow(e, ang - sp * rng.range(0.6, 1.2), L * rng.range(0.7, 0.85), d + 1);
+    grow(e, ang + sp * rng.range(0.6, 1.2), L * rng.range(0.7, 0.85), d + 1);
+  };
+  grow([0, 0, 0], Math.PI / 2 + rng.range(-0.1, 0.1), 0.28 * size, 0);
+  tips.sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i + 1 < tips.length; i++) if (Math.hypot(tips[i + 1][0] - tips[i][0], tips[i + 1][1] - tips[i][1]) < 0.22 * size) s.tube([tips[i], tips[i + 1]], () => 0.012 * size, 3, r, { flex: () => tips[i][1] * 0.08 });
+}
+
+export const SPECIES3D_EXTRA: Record<string, Species> = {
+  seafan: {
+    id: 'seafan', size: [0.9, 1.6],
+    build(k, A) {
+      const base = ['#8a3a9e', '#c0443a', '#d88a2a'][k % 3];
+      const r = pixBlade(A, 'fan3d' + (k % 3), 6, 16, base, { rib: 'light', taper: 0.01, tones: 4 });
+      const s = new Soup();
+      flatFan(s, new Rng(k * 17 + 3), r, 1);
+      return s;
+    },
+  },
+  plumose: {
+    id: 'plumose', size: [0.6, 1.1],
+    build(k, A, a) {
+      const base = a.id === 'arctic' && k % 2 ? '#e88a4a' : '#d8d2c4';
+      const rb = pixBlade(A, 'plum3d' + (a.id === 'arctic' ? k % 2 : 0), 8, 16, base, { rib: null, taper: 0.01, wrinkle: 4 });
+      const s = new Soup(), rng = new Rng(k * 9 + 1), H = rng.range(0.35, 0.55);
+      s.lathe([[0.1, 0], [0.08, H * 0.6], [0.13, H]], 6, rb);
+      // the crown: faceted lobes ringed with short tentacle cones
+      for (let i = 0; i < 7; i++) {
+        const a0 = (i / 7) * TAU, cx = Math.cos(a0) * 0.12, cz = Math.sin(a0) * 0.1, cy = H + 0.05 + (i % 2) * 0.04;
+        const from = s.count; s.flex(0.05).lathe([[0.07, -0.04], [0.09, 0.02], [0.0, 0.08]], 5, rb); s.transformSince(from, mat4(cx, cy, cz, 1, 1, 1, a0));
+        for (let q = 0; q < 3; q++) { const aa = a0 + (q - 1) * 0.5; s.tube([[cx, cy + 0.03, cz], [cx + Math.cos(aa) * 0.14, cy + 0.1, cz + Math.sin(aa) * 0.1]], (t) => 0.015 * (1 - t), 3, rb, { tip: true, flex: () => 0.06 }); }
+      }
+      s.flex(0);
+      return s;
+    },
+  },
+  seapen: {
+    id: 'seapen', size: [0.4, 0.8],
+    build(k, A, a) {
+      const glow = !!a.glow;
+      const r = pixBlade(A, 'pen3d' + (glow ? 'g' : ''), 6, 16, glow ? '#48c8e8' : '#e0a070', { rib: 'dark', taper: 0.2 });
+      const s = new Soup();
+      if (glow) s.glow(2.6);
+      s.tube([[0, 0, 0], [0.01, 0.22, 0], [0, 0.55, 0.01]], () => 0.016, 4, r, { flex: (t) => t * 0.05 });
+      for (let y = 0.24; y < 0.52; y += 0.035) for (const sd of [-1, 1]) s.ribbon([[0, y, 0], [sd * 0.05, y + 0.03, 0.01], [sd * 0.09 * Math.sin(((y - 0.2) / 0.34) * Math.PI), y + 0.05, 0.02]], (t) => 0.03 * (1 - t * 0.5), r, { side: [0, 1, 0], flex: () => 0.04 });
+      s.glow(0);
+      void k;
+      return s;
+    },
+  },
+  hydroid: {
+    id: 'hydroid', size: [0.4, 0.7],
+    build(k, A) {
+      const r = pixBlade(A, 'hyd3d', 4, 16, '#c8b890', { rib: null, taper: 0.01, tones: 4 });
+      const s = new Soup(), rng = new Rng(k * 5 + 2);
+      for (let i = 0; i < 4; i++) {
+        const a0 = rng.range(-0.5, 0.5), L = rng.range(0.25, 0.45);
+        const base: V3 = [rng.range(-0.06, 0.06), 0, rng.range(-0.06, 0.06)], tip: V3 = [Math.sin(a0) * L, Math.cos(a0) * L, 0];
+        s.tube([base, tip], () => 0.01, 3, r, { flex: (t) => t * 0.06 });
+        for (let q = 1; q < 6; q++) { const t = q / 6, p: V3 = [base[0] + (tip[0] - base[0]) * t, base[1] + (tip[1] - base[1]) * t, 0]; const sd = q % 2 ? 1 : -1; s.tube([p, [p[0] + sd * 0.07, p[1] + 0.05, 0.02]], () => 0.006, 3, r, { flex: () => t * 0.06 }); }
+      }
+      return s;
+    },
+  },
+  brownweed: {
+    id: 'brownweed', size: [0.6, 1.1],
+    build(k, A, a) {
+      const r = pixBlade(A, 'wrack3d', 8, 32, a.id === 'arctic' ? '#7a6a3a' : '#7a6420', { rib: 'dark', taper: 0.2 });
+      const s = new Soup(), rng = new Rng(k * 3 + 7);
+      // bladder wrack: forked flat straps
+      const fork = (p: V3, ang: number, L: number, d: number) => {
+        const e: V3 = [p[0] + Math.sin(ang) * L, p[1] + Math.cos(ang) * L, p[2] + rng.range(-0.04, 0.04)];
+        s.ribbon([p, [(p[0] + e[0]) / 2 + 0.02, (p[1] + e[1]) / 2, (p[2] + e[2]) / 2], e], () => 0.07 - d * 0.01, r, { side: [Math.cos(ang), -Math.sin(ang) * 0.2, 0.3], twist: rng.range(-0.6, 0.6), flex: (t) => (p[1] + t * L) * 0.12 });
+        if (d < 2) { fork(e, ang - rng.range(0.25, 0.5), L * 0.8, d + 1); fork(e, ang + rng.range(0.25, 0.5), L * 0.8, d + 1); }
+      };
+      for (let i = 0; i < 3; i++) fork([rng.range(-0.08, 0.08), 0, rng.range(-0.08, 0.08)], rng.range(-0.4, 0.4), 0.3, 0);
+      return s;
+    },
+  },
+};
+Object.assign(SPECIES, SPECIES3D_EXTRA);
+SPECIES.redweed = { ...SPECIES3D_EXTRA.hydroid, id: 'redweed' };

@@ -13,7 +13,8 @@ import type { Shape } from './shape';
 import { SEAM_Z } from './shape';
 import { Soup, mat4 } from '../world/lp';
 import { Atlas } from '../world/atlas';
-import { FloraKit, SPECIES } from '../world/flora';
+import { FloraKit, SPECIES, simRegions } from '../world/flora';
+import { PlantSim, type SimRegions } from '../world/plantsim';
 import { boulder, spire, arch, crustPainter, pillows } from '../world/rockgen';
 import { rockTile, groundTile, strataTile, sectionTile } from '../world/texlib';
 import { floraMaterial, rockMaterial, groundMaterial, sectionMaterial, propMaterial, spriteMaterial } from '../world/mats';
@@ -40,6 +41,9 @@ export class Scenery {
   floraAtlas: Atlas;
   spriteAtlas: Atlas;
   sprites: SpriteKit;
+  simR: SimRegions;
+  /** physically simulated seaweed near the gameplay plane */
+  sim!: PlantSim;
   propAtlas: Atlas;
   flora: FloraKit;
   props: PropKit;
@@ -62,6 +66,7 @@ export class Scenery {
     this.flora = new FloraKit(this.floraAtlas, a);
     this.spriteAtlas = new Atlas(1024, 1024, false);
     this.sprites = new SpriteKit(this.spriteAtlas, a, seed);
+    this.simR = simRegions(this.floraAtlas, a);
     const rt = rockTile(a), gt = groundTile(a);
     this.mats = {
       rock: rockMaterial(rt),
@@ -78,6 +83,8 @@ export class Scenery {
       cloth: propMaterial(new THREE.Texture(), { sway: true, side: THREE.DoubleSide, alphaTest: 0.5 }),
     };
     this.group.name = 'area-scenery';
+    this.sim = new PlantSim(this.mats.flora, this.simR);
+    this.group.add(this.sim.mesh);
     this.reserved.push({ x: shape.wreckX, r: 10, z0: -9, z1: 0.2 }, { x: shape.buoyX, r: 3, z0: -3, z1: 3 }, { x: shape.spawnX, r: 4, z0: -1.5, z1: 3 });
   }
 
@@ -373,7 +380,6 @@ export class Scenery {
   }
 
   placeFlora(rule: FloraRule) {
-    if (SPRITES[rule.sp]) { this.placeSpriteRule(rule); return; }
     const S = SPECIES[rule.sp];
     if (!S) return;
     const variants = this.flora.get(rule.sp);
@@ -402,6 +408,7 @@ export class Scenery {
           if (zone === 'play' && S.tall && Math.abs(z) < 0.6) continue;
           let y = onRock ? onRock.y - 0.05 : this.heightAt(x, z) - 0.04;
           if (zone === 'fg' && !onRock) y = this.heightAt(x, z) - 0.04;
+          if ((zone === 'play' || zone === 'fg') && !onRock && this.simulate(rule.sp, x, y, z, 1, zone === 'fg' && z > 1.6)) continue;
           const v = r.pick(z < -9 ? farVariants : variants);
           let sc = r.range(S.size[0], S.size[1]) * (rule.scale ? r.range(rule.scale[0], rule.scale[1]) : 1);
           if (zone === 'back') sc *= 1.25;
@@ -458,9 +465,28 @@ export class Scenery {
     }
   }
 
-  /** place any plant by id (sprite species or 3D flora) */
+  /** hand a plant near the gameplay plane to the verlet simulation; false when the species is rigid */
+  simulate(id: string, x: number, y: number, z: number, sc = 1, dark = false): boolean {
+    if (z < -3) return false;
+    const sim = this.sim, seed = (x * 1000 + z * 77) | 0, ground = () => this.sand.heightAt(x) + (z > -0.6 ? 0 : 0);
+    sim.tintK = dark ? 0.42 : 1;
+    let ok = true;
+    switch (id) {
+      case 'giantkelp': sim.addGiantKelp(x, y, z, Math.max(3, -y - this.rng.range(0.3, 1.4)), seed, ground); break;
+      case 'bullkelp': sim.addBullKelp(x, y, z, Math.max(3, -y * this.rng.range(0.5, 0.75)), seed, ground); break;
+      case 'seagrass': sim.addGrass(x, y, z, seed, ground, { h: [0.45 * sc, 0.95 * sc] }); break;
+      case 'sealettuce': sim.addLettuce(x, y, z, seed, ground); break;
+      case 'seawhip': sim.addWhips(x, y, z, seed, ground); break;
+      case 'wrackStrap': sim.addGrass(x, y, z, seed, ground, { n: 5, h: [0.5, 0.9], w: 0.1, uv: this.simR.wrack, buoy: 0.6 }); break;
+      default: ok = false;
+    }
+    sim.tintK = 1;
+    return ok;
+  }
+
+  /** place any plant by id (3D flora; seaweed near the plane is simulated) */
   placePlant(id: string, x: number, y: number, z: number, sc = 1) {
-    if (SPRITES[id]) { this.placeSprite(id, x, y, z, sc); return; }
+    if (this.simulate(id, x, y, z, sc)) return;
     const v = this.flora.get(id), r = this.rng;
     const t = r.range(0.85, 1.1);
     const ch = this.chunk(x);

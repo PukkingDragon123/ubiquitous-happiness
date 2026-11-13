@@ -31,9 +31,11 @@ interface Chain {
   tint: number;
   free: boolean; age: number; dead: boolean;
   plant: SimPlant;
+  /** blades riding on a cut-off piece fade and die with it */
+  host?: Chain;
 }
 interface Bulb { node: number; r: number; uv: UVR }
-export interface SimPlant { x: number; z: number; chains: Chain[]; bulbs: Bulb[]; on: boolean; ground: () => number; baseY: number }
+export interface SimPlant { x: number; z: number; chains: Chain[]; bulbs: Bulb[]; on: boolean; ground: () => number; baseY: number; deadNodes?: Set<number> }
 
 export interface SimRegions { stipe: UVR; blade: UVR; bladder: UVR; bull: UVR; bulb: UVR; grass: UVR; lettuce: UVR; whip: UVR; wrack: UVR }
 
@@ -51,6 +53,8 @@ export class PlantSim {
   /** current: base speed (m/s) along +x, gusting */
   current = 0.35;
   window = 17;
+  /** tint multiplier for the next plants (dark foreground silhouettes) */
+  tintK = 1;
   private prevE = new Map<Entity, [number, number]>();
   private rng = new Rng(4242);
   /** a cut happened (for sfx / fx by the owner) */
@@ -91,7 +95,7 @@ export class PlantSim {
     const c: Chain = {
       nodes, rest: L / (pts.length - 1), kind: o.kind, size: o.size, uv: o.uv, buoy: o.buoy ?? 1, stiff: o.stiff ?? 0.08, drag: o.drag ?? 2,
       dir, anchor: parent >= 0 ? null : [pts[0][0], pts[0][1], pts[0][2]], parent, side: o.side ?? [1, 0, 0], twist: o.twist ?? 0, ruffle: o.ruffle ?? 0,
-      tint: o.tint ?? 1, free: false, age: 0, dead: false, plant: p,
+      tint: (o.tint ?? 1) * this.tintK, free: false, age: 0, dead: false, plant: p,
     };
     p.chains.push(c);
     return c;
@@ -218,7 +222,10 @@ export class PlantSim {
           const rest = c.nodes.splice(i);
           const dir = c.dir.splice(i - 1);
           const piece: Chain = { ...c, nodes: rest, dir: dir.slice(1).length ? dir.slice(1) : dir, anchor: null, parent: -1, free: true, age: 0, dead: false };
-          if (rest.length >= 2) p.chains.push(piece);
+          if (rest.length >= 2) {
+            p.chains.push(piece);
+            for (const o of p.chains) if (o !== piece && o !== c && !o.anchor && rest.includes(o.nodes[0])) o.host = piece;
+          }
           cuts++;
           this.onCut?.(this.X[b], this.Y[b]);
           // a little kick so the piece tumbles
@@ -260,7 +267,11 @@ export class PlantSim {
       const gy = p.ground();
       for (const c of p.chains) {
         if (c.dead) continue;
-        if (c.free) { c.age += dt; if (c.age > 14) { c.dead = true; continue; } }
+        if (c.host?.dead) { c.dead = true; continue; }
+        if (c.free) {
+          c.age += dt;
+          if (c.age > 14) { c.dead = true; p.deadNodes ??= new Set(); for (const nd of c.nodes) p.deadNodes.add(nd); continue; }
+        }
         const N = c.nodes.length;
         // integrate
         for (let i = 0; i < N; i++) {
@@ -307,7 +318,7 @@ export class PlantSim {
         }
         v = this.skinChain(c, v);
       }
-      for (const b of p.bulbs) if (!p.chains[0]?.dead) v = this.skinBall(b, v);
+      for (const b of p.bulbs) if (!p.deadNodes?.has(b.node)) v = this.skinBall(b, v);
     }
     this.geo.setDrawRange(0, v);
     for (const k of ['position', 'uv', 'color'] as const) { const at = this.geo.attributes[k] as THREE.BufferAttribute; at.needsUpdate = true; at.clearUpdateRanges(); at.addUpdateRange(0, v * (k === 'uv' ? 2 : 3)); }
@@ -325,7 +336,8 @@ export class PlantSim {
 
   private skinChain(c: Chain, v: number) {
     const N = c.nodes.length, X = this.X, Y = this.Y, Z = this.Z, U = c.uv;
-    const fade = c.free ? Math.max(0, 1 - Math.max(0, c.age - 9) / 5) : 1;
+    const host = c.free ? c : c.host;
+    const fade = host ? Math.max(0, 1 - Math.max(0, host.age - 9) / 5) : 1;
     if (fade <= 0) return v;
     const frames: { p: number[]; t: number[] }[] = [];
     for (let i = 0; i < N; i++) {

@@ -87,10 +87,11 @@ const ART = {
 };
 
 const C = { white: '#f4f0e6', dim: '#9aa8b8', gold: '#ffd860', red: '#ff5a4a', green: '#7aea6a', cyan: '#8ae8ff', ink: '#06080e' };
+const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const fmt = (s: number) => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 interface Floater { text: string; icons: [string, number][]; at: () => HudAnchor; t: number; life: number; color: string }
-interface Banner { title: string; sub: string; t: number; life: number; color: string }
+interface Banner { title: string; sub: string; t: number; life: number; color: string; small: boolean }
 
 export class RunHud {
   ui = new PixelUI({ targetH: 240 });
@@ -105,7 +106,7 @@ export class RunHud {
   /** a rising receipt at a world anchor: "SENT HOME" + the item icons */
   receipt(text: string, icons: [string, number][], at: () => HudAnchor, color = C.gold) { this.floaters.push({ text, icons, at, t: 0, life: 2.8, color }); }
   /** a big centred title card (area names, AREA CLEAR, WAVE n) */
-  banner(title: string, sub = '', color = C.white, life = 3) { this.banners = this.banners.filter((b) => b.t < b.life - 0.4); this.banners.push({ title, sub, t: 0, life, color }); }
+  banner(title: string, sub = '', color = C.white, life = 3, small = false) { this.banners = this.banners.filter((b) => b.t < b.life - 0.4); this.banners.push({ title, sub, t: 0, life, color, small }); }
   flashBag(id: string) { this.bagFlash.set(id, 1); }
 
   /**
@@ -143,9 +144,9 @@ export class RunHud {
       const bob = low && v > 0 && Math.floor(this.t * 4 + i) % 4 === 0 ? -1 : 0;
       ui.img(art, 5 + (i % 10) * 10, 5 + Math.floor(i / 10) * 9 + bob);
     }
-    const y = 5 + Math.ceil(n / 10) * 9 + 3;
-    ui.text(`${s.areaName.toUpperCase()}`, 5, y, { font: 'small', color: C.white, outline: C.ink });
-    ui.text(`AREA ${s.areaIdx + 1}/${s.areaCount}`, 5, y + ui.lh('small'), { font: 'small', color: C.dim, outline: C.ink });
+    const y = 5 + Math.ceil(n / 10) * 9 + 2;
+    const aw = ui.text(`${s.areaName.toUpperCase()}`, 5, y, { font: 'small', color: C.white, outline: C.ink });
+    ui.text(` ${s.areaIdx + 1}/${s.areaCount}`, 5 + aw, y, { font: 'small', color: C.dim, outline: C.ink });
   }
 
   // ---------------------------------------------------------------- top centre: waves
@@ -158,19 +159,15 @@ export class RunHud {
     if (s.phase === 'wave') {
       ui.text(s.boss ? `BOSS WAVE · ${s.remaining} LEFT` : `${s.remaining} LEFT`, cx, y, { font: 'small', color: s.boss ? C.red : C.dim, outline: C.ink, align: 'center' });
     } else if (s.phase === 'intermission') {
-      const w = 84, x = cx - w / 2;
-      ui.bar(x, y, w, 5, s.interT / Math.max(1, s.interMax), '#5ac8ff', '#10202e');
-      y += 7;
+      // one row: the ENTER keycap (fills while held) + the countdown
       const label = `NEXT WAVE ${fmt(s.interT)}`;
-      ui.text(label, cx, y, { font: 'small', color: C.cyan, outline: C.ink, align: 'center' });
-      y += ui.lh('small') + 1;
-      // hold ENTER: the keycap fills as you hold
       const kw = ui.keycap('ENTER', 0, -100);
-      const lw = ui.measure('hold to start now', 'small');
-      const x0 = cx - Math.round((kw + 3 + lw) / 2);
-      ui.keycap('ENTER', x0, y, true);
-      if (s.holdK > 0) ui.fill(x0 + 1, y + 10, Math.round((kw - 2) * s.holdK), 1, C.gold);
-      ui.text('hold to start now', x0 + kw + 3, y + 3, { font: 'small', color: C.dim, outline: C.ink });
+      const lw = ui.measure(label, 'small');
+      const x0 = cx - Math.round((kw + 4 + lw) / 2);
+      ui.text(label, x0, y + 3, { font: 'small', color: s.interT < 6 ? C.gold : C.cyan, outline: C.ink });
+      ui.keycap('ENTER', x0 + lw + 4, y, true);
+      if (s.holdK > 0) ui.fill(x0 + lw + 5, y + 10, Math.round((kw - 2) * s.holdK), 1, C.gold);
+      ui.fill(cx - 30, y + 14, Math.round(60 * Math.max(0, s.interT / Math.max(1, s.interMax))), 1, '#5ac8ff', 0.8);
     } else if (s.phase === 'cleared') {
       const msg = s.wreck.ready ? 'SET SAIL AT THE WRECK' : 'REPAIR THE WRECK TO SAIL ON';
       ui.text(msg, cx, y, { font: 'small', color: Math.floor(this.t * 2) % 2 ? C.gold : C.white, outline: C.ink, align: 'center' });
@@ -223,17 +220,20 @@ export class RunHud {
     const ui = this.ui;
     // ---- the wreck: hp, stage pips and the next repair's needs, floating above the hull
     const wk = s.wreck, wa = wk.at;
-    if (wa.on && wk.dist < 26) {
+    if (wa.on) {
       const needs = Object.entries(wk.needs);
-      const cw = needs.length ? ui.costWidth(wk.needs, { have: s.have, size: 12, showHave: true, gap: 3 }) : 0;
-      const w = Math.max(76, cw + 10), x = Math.round(wa.x - w / 2), y = Math.round(Math.max(30, wa.y - 34));
-      ui.frame('dark', x, y, w, needs.length ? 32 : 20, 0.85);
-      // stage pips
-      for (let i = 0; i < wk.stages; i++) ui.fill(x + 5 + i * 6, y + 5, 4, 3, i < wk.stage ? C.gold : '#3a3a4a');
-      ui.text(wk.ready ? 'SEAWORTHY' : wk.stageName.toUpperCase(), x + 5 + wk.stages * 6 + 2, y + 4, { font: 'small', color: wk.ready ? C.green : C.white, outline: C.ink });
+      const near = wk.dist < 14;
+      const cw = near && needs.length ? ui.costWidth(wk.needs, { have: s.have, size: 12, showHave: true, gap: 3 }) : 0;
+      const w = Math.max(52, cw + 8), h = near && needs.length ? 26 : 13;
+      const x = Math.round(clampN(wa.x - w / 2, 2, ui.w - w - 2)), y = Math.round(clampN(wa.y - h, 32, ui.h - 60));
+      ui.fill(x, y, w, h, '#06080e', 0.6);
+      ui.rect(x, y, w, h, '#2a3040');
+      // stage pips (gold = repaired) + hp
+      for (let i = 0; i < wk.stages; i++) ui.fill(x + 3 + i * 5, y + 3, 4, 3, i < wk.stage ? C.gold : '#3a3a4a');
       const k = wk.hp / Math.max(1, wk.maxHp);
-      ui.bar(x + 5, y + 12, w - 10, 4, k, k > 0.5 ? '#5ad04a' : k > 0.25 ? '#e8b030' : '#e83a3a');
-      if (needs.length) ui.costRow(wk.needs, x + 5, y + 18, { have: s.have, size: 12, showHave: true, gap: 3, font: 'small' });
+      ui.bar(x + 4 + wk.stages * 5, y + 3, w - 7 - wk.stages * 5, 4, k, k > 0.5 ? '#5ad04a' : k > 0.25 ? '#e8b030' : '#e83a3a');
+      if (wk.ready) ui.text('SEAWORTHY', x + w / 2, y + 9, { font: 'small', color: C.green, outline: C.ink, align: 'center' });
+      else if (near && needs.length) ui.costRow(wk.needs, x + 4, y + 11, { have: s.have, size: 12, showHave: true, gap: 3, font: 'small' });
     } else this.edgeArrow(wa, ART.ship, wk.dist, wk.hp / Math.max(1, wk.maxHp));
     // ---- the buoy (only an arrow when it is off screen)
     if (!s.buoy.at.on) this.edgeArrow(s.buoy.at, ART.mail, s.buoy.dist, -1, s.manatee.state === 'waiting');
@@ -308,10 +308,12 @@ export class RunHud {
     this.banners = this.banners.filter((x) => x.t < x.life);
     if (!b || b.t >= b.life) return;
     const a = Math.min(1, b.t * 4, (b.life - b.t) * 2);
-    const y = Math.round(ui.h * 0.3 - (1 - Math.min(1, b.t * 3)) * 6);
-    ui.fill(0, y - 6, ui.w, ui.lh('big') + (b.sub ? ui.lh('small') + 4 : 0) + 10, '#000000', 0.35 * a);
-    ui.text(b.title, ui.w / 2, y, { font: 'big', color: b.color, color2: '#ffb43a', outline: '#1a0a04', shadow: '#000', align: 'center', alpha: a });
-    if (b.sub) ui.text(b.sub, ui.w / 2, y + ui.lh('big') + 1, { font: 'small', color: C.cyan, outline: C.ink, align: 'center', alpha: a });
+    const font = b.small ? 'title' : 'big';
+    const y = Math.round(ui.h * (b.small ? 0.36 : 0.3) - (1 - Math.min(1, b.t * 3)) * 6);
+    const bw = Math.max(ui.measure(b.title, font), ui.measure(b.sub, 'small')) + 24;
+    ui.fill(Math.round((ui.w - bw) / 2), y - 4, bw, ui.lh(font) + (b.sub ? ui.lh('small') + 2 : 0) + 6, '#000000', 0.3 * a);
+    ui.text(b.title, ui.w / 2, y, { font, color: b.color, color2: '#ffb43a', outline: '#1a0a04', shadow: '#000', align: 'center', alpha: a });
+    if (b.sub) ui.text(b.sub, ui.w / 2, y + ui.lh(font) + 1, { font: 'small', color: C.cyan, outline: C.ink, align: 'center', alpha: a });
   }
 
   // ---------------------------------------------------------------- pause

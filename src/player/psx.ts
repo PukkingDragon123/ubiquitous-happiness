@@ -18,7 +18,7 @@ export function psxMat(map: THREE.Texture | null, o: PsxMatOpts = {}): THREE.Mes
   });
   if (o.emissive !== undefined) { m.emissive = new THREE.Color(o.emissive); m.emissiveIntensity = o.emissiveK ?? 1; if (o.emissiveMap) m.emissiveMap = o.emissiveMap; }
   // uw() also applies the PS1 retro patch (vertex snap / affine) from src/gfx/retro.ts
-  uw(m, { sss: o.sss, sssK: o.sssK, rim: o.rim ?? 0.12 });
+  uw(m, { sss: o.sss, sssK: o.sssK, rim: o.rim ?? 0.12, smooth: o.flat === false });
   return m;
 }
 
