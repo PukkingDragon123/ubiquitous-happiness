@@ -358,7 +358,7 @@ function kasaGeo(R: number, H: number, n: number, droop: number, under: boolean)
   const yAt = (f: number) => H * (1 - f) - droop * Math.max(0, (f - 0.55) / 0.45) ** 2 - (under ? 0.014 : 0);
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   const REP = 3;
-  F.forEach((f, i) => {
+  F.forEach((f) => {
     for (let j = 0; j <= n; j++) {
       const a = (j / n) * TAU;
       pos.push(Math.cos(a) * R * f, yAt(f), Math.sin(a) * R * f);

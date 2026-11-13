@@ -21,9 +21,12 @@ import type { Particles } from '../gfx/particles';
 import { equippedLook, withLook, lookVersion, type Look } from './index';
 import { applySkin } from './skins';
 
+const SCARF_RED = ['#5a0a14', '#8e1420', '#c4222a', '#e83e34', '#ff7a5a'];
 const SCARF = () => ctex('roninScarf', 32, 32, (p) => {
-  cloth(p, 0, 0, 32, 32, T.red, 8, { ts: ['#1a0206', '#3a0610', '#6e0e1a', '#8a1a22', '#a82a2a'], bottom: 3 });
-  for (let x = 1; x < 32; x += 3) p.set(x, 30, '#e0c090');
+  cloth(p, 0, 0, 32, 32, SCARF_RED, 8, { ts: ['#2a0408', '#4a0810', '#7a1018', '#9a1c22', '#c02e2e'], bottom: 3 });
+  // a woven stripe pair near the hem
+  rect(p, 0, 24, 32, 1, tone(SCARF_RED, 4)); rect(p, 0, 26, 32, 1, tone(SCARF_RED, 1));
+  for (let x = 1; x < 32; x += 3) p.set(x, 30, '#f0d0a0');
 });
 const CLOAK = () => ctex('tatteredCloak', 32, 32, (p) => {
   const C = ['#100e0c', '#1e1a16', '#2e2822', '#40382e', '#564c3e'];
@@ -112,18 +115,18 @@ export class CosmeticRig {
   }
 
   /** trail particles behind a moving blobfish (bubbles are the run's own wake unless `always`) */
-  trail(fx: Particles, x: number, y: number, z: number, speed: number, dt: number, always = false) {
+  trail(fx: Particles, x: number, y: number, z: number, speed: number, dt: number, always = false, size = 1) {
     const kind = this.look.trail;
     if (speed < 1.0 || (kind === 'bubbles' && !always)) { this.acc = 0; return; }
     this.acc += dt * Math.min(18, 6 + speed * 2.5);
     while (this.acc >= 1) {
       this.acc -= 1;
       const jx = (Math.random() - 0.5) * 0.25, jy = (Math.random() - 0.5) * 0.25;
-      if (kind === 'sparkles') fx.emit('sparkle', x + jx, y + jy, { z, life: 0.7, size: 0.16 + Math.random() * 0.1, color: Math.random() < 0.5 ? '#fff6c0' : '#bff4ff', add: true, vy: 0.2 });
-      else if (kind === 'ink') fx.emit('ink', x + jx, y + jy, { z, life: 1.6, size: 0.35, size1: 0.9, color: '#1e1428', alpha: 0.7, drag: 2, speed: 0.2 });
-      else if (kind === 'hearts') fx.emit('heartP', x + jx, y + jy, { z, life: 1, size: 0.22, vy: 0.6, drag: 0.8 });
-      else if (kind === 'embers') fx.emit('ember', x + jx, y + jy, { z, life: 0.8, size: 0.09, color: Math.random() < 0.5 ? '#ffb050' : '#ff6a2a', add: true, vy: 0.5, bright: 1.5 });
-      else fx.emit('bubble', x + jx, y + jy, { z, life: 1.4, size: 0.08 + Math.random() * 0.06, vy: 0.6 });
+      if (kind === 'sparkles') fx.emit('sparkle', x + jx, y + jy, { z, life: 0.7, size: (0.16 + Math.random() * 0.1) * size, color: Math.random() < 0.5 ? '#fff6c0' : '#bff4ff', add: true, vy: 0.2 });
+      else if (kind === 'ink') fx.emit('ink', x + jx, y + jy, { z, life: 1.6, size: 0.35 * size, size1: 0.9 * size, color: '#1e1428', alpha: 0.7, drag: 2, speed: 0.2 });
+      else if (kind === 'hearts') fx.emit('heartP', x + jx, y + jy, { z, life: 1, size: 0.22 * size, vy: 0.6, drag: 0.8 });
+      else if (kind === 'embers') fx.emit('ember', x + jx, y + jy, { z, life: 0.8, size: 0.09 * size, color: Math.random() < 0.5 ? '#ffb050' : '#ff6a2a', add: true, vy: 0.5, bright: 1.5 });
+      else fx.emit('bubble', x + jx, y + jy, { z, life: 1.4, size: (0.08 + Math.random() * 0.06) * size, vy: 0.6 });
     }
   }
 }

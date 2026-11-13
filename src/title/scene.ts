@@ -12,7 +12,6 @@ import { Loft, type V3 } from '../gfx/loft';
 import { Px, worley } from '../gfx/px';
 import { Lighting, type Look, LOOKS } from '../gfx/lighting';
 import { Particles } from '../gfx/particles';
-import { UW } from '../gfx/shaders/underwater';
 import { chainKey } from '../gfx/retro';
 import { psxMat, facet } from '../player/psx';
 import { ctex, T, tone, rect } from '../skills/texkit';
@@ -48,15 +47,15 @@ function rockPage(moss: boolean) {
     const bandAt = (x: number, y: number) => Math.floor((y + wob(x) + 64) / 8);
     for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
       const b = bandAt(x, y), by = (y + wob(x) + 64) % 8;
-      // joints: each band split into blocks at hashed x positions
-      const off = Math.floor(hash2(b, 1, 9) * 16);
-      const jx = (x + off) % 16;
-      const blk = Math.floor((x + off) / 16);
+      // joints: each band split into blocks of its own length, every other joint left out (no masonry look)
+      const P = 12 + Math.floor(hash2(b, 2, 9) * 3) * 6, off = Math.floor(hash2(b, 1, 9) * P);
+      let blk = Math.floor((x + off) / P), jx = (x + off) % P;
+      if (hash2(b, blk, 23) < 0.5) { jx = 5; blk -= 1; } // this joint is left out: the block before carries on
       let k = 2 + Math.floor(hash2(b, blk, 7) * 2.4);
       if (by === 0) k += 1;                          // the lit upper lip
       if (by === 7) k = 0;                           // the seam under the band
       else if (by === 6) k = Math.max(1, k - 1);
-      if (jx === 0) k = 0; else if (jx === 1) k = Math.max(1, k - 1); else if (jx === 15) k = Math.min(5, k + 1);
+      if (jx === 0) k = 0; else if (jx === 1) k = Math.max(1, k - 1); else if (jx === P - 1) k = Math.min(5, k + 1);
       if (hash2(b, blk, 11) < 0.25 && jx > 10 && by < 3) k = 1; // a chipped corner
       let c = tone(ROCK_T, k);
       if (moss && by < 3 + Math.floor(hash2(b, blk, 13) * 3) && by !== 7 && hash2(b, blk, 17) < 0.7) {
@@ -134,7 +133,7 @@ function boulder(seed: number, sx: number, sy: number, sz: number, detail = 1, r
     if (flat.front !== undefined && v.z > flat.front) v.z = flat.front + (v.z - flat.front) * 0.15;
     P.setXYZ(i, v.x * sx, v.y * sy, v.z * sz);
   }
-  return splitByFacing(facet(ico), 1.5);
+  return splitByFacing(facet(ico), 1.1);
 }
 /** box-project uvs per face (tile metres per texture) and group faces: 0 = sides / underside, 1 = tops (moss) */
 function splitByFacing(g: THREE.BufferGeometry, tile: number) {
@@ -264,7 +263,7 @@ export class HeroSet {
   private interior: THREE.MeshBasicMaterial;
   private hatchVents: THREE.Vector3[] = [];
   private m4 = new THREE.Matrix4(); private q = new THREE.Quaternion(); private e = new THREE.Euler(); private v = new THREE.Vector3(); private s = new THREE.Vector3();
-  whaleT = 0;
+  whaleT = 38;
   /** the whale just sang (screen plays a call) */
   onWhale?: () => void;
 
@@ -281,7 +280,7 @@ export class HeroSet {
       G.add(m); return m;
     };
     // ---- the outcrop: the hideout's rock mass behind and right, the ledge under the hero, a column down into the blue
-    rock(1, [0.5, -0.62, -0.7], [2.5, 0.7, 2.2], 2, 0.3, 0.2, { top: 0.55 });          // the ledge slab: a flat shelf at the hero's feet
+    rock(1, [0.5, -0.4, -0.7], [2.5, 0.7, 2.2], 2, 0.3, 0.2, { top: 0.55 });           // the ledge slab: a flat shelf at the hero's feet
     rock(2, [1.7, 1.2, -4.3], [3.2, 3.2, 2.1], 2, 0.35, 0, { front: 0.6 });         // the hideout's face, the hatch set in it
     rock(3, [5.2, 1.6, -2.9], [2.4, 3.4, 2.4], 2, 0.4, 0.6);
     rock(4, [1.6, 4.0, -5.4], [3.2, 2.0, 2.6], 1, 0.4, 1.2);
@@ -289,8 +288,8 @@ export class HeroSet {
     rock(7, [0.7, -3.0, -1.6], [2.3, 2.6, 2.0], 1, 0.35, 0, {}, false);               // the column below the ledge
     rock(8, [1.8, -7.4, -2.6], [3.4, 3.4, 3.0], 1, 0.4, 1, {}, false);
     rock(9, [4.6, -0.7, 0.9], [1.5, 1.2, 1.3], 1, 0.4, 2);
-    rock(11, [1.75, -0.04, 0.75], [0.26, 0.18, 0.24], 1, 0.4, 1);         // a pebble on the lip
-    rock(12, [2.75, 0.1, -1.6], [0.62, 0.5, 0.55], 1, 0.4, 2);
+    rock(11, [1.75, 0.02, 0.75], [0.26, 0.18, 0.24], 1, 0.4, 1);          // a pebble on the lip
+    rock(12, [2.75, 0.18, -1.6], [0.62, 0.5, 0.55], 1, 0.4, 2);
     // far pinnacles and the seafloor fading into the blue
     for (let i = 0; i < 9; i++) {
       const a = -2.4 + i * 0.42 + hash2(i, 1, 4) * 0.2, r = 26 + hash2(i, 2, 4) * 30;
@@ -316,7 +315,7 @@ export class HeroSet {
     const recess = new THREE.Mesh(new THREE.CircleGeometry(0.78, 10), this.interior); recess.position.z = -0.25; door.add(recess);
     const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.8, 0.5, 10, 1, true), psxMat(rockPage(false), { rough: 0.95, side: THREE.BackSide }));
     tunnel.rotation.x = Math.PI / 2; tunnel.position.z = -0.02; door.add(tunnel);
-    const ring = new THREE.Mesh(facet(new THREE.TorusGeometry(0.84, 0.08, 4, 12)), psxMat(BRASS(), { metal: 0.35, rough: 0.5, color: '#b89870' }));
+    const ring = new THREE.Mesh(facet(new THREE.TorusGeometry(0.84, 0.08, 4, 12)), psxMat(BRASS(), { metal: 0.3, rough: 0.6, color: '#8a7458' }));
     ring.position.z = 0.1; ring.castShadow = true; door.add(ring);
     // a rough stone collar round the ring so it sits in the rock face
     for (let i = 0; i < 9; i++) { const a = (i / 9) * TAU + 0.2; const st = new THREE.Mesh(boulder(40 + i, 0.32, 0.26, 0.22, 0, 0.4), rockM); st.position.set(Math.cos(a) * 1.02, Math.sin(a) * 1.02, -0.02); st.rotation.z = a; door.add(st); }
@@ -465,10 +464,10 @@ export class HeroSet {
     // the whale: a slow pass far off, fluke beating
     this.whaleT += dt;
     const wk = (this.whaleT % 150) / 150;
-    this.whale.position.set(H.x - 90 + wk * 160, H.y + 3 + Math.sin(wk * Math.PI) * 4, H.z - 62);
+    this.whale.position.set(H.x - 75 + wk * 120, H.y + 4 + Math.sin(wk * Math.PI) * 3, H.z - 40);
     this.whale.rotation.set(0, 0.08, Math.sin(this.whaleT * 0.4) * 0.03);
     this.fluke.rotation.z = Math.sin(this.whaleT * 0.9) * 0.35;
-    if (Math.abs((this.whaleT % 150) - 50) < dt) this.onWhale?.();
+    if (Math.abs((this.whaleT % 150) - 55) < dt) this.onWhale?.();
     // boats bob and drift; lines sway
     for (const b of this.boats) {
       b.g.position.x = b.x0 + Math.sin(t * 0.02 * Math.sign(b.sp) + b.x0) * 6;

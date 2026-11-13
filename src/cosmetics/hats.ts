@@ -56,9 +56,9 @@ export function stripGeo(path: V3[], w: (t: number) => number, side: V3) {
 }
 const ico = (r: number, at: V3, sc: V3 = [1, 1, 1]) => facet(xf(new THREE.IcosahedronGeometry(r, 0), at, [0, 0, 0], sc));
 /** the hat's own group on the head anchor: sits on the dome, tipped a touch forward */
-function seat(h: HatBuild, x = -0.1, y = 0.0, tilt = -0.06) {
+function seat(h: HatBuild, x = -0.1, y = 0.0, tilt = -0.06, scale = 1.3) {
   const g = new THREE.Group(); g.name = 'hatTilt';
-  g.position.set(x, y, 0); g.rotation.z = tilt;
+  g.position.set(x, y, 0); g.rotation.z = tilt; g.scale.setScalar(scale);
   h.rig.add(g);
   return g;
 }
@@ -81,7 +81,7 @@ const RUBBLE = () => ctex('coralRubble', 32, 16, (p) => {
   for (let x = 2; x < 32; x += 5) for (let y = 1; y < 16; y += 4) { p.set(x, y, tone(T.bone, 4)); p.set(x + 1, y, tone(T.bone, 3)); }
 });
 const FELT = () => ctex('tricornFelt', 64, 16, (p) => {
-  const F = ['#07070a', '#121218', '#1c1c26', '#2a2a36', '#3c3c4c'];
+  const F = ['#120e16', '#221c2a', '#342a3e', '#4a3e56', '#64567a'];
   for (let y = 0; y < 16; y++) for (let x = 0; x < 64; x++) p.set(x, y, tone(F, y < 2 ? 3 : (x + y) % 9 === 0 ? 1 : 2));
   // gold braid on the brim edge
   for (let y = 11; y < 16; y++) for (let x = 0; x < 64; x++) p.set(x, y, tone(T.gold, y === 11 || y === 15 ? 1 : (x + y) % 4 < 2 ? 4 : 3));
@@ -188,18 +188,18 @@ const M = (map: THREE.Texture | null, o: Parameters<typeof psxMat>[1] = {}) => p
 
 const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
   coralCrown(h) {
-    const g = seat(h, -0.1, -0.02, -0.04);
+    const g = seat(h, -0.1, -0.02, -0.04, 1.4);
     h.add(lathe([[0.27, 0], [0.295, 0.03], [0.285, 0.07], [0.25, 0.085]], 10, { rep: 2, warp: (v, j) => { v.multiplyScalar(1 + (j % 2 ? 0.05 : -0.02)); } }), M(RUBBLE(), { rough: 0.9 }), false, g);
     const mats = [M(CORAL(T.coral, 'coralOrange'), { rough: 0.85, sss: [1, 0.5, 0.4], sssK: 0.3 }), M(CORAL(T.pink, 'coralPink'), { rough: 0.85, sss: [1, 0.5, 0.6], sssK: 0.3 })];
     const tipM = M(null, { color: '#ffe0c0', rough: 0.6, emissive: '#ff9a7a', emissiveK: 0.15 });
     for (let k = 0; k < 7; k++) {
       const a = (k / 7) * TAU + 0.22, ca = Math.cos(a), sa = -Math.sin(a);
       const front = Math.max(0, Math.cos(a));
-      const hgt = 0.17 + front * 0.15 + hash2(k, 1, 9) * 0.04;
+      const hgt = 0.2 + front * 0.16 + hash2(k, 1, 9) * 0.05;
       const base: V3 = [ca * 0.25, 0.06, sa * 0.25];
       const path: V3[] = [];
       for (let i = 0; i <= 4; i++) { const t = i / 4; path.push([base[0] + ca * t * 0.07 + Math.sin(t * 5 + k) * 0.012, base[1] + t * hgt, base[2] + sa * t * 0.07]); }
-      h.add(tubeGeo(path, (t) => 0.034 * (1 - t * 0.55), 5), mats[k % 2], false, g);
+      h.add(tubeGeo(path, (t) => 0.042 * (1 - t * 0.5), 5), mats[k % 2], false, g);
       const tip = path[4];
       h.add(ico(0.028, [tip[0], tip[1] + 0.01, tip[2]]), tipM, false, g);
       // a fork off the middle
@@ -210,17 +210,17 @@ const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
     }
   },
   tricorn(h) {
-    const g = seat(h, -0.1, 0.0, -0.08);
+    const g = seat(h, -0.1, 0.0, -0.08, 1.45);
     const felt = M(FELT(), { rough: 0.95, side: THREE.DoubleSide });
-    h.add(lathe([[0.235, 0], [0.25, 0.07], [0.24, 0.15], [0.17, 0.2], [0.0, 0.215]], 12, { rep: 2 }), M(FELT(), { rough: 0.95 }), false, g);
+    h.add(lathe([[0.235, 0], [0.25, 0.08], [0.24, 0.17], [0.17, 0.23], [0.0, 0.245]], 12, { rep: 2 }), M(FELT(), { rough: 0.95 }), false, g);
     // the brim, cocked up on three sides into a triangle with its points front and back-left / back-right
     const pos: number[] = [], uv: number[] = [], idx: number[] = [];
     const NA = 24, F = [0.22, 0.32, 1];
     for (let i = 0; i < F.length; i++) for (let j = 0; j <= NA; j++) {
       const a = (j / NA) * TAU, s = Math.abs(Math.sin(1.5 * a));
-      const R = 0.4 + 0.15 * Math.pow(1 - s, 2.2);
+      const R = 0.42 + 0.16 * Math.pow(1 - s, 2.2);
       const r = i < 2 ? F[i] : R, f = i === 0 ? 0 : i === 1 ? 0.25 : 1;
-      const y = 0.012 + Math.pow(f, 1.4) * 0.19 * Math.pow(s, 0.75);
+      const y = 0.012 + Math.pow(f, 1.4) * 0.22 * Math.pow(s, 0.75);
       pos.push(Math.cos(a) * r, y, -Math.sin(a) * r);
       uv.push((j / NA) * 4, 1 - (i === 2 ? 0.995 : i * 0.35));
     }
@@ -253,7 +253,7 @@ const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
     }), M(TOQUE(), { rough: 0.95, sss: [1, 1, 1], sssK: 0.25 }), false, g);
   },
   partyCone(h) {
-    const g = seat(h, -0.04, 0.0, 0.22);
+    const g = seat(h, -0.04, 0.0, 0.22, 1.45);
     g.rotation.x = -0.22;
     h.add(lathe([[0.165, 0], [0.125, 0.15], [0.075, 0.3], [0.0, 0.45]], 8), M(PARTY(), { rough: 0.6 }), false, g);
     const cols = ['#ffffff', '#ff8ac0', '#ffe060', '#8af0f0', '#ffffff', '#ff8ac0', '#ffe060'];
@@ -263,7 +263,7 @@ const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
     }
   },
   jellyCap(h) {
-    const g = seat(h, -0.1, -0.03, -0.05);
+    const g = seat(h, -0.1, -0.03, -0.05, 1.35);
     const bell = M(JELLY(), { rough: 0.3, side: THREE.DoubleSide, emissive: '#ff7ad8', emissiveK: 0.35, sss: [1, 0.6, 1], sssK: 0.6 });
     bell.transparent = true; bell.opacity = 0.78; bell.depthWrite = false;
     h.add(lathe([[0.31, 0], [0.325, 0.035], [0.29, 0.12], [0.22, 0.2], [0.11, 0.255], [0, 0.27]], 16, {
@@ -284,7 +284,7 @@ const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
   anglerLamp(h) {
     // a leather strap round the head (skin-tight), a brass mount, the lure stalk arching over the face, the lamp
     h.add(shellGeo(0.73, 0.785, 0, 1, () => 0.024, undefined, { closed: true, uvScale: [5, 1] }), M(STRAP(), { rough: 0.75 }), true);
-    const g = seat(h, 0.0, 0.0, 0.0);
+    const g = seat(h, 0.0, 0.0, 0.0, 1.15);
     const brass = M(ctex('lampBrass', 16, 16, (p) => gemFacets(p, 0, 0, 16, 16, T.brass)), { metal: 0.8, rough: 0.35 });
     h.add(facet(xf(new THREE.BoxGeometry(0.1, 0.03, 0.12), [0.1, -0.035, 0], [0, 0, -0.55])), brass, false, g);
     const path: V3[] = [[0.1, -0.02, 0], [0.14, 0.12, 0], [0.24, 0.25, 0], [0.4, 0.31, 0], [0.54, 0.27, 0], [0.62, 0.18, 0]];
@@ -297,7 +297,7 @@ const BUILD: Partial<Record<HatId, (h: HatBuild) => void>> = {
     h.part.ribbons = [-1, 1].map((s) => { const o = new THREE.Object3D(); o.position.set(0.63, 0.07, s * 0.02); g.add(o); return { mat: fm, opts: { n: 5, seg: 0.035, w0: 0.008, w1: 0.004, gravity: 0.0012, flutter: 0.003, uv: R4, thick: 0.003 }, anchor: o, k: s > 0 ? 0.7 : 0.3 }; });
   },
   kabuto(h) {
-    const g = seat(h, -0.1, -0.02, -0.04);
+    const g = seat(h, -0.1, -0.02, -0.04, 1.35);
     h.add(lathe([[0.265, 0], [0.275, 0.06], [0.25, 0.15], [0.19, 0.225], [0.1, 0.27], [0.0, 0.28]], 12, { rep: 1.5 }), M(LACQUER(), { rough: 0.35, metal: 0.2 }), false, g);
     const gold = M(GOLD_PLATE(), { metal: 0.85, rough: 0.3 });
     // the visor over the face

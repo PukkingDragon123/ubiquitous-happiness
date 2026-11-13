@@ -63,33 +63,36 @@ export class RunConfigPanel {
     if (ui.iconButton('cfg:x', 'close', px + CFG_W - 22, py + 4, { style: 'red', size: 13, key: 'Escape', keyLabel: '' })) res = 'back';
     // ---- mastery
     let x = px + 6, y = py + 24;
-    ui.frame('dark', x, y, 108, 86);
+    const LW = 118;
+    ui.frame('dark', x, y, LW, 92);
     ui.text('MASTERY', x + 6, y + 6, { font: 'small', color: C.head });
-    const d = ui.stepper('mst', `M${this.mastery}`, x + 5, y + 15, 98, { style: 'dark', font: 'body', canL: this.mastery > 0, canR: this.mastery < Math.min(MAX_MASTERY, META.masteryUnlocked) });
+    const d = ui.stepper('mst', `M${this.mastery}`, x + 5, y + 15, LW - 10, { style: 'dark', font: 'body', canL: this.mastery > 0, canR: this.mastery < Math.min(MAX_MASTERY, META.masteryUnlocked) });
     if (d) { this.mastery = Math.max(0, Math.min(Math.min(MAX_MASTERY, META.masteryUnlocked), this.mastery + d)); if (AREAS[this.area].minMastery > this.mastery) this.area = 0; }
     const ml = MASTERY[this.mastery];
-    ui.text(ml.name.toUpperCase(), x + 54, y + 36, { font: 'small', color: C.yellow, align: 'center' });
+    ui.text(ml.name.toUpperCase(), x + LW / 2, y + 36, { font: 'small', color: C.yellow, align: 'center' });
     const mods = masteryMods(this.mastery);
-    ui.clip(x + 2, y + 46, 104, 38);
-    if (!mods.length) ui.textBox(ml.mod, x + 6, y + 47, 96, { font: 'small', color: C.white });
-    else { let yy = y + 47; for (const m of mods.slice(-2)) yy += ui.textBox('· ' + m, x + 6, yy, 96, { font: 'small', color: m === ml.mod ? C.white : '#b0b8d0' }); }
+    ui.clip(x + 2, y + 46, LW - 4, 44);
+    if (!mods.length) ui.textBox(ml.mod, x + 6, y + 47, LW - 12, { font: 'small', color: C.white });
+    else { let yy = y + 47; for (const m of mods.slice(-2)) yy += ui.textBox('· ' + m, x + 6, yy, LW - 12, { font: 'small', color: m === ml.mod ? C.white : '#b0b8d0' }); }
     ui.unclip();
-    if (this.mastery < MAX_MASTERY && this.mastery === META.masteryUnlocked) ui.icon('lock', x + 96, y + 5);
+    if (mods.length > 2 && ui.hover(x, y + 44, LW, 46)) ui.tooltip(mods.map((m) => '· ' + m), { maxW: 190 });
+    if (this.mastery < MAX_MASTERY && this.mastery === META.masteryUnlocked) ui.icon('lock', x + LW - 12, y + 5);
     // ---- start area
-    y = py + 114;
-    ui.frame('dark', x, y, 108, 72);
+    y = py + 120;
+    ui.frame('dark', x, y, LW, 66);
     ui.text('START AREA', x + 6, y + 6, { font: 'small', color: C.head });
     const a = AREAS[this.area];
-    const da = ui.stepper('area', '', x + 5, y + 14, 98, { style: 'dark' });
+    const da = ui.stepper('area', '', x + 5, y + 14, LW - 10, { style: 'dark' });
     if (da) { let n = this.area; for (let k = 0; k < AREAS.length; k++) { n = (n + da + AREAS.length) % AREAS.length; if (AREAS[n].minMastery <= this.mastery) break; } this.area = n; }
     let an = a.name.toUpperCase();
-    while (ui.measure(an, 'small') > 66 && an.length > 4) an = an.slice(0, -2) + '.';
-    ui.text(an, x + 54, y + 18, { font: 'small', color: C.yellow, align: 'center' });
+    while (ui.measure(an, 'small') > LW - 40 && an.length > 4) an = an.slice(0, -2) + '.';
+    ui.text(an, x + LW / 2, y + 18, { font: 'small', color: C.yellow, align: 'center' });
     const th = areaThumb(a.id);
-    ui.img(th, x + 54 - Math.round(th.width / 2), y + 33);
+    ui.img(th, x + LW / 2 - Math.round(th.width / 2), y + 33, { h: Math.min(th.height, 30), w: Math.round(th.width * Math.min(1, 30 / th.height)) });
+    if (ui.hover(x, y + 30, LW, 34)) ui.tooltip([a.name, { text: a.desc, font: 'small', color: '#3a2810' }]);
     // ---- the bag
-    x = px + 118; y = py + 24;
-    const cell = 17, gw = cell * GRID;
+    x = px + 128; y = py + 24;
+    const cell = 16, gw = cell * GRID;
     ui.frame('dark', x, y, gw + 12, gw + 42);
     ui.text('LOADOUT', x + 6, y + 6, { font: 'small', color: C.head });
     ui.text(`${this.loadout.length}`, x + gw + 6, y + 6, { font: 'small', color: C.yellow, align: 'right' });
@@ -120,13 +123,13 @@ export class RunConfigPanel {
     // perks
     const perks = stationPerks();
     const fit = (s: string, w: number) => { while (ui.measure(s, 'small') > w && s.length > 4) s = s.slice(0, -2) + '.'; return s; };
-    ui.text('PERKS', x + 6, y + gw + 46, { font: 'small', color: C.head });
-    if (!perks.perks.length) ui.text(fit('Build stations for perks', gw - 22), x + 34, y + gw + 46, { font: 'small', color: C.dim });
-    else ui.text(fit(perks.perks[0], gw - 22), x + 34, y + gw + 46, { font: 'small', color: '#c8d8ff' });
-    if (perks.perks.length && ui.hover(x, y + gw + 42, gw + 12, 14)) ui.tooltip(perks.perks, { maxW: 200 });
+    ui.text('PERKS', x + 2, y + gw + 46, { font: 'small', color: C.head });
+    if (!perks.perks.length) ui.text(fit('none yet', gw - 30), x + 34, y + gw + 46, { font: 'small', color: C.dim });
+    else ui.text(fit(perks.perks[0], gw - 30), x + 34, y + gw + 46, { font: 'small', color: '#c8d8ff' });
+    if (ui.hover(x, y + gw + 42, gw + 12, 14)) ui.tooltip(perks.perks.length ? perks.perks : ['Build stations in the hideout for perks'], { maxW: 200 });
     // ---- the stash
-    x = px + 222; y = py + 24;
-    const lw = 94, lh = 162;
+    x = px + 226; y = py + 24;
+    const lw = 90, lh = 162;
     ui.frame('dark', x, y, lw, lh);
     ui.text('STASH', x + 6, y + 6, { font: 'small', color: C.head });
     const stash = META.stash.filter((s) => ITEMS[s.id]);
@@ -141,13 +144,13 @@ export class RunConfigPanel {
       const lifted = this.drag?.moved && this.drag.from === 'stash' && this.drag.it.uid === it.uid;
       ui.item(it.id, rx + 3, ry + 3, 16, 16, it.level ?? 1, lifted ? 0.35 : inb ? 0.55 : 1);
       if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, rx + 20, ry + 2, { font: 'small', color: C.green, outline: '#000', align: 'right' });
-    }, { style: 'dark', cols: 4 });
+    }, { style: 'dark', cols: 3 });
     if (tipIt && !this.drag?.moved) { const ti = tipIt as ItemInst; ui.tooltip(ui.itemTip(ti.id, ti.level ?? 1, [{ text: this.inBag(ti.uid) ? 'click: take out' : 'click or drag into the bag', font: 'small', color: '#1a4a7a', gap: 2 }])); }
     this.dragDrop(ui, bag);
     // ---- bottom: back + ENTER
     const by = py + CFG_H - 24;
     if (ui.button('cfg:back', 'BACK', px + 6, by, 56, 19, { style: 'dark', key: 'Backspace', keyLabel: '' })) res = 'back';
-    const ex = px + 118, ew = CFG_W - 124;
+    const ex = px + 128, ew = CFG_W - 134;
     if (Math.sin(this.t * 5) > 0) ui.fill(ex - 2, by - 2, ew + 4, 23, '#ffd27a', 0.22);
     if (ui.button('cfg:enter', 'ENTER THE OCEAN', ex, by, ew, 19, { style: 'gold', font: 'title', key: 'Enter', sfx: 'k_confirm2' })) {
       META.lastConfig = this.config(); META.mastery = this.mastery; saveMeta();

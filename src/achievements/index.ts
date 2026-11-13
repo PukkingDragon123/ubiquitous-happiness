@@ -10,7 +10,7 @@ import type { Game } from '../game/game';
 import { META, saveMeta } from '../meta/meta';
 import { RunWorld } from '../game/runWorld';
 import { ITEMS, setCounts } from '../game/items';
-import { COSMETIC, unlockCosmetic } from '../cosmetics';
+import { unlockCosmetic } from '../cosmetics';
 import { CosmeticRig } from '../cosmetics/rig';
 import { Toasts } from './toast';
 import * as THREE from 'three';
@@ -154,4 +154,3 @@ export function installAchievements(game: Game) {
   Object.assign(window, { ach: { ACHIEVEMENTS, bump, atLeast, check: checkAchievements, toast: (id: string) => toasts?.push(id, ACH[id]?.reward ?? '') } });
   checkAchievements();
 }
-export { COSMETIC };

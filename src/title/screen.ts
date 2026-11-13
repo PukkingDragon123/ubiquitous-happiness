@@ -17,10 +17,10 @@ import { SURF } from '../gfx/water/surface';
 import { META, type RunConfig } from '../meta/meta';
 import { PixelUI } from '../ui/pixel/ui';
 import { audio } from '../audio/audio';
-import { damp, clamp01, easeOutCubic, angDiff } from '../core/math';
+import { damp, clamp01, easeOutCubic } from '../core/math';
 import { HeroSet, TITLE_LOOK, HERO_YAW } from './scene';
 import { drawTitleLogo } from './logo';
-import { RunConfigPanel, CFG_W } from './runConfig';
+import { RunConfigPanel } from './runConfig';
 import { SettingsPanel, CreditsPanel } from './pages';
 import { WardrobePanel, WARD_W } from './wardrobe';
 import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
@@ -65,7 +65,7 @@ export class TitleScreen implements Screen {
   name = 'title';
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
-  ui = new PixelUI({ targetH: 260 });
+  ui = new PixelUI({ targetH: 300 });
   overlays: { scene: THREE.Scene; camera: THREE.Camera }[] = [this.ui.layer];
   set: HeroSet;
   page: TitlePage = 'main';
@@ -142,8 +142,8 @@ export class TitleScreen implements Screen {
     this.go(d.page ?? q ?? 'main', true);
     this.cur = this.shot(this.page);
     if (!d.quick && this.page === 'main') {
-      // the opening crane: high above the ledge, sinking down into the hero shot
-      this.cur.target.y += 6; this.cur.dist += 9; this.cur.pitch = 0.62;
+      // the opening: looking up at the boats' hulls against the bright surface, tilting down onto the hero
+      this.cur.target.set(this.set.H.x - 3, this.set.H.y + 7.5, this.set.H.z - 9); this.cur.dist = 3; this.cur.pitch = -0.2; this.cur.yaw = 0.15;
     }
     this.game.cursor = 'none';
     audio.music('mu_fjord', 2);
@@ -191,7 +191,7 @@ export class TitleScreen implements Screen {
     };
     switch (p) {
       case 'config': return mk(0.82, 3.7, 0.03, 36, 1.4, 0.42);
-      case 'wardrobe': return mk(0.3, 3.3, 0.07, 36, 1.05, 0.42);
+      case 'wardrobe': return mk(0.3, 3.9, 0.06, 36, 1.2, 0.6);
       case 'ach': return mk(0.34 + Math.sin(t * 0.05) * 0.06, 9.5, -0.02, 42, 0, 1.8, 1.5);
       case 'settings': case 'credits': return mk(0.42 + Math.sin(t * 0.045) * 0.08, 4.8, -0.03, 38, 0.95, 0.5);
       default: return mk(0.3 + Math.sin(t * 0.042) * 0.17, 4.7 + Math.sin(t * 0.05) * 0.4, -0.13 + Math.sin(t * 0.06) * 0.025, 38, 1.05 + Math.sin(t * 0.031) * 0.08, 0.62);
@@ -199,7 +199,7 @@ export class TitleScreen implements Screen {
   }
   private updateCamera(dt: number) {
     const goal = this.shot(this.page), c = this.cur;
-    const k = this.page === 'main' && this.intro < 4 ? 0.9 : this.page === 'config' || this.page === 'wardrobe' ? 2.6 : 1.6;
+    const k = this.page === 'main' && this.intro < 5 ? 0.55 + this.intro * 0.1 : this.page === 'config' || this.page === 'wardrobe' ? 2.6 : 1.6;
     c.target.x = damp(c.target.x, goal.target.x, k, dt); c.target.y = damp(c.target.y, goal.target.y, k, dt); c.target.z = damp(c.target.z, goal.target.z, k, dt);
     c.dist = damp(c.dist, goal.dist, k, dt); c.yaw = damp(c.yaw, goal.yaw, k, dt); c.pitch = damp(c.pitch, goal.pitch, k, dt); c.fov = damp(c.fov, goal.fov, k, dt);
     const t = this.t, cam = this.camera;
@@ -286,7 +286,7 @@ export class TitleScreen implements Screen {
   private menu(dt: number) {
     const ui = this.ui, inp = this.game.input;
     const n = this.items.length, rowH = 16;
-    const x0 = 24, y0 = Math.max(104, Math.round(ui.h * 0.4));
+    const x0 = 24, y0 = Math.max(108, Math.min(Math.round(ui.h * 0.42), ui.h - 30 - n * rowH - 14));
     const appear = this.intro - 1.5;
     if (appear > 0 && !this.leaving) {
       if (inp.keyHit('ArrowDown') || inp.keyHit('KeyS')) { this.sel = this.nextOn(this.sel, 1); this.kbd = true; audio.play('k_tick1', { vol: 0.2, dry: true }); }
@@ -385,7 +385,7 @@ export class TitleScreen implements Screen {
       id === 'ach' ? this.v.set(H.x - 4, H.y + 4, H.z - 3) : this.v.set(H.x - 9 + Math.sin(t * 0.2) * 2, H.y + 0.6, H.z - 6 + Math.sin(t * 0.13) * 3);
     h.lookAt(look);
     // the sword: planted in the rock, raised to the ready for NEW RUN, with a glint running up the blade
-    const ready = id === 'new' || id === 'config' ? 1 : 0;
+    const ready = id === 'new' || id === 'config' ? 1 : page === 'wardrobe' ? 0.75 : 0;
     this.swordK = damp(this.swordK, ready, 6, dt);
     m.weaponCtl = 'external';
     const hand = m.handWorld(new THREE.Vector3());
@@ -406,9 +406,9 @@ export class TitleScreen implements Screen {
     // turntable in the wardrobe, back to the hero pose elsewhere
     if (page === 'wardrobe') { if (this.dragX === null) this.spin += dt * 0.35 + this.spinV * dt; this.spinV *= Math.exp(-dt * 3); }
     else this.spin = damp(this.spin, Math.round(this.spin / (Math.PI * 2)) * Math.PI * 2, 3, dt);
-    h.root.rotation.y = HERO_YAW + (page === 'wardrobe' ? 0.45 : 0) + this.spin + angDiff(0, Math.sin(t * 0.25) * 0.04);
+    h.root.rotation.y = HERO_YAW + (page === 'wardrobe' ? 0.45 : 0) + this.spin + Math.sin(t * 0.25) * 0.04;
     h.update(dt, { t });
     // the trail shows behind him in the wardrobe
-    if (page === 'wardrobe') { const tp = m.tail.getWorldPosition(new THREE.Vector3()); h.rig.trail(s.fx, tp.x, tp.y, tp.z, 3, dt * 0.6, true); }
+    if (page === 'wardrobe') { const tp = m.tail.getWorldPosition(new THREE.Vector3()); h.rig.trail(s.fx, tp.x, tp.y, tp.z, 1.6, dt * 0.5, true, 0.6); }
   }
 }

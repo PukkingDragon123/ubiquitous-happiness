@@ -1,4 +1,4 @@
-// The hideout: hub + main menu. See screen.ts (HideoutScreen), blueprints.ts (BLUEPRINTS, stationsBuilt,
+// The hideout: the hub (the main menu is the title screen, src/title). See screen.ts (HideoutScreen), blueprints.ts (BLUEPRINTS, stationsBuilt,
 // stationPerks), mastery.ts (MASTERY, AREAS, masteryScalars), recipes.ts (workshop) and hero.ts (the hero
 // interface the cinematic drives).
 export { HideoutScreen, type HideoutOpts } from './screen';

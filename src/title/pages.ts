@@ -72,10 +72,11 @@ export class CreditsPanel {
     this.t += dt;
     const w = 236, h = 190;
     ui.panel('dark', x, y, w, h, undefined, { alpha: 0.9 });
-    const lh = 11, H2 = LINES.length * lh;
-    const off = (this.t * 14) % (H2 + h);
-    ui.clip(x + 4, y + 4, w - 8, h - 30);
-    LINES.forEach(([l, c, f], i) => { const yy = y + h - 30 - off + i * lh; if (yy > y - 12 && yy < y + h) ui.text(l, x + w / 2, yy, { font: f === 'title' ? 'title' : 'small', color: c || W, align: 'center', shadow: '#000' }); });
+    const lh = 11, H2 = LINES.length * lh + 40;
+    // starts full, scrolls up, loops seamlessly
+    const off = (Math.max(0, this.t - 1.2) * 12) % H2;
+    ui.clip(x + 4, y + 6, w - 8, h - 34);
+    for (const rep of [0, H2]) LINES.forEach(([l, c, f], i) => { const yy = y + 12 + i * lh - off + rep; if (yy > y - 12 && yy < y + h - 26) ui.text(l, x + w / 2, yy, { font: f === 'title' ? 'title' : 'small', color: c || W, align: 'center', shadow: '#000' }); });
     ui.unclip();
     return ui.button('cred:back', 'BACK', x + (w - 60) / 2, y + h - 24, 60, 18, { style: 'dark', key: 'Escape', keyLabel: '' });
   }

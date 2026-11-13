@@ -21,8 +21,9 @@ export class AchievementsPanel {
     ui.fill(x + 4, y + 4, ACH_W - 8, 15, '#1a0c08', 0.9); ui.fill(x + 4, y + 18, ACH_W - 8, 1, '#f0c040');
     ui.text('ACHIEVEMENTS', x + 9, y + 8, { font: 'title', color: '#fff4dc', color2: '#ffd27a', shadow: '#000' });
     const done = META.achievements.unlocked.length;
-    ui.text(`${done}/${ACHIEVEMENTS.length}`, x + 118, y + 9, { font: 'small', color: '#ffd27a' });
-    ui.bar(x + 140, y + 10, 90, 5, done / ACHIEVEMENTS.length, '#f0c040');
+    const hx = x + 16 + ui.measure('ACHIEVEMENTS', 'title');
+    ui.text(`${done}/${ACHIEVEMENTS.length}`, hx, y + 9, { font: 'small', color: '#ffd27a' });
+    ui.bar(hx + 28, y + 10, 90, 5, done / ACHIEVEMENTS.length, '#f0c040');
     let close = ui.iconButton('ach:x', 'close', x + ACH_W - 22, y + 4, { style: 'red', size: 13, key: 'Escape', keyLabel: '' });
     if (inp?.keyHit('ArrowRight')) this.sel = (this.sel + 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowLeft')) this.sel = (this.sel + ACHIEVEMENTS.length - 1) % ACHIEVEMENTS.length;
@@ -43,7 +44,9 @@ export class AchievementsPanel {
       if (got && Math.sin(this.t * 2.5 + i * 1.3) > 0.85) { ui.fill(cx + 9, cy + 13, 1, 3, '#ffffff'); ui.fill(cx + 8, cy + 14, 3, 1, '#ffffff'); }
       // progress bar (full + gold once done)
       ui.bar(cx + 3, cy + 37, CW - 8, 4, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
-      ui.text(got ? 'DONE' : a.goal > 1 ? `${p}/${a.goal}` : '0/1', cx + (CW - 2) / 2, cy + 41, { font: 'small', color: got ? '#ffd27a' : '#8a94b0', align: 'center' });
+      let label = got ? 'DONE' : `${p}/${a.goal}`;
+      if (ui.measure(label, 'small') > CW - 4) label = `${Math.floor((p / a.goal) * 100)}%`;
+      ui.text(label, cx + (CW - 2) / 2, cy + 41, { font: 'small', color: got ? '#ffd27a' : '#8a94b0', align: 'center' });
       ui.block(cx, cy, CW - 2, CH - 2);
     });
     // ---- the detail card
@@ -65,9 +68,13 @@ export class AchievementsPanel {
     ui.text('REWARD', dx + 6, ry, { font: 'small', color: '#ffd27a' });
     ui.frame(got ? 'cardSel' : 'slot', dx + 6, ry + 9, 22, 22);
     ui.img(cosmeticIcon(a.reward), dx + 7, ry + 10, { alpha: got ? 1 : 0.4 });
-    if (c) { ui.textBox(c.name.toUpperCase(), dx + 32, ry + 10, dw - 36, { font: 'small', color: got ? '#ffffff' : '#a8a0b0' }); ui.text(SLOT_NAME[c.slot], dx + 32, ry + 24, { font: 'small', color: '#8a94b0' }); }
+    if (c) {
+      ui.text(SLOT_NAME[c.slot], dx + dw - 6, ry, { font: 'small', color: '#8a94b0', align: 'right' });
+      ui.textBox(c.name.toUpperCase(), dx + 32, ry + 10, dw - 36, { font: 'small', color: got ? '#ffffff' : '#a8a0b0' });
+    }
     if (ui.button('ach:back', 'BACK', x + ACH_W - 66, y + ACH_H - 24, 58, 18, { style: 'dark' })) close = true;
-    ui.hint('←→', 'browse', x + 10, y + ACH_H - 21, { color: '#c8d8ff' });
+    ui.icon('left', x + 11, y + ACH_H - 19); ui.icon('right', x + 19, y + ACH_H - 19);
+    ui.text('browse', x + 28, y + ACH_H - 18, { font: 'small', color: '#c8d8ff', shadow: '#000' });
     return close;
   }
 }
