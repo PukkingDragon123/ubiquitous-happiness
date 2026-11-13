@@ -425,9 +425,9 @@ export class HideoutScreen implements Screen {
   // ---------------------------------------------------------------- HUDs
   private plaque() {
     const ui = this.ui;
-    ui.panel('wood', 6, 8, 128, 30);
-    ui.text('THE HIDEOUT', 70, 15, { font: 'title', color: '#ffe7b0', color2: '#f0b860', shadow: '#1a0c04', align: 'center' });
-    ui.text(`M${META.masteryUnlocked} · ${META.runs} RUNS · ${META.wins} WINS`, 70, 29, { font: 'tiny', color: '#c8a878', align: 'center' });
+    ui.panel('wood', 6, 8, 128, 34);
+    ui.text('THE HIDEOUT', 70, 16, { font: 'title', color: '#ffe7b0', color2: '#f0b860', shadow: '#1a0c04', align: 'center' });
+    ui.text(`M${META.masteryUnlocked} · ${META.runs} RUNS · ${META.wins} WINS`, 70, 29, { font: 'small', color: '#e0b878', shadow: '#1a0c04', align: 'center' });
   }
   private miniHud() { this.plaque(); }
 
@@ -437,9 +437,9 @@ export class HideoutScreen implements Screen {
     // material summary under the plaque
     const mats = Object.entries(META.materials).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 6);
     if (mats.length) {
-      ui.panel('dark', 6, 40, 128, 10 + Math.ceil(mats.length / 2) * 18, undefined, { alpha: 0.9 });
+      ui.panel('dark', 6, 44, 128, 10 + Math.ceil(mats.length / 2) * 18, undefined, { alpha: 0.9 });
       mats.forEach(([id, n], i) => {
-        const x = 11 + (i % 2) * 62, y = 45 + Math.floor(i / 2) * 18;
+        const x = 11 + (i % 2) * 62, y = 49 + Math.floor(i / 2) * 18;
         ui.item(id, x, y, 16, 16);
         ui.text(`${n}`, x + 19, y + 5, { font: 'small', color: '#ffffff' });
         if (ui.hover(x, y, 50, 16)) ui.tooltip(ui.itemTip(id));

@@ -182,9 +182,9 @@ export class TvUI {
     const ui = this.ui;
     // ---- mastery
     let x = 6, y = 20;
-    ui.frame('tv', x, y, 112, 100);
+    ui.frame('tv', x, y, 112, 96);
     ui.text('MASTERY', x + 6, y + 6, { font: 'small', color: C.cyan });
-    const d = ui.stepper('mst', `M${this.mastery}`, x + 6, y + 16, 100, { style: 'tv', canL: this.mastery > 0, canR: this.mastery < Math.min(MAX_MASTERY, META.masteryUnlocked) });
+    const d = ui.stepper('mst', `M${this.mastery}`, x + 6, y + 16, 100, { style: 'tv', font: 'body', canL: this.mastery > 0, canR: this.mastery < Math.min(MAX_MASTERY, META.masteryUnlocked) });
     if (d) { this.mastery = Math.max(0, Math.min(Math.min(MAX_MASTERY, META.masteryUnlocked), this.mastery + d)); if (AREAS[this.area].minMastery > this.mastery) this.area = 0; }
     const ml = MASTERY[this.mastery];
     ui.text(ml.name.toUpperCase(), x + 56, y + 38, { font: 'small', color: C.yellow, align: 'center' });
@@ -194,19 +194,25 @@ export class TvUI {
       let yy = y + 50;
       const shown = mods.slice(-4);
       if (mods.length > 4) { ui.text(`+${mods.length - 4} more...`, x + 6, yy, { font: 'small', color: C.dim }); yy += 9; }
-      for (const m of shown) { yy += ui.textBox('• ' + m, x + 6, yy, 100, { font: 'small', color: m === ml.mod ? C.white : '#a8b8e0' }); if (yy > y + 96) break; }
+      ui.clip(x + 2, yy, 108, Math.max(1, y + 94 - yy));
+      for (const m of shown.slice(-3)) { yy += ui.textBox('• ' + m, x + 6, yy, 100, { font: 'small', color: m === ml.mod ? C.white : '#a8b8e0' }); }
+      ui.unclip();
     }
     if (this.mastery < MAX_MASTERY && this.mastery === META.masteryUnlocked) { ui.icon('lock', x + 100, y + 5); }
     // ---- start area
-    y = 124;
-    ui.frame('tv', x, y, 112, 88);
+    y = 120;
+    ui.frame('tv', x, y, 112, 92);
     ui.text('START AREA', x + 6, y + 6, { font: 'small', color: C.cyan });
     const a = AREAS[this.area];
-    const da = ui.stepper('area', '', x + 6, y + 15, 100, { style: 'tv' });
+    const da = ui.stepper('area', '', x + 6, y + 14, 100, { style: 'tv' });
     if (da) { let n = this.area; for (let k = 0; k < AREAS.length; k++) { n = (n + da + AREAS.length) % AREAS.length; if (AREAS[n].minMastery <= this.mastery) break; } this.area = n; }
-    ui.text(a.name.toUpperCase(), x + 56, y + 19, { font: 'small', color: C.yellow, align: 'center' });
-    ui.img(areaThumb(a.id), x + 24, y + 35);
-    ui.textBox(a.desc, x + 6, y + 77, 100, { font: 'tiny', color: '#c8d8ff' });
+    let an = a.name.toUpperCase();
+    while (ui.measure(an, 'small') > 70 && an.length > 4) an = an.slice(0, -2) + '.';
+    ui.text(an, x + 56, y + 18, { font: 'small', color: C.yellow, align: 'center' });
+    ui.img(areaThumb(a.id), x + 24, y + 33);
+    let ad = a.desc;
+    while (ui.measure(ad, 'small') > 100 && ad.length > 4) ad = ad.slice(0, -2) + '.';
+    ui.text(ad, x + 6, y + 78, { font: 'small', color: '#c8d8ff' });
     // ---- loadout: the 5x5 bag
     x = 122; y = 20;
     const cell = 18, gw = cell * GRID;
@@ -238,8 +244,9 @@ export class TvUI {
     const perks = stationPerks();
     ui.frame('tv', x, y + gw + 48, gw + 12, 40);
     ui.text('HIDEOUT PERKS', x + 6, y + gw + 54, { font: 'small', color: C.cyan });
-    if (!perks.perks.length) ui.text('build stations for perks', x + 6, y + gw + 66, { font: 'tiny', color: C.dim });
-    else perks.perks.slice(0, 2).forEach((p, i) => ui.text(p.length > 30 ? p.slice(0, 29) + '…' : p, x + 6, y + gw + 64 + i * 9, { font: 'tiny', color: '#c8d8ff' }));
+    const fit = (t: string, w: number) => { while (ui.measure(t, 'small') > w && t.length > 4) t = t.slice(0, -2) + '.'; return t; };
+    if (!perks.perks.length) ui.text(fit('Build stations for perks', gw), x + 6, y + gw + 66, { font: 'small', color: C.dim });
+    else perks.perks.slice(0, 2).forEach((p, i) => ui.text(fit(p, gw), x + 6, y + gw + 64 + i * 10, { font: 'small', color: '#c8d8ff' }));
     if (perks.perks.length > 2 && ui.hover(x, y + gw + 48, gw + 12, 40)) ui.tooltip(perks.perks, { maxW: 200 });
     // ---- stash list
     x = 238; y = 20;
@@ -249,18 +256,15 @@ export class TvUI {
     const stash = META.stash.filter((s) => ITEMS[s.id]);
     if (!stash.length) ui.textBox('Empty. Extract loot on runs to fill it.', x + 6, y + 20, lw - 10, { font: 'tiny', color: C.dim });
     let tipIt: ItemInst | null = null;
-    const clicked = ui.list('stash', x + 4, y + 16, lw - 6, lh - 4, stash.length, 18, (i, rx, ry, rw, hov) => {
+    const clicked = ui.list('stash', x + 4, y + 16, lw - 6, lh - 4, stash.length, 22, (i, rx, ry, _rw, hov) => {
       const it = stash[i];
       const inb = this.inBag(it.uid);
-      if (inb) ui.fill(rx, ry, rw, 17, '#1a4a8a');
-      if (hov) { ui.fill(rx, ry, rw, 17, '#2a6ad0'); tipIt = it; }
-      ui.item(it.id, rx, ry, 16, 16, it.level ?? 1);
-      const nm = getItem(it.id).name;
-      const short = ui.measure(nm, 'tiny') > rw - 20 ? nm.slice(0, Math.max(3, Math.floor((rw - 22) / 4))) + '.' : nm;
-      ui.text(short, rx + 17, ry + 3, { font: 'tiny', color: inb ? C.yellow : C.white });
-      if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, rx + 17, ry + 10, { font: 'tiny', color: C.green });
-      if (inb) ui.icon('check', rx + rw - 10, ry + 4);
-    }, { style: 'tv' });
+      ui.frame('slotTv', rx + 1, ry + 1, 20, 20);
+      if (inb) ui.rect(rx + 1, ry + 1, 20, 20, C.yellow);
+      if (hov) { ui.rect(rx + 1, ry + 1, 20, 20, C.white); tipIt = it; }
+      ui.item(it.id, rx + 3, ry + 3, 16, 16, it.level ?? 1);
+      if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, rx + 20, ry + 2, { font: 'small', color: C.green, outline: '#000', align: 'right' });
+    }, { style: 'tv', cols: 3 });
     if (tipIt) { const ti = tipIt as ItemInst; ui.tooltip(ui.itemTip(ti.id, ti.level ?? 1, [{ text: this.inBag(ti.uid) ? 'click: take out' : 'click: pack it', font: 'small', color: '#1a4a7a', gap: 2 }])); }
     if (clicked >= 0) {
       const it = stash[clicked];

@@ -23,9 +23,9 @@ type CurveIn = Curve | number | [number, number][];
  * v2 PS1 look: every species is rebuilt at a fraction of its authored resolution (faceted, flat-shaded),
  * keeping the silhouette, fins and painted texture that make it recognisable.
  */
-export const LOWPOLY = { seg: 0.34, rings: 0.32, fin: 0.42, finRows: 0.5, eyeSides: 8, eyeRings: 3 };
+export const LOWPOLY = { seg: 0.28, rings: 0.22, fin: 0.3, finRows: 0.4, eyeSides: 6, eyeRings: 2 };
 const lpSeg = (n: number) => Math.max(8, 2 * Math.round((n * LOWPOLY.seg) / 2));
-const lpRings = (n: number) => Math.max(10, Math.round(n * LOWPOLY.rings));
+const lpRings = (n: number) => Math.max(8, Math.round(n * LOWPOLY.rings));
 const lpCols = (n: number) => Math.max(3, Math.round(n * LOWPOLY.fin));
 const lpRows = (n: number) => Math.max(2, Math.round(n * LOWPOLY.finRows));
 

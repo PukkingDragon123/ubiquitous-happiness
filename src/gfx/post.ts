@@ -205,7 +205,7 @@ void main() {
       float s0 = t0 + uFogNear * 0.8, L = min(t1, t0 + 120.0) - s0;
       if (L > 0.0) {
         float acc = 0.0;
-        float jitter = nhash(uv * 731.7 + fract(uTime * 7.0)) * 0.5 + 0.25;
+        const float jitter = 0.5; // fixed sample offsets: clean shafts, no per-pixel speckle
         for (int i = 0; i < 6; i++) {
           float s = s0 + (float(i) + jitter) / 6.0 * L;
           vec3 p = C + dir * s;

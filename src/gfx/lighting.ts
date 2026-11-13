@@ -53,9 +53,9 @@ export const LOOKS: Record<string, Look> = {
     sky: ['#3f86d8', '#c7ecf7'], seaFar: '#1d6f96', sun: '#fff4e0',
     scatterTop: '#3ec4dc', scatterDeep: '#1652a0', rays: 0.9, rayCol: '#f0fff8',
     tir: '#2a8fb0', shallow: '#22b3c9', deep: '#0b5a80',
-    hemiSky: '#6fd2e8', hemiGround: '#4a5a48', hemi: 1.0, sunI: 3.4,
+    hemiSky: '#6fd2e8', hemiGround: '#4a5a48', hemi: 0.85, sunI: 2.7,
     depthExt: [0.022, 0.009, 0.005], depthMin: [0.4, 0.55, 0.65], caustic: 0.8,
-    saturation: 1.1, contrast: 1.08, exposure: 1.0,
+    saturation: 1.1, contrast: 1.1, exposure: 0.95,
     fogNear: 5, fogK: 0.042, fogDeep: 34, rim: ['#e8fcff', 0.39], fill: ['#9fe0f0', 0.35], split: ['#1d4a66', '#ffc890', 0.08],
   },
   kelp: {
@@ -63,7 +63,7 @@ export const LOOKS: Record<string, Look> = {
     sky: ['#4a8ccc', '#d6efe8'], seaFar: '#1f6a70', sun: '#fff2cc', cloudCover: 0.62,
     scatterTop: '#3aa68e', scatterDeep: '#0e4446', rays: 1.3, rayCol: '#f6ffd8',
     tir: '#3a9f94', shallow: '#2aa898', deep: '#0d4f52',
-    hemiSky: '#7cc8a8', hemiGround: '#3a4428', hemi: 0.95, sunI: 3.2,
+    hemiSky: '#7cc8a8', hemiGround: '#3a4428', hemi: 0.85, sunI: 2.6,
     depthExt: [0.026, 0.01, 0.009], depthMin: [0.35, 0.5, 0.45], caustic: 1.0, causticCol: '#fffbd0',
     saturation: 1.08, contrast: 1.1, exposure: 1.0,
     fogNear: 5, fogK: 0.048, fogDeep: 32, rim: ['#e0ffe8', 0.35], fill: ['#a8e0c4', 0.3], split: ['#1e4a3a', '#ffd890', 0.08],
@@ -71,11 +71,11 @@ export const LOOKS: Record<string, Look> = {
   graveyard: {
     ...base,
     sky: ['#56677a', '#b4b8b2'], seaFar: '#24403f', sun: '#e6ecf0', cloudCover: 0.85,
-    scatterTop: '#7890a2', scatterDeep: '#243448', rays: 0.6, rayCol: '#e4eef4',
+    scatterTop: '#5a7488', scatterDeep: '#1a2636', rays: 0.5, rayCol: '#d8e6f0',
     tir: '#3a6a64', shallow: '#3a7a70', deep: '#123634',
-    hemiSky: '#90a6b6', hemiGround: '#34322c', hemi: 0.9, sunI: 2.8,
+    hemiSky: '#90a6b6', hemiGround: '#34322c', hemi: 0.75, sunI: 2.2,
     depthExt: [0.03, 0.014, 0.01], depthMin: [0.35, 0.42, 0.5], caustic: 0.4, causticCol: '#e8f0f4',
-    saturation: 0.88, contrast: 1.1, exposure: 1.0,
+    saturation: 0.9, contrast: 1.16, exposure: 0.95,
     fogNear: 5, fogK: 0.05, fogDeep: 30, rim: ['#dce8f4', 0.39], fill: ['#a8b8c8', 0.3], split: ['#2a3a4c', '#e8d0b0', 0.08],
   },
   harbor: {
@@ -83,7 +83,7 @@ export const LOOKS: Record<string, Look> = {
     sky: ['#6f9fd0', '#e6e0d0'], seaFar: '#3a6a70', sun: '#ffe6c0', cloudCover: 0.7,
     scatterTop: '#4e9c96', scatterDeep: '#143c44', rays: 0.8, rayCol: '#fff4dc',
     tir: '#4a8f88', shallow: '#3f9890', deep: '#164a50',
-    hemiSky: '#a8d0c8', hemiGround: '#4a4436', hemi: 0.95, sunI: 3.0,
+    hemiSky: '#a8d0c8', hemiGround: '#4a4436', hemi: 0.85, sunI: 2.5,
     depthExt: [0.03, 0.013, 0.012], depthMin: [0.35, 0.45, 0.45], caustic: 0.8, causticCol: '#fff0d0',
     saturation: 1.0, contrast: 1.08, exposure: 1.0,
     fogNear: 5, fogK: 0.05, fogDeep: 30, rim: ['#f0f8f0', 0.35],
@@ -93,7 +93,7 @@ export const LOOKS: Record<string, Look> = {
     sky: ['#7fa8d6', '#eef4f8'], seaFar: '#2a5a80', sun: '#f6fbff', cloudCover: 0.6,
     scatterTop: '#b4e2f0', scatterDeep: '#3a78a6', rays: 1.1, rayCol: '#f4fcff',
     tir: '#6ab8d8', shallow: '#4cb4d8', deep: '#164a7a',
-    hemiSky: '#c8ecf8', hemiGround: '#6a8090', hemi: 1.1, sunI: 3.2,
+    hemiSky: '#c8ecf8', hemiGround: '#6a8090', hemi: 0.95, sunI: 2.6,
     depthExt: [0.02, 0.008, 0.004], depthMin: [0.45, 0.58, 0.7], caustic: 0.9, causticCol: '#f0fbff',
     saturation: 0.95, contrast: 1.06, exposure: 1.0,
     fogNear: 6, fogK: 0.034, fogDeep: 40, rim: ['#ffffff', 0.35], fill: ['#d8f0ff', 0.35], split: ['#3a5a78', '#fff0dc', 0.06],
@@ -113,7 +113,7 @@ export const LOOKS: Record<string, Look> = {
     sky: ['#4a5aa8', '#ffb98a'], seaFar: '#3a4a7a', sun: '#ffcf96', cloudCover: 0.55,
     scatterTop: '#4aa0b0', scatterDeep: '#122a52', rays: 1.3, rayCol: '#ffe0b8',
     tir: '#5a8aa8', shallow: '#3a8ab0', deep: '#14325a',
-    hemiSky: '#d8b0a0', hemiGround: '#3a2a3a', hemi: 0.9, sunI: 3.2,
+    hemiSky: '#d8b0a0', hemiGround: '#3a2a3a', hemi: 0.8, sunI: 2.6,
     depthExt: [0.022, 0.012, 0.009], depthMin: [0.4, 0.35, 0.5], caustic: 1.0, causticCol: '#ffe0b0',
     saturation: 1.06, contrast: 1.08, exposure: 1.0,
     fogNear: 5, fogK: 0.045, fogDeep: 34, rim: ['#ffd8b8', 0.39], split: ['#2a3a6a', '#ffb070', 0.1],
@@ -142,7 +142,7 @@ interface Slot { light: THREE.PointLight; kind: 'free' | 'lamp' | 'flash'; t0: n
 
 export class Lighting {
   /** the key: from the surface, tilted toward the viewer; crisp shadows */
-  sun = new THREE.DirectionalLight('#fff2d6', 3.2);
+  sun = new THREE.DirectionalLight('#fff2d6', 2.7);
   /** coloured water ambient */
   hemi = new THREE.HemisphereLight('#6fd2e8', '#4a5a48', 1.0);
   /** weak camera-side fill (no shadows) */

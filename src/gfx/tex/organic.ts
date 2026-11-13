@@ -15,7 +15,7 @@ function seam(s: Surf, x: number, P: RGB[], thread: RGB) {
 export function cotton(s: Surf) {
   const P = hramp('#b4b0a6', 5, 0.35, 0.02);
   // plain weave: a quiet 2-tone checker of thread crossings inside two broad tone zones
-  s.each((x, y) => { const z = s.zone(x, y, 2, 2, 1); s.set(x, y, P[2 + z - ((x + y) & 1)]); s.setH(x, y, 0.5 + ((x + y) & 1) * 0.1); s.R(x, y, 0.95); });
+  s.each((x, y) => { s.set(x, y, P[3 - ((x + y) & 1)]); s.setH(x, y, 0.5 + ((x + y) & 1) * 0.1); s.R(x, y, 0.95); });
   seam(s, Math.floor(s.w * 0.7), P, P[1]);
   s.bump = 1.2;
 }
@@ -25,8 +25,7 @@ export function denim(s: Surf) {
   // 3/1 twill: diagonal wales; faded lighter zone (wear); an orange top-stitched seam
   s.each((x, y) => {
     const d = ((x + y) % 4 + 4) % 4;
-    const z = s.zone(x, y, 2, 2, 2);
-    s.set(x, y, P[[1, 2, 2, 3][d] + z - (z ? 0 : 0)]);
+    s.set(x, y, P[[1, 2, 2, 3][d]]);
     s.setH(x, y, d === 3 ? 0.6 : 0.5);
     s.R(x, y, 0.95);
   });
@@ -53,9 +52,8 @@ export function canvas(s: Surf) {
   // 2x2 basket weave, two broad tone zones, a stitched hem
   s.each((x, y) => {
     const over = ((x >> 1) + (y >> 1)) & 1;
-    const z = s.zone(x, y, 2, 2, 3);
     const k = over ? ((x & 1) ? 2 : 3) : ((y & 1) ? 1 : 2);
-    s.set(x, y, P[k + z]);
+    s.set(x, y, P[k]);
     s.setH(x, y, 0.4 + k * 0.08);
     s.R(x, y, 0.95);
   });
@@ -66,10 +64,10 @@ export function canvas(s: Surf) {
 export function leather(s: Surf, tint?: string) {
   const P = hramp(tint ?? '#6e4428', 6, 0.55, 0.04);
   // two panels joined by a stitched seam, broad tone zones, a few creases, a scuffed patch
-  s.each((x, y) => { s.set(x, y, P[2 + s.zone(x, y, 2, 2, 1)]); s.setH(x, y, 0.5); s.R(x, y, 0.75); });
+  s.each((x, y) => { s.set(x, y, P[3]); s.setH(x, y, 0.5); s.R(x, y, 0.75); });
   for (let k = 0; k < 3; k++) {
     const x = Math.floor(s.r(k, 1, 2) * s.w), y = Math.floor(s.r(k, 2, 2) * s.h);
-    s.crack([[x, y], [x + 5, y + 1], [x + 11, y + 1]], P[1], P[4], 0.1);
+    s.crack([[x, y], [x + 5, y + 1], [x + 11, y + 1]], P[2], P[4], 0.1);
   }
   const sx = Math.floor(s.r(5, 1, 3) * s.w), sy = Math.floor(s.r(5, 2, 3) * s.h);
   for (let y = -2; y <= 2; y++) for (let x = -5; x <= 5; x++) if ((x / 5) ** 2 + (y / 2) ** 2 < 1) s.set(sx + x, sy + y, P[4]);
@@ -108,16 +106,11 @@ export function rubber(s: Surf) {
 export const SKIN_TONES: Record<string, string> = {
   skinPale: '#e0b4a0', skinFair: '#c89478', skinTan: '#a87452', skinBrown: '#7e4e34', skinDark: '#4e2e20',
 };
-/** human skin: smooth, a few broad hard-edged tone zones (subtle redness), no pores or noise */
+/** human skin: nearly flat (two close tones in broad zones), no pores, no noise; a few freckles on fair tones */
 export function skin(s: Surf, tone: string) {
-  const P = hramp(SKIN_TONES[tone] ?? SKIN_TONES.skinFair, 5, 0.35, 0.04);
-  const red = mixc(P[2], hex('#c0605a'), 0.22);
-  s.each((x, y) => {
-    const z = s.zone(x, y, 2, 3, 1);
-    s.set(x, y, z === 2 && s.zone(x, y, 3, 2, 2) ? red : P[1 + z]);
-    s.setH(x, y, 0.5); s.R(x, y, 0.75);
-  });
-  if (tone === 'skinPale' || tone === 'skinFair') for (let k = 0; k < 5; k++) s.set(Math.floor(s.r(k, 1, 3) * s.w), Math.floor(s.r(k, 2, 3) * s.h), P[0]);
+  const P = hramp(SKIN_TONES[tone] ?? SKIN_TONES.skinFair, 7, 0.3, 0.03);
+  s.each((x, y) => { s.set(x, y, P[3 + s.zone(x, y, 2, 2, 1)]); s.setH(x, y, 0.5); s.R(x, y, 0.75); });
+  if (tone === 'skinPale' || tone === 'skinFair') for (let k = 0; k < 5; k++) s.set(Math.floor(s.r(k, 1, 3) * s.w), Math.floor(s.r(k, 2, 3) * s.h), P[1]);
   s.bump = 0.8;
 }
 

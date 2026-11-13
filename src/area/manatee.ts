@@ -13,6 +13,7 @@ import type { AreaDef } from './defs';
 import type { Scenery } from './scenery';
 import { Soup, V3, UVR, mat4 } from '../world/lp';
 import { ramp, hex, mix, pxNoise, RGB } from '../gfx/px';
+import { hueRamp } from '../world/pixart';
 import { hash2, damp, clamp, dampAngle } from '../core/math';
 import { ITEMS } from '../game/items';
 
@@ -22,27 +23,24 @@ const TAU = Math.PI * 2;
 function paintRegions(scen: Scenery) {
   const A = scen.props.A;
   const skin = A.paint('manateeSkin', 64, 48, (p, w, h) => {
-    const R = ramp(['#24221e', '#46423a', '#6a6458', '#8c857a', '#ada698'], 4, 0);
+    // a soft grey-brown hide: darker back, pale belly, deliberate wrinkle arcs, algae on the back, old scars
+    const T = hueRamp('#9a9486', 6, { spread: 0.9 });
+    const G = hueRamp('#6e7a3c', 4);
     p.fill((x, y) => {
-      const v = y / h;                                   // 0 = back (top of the texture) .. 1 = belly
-      const n = pxNoise(x, y, 10, 3, 3, 64);
-      let t = 0.42 + v * 0.28 + (n - 0.5) * 0.3;
-      // wrinkle creases around the body
-      const cr = Math.sin(x * 0.55 + pxNoise(x, y, 6, 2, 5) * 4);
-      if (cr > 0.86) t -= 0.18; else if (cr > 0.7) t += 0.05;
-      let c: RGB = R(t, x, y);
-      // algae on the back
-      const al = pxNoise(x, y, 7, 3, 9, 64);
-      if (v < 0.4 && al > 0.62) c = mix(c, hex(al > 0.7 ? '#5e6a34' : '#4a5a2a'), 0.55);
-      // old propeller scars: pale parallel slashes across the back
-      for (let k = 0; k < 3; k++) { const d = Math.abs((x - 20 - k * 4) - (y - 4) * 0.6); if (d < 0.7 && y > 2 && y < 16 && x > 10 && x < 46) c = mix(c, hex('#c8c0b4'), 0.7); }
+      const v = y / h;
+      let t = v < 0.22 ? 2 : v < 0.6 ? 3 : v < 0.8 ? 4 : 5;
+      const wr = (x + Math.round(Math.sin(y * 0.35) * 2)) % 7;
+      if (wr === 0 && v > 0.1 && v < 0.9) t -= 1; else if (wr === 1 && v > 0.1 && v < 0.9) t = Math.min(5, t + 1);
+      let c: RGB = T[t];
+      if (v < 0.3) { const al = Math.sin(x * 0.31) + Math.sin(x * 0.13 + y * 0.4); if (al > 1.25) c = G[al > 1.6 ? 2 : 1]; }
+      for (let k = 0; k < 3; k++) { const d = Math.abs((x - 22 - k * 4) - (y - 4) * 0.6); if (d < 0.6 && y > 3 && y < 14) c = T[5]; }
       return c;
     });
   });
   const muzzle = A.paint('manateeMuzzle', 16, 16, (p, w, h) => {
-    const R = ramp(['#3a3630', '#5e584e', '#827a6e', '#a29a8c'], 4, 0);
-    p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, 7) - 0.5) * 0.4 + (y / h) * 0.15, x, y));
-    for (let i = 0; i < 26; i++) p.set(hash2(i, 1, 3) * w, 4 + hash2(i, 2, 3) * (h - 6), '#1a1814'); // bristles
+    const T = hueRamp('#aaa090', 5);
+    p.fill((x, y) => T[y < 3 ? 2 : y < 10 ? 3 : 4]);
+    for (let y = 5; y < h - 2; y += 3) for (let x = 2 + ((y / 3) % 2); x < w - 1; x += 3) p.set(x, y, T[0]); // bristle pores in rows
   });
   const cap = A.paint('postCap', 16, 16, (p, w, h) => {
     const R = ramp(['#080c1a', '#121c38', '#1e2e58', '#30467a'], 4, 0);
@@ -67,7 +65,7 @@ function paintRegions(scen: Scenery) {
     if (y === 5 && x > 3 && x < 10) return [120, 120, 130];
     return x > 11 && y < 5 ? [210, 120, 60] : [240, 236, 222];
   }));
-  const eye = A.paint('manateeEye', 4, 4, (p) => p.fill((x, y) => (x === 1 && y === 1 ? [220, 230, 240] : [12, 10, 10])));
+  const eye = A.paint('manateeEye', 4, 4, (p) => p.fill((x, y) => (x <= 1 && y <= 1 ? [235, 240, 250] : [10, 8, 12])));
   return { skin, muzzle, cap, visor, badge, leather, env, eye };
 }
 
@@ -117,7 +115,7 @@ function buildManatee(scen: Scenery): ManateeParts {
   // nostrils
   for (const z of [-0.07, 0.07]) P.front.box([1.46, 0.17, z - 0.03], [0.06, 0.02, 0.05], R.eye);
   // eyes (tiny, a glint)
-  for (const z of [-0.29, 0.29]) { const from = P.eyes.count; P.eyes.lathe([[0.04, -0.035], [0.045, 0], [0, 0.035]], 5, R.eye); P.eyes.transformSince(from, mat4(1.08, 0.13, z, 1, 1, 1, 0, 0, Math.PI / 2)); }
+  for (const z of [-0.3, 0.3]) { const from = P.eyes.count; P.eyes.lathe([[0.06, -0.05], [0.07, 0], [0, 0.05]], 6, R.eye); P.eyes.transformSince(from, mat4(1.06, 0.14, z, 1, 1, 1, 0, 0, Math.PI / 2)); }
   // rear: belly -> tail stock (pivot at x = 0, extends to -x)
   const rr = [ring(-1.15, 0.03, 0.22, 0.26, N, 2.2), ring(-0.8, 0.0, 0.42, 0.46, N, 2.2, 0.1), ring(-0.4, -0.01, 0.54, 0.58, N, 2.2, 0.15), ring(0.02, 0, 0.56, 0.6, N, 2.2, 0.15)];
   bodyLoft(P.rear, rr, R.skin);

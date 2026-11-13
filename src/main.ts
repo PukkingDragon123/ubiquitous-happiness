@@ -1,4 +1,5 @@
-// Entry: boot, fonts, game, screens.
+// Entry: boot, fonts, game, screens. No query: the v2 game (hideout -> runs). ?preview=<name> dev previews
+// (?preview=run&area=kelp&mastery=0&wave=1 starts a run directly); ?dive= / ?menu= are the v1 screens.
 import { Game, Screen } from './game/game';
 import { loadFonts } from './ui/text';
 import { Sandbox } from './dev/sandbox';
@@ -21,6 +22,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   builds: () => import('./dev/preview_builds'),
   retro: () => import('./dev/preview_retro'),
   blobstudio: () => import('./dev/preview_blobstudio'),
+  run: () => import('./dev/preview_run'),
 };
 
 async function boot() {
@@ -49,9 +51,9 @@ async function boot() {
     game.register(new Sandbox(game));
     game.go('sandbox');
   } else {
-    // the real game: menu -> map -> dives
+    // the real game (v2): the hideout is the hub and main menu -> runs -> back to the hideout
     setupFlow(game);
-    game.go('menu', { mode: 'menu' });
+    game.go('hideout', {});
   }
   game.start();
   document.getElementById('boot')?.classList.add('gone');

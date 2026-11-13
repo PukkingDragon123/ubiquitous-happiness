@@ -75,7 +75,7 @@ export class Furniture {
     const kl = this.room.keyLamp;
     if (key) {
       kl.position.copy(key.pos); kl.target.position.copy(key.pos).add(new THREE.Vector3(0.15, -1, 0.1));
-      kl.color.set(key.l.color); kl.userData.base = 38 * key.l.intensity; kl.userData.src = key.l;
+      kl.color.set(key.l.color); kl.userData.base = 24 * key.l.intensity; kl.userData.src = key.l;
     } else { kl.userData.base = 0; kl.userData.src = null; kl.intensity = 0; }
     // brightest first
     lights.sort((a, b) => b.l.intensity - a.l.intensity);

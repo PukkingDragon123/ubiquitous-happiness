@@ -19,13 +19,13 @@ function shells(s: Surf, n: number, c: RGB, d: RGB, seed: number) {
 }
 
 export function sand(s: Surf) {
-  const P = hramp('#b5a27c', 5, 0.42);
+  const P = hramp('#b5a27c', 7, 0.42);
   // two broad, hard-edged tone zones; faint wind ripples as clean 1 px lines
   s.each((x, y) => {
     const z = s.zone(x, y, 2, 2, 1);
-    let k = 2 + z;
+    let k = 3 + z;
     const yy = y + Math.round(Math.sin((x / s.w) * Math.PI * 2 * 2 + Math.floor(y / 9)) * 1.5);
-    if (yy % 9 === 0) k = Math.min(4, k + 1); else if (yy % 9 === 1) k = Math.max(1, k - 1);
+    if (yy % 9 === 0) k = Math.min(6, k + 2); else if (yy % 9 === 1) k = Math.max(1, k - 2);
     s.set(x, y, P[k]);
     s.setH(x, y, yy % 9 === 0 ? 0.6 : 0.5);
     s.R(x, y, 0.95);
@@ -49,8 +49,10 @@ export function sandWet(s: Surf) {
     for (let y = Math.floor(cy - ry); y <= cy + ry; y++) for (let x = Math.floor(cx - rx); x <= cx + rx; x++) {
       const d = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
       if (d > 1) continue;
-      s.set(x, y, P[0]); s.setH(x, y, 0.42); s.R(x, y, 0.6);
-      if (d > 0.7 && y < cy) s.set(x, y, P[3]);
+      // a thin film of water reflecting the light above: lighter, cooler, a glint line on the near rim
+      s.set(x, y, mixc(P[3], hex('#9ab4b8'), 0.45)); s.setH(x, y, 0.42); s.R(x, y, 0.6);
+      if (d > 0.72 && y > cy) s.set(x, y, P[1]);
+      else if (d < 0.25 && Math.abs(y + 0.5 - cy) < 0.6) s.set(x, y, hex('#d8e4e0'));
     }
   }
   pebbles(s, Math.round(s.w * s.h / 800), hramp('#5a554c', 4, 0.5), 11);

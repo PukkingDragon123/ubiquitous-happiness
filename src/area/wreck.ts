@@ -341,6 +341,9 @@ export class Shipwreck implements Entity {
     }
     const w = this.world;
     if (Object.keys(took).length) {
+      // every patch pays back some hull
+      let n = 0; for (const v of Object.values(took)) n += v;
+      this.hp = Math.min(this.maxHp, this.hp + n * 6);
       w.sfx('hammer1', this.x, 0.8); w.sfx('clank1', this.x, 0.5, 1.2);
       w.fx.burst('spark', this.repairPoint.x, this.repairPoint.y + 0.6, 8, 3);
     }
@@ -353,7 +356,7 @@ export class Shipwreck implements Entity {
     this.stage++;
     this.paid = {};
     this.maxHp = 100 + this.stage * 25;
-    this.hp = Math.min(this.maxHp, this.hp + 40);
+    this.hp = this.maxHp;   // a finished stage leaves her sound again
     this.poseFrom = { ...this.pose }; this.poseT = 0;
     this.applyStage(false);
     // a creaking heave: sand bursts out from under the hull, bubbles stream from every seam
@@ -394,18 +397,38 @@ export class Shipwreck implements Entity {
     if (l) this.lamps.push(l);
   }
 
-  hit(dmg: number, dirX: number, _dirY: number, w: World, src: Entity | null, kind?: DamageKind): boolean {
+  /**
+   * Damage the wreck. Two call styles:
+   *   hit(dmg, x, y, kind?)                      - attackers: (x, y) is where the blow lands
+   *   hit(dmg, dirX, dirY, world, src, kind?)    - the Entity interface (the player's own sword is ignored)
+   * Splinters + a silt puff at the impact, the hull shudders, the timbers creak. At hp <= 0 it emits
+   * 'wreckDestroyed' (and 'wreckDown'); repairs restore hp.
+   */
+  hit(dmg: number, a: number, b: number, w?: World | string, src?: Entity | null, kind?: DamageKind | string): boolean {
+    const worldStyle = typeof w === 'object' && w !== null;
+    const W = worldStyle ? (w as World) : this.world;
+    const k = (worldStyle ? kind : (w as string | undefined)) ?? '';
     if (src && src.team === 'player') return false;   // the blobfish's own sword never hurts the wreck
     if (this.hp <= 0) return false;
-    this.hp = Math.max(0, this.hp - dmg * (kind === 'explosion' ? 1.5 : 1));
+    this.hp = Math.max(0, this.hp - dmg * (k === 'explosion' ? 1.5 : 1));
     this.flashT = 0.08;
-    const hx = this.x + clamp(dirX, -1, 1) * -this.dims.L * 0.3 + (Math.random() - 0.5) * 2;
-    w.fx.debrisBurst(hx, this.floor + this.dims.D * 0.6, 6, this.dims.steel ? '#5a4a40' : '#6a4a2a', 3, 0.07, this.z + this.dims.B);
-    w.fx.burst('bubble', hx, this.floor + this.dims.D * 0.6, 6, 1.5);
-    w.sfx(this.dims.steel ? 'clank2' : 'crunch1', this.x, 0.8, 0.8 + Math.random() * 0.3);
-    if (this.hp <= 0) w.emit('wreckDown', { x: this.x, y: this.y });
+    // impact point: given (x, y), or a spot on the hull side the blow came from
+    let hx: number, hy: number;
+    if (worldStyle) { hx = this.x + clamp(a, -1, 1) * -this.dims.L * 0.3 + (Math.random() - 0.5) * 2; hy = this.floor + this.dims.D * 0.6; }
+    else { hx = clamp(a, this.x - this.dims.L * 0.5, this.x + this.dims.L * 0.5); hy = clamp(b, this.floor, this.floor + this.dims.D * 1.2); }
+    const zf = this.z + this.dims.B;
+    W.fx.debrisBurst(hx, hy, 7, this.dims.steel ? '#5a4a40' : '#7a5a34', 3, 0.07, zf);
+    W.fx.burst('bubble', hx, hy, 6, 1.5);
+    this.scen.sand.onPuff?.(hx, this.floor + 0.1, 0.5 + Math.min(1, dmg * 0.1));
+    W.sfx(this.dims.steel ? 'clank2' : 'crunch1', hx, 0.8, 0.8 + Math.random() * 0.3);
+    if (Math.random() < 0.5) W.sfx(Math.random() < 0.5 ? 'creak1' : 'creak2', this.x, 0.6, 0.9 + Math.random() * 0.2);
+    this.shudder = Math.min(1, this.shudder + 0.35 + dmg * 0.04);
+    if (this.hp <= 0) { W.emit('wreckDestroyed', { x: this.x, y: this.y, stage: this.stage }); W.emit('wreckDown', { x: this.x, y: this.y }); W.sfx('creak3', this.x, 1); }
     return true;
   }
+  /** max hp (alias of maxHp) */
+  get hpMax() { return this.maxHp; }
+  private shudder = 0;
   /** heal (e.g. a repair ability) */
   heal(n: number) { this.hp = Math.min(this.maxHp, this.hp + n); }
 
@@ -437,9 +460,12 @@ export class Shipwreck implements Entity {
       if (Math.random() < dt * 30) w.fx.emit('bubbleBig', this.x + (Math.random() - 0.5) * this.dims.L, this.floor + lift, { n: 1, vy: 2, z: this.z + this.dims.B });
       if (this.floor + lift > 1.5 && this.sailing < 99) { w.emit('sail', { x: this.x }); this.sailing = 99; }
     }
-    this.ship.position.set(0, -this.pose.sink + hover + lift, 0);
+    // a struck hull shudders (no camera shake: the wreck itself rocks)
+    this.shudder = Math.max(0, this.shudder - dt * 2.5);
+    const sh = this.shudder * this.shudder;
+    this.ship.position.set(Math.sin(this.t * 41) * 0.06 * sh, -this.pose.sink + hover + lift + Math.sin(this.t * 37) * 0.04 * sh, 0);
     // list away from the camera so the holed hull side faces the player
-    this.ship.rotation.set(-this.pose.roll, 0, this.pose.pitch + Math.sin(this.t * 0.5) * (this.stage >= 3 ? 0.01 : 0));
+    this.ship.rotation.set(-this.pose.roll + Math.sin(this.t * 29) * 0.012 * sh, 0, this.pose.pitch + Math.sin(this.t * 0.5) * (this.stage >= 3 ? 0.01 : 0));
     // flash on damage
     if (this.flashT > 0) {
       this.flashT -= dt;

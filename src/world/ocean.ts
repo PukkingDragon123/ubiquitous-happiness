@@ -219,14 +219,15 @@ export class MarineSnow {
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           float sz = (0.025 + aSeed * 0.035);
-          gl_PointSize = max(1.0, sz * uScale / -mv.z);
+          gl_PointSize = max(1.0, floor(sz * uScale / -mv.z + 0.5));
           float tw = 0.6 + 0.4 * sin(uT * (1.0 + aSeed * 3.0) + aSeed * 40.0);
           vA = tw * smoothstep(60.0, 8.0, -mv.z) * (p.y < 0.0 ? 1.0 : 0.0);
           vS = aSeed;
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uCol; varying float vA; varying float vS;
-        void main() { vec2 c = gl_PointCoord - 0.5; float d = length(c); if (d > 0.5) discard; gl_FragColor = vec4(uCol * vA * (1.0 - d * 1.6) * 0.55, 1.0); }`,
+        // hard pixel specks in two tones (pixel art, no soft blobs)
+        void main() { gl_FragColor = vec4(uCol * (vS > 0.6 ? 0.75 : 0.42) * step(0.35, vA), 1.0); }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     this.points = new THREE.Points(g, this.mat);
