@@ -5,7 +5,8 @@ import { Run, ItemInst } from './run';
 import { DiveScreen, DiveNode } from './dive';
 import { MenuScreen } from '../ui/menu';
 import { MapScreen, visitNode, ensureActMap, nodeById, ActMap, MapNode } from '../map';
-import { installItemSystem, getItem, rollItem, ITEMS } from './items';
+import { installItemSystem, getItem, rollItem, ITEMS, itemMesh } from './items';
+import { BackpackScreen } from '../backpack/backpack';
 import { PICKUP } from './pickup';
 import { EVENT_POOLS } from './events';
 import { Rng } from '../core/rng';
@@ -43,7 +44,7 @@ function toDive(n: MapNode): DiveNode {
   return { type: n.type, spot: n.type === 'boss' ? 'boss' : n.spot, biome: n.biome, difficulty: n.difficulty, name: n.title, id: n.id + n.row * 31 };
 }
 
-export function setupFlow(game: Game, extra: { backpack?: () => import('./game').Screen } = {}) {
+export function setupFlow(game: Game) {
   let run: Run | null = null;
   const menu = new MenuScreen(game);
   const dive = new DiveScreen(game);
@@ -56,10 +57,11 @@ export function setupFlow(game: Game, extra: { backpack?: () => import('./game')
     },
   });
   game.register(menu); game.register(dive); game.register(map);
-  if (extra.backpack) game.register(extra.backpack());
+  game.register(new BackpackScreen(game));
 
   // item hooks for pickups, shops and chests
   PICKUP.itemName = (id) => getItem(id).name;
+  PICKUP.itemVisual = (id) => itemMesh(id, 1);
   const rng = new Rng(Date.now() & 0xffff);
   EVENT_POOLS.roll = (w, r) => rollItem(w.rng, r === 'rare' ? (d) => d.rarity !== 'common' && d.kind !== 'material' : 'loot', w.run.stats().luck);
   EVENT_POOLS.price = (id) => ({ common: 8, uncommon: 14, rare: 22, epic: 34, legendary: 50 } as Record<string, number>)[getItem(id).rarity] ?? 15;

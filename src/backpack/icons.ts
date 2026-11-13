@@ -742,22 +742,30 @@ const PAINT: Record<string, (c: Ic) => void> = {
     c.glint(5, 9, 0); c.glint(12, 5, 0);
   },
   sailFin(c) {
-    const m = c.mat(P.sail, { spec: 0.35, shin: 10, dither: 0.4, irid: 0.1 }), ray = c.mat(P.sail, { ...SHINY, contrast: 1.5 }), base = c.mat(P.blue, SOFT);
-    const lead = bez3([5, 60], [2, 38], [4, 14], [12, 3], 24);
-    const trail = curve((t) => [12 + t * 17 + Math.sin(t * Math.PI) * 4, 3 + t * 55 + Math.sin(t * 24) * 1.5], 40);
-    const poly: V2[] = [...lead, ...trail, [29, 60]];
-    const g = c.slab(poly, m, { h: 2.2, bevel: 1, round: true });
-    c.paint(() => -0.15, g);
-    for (let k = 0; k < 9; k++) {
-      const t = k / 8;
-      const top = trail[Math.min(trail.length - 1, Math.round(t * 0.85 * (trail.length - 1)))];
-      const tip: V2 = [lead[Math.round((1 - t) * 0)][0] * 0 + (k === 0 ? 12 : top[0] - 2), k === 0 ? 4 : top[1] + 1];
-      c.tube(bez([6 + t * 21, 60], [6 + t * 18, 36], tip), (u) => 1.3 - u * 0.7, ray, { z: 1.4, mask: (x, y) => inPoly(poly, x + 0.5, y + 0.5) });
+    const m = c.mat(P.sail, { spec: 0.35, shin: 10, dither: 0.4, irid: 0.1, contrast: 1.0 }), ray = c.mat(P.blue, { ...SHINY, contrast: 1.3 }), base = c.mat(P.sail, SOFT);
+    // rays fan up from the base; the membrane hangs between them in scallops
+    const N = 9, tips: V2[] = [], bases: V2[] = [];
+    for (let k = 0; k < N; k++) {
+      const t = k / (N - 1);
+      bases.push([6 + t * 21, 60]);
+      tips.push([7 + t * 20 + Math.sin(t * Math.PI) * 3, 3 + Math.pow(t, 1.25) * 44]);
     }
-    c.speckle(0.04, 9, (_x, _y, i) => { c.L[i] -= 0.3; }, g);
-    for (const [x, y, r] of [[13, 24, 2.4], [18, 36, 2.2], [11, 44, 1.8], [21, 50, 1.6]] as number[][]) c.paint((px, py) => (Math.hypot(px - x, py - y) < r ? -0.35 : null), g);
-    c.tube([[4, 60], [30, 60]], 2.2, base, { z: 2 });
-    c.glint(9, 14, 0);
+    const edge: V2[] = [];
+    for (let k = 0; k < N; k++) {
+      edge.push(tips[k]);
+      if (k + 1 < N) { const a = tips[k], b = tips[k + 1]; edge.push([(a[0] + b[0]) / 2 - 1.2, (a[1] + b[1]) / 2 + 3]); }
+    }
+    const poly: V2[] = [[4, 61], [3, 40], [5, 14], ...edge, [30, 61]];
+    const g = c.slab(poly, m, { h: 2, bevel: 1, round: true });
+    c.paint((x, y) => (y > 50 ? -0.05 : -0.12), g);
+    for (const [x, y, r] of [[11, 22, 2.2], [15, 33, 2], [10, 41, 1.8], [20, 45, 1.6], [16, 52, 1.5], [24, 54, 1.3]] as number[][]) c.paint((px, py) => (Math.hypot(px - x, py - y) < r ? -0.4 : null), g);
+    for (let k = 0; k < N; k++) {
+      const [bx, by] = bases[k], [tx, ty] = tips[k];
+      const dx = tx - bx, dy = ty - by, l = Math.hypot(dx, dy);
+      c.tube([[bx, by], [tx + (dx / l) * 1.5, ty + (dy / l) * 1.5]], (u) => 1.4 - u * 0.9, ray, { z: 1.2 });
+    }
+    c.tube([[3, 60], [31, 60]], 2.4, base, { z: 2 });
+    c.glint(8, 10, 0);
   },
 };
 
@@ -768,14 +776,14 @@ function levelFlair(p: Px, level: number) {
   const rimC = hex(gold ? '#ffd65a' : '#cfe8ff');
   // warm/cool sheen
   p.map((c) => { const k: RGB = gold ? [1.08, 1.04, 0.92] : [1.0, 1.03, 1.08]; return [c[0] * k[0], c[1] * k[1], c[2] * k[2]]; });
-  if (gold) {
-    // a golden rim outside the outline
+  {
+    // a rim outside the outline: dotted silver at level 2, solid gold at level 3
     const add: [number, number][] = [];
     for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
       if (p.alpha(x, y)) continue;
       if (p.alpha(x - 1, y) || p.alpha(x + 1, y) || p.alpha(x, y - 1) || p.alpha(x, y + 1)) add.push([x, y]);
     }
-    for (const [x, y] of add) p.set(x, y, mix(rimC, [120, 60, 10], ((x + y) & 3) === 0 ? 0.45 : 0));
+    for (const [x, y] of add) { if (!gold && (x + y) & 1) continue; p.set(x, y, gold ? mix(rimC, [120, 60, 10], ((x + y) & 3) === 0 ? 0.45 : 0) : rimC); }
   }
   // sparkles near the top-right of the silhouette
   const opaque: [number, number][] = [];

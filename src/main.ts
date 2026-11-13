@@ -5,6 +5,7 @@ import { Sandbox } from './dev/sandbox';
 import { DiveScreen } from './game/dive';
 import { Run } from './game/run';
 import { MenuScreen } from './ui/menu';
+import { setupFlow } from './game/flow';
 
 const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> = {
   fish: () => import('./dev/preview_fish'),
@@ -36,9 +37,13 @@ async function boot() {
     const s = (await PREVIEWS[pv]()).default(game);
     game.register(s);
     game.go(s.name);
-  } else {
+  } else if (q.get('sandbox') !== null) {
     game.register(new Sandbox(game));
     game.go('sandbox');
+  } else {
+    // the real game: menu -> map -> dives
+    setupFlow(game);
+    game.go('menu', { mode: 'menu' });
   }
   game.start();
   document.getElementById('boot')?.classList.add('gone');

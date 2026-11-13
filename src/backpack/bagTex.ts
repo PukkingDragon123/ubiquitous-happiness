@@ -78,7 +78,7 @@ export function leatherShell(w = 1024, h = 128): TexPair {
     }, n, { dash: 3, gap: 2 });
   };
   patch(w * 0.57, h * 0.5, 54, 40, ['#3a2410', '#5e3c1c', '#86602e', '#a8804a', '#c8a06a'], false);
-  patch(w * 0.31, h * 0.42, 26, 26, ['#24301a', '#38482a', '#506a38', '#6e8c48', '#90aa60'], true);
+  patch(w * 0.19, h * 0.3, 26, 26, ['#24301a', '#38482a', '#506a38', '#6e8c48', '#90aa60'], true);
   p.lightFromHeight((x, y) => H[((y + h) % h) * w + ((x + w) % w)], -0.5, -0.7, 0.35, 1);
   const map = p.texture({ repeat: true });
   return { map, normal: Px.normalMap(w, h, (x, y) => H[y * w + x], 1.2, true) };

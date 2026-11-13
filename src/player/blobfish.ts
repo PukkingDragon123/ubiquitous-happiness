@@ -62,6 +62,8 @@ export class Blobfish implements PlayerLike {
   private dashT = 0;
   // abilities
   ability: AbilityId | null = null;
+  /** ability core levels from merging (1..3) */
+  abilityLv: Partial<Record<AbilityId, number>> = {};
   cds: Partial<Record<AbilityId, number>> = {};
   rock = 0; rockT = 0;
   laserOn = false; laserEnergy = 1; private laser: THREE.Group;
@@ -352,7 +354,7 @@ export class Blobfish implements PlayerLike {
     if (ab && inp.hit('ability') && ready) this.useAbility(ab, w);
     // laser: hold
     this.laserOn = ab === 'laserEyes' && inp.held('ability') && this.laserEnergy > 0.02 && !this.outOfWater;
-    if (this.laserOn) this.laserEnergy = Math.max(0, this.laserEnergy - dt / 2.8); else this.laserEnergy = Math.min(1, this.laserEnergy + dt / 4);
+    if (this.laserOn) this.laserEnergy = Math.max(0, this.laserEnergy - dt / (2.8 * (1 + 0.4 * ((this.abilityLv.laserEyes ?? 1) - 1)))); else this.laserEnergy = Math.min(1, this.laserEnergy + dt / 4);
     this.updateLaser(dt, w);
     // rock
     if (this.rockT > 0) { this.rockT -= dt; if (this.rockT <= 0) { w.sfx('rock_crumble', this.x, 0.5, 1.3); w.fx.debrisBurst(this.x, this.y, 14, '#8a8378', 3); } }
@@ -367,10 +369,11 @@ export class Blobfish implements PlayerLike {
   }
 
   private useAbility(ab: AbilityId, w: World) {
-    this.cds[ab] = ABILITY_CD[ab];
+    const lv = this.abilityLv[ab] ?? 1;
+    this.cds[ab] = ABILITY_CD[ab] * (1 - 0.18 * (lv - 1));
     switch (ab) {
       case 'rockBody':
-        this.rockT = 2.6;
+        this.rockT = 2.6 * (1 + 0.3 * (lv - 1));
         w.sfx('rock_hit', this.x, 0.8, 0.7); w.sfx('thud_heavy', this.x, 0.5);
         w.text.pop('ROCK BODY!', this.x, this.y + 0.9, 'shout', { size: 0.38 });
         w.fx.debrisBurst(this.x, this.y, 8, '#9a9184', 2);
@@ -397,13 +400,13 @@ export class Blobfish implements PlayerLike {
           if (e.slash && d < 6) {
             // zap snaps any line segment that passes within reach
             for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; e.slash(this.x, this.y, this.x + Math.cos(a) * 2.2, this.y + Math.sin(a) * 2.2, 6, w); }
-          } else if (e.team === 'enemy' && e.hit && d < 2.4 + e.r) e.hit(2, Math.sign(e.x - this.x), 0.4, w, this, 'zap');
+          } else if (e.team === 'enemy' && e.hit && d < 2.4 + lv * 0.5 + e.r) e.hit(1 + lv, Math.sign(e.x - this.x), 0.4, w, this, 'zap');
         }
         w.game.flash('#cff6ff', 0.25); w.game.addShake(0.12);
         break;
       }
       case 'puff':
-        this.puffT = 2.5; w.sfx('inflate1', this.x, 0.9); w.text.pop('PUFF!', this.x, this.y + 1, 'shout', { size: 0.34 });
+        this.puffT = 2.5 * (1 + 0.3 * (lv - 1)); w.sfx('inflate1', this.x, 0.9); w.text.pop('PUFF!', this.x, this.y + 1, 'shout', { size: 0.34 });
         break;
       default: break;
     }

@@ -21,7 +21,7 @@ import { POST } from '../gfx/post';
 import { audio } from '../audio/audio';
 import { STYLES, textCanvas, type TextStyle } from '../ui/text';
 import { Tag, Floaters, Cursor, type CursorKind } from './ui';
-import { clamp, damp, easeOutBack } from '../core/math';
+import { clamp, damp, hash2 } from '../core/math';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
@@ -68,6 +68,8 @@ export class BackpackScreen implements Screen {
   private fx = new Particles();
   private items = new THREE.Group();
   private vis = new Map<number, Vis>();
+  /** where loose items were left on the board (kept between openings) */
+  private trayMem = new Map<number, THREE.Vector2>();
   private run: Run | null = null;
   private onClose?: () => void;
   private state: 'closed' | 'opening' | 'open' | 'closing' = 'closed';
@@ -149,13 +151,15 @@ export class BackpackScreen implements Screen {
     this.state = 'opening'; this.st = 0;
     this.drop = 2.6; this.dropV = 0; this.landed = false; this.flap = 0; this.flapV = 0; this.flapT = 0;
     this.chain.init = false; this.tagp.init = false;
-    for (const k2 of ['uExposure', 'uVignette', 'uBloom', 'uBloomThreshold', 'uSaturation', 'uContrast', 'uDesat', 'uPulse'] as const) this.postSave[k2] = POST[k2].value as number;
+    if (!Object.keys(this.postSave).length) for (const k2 of ['uExposure', 'uVignette', 'uBloom', 'uBloomThreshold', 'uSaturation', 'uContrast', 'uDesat', 'uPulse'] as const) this.postSave[k2] = POST[k2].value as number;
     POST.uExposure.value = 1.0; POST.uVignette.value = 0.55; POST.uBloom.value = 0.6; POST.uBloomThreshold.value = 0.9; POST.uSaturation.value = 1.1; POST.uContrast.value = 1.06;
     POST.uDesat.value = 0; POST.uPulse.value = 0;
     sfx(['bag_zip1', 'cloth1'], { vol: 0.5, delay: 0.05 });
   }
   exit() {
     for (const [k, v] of Object.entries(this.postSave)) (POST as Record<string, { value: unknown }>)[k].value = v;
+    this.postSave = {};
+    this.tag.update(0, false, 0, 0, 0, 0, 1);
   }
   resize(w: number, h: number) {
     this.w = w; this.h = h;
@@ -233,10 +237,12 @@ export class BackpackScreen implements Screen {
     for (const v of this.vis.values()) if (v.inst.gx < 0 && v.tray) taken.push({ p: v.tray, r: this.radius(v) });
     for (const v of this.vis.values()) {
       if (v.inst.gx >= 0 || v.tray) continue;
+      const mem = this.trayMem.get(v.inst.uid);
+      if (mem) { v.tray = mem.clone(); taken.push({ p: v.tray, r: this.radius(v) }); continue; }
       const r = this.radius(v);
       let best: THREE.Vector2 | null = null, bestScore = -1e9;
       for (let k = 0; k < 90; k++) {
-        const p = new THREE.Vector2((Math.random() * 2 - 1) * hx, (Math.random() * 2 - 1) * hz);
+        const p = new THREE.Vector2((hash2(k, v.inst.uid, 7) * 2 - 1) * hx, (hash2(k, v.inst.uid, 8) * 2 - 1) * hz);
         let clear = 1e9;
         for (const o of taken) clear = Math.min(clear, p.distanceTo(o.p) - o.r - r);
         const score = Math.min(clear, 0.5) - p.length() * 0.05;
@@ -407,8 +413,10 @@ export class BackpackScreen implements Screen {
   private interactHeld() {
     const v = this.held!;
     const inp = this.game.input;
-    if (inp.keyHit('KeyR') || inp.pressed.has('Mouse2')) {
-      v.inst.rot = (v.inst.rot + 1) % 4; v.angT -= Math.PI / 2; v.angV -= 3;
+    const wheel = inp.mouse.wheel;
+    if (inp.keyHit('KeyR') || inp.pressed.has('Mouse2') || wheel) {
+      const dir = wheel < 0 ? -1 : 1;
+      v.inst.rot = (v.inst.rot + dir + 4) % 4; v.angT -= dir * Math.PI / 2; v.angV -= 3 * dir;
       sfx(['swish_a', 'sw_swish2'], { vol: 0.4, rate: 1.2 });
     }
     const { local, hitB, tl, hitT, tn } = this.planes();
@@ -539,6 +547,7 @@ export class BackpackScreen implements Screen {
       v.popV += ((want - v.pop) * (want ? 160 : 260) - v.popV * (want ? 11 : 20)) * dt;
       v.pop = Math.max(0, v.pop + v.popV * dt);
       if (!want && v.pop < 0.02) { v.pop = 0; v.popV = 0; }
+      if (v.inst.gx < 0 && v.tray && v !== this.held) this.trayMem.set(v.inst.uid, v.tray); else if (v.inst.gx >= 0) this.trayMem.delete(v.inst.uid);
       v.root.visible = v.pop > 0.01;
       // hover lift
       const hov = v === this.hover && !this.held ? 1 : 0;
@@ -691,12 +700,14 @@ export class BackpackScreen implements Screen {
     lure.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(lq));
     // name tag: one point on a string
     const T = this.bag.tagAnchor.getWorldPosition(new THREE.Vector3());
-    const tg = this.tagp, LS = 0.13;
+    const tg = this.tagp, LS = 0.1;
     if (!tg.init) { tg.p.copy(T).add(new THREE.Vector3(-0.03, -LS, 0)); tg.o.copy(tg.p); tg.init = true; }
     for (let s = 0; s < steps; s++) {
       const vel = tg.p.clone().sub(tg.o).multiplyScalar(0.98);
       tg.o.copy(tg.p); tg.p.add(vel).add(new THREE.Vector3(0, -5 * h * h, 0));
       tg.p.copy(T).addScaledVector(tg.p.clone().sub(T).normalize(), LS);
+      const lp = this.bag.root.worldToLocal(tg.p.clone());
+      if (lp.z < 0.36) { lp.z = 0.36; tg.p.copy(this.bag.root.localToWorld(lp)); }
     }
     const [tx, ty] = this.screenOf(tg.p);
     if (Math.hypot(this.game.input.mouse.x - tx, this.game.input.mouse.y - ty - 12 * this.S) < 30 * this.S && this.mouseVel.length() > 200) {
@@ -826,4 +837,3 @@ function nameStyle(d: ItemDef): TextStyle {
   }
 }
 
-export { easeOutBack };

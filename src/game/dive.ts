@@ -26,10 +26,13 @@ import { spotLayout } from './spots';
 import { eventLayout } from './events';
 import { setupBoss } from '../fishing/boss';
 import { populate, ambientSpawn, ambush, creatureElite, resolveDrop } from './population';
+import { abilityLevels } from './items';
 
 interface RideableLike { alive: boolean; x: number; y: number; vx: number; vy: number; carry(dt: number, p: Blobfish): void; seatX(): number; seatY(): number }
 
 export interface DiveNode { type: string; spot: string; biome: string; difficulty: number; name?: string; id?: number }
+
+const PROC_RUNS = new WeakSet<Run>();
 
 export class DiveScreen implements Screen {
   name = 'dive';
@@ -61,6 +64,7 @@ export class DiveScreen implements Screen {
   onExit?: (result: 'cleared' | 'dead', run: Run) => void;
   /** creature spawner installed by the creatures module integration */
   static populate?: (w: World, biome: Biome, node: DiveNode, x0: number, x1: number) => void;
+  static live: DiveWorld | null = null;
   static ambientSpawn?: (w: World, biome: Biome, camX: number, dt: number) => void;
   /** spawns `n` hostile creatures; calls done() once they're all gone */
   static ambush?: (w: World, x: number, y: number, n: number, done: () => void) => void;
@@ -99,6 +103,7 @@ export class DiveScreen implements Screen {
     this.ocean.terrain.flatX = -18;
     this.player = new Blobfish(-18, -4.5);
     this.player.setStats(this.run.stats());
+    this.player.abilityLv = abilityLevels(this.run);
     this.player.hp = Math.min(this.run.hp, this.run.stats().maxHp);
     this.scene.add(makeSky(), water.group, this.light.group, fx.object, this.ocean.group, this.player.obj);
     this.overlay.add(text.group);
@@ -124,6 +129,16 @@ export class DiveScreen implements Screen {
     this.dark = 0;
     this.world.on('darkness', (d) => { this.dark = (d.k as number) ?? 0; });
     this.world.on('kill', () => { this.run.kills++; });
+    DiveScreen.live = this.world;
+    if (!PROC_RUNS.has(this.run)) {
+      PROC_RUNS.add(this.run);
+      this.run.on('proc', (d) => {
+        const w = DiveScreen.live; if (!w) return;
+        const x = (d.x as number) ?? w.player.x, y = (d.y as number) ?? w.player.y + 1;
+        w.text.pop(String(d.text ?? '!'), x, y + 0.4, 'magic', { size: 0.3, life: 1.2 });
+        w.sfx('shimmer', x, 0.4, 1.3);
+      });
+    }
     this.cleared = false; this.deadT = -1; this.introT = 0; this.riding = null;
     this.camPos.set(this.player.x, this.player.y + 1, 16);
     this.camLook.set(this.player.x, this.player.y, 0);
@@ -170,7 +185,7 @@ export class DiveScreen implements Screen {
     w.time += dt; this.introT += dt;
     this.run.time += dt;
     // stats can change mid-dive (pickups)
-    if (w.statsDirty) { const hp = p.hp; p.setStats(this.run.stats()); p.hp = Math.min(hp, p.maxHp); w.statsDirty = false; }
+    if (w.statsDirty) { const hp = p.hp; p.setStats(this.run.stats()); p.abilityLv = abilityLevels(this.run); p.hp = Math.min(hp, p.maxHp); w.statsDirty = false; }
     // dynamic colliders: boat hulls, pilings
     this.ocean.terrain.dynamic = this.fishing.colliders();
     // riding a sea turtle: E to hop on / off (the turtle steers with your swim keys)

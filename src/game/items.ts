@@ -424,7 +424,14 @@ export function installItemSystem(run: Run) {
   const mine = new Set<(data: Record<string, unknown>) => void>();
   for (const l of run.hooks.values()) for (const fn of l) if (!before.has(fn)) mine.add(fn);
   installed.set(run, mine);
-  run.statFn = (base, r) => applyItems(base, r.items);
+  // cached: the dive may call run.stats() every frame; recompute only when the bag or the base changes
+  let key = '', cached: Stats | null = null;
+  run.statFn = (base, r) => {
+    let k = JSON.stringify(base);
+    for (const it of r.items) if (it.gx >= 0) k += `|${it.id}:${it.gx},${it.gy},${it.rot},${it.level || 1}`;
+    if (k !== key || !cached) { key = k; cached = applyItems({ ...base, abilities: [...base.abilities] }, r.items); }
+    return { ...cached, abilities: [...cached.abilities] };
+  };
   const m = run.stats().maxHp;
   if (run.hp > m) run.hp = m;
 }

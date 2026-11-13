@@ -186,7 +186,7 @@ export function buildBag(): BagModel {
     return a;
   };
   const keyAnchor = dring(OX * 0.99, 0.6, 0.1, 1);
-  const tagAnchor = new THREE.Object3D(); body.add(tagAnchor); tagAnchor.position.set(-0.5, CY - OY * 0.84 - 0.1, ZR + 0.13);
+  const tagAnchor = new THREE.Object3D(); body.add(tagAnchor); tagAnchor.position.set(-0.5, CY - OY * 0.84 - 0.04, ZR + 0.2);
   // ---------------------------------------------------------------- grab handle on top
   {
     const st = strap.map.clone(); st.needsUpdate = true; st.repeat.set(1, 3); st.wrapS = st.wrapT = THREE.RepeatWrapping;
