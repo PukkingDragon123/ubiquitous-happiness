@@ -196,6 +196,8 @@ export function stationPerks(): { unlocks: string[]; perks: string[]; arch: Arch
 export const GRID_W = 10, GRID_D = 8;
 /** cells kept clear in front of the door (x = 0 wall) */
 export const DOOR_CELLS: [number, number][] = [[0, 5], [0, 6], [1, 5], [1, 6]];
+/** cells taken by fixed set dressing (the sea-vent stove in the back corner) */
+export const FIXED_CELLS: [number, number][] = [[0, 0]];
 
 export function footprint(bp: Blueprint, rot: number): [number, number] { return rot % 2 ? [bp.size[1], bp.size[0]] : [bp.size[0], bp.size[1]]; }
 export function cellsOf(p: Placement): [number, number][] {
@@ -229,6 +231,8 @@ export function defaultLayout(): Placement[] {
     P('workbench', 7, 0, 0),
     P('plant', 9, 0, 0),
     P('bookshelf', 1, 0, 0),
+    P('armchair', 7, 2, 3),
+    P('aquarium', 9, 3, 3),
   ];
 }
 export function ensureLayout() {

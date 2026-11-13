@@ -16,6 +16,7 @@ import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
 import { Room, WALL_H, HALF_W, HALF_D } from './room';
 import { OceanOutside, Motes } from './ocean';
+import { Decor } from './decor';
 import { Furniture, type Placed } from './furniture';
 import { BLUEPRINTS, ensureLayout, stationPerks } from './blueprints';
 import { BuildMode } from './build';
@@ -25,7 +26,7 @@ import { StashPanel, WorkshopPanel } from './panels';
 import { Cinematic, Walker, faceToward } from './cinematic';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 
-export interface HideoutOpts { onEnterRun: (cfg: RunConfig) => void; onResume: () => void; hero?: HeroFactory }
+export interface HideoutOpts { onEnterRun: (cfg: RunConfig) => void; onResume: () => void; hero?: HeroFactory; /** TV > PROLOGUE: replay the story intro */ onPrologue?: () => void }
 type Mode = 'room' | 'build' | 'stash' | 'workshop' | 'nemesis' | 'tvIn' | 'tv' | 'tvOut' | 'tvOff' | 'cine';
 
 const RECORDS = ['mu_aquarium', 'mu_shallows', 'mu_junkyard', 'mu_fjord', 'mu_metropolis'];
@@ -51,6 +52,10 @@ export class HideoutScreen implements Screen {
   private walker: Walker;
   private dust = new Motes(160, 'dot', '#e8d8b8');
   private sparks = new Motes(160, 'spark', '#fff2b0', true);
+  private steam = new Motes(90, 'dot', '#e8f0f4');
+  decor: Decor;
+  private decorT = 0;
+  private cableKey = '-';
   private cine: Cinematic;
   private stash = new StashPanel();
   private work = new WorkshopPanel();
@@ -69,13 +74,17 @@ export class HideoutScreen implements Screen {
   private devSize: [number, number] = [1, 1];
   private screenRect = { x: 0, y: 0, w: 1, h: 1 };
   private pendingCfg: RunConfig | null = null;
+  /** the TV powers on (line -> picture) a moment after you arrive */
+  private powerDelay = 0;
 
   constructor(private game: Game, private opts: HideoutOpts) {
     ensureLayout();
     this.room = new Room(game.lowQuality);
     this.furn = new Furniture(this.room);
     this.rig = new CamRig(this.camera);
-    this.scene.add(this.ocean.group, this.room.group, this.furn.group, this.dust.points, this.sparks.points);
+    this.scene.add(this.ocean.group, this.room.group, this.furn.group, this.dust.points, this.sparks.points, this.steam.points);
+    this.decor = new Decor((p) => this.room.wallFor(p), this.ocean.bubbles, this.steam);
+    this.scene.add(this.decor.group);
     this.scene.background = new THREE.Color('#03141f');
     this.build = new BuildMode(this.furn, this.dust);
     this.scene.add(this.build.group);
@@ -97,6 +106,7 @@ export class HideoutScreen implements Screen {
     this.cine.onDone = (cfg) => this.opts.onEnterRun(cfg);
     this.tv.onBack = () => this.leaveTv();
     this.tv.onResume = () => { audio.play('k_confirm1', { vol: 0.5, dry: true }); this.opts.onResume(); };
+    if (this.opts.onPrologue) this.tv.onPrologue = () => { audio.play('k_confirm1', { vol: 0.5, dry: true }); this.opts.onPrologue?.(); };
     this.tv.onEnter = (cfg) => this.enterRun(cfg);
     this.ui.drawCursor = true;
     this.seatHero();
@@ -119,7 +129,7 @@ export class HideoutScreen implements Screen {
     oc.left = 0; oc.right = dw; oc.top = dh; oc.bottom = 0; oc.updateProjectionMatrix();
     // point sprites: pixels per metre at distance 1 (low internal res handled by post)
     const k = (h / (2 * Math.tan((this.camera.fov * Math.PI) / 360))) * 0.5;
-    this.ocean.setScale(k); this.dust.setScale(k); this.sparks.setScale(k);
+    this.ocean.setScale(k); this.dust.setScale(k); this.sparks.setScale(k); this.steam.setScale(k);
   }
 
   enter(data?: unknown) {
@@ -130,7 +140,7 @@ export class HideoutScreen implements Screen {
     this.furn.sync();
     this.applyTvMaterial();
     this.mode = 'room'; this.modeT = 0;
-    this.tv.page = 'idle'; this.tvPower = 1; this.tvK = 0;
+    this.tv.page = 'idle'; this.tvPower = 0; this.powerDelay = 0.7; this.tvK = 0;
     this.seatHero();
     this.rig.shot = null; this.rig.snap();
     POST.uLetterbox.value = 0; POST.uFade.value = 1;
@@ -290,6 +300,34 @@ export class HideoutScreen implements Screen {
     return [Math.floor(su * TV_W), Math.floor((1 - sv) * TV_H)];
   };
 
+  // ---------------------------------------------------------------- test hooks
+  /** CSS-pixel centre of a main-UI widget drawn last frame (e.g. 'hTv', 'hBuild', 'bDone', 'stashX') */
+  uiButton(id: string): [number, number] | null {
+    const r = this.ui.rects.get(id);
+    if (!r) return null;
+    const pr = this.game.renderer.getPixelRatio(), k = this.ui.scale / pr;
+    return [(r[0] + r[2] / 2) * k, (r[1] + r[3] / 2) * k];
+  }
+  /** CSS-pixel position of a world point (e.g. a floor cell for build-mode tests) */
+  worldToCss(x: number, y: number, z: number): [number, number] {
+    const v = new THREE.Vector3(x, y, z).project(this.camera);
+    return [(v.x * 0.5 + 0.5) * this.game.w, (-v.y * 0.5 + 0.5) * this.game.h];
+  }
+  /** CSS-pixel position of a point on the TV canvas (inverts the CRT curvature) */
+  tvPoint(tx: number, ty: number): [number, number] {
+    const curve = this.tvOverMat.uniforms.uCurve.value as number;
+    const tu = tx / TV_W, tv = 1 - ty / TV_H;
+    let u = tu, v = tv;
+    for (let i = 0; i < 12; i++) { const [su, sv] = crtUv(u, v, curve); u += tu - su; v += tv - sv; }
+    const r = this.screenRect, pr = this.game.renderer.getPixelRatio();
+    return [(r.x + u * r.w) / pr, (this.devSize[1] - (r.y + v * r.h)) / pr];
+  }
+  /** CSS-pixel centre of a TV widget drawn last frame (e.g. 'm0' NEW RUN, 'enter', 'mst:r', 'stash:3') */
+  tvButton(id: string): [number, number] | null {
+    const r = this.tv.ui.rects.get(id);
+    return r ? this.tvPoint(r[0] + r[2] / 2, r[1] + r[3] / 2) : null;
+  }
+
   // ---------------------------------------------------------------- frame
   update(dt: number) {
     this.t += dt; this.modeT += dt;
@@ -314,12 +352,12 @@ export class HideoutScreen implements Screen {
 
     // ---- camera controls
     const allowPan = this.mode === 'room' || this.mode === 'build';
-    if (!inTv && this.mode !== 'cine') this.rig.controls(input, dt, { allowPan: allowPan && !this.hoverAny(), overUI: ui.overUI || ui.uiOwnsDrag });
+    if (!inTv && this.mode !== 'cine') this.rig.controls(input, dt, { allowPan: allowPan && !this.hoverAny(), overUI: ui.mouseOnUI || ui.uiOwnsDrag });
     this.rig.update(dt);
 
     // ---- world interaction
     this.hover = null;
-    if (this.mode === 'room' && !ui.overUI) {
+    if (this.mode === 'room' && !ui.mouseOnUI) {
       this.hover = this.furn.pick(this.ray);
       if (this.hover && !BLUEPRINTS[this.hover.p.bp].use) this.hover = null;
       if (this.hover) ui.cursor = 'point';
@@ -329,7 +367,7 @@ export class HideoutScreen implements Screen {
       if (input.keyHit('KeyI')) this.setMode('stash');
       if (input.keyHit('KeyK')) this.setMode('workshop');
     }
-    if (this.mode === 'build') this.build.world(dt, this.ray, input, { overUI: ui.overUI, dragged: this.rig.dragged });
+    if (this.mode === 'build') this.build.world(dt, this.ray, input, { overUI: ui.mouseOnUI, dragged: this.rig.dragged });
     if (this.hover) this.drawBrackets(this.hover, BLUEPRINTS[this.hover.p.bp].name, useLabel(BLUEPRINTS[this.hover.p.bp].use));
     if (this.mode === 'build' && this.build.hover) this.drawBrackets(this.build.hover, '', '', '#8affd0');
 
@@ -349,6 +387,17 @@ export class HideoutScreen implements Screen {
     this.room.grid.visible = this.mode === 'build';
     this.room.gridMat.opacity = damp(this.room.gridMat.opacity, this.mode === 'build' ? 0.75 : 0, 8, dt);
     this.furn.tick(this.t, dt);
+    this.decor.update(dt, this.t);
+    this.steam.update(dt, this.t, 'rise');
+    this.decorT -= dt;
+    if (this.decorT <= 0) {
+      this.decorT = 0.4;
+      this.decor.syncClutter(this.furn.occupancy().obj);
+      const tvp = this.furn.byBp('tv');
+      const back = tvp ? tvp.obj.position.clone().addScaledVector(Furniture.front(tvp.p.rot), -0.25).setY(0.75) : null;
+      const key = back ? back.toArray().map((v) => v.toFixed(2)).join(',') : '';
+      if (key !== this.cableKey) { this.cableKey = key; this.decor.setCable(back); }
+    }
     this.ocean.update(dt, this.camera);
     this.dust.update(dt, this.t, 'burst');
     this.sparks.update(dt, this.t, 'burst');
@@ -368,10 +417,14 @@ export class HideoutScreen implements Screen {
     if (this.mode === 'tvOff') {
       this.tvPower = Math.max(0, this.tvPower - dt * 2.4);
       if (this.tvPower <= 0 && this.modeT > 0.55) { this.tv.page = 'idle'; this.leaveTvForCine(); }
-    } else if (this.mode !== 'cine') this.tvPower = Math.min(1, this.tvPower + dt * 3);
+    } else if (this.mode !== 'cine') {
+      if (this.powerDelay > 0) { this.powerDelay -= dt; if (this.powerDelay <= 0) audio.play('crt_on', { vol: 0.35, dry: true }); }
+      else this.tvPower = Math.min(1, this.tvPower + dt * 1.4);
+    }
     for (const m of [this.tvScreenMat, this.tvOverMat]) {
       m.uniforms.uTime.value = this.t;
       m.uniforms.uPower.value = this.tvPower;
+      m.uniforms.uRoll.value = this.tv.staticK > 0.05 ? (1 - this.tv.staticK) * this.tv.staticK * 1.4 : 0;
       m.uniforms.uStatic.value = Math.max(this.tv.staticK * 0.8, this.mode === 'tvIn' ? 0.15 * (1 - clamp01(this.modeT * 2)) : 0);
     }
     if (this.mode === 'tvIn') {

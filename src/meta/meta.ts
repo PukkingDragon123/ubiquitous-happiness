@@ -78,6 +78,8 @@ export interface MetaSave {
   activeRun: RunSave | null;
   lastConfig: RunConfig | null;
   settings: { volume: number; music: number; lowQuality: boolean; motionBlur: number };
+  /** the prologue (src/story/intro.ts) has been played or skipped: boot goes straight to the hideout */
+  introDone: boolean;
 }
 
 const KEY = 'blobfish.meta.v2';
@@ -90,13 +92,18 @@ function fresh(): MetaSave {
     runs: 0, wins: 0, deaths: 0, extractions: 0,
     activeRun: null, lastConfig: null,
     settings: { volume: 0.9, music: 0.55, lowQuality: false, motionBlur: 1 },
+    introDone: false,
   };
 }
 
 function load(): MetaSave {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) { const m = JSON.parse(raw) as MetaSave; if (m.version === 2) return { ...fresh(), ...m, settings: { ...fresh().settings, ...m.settings } }; }
+    if (raw) {
+      const m = JSON.parse(raw) as MetaSave;
+      // saves from before the prologue existed: anyone who has played a run skips it
+      if (m.version === 2) return { ...fresh(), ...m, settings: { ...fresh().settings, ...m.settings }, introDone: m.introDone ?? (m.runs ?? 0) > 0 };
+    }
   } catch { /* corrupt or blocked storage: start fresh */ }
   return fresh();
 }

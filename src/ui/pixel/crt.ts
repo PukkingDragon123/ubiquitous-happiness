@@ -14,7 +14,7 @@ const FS = /* glsl */ `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D tSrc; uniform vec2 uSrcSize; uniform vec2 uOutSize; uniform float uTime;
-uniform float uCurve; uniform float uPower; uniform float uStatic; uniform float uBright; uniform float uOverlay; uniform float uGlare;
+uniform float uCurve; uniform float uPower; uniform float uStatic; uniform float uBright; uniform float uOverlay; uniform float uGlare; uniform float uRoll;
 uniform vec3 uBlack;
 float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec2 curve(vec2 uv) {
@@ -46,8 +46,12 @@ void main() {
   float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
   if (inside > 0.5 && p > 0.001) {
     float on = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
+    // vertical hold slip on channel changes: the picture rolls with a black blanking bar
+    float rolled = fract(suv.y + uRoll);
+    float blank = uRoll > 0.0005 ? smoothstep(0.0, 0.03, rolled) * smoothstep(1.0, 0.97, rolled) : 1.0;
+    suv.y = rolled;
     if (on > 0.5) {
-      vec3 c = sharp(suv);
+      vec3 c = sharp(suv) * blank;
       // phosphor glow (cheap 4-tap blur, 1.5 source texels)
       vec2 o = 1.5 / uSrcSize;
       vec3 g = sharp(suv + vec2(o.x, 0.0)) + sharp(suv - vec2(o.x, 0.0)) + sharp(suv + vec2(0.0, o.y)) + sharp(suv - vec2(0.0, o.y));
@@ -80,6 +84,10 @@ void main() {
     col += vec3(0.06, 0.08, 0.09) * gl * uGlare;
     float edge = smoothstep(0.86, 1.0, max(abs(cc.x), abs(cc.y)));
     col += vec3(0.03, 0.04, 0.05) * edge * uGlare;
+    // a curved reflection arc across the top of the glass and a small hot specular
+    float arc = smoothstep(0.008, 0.0, abs(length((uv - vec2(0.62, 1.55)) * vec2(0.8, 1.0)) - 0.95)) * smoothstep(0.7, 0.9, uv.y) * smoothstep(0.75, 0.35, abs(uv.x - 0.45));
+    col += vec3(0.05, 0.06, 0.07) * arc * uGlare;
+    col += vec3(0.12) * smoothstep(0.018, 0.0, length((uv - vec2(0.12, 0.9)) * vec2(1.0, 1.4))) * uGlare;
   } else {
     col = vec3(0.0);
   }
@@ -93,7 +101,7 @@ void main() {
   gl_FragColor = vec4(col, a);
 }`;
 
-export type CrtMaterial = THREE.ShaderMaterial & { uniforms: Record<'tSrc' | 'uSrcSize' | 'uOutSize' | 'uTime' | 'uCurve' | 'uPower' | 'uStatic' | 'uBright' | 'uOverlay' | 'uGlare' | 'uBlack', THREE.IUniform> };
+export type CrtMaterial = THREE.ShaderMaterial & { uniforms: Record<'tSrc' | 'uSrcSize' | 'uOutSize' | 'uTime' | 'uCurve' | 'uPower' | 'uStatic' | 'uBright' | 'uOverlay' | 'uGlare' | 'uBlack' | 'uRoll', THREE.IUniform> };
 
 export function crtMaterial(tex: THREE.Texture, src: [number, number], o: { overlay?: boolean; curve?: number; bright?: number } = {}): CrtMaterial {
   const m = new THREE.ShaderMaterial({
@@ -101,7 +109,7 @@ export function crtMaterial(tex: THREE.Texture, src: [number, number], o: { over
     uniforms: {
       tSrc: { value: tex }, uSrcSize: { value: new THREE.Vector2(src[0], src[1]) }, uOutSize: { value: new THREE.Vector2(src[0] * 3, src[1] * 3) },
       uTime: { value: 0 }, uCurve: { value: o.curve ?? 0.06 }, uPower: { value: 1 }, uStatic: { value: 0 }, uBright: { value: o.bright ?? 1 },
-      uOverlay: { value: o.overlay ? 1 : 0 }, uGlare: { value: 1 }, uBlack: { value: new THREE.Color('#0b120f').convertSRGBToLinear() },
+      uOverlay: { value: o.overlay ? 1 : 0 }, uGlare: { value: 1 }, uRoll: { value: 0 }, uBlack: { value: new THREE.Color('#0b120f').convertSRGBToLinear() },
     },
     transparent: !!o.overlay, depthTest: !o.overlay, depthWrite: !o.overlay, toneMapped: false,
   }) as CrtMaterial;

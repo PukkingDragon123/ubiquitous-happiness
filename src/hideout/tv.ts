@@ -9,6 +9,8 @@ import type { ItemInst } from '../game/run';
 import { MASTERY, MAX_MASTERY, masteryMods, AREAS, areaThumb } from './mastery';
 import { stationPerks } from './blueprints';
 import { audio } from '../audio/audio';
+import { fits } from '../game/items';
+import { drawLogo, logoSize, drawRibbon, blobSprite, fishSprite, oceanLayers } from './tvArt';
 
 export type TvPage = 'idle' | 'main' | 'config' | 'settings' | 'credits' | 'reset';
 export const TV_W = 320, TV_H = 240;
@@ -28,14 +30,29 @@ export class TvUI {
   private flash = { text: '', t: 0 };
   onEnter?: (cfg: RunConfig) => void;
   onResume?: () => void;
+  /** replay the story prologue (set by the hideout from HideoutOpts.onPrologue) */
+  onPrologue?: () => void;
   onBack?: () => void;
   private creditsT = 0;
   private resetArm = 0;
+  /** boot sequence clock (typed text) and menu slide-in clock */
+  private bootT = 9;
+  private menuT = 9;
+  /** on-screen channel display after tuning in */
+  private osdT = 9;
+  /** loadout drag & drop */
+  private drag: { it: ItemInst; from: 'stash' | 'bag'; sx: number; sy: number; moved: boolean } | null = null;
+  private dropT = new Map<number, number>();
+  private lastTarget = '';
+  private shake = 0;
 
   constructor() { this.ui.drawCursor = true; }
 
   go(p: TvPage) {
     if (p === this.page) return;
+    if (p === 'main' && this.page === 'idle') { this.bootT = 0; this.osdT = 0; audio.play('k_glitch2', { vol: 0.18, dry: true }); }
+    if (p === 'main') this.menuT = this.page === 'idle' ? -1.15 : 0;
+    this.drag = null;
     this.page = p; this.sel = 0; this.staticK = 1;
     if (p === 'config') this.loadConfig();
     if (p === 'credits') this.creditsT = 0;
@@ -67,8 +84,9 @@ export class TvUI {
   config(): RunConfig { return { mastery: this.mastery, startArea: AREAS[this.area].id, loadout: this.loadout.map((l) => l.uid) }; }
 
   draw(input: Input | null, dt: number, map?: (x: number, y: number) => [number, number] | null) {
-    this.t += dt;
-    this.staticK = Math.max(0, this.staticK - dt * 4);
+    this.t += dt; this.bootT += dt; this.menuT += dt; this.osdT += dt; this.shake = Math.max(0, this.shake - dt * 3);
+    for (const [k, v] of this.dropT) { if (v > 0.6) this.dropT.delete(k); else this.dropT.set(k, v + dt); }
+    this.staticK = Math.max(0, this.staticK - dt * 3.2);
     this.flash.t -= dt;
     const ui = this.ui;
     ui.drawCursor = !!input;
@@ -83,6 +101,7 @@ export class TvUI {
       case 'reset': this.reset(); break;
     }
     if (this.page !== 'idle') this.header();
+    if (this.page !== 'idle' && this.osdT < 2.2 && Math.floor(this.osdT * 4) % 4 !== 3) ui.text('CH 03', TV_W - 14, 22, { font: 'title', color: '#6aff7a', shadow: '#002200', align: 'right' });
     if (this.flash.t > 0) {
       const w = ui.measure(this.flash.text, 'title') + 16;
       ui.frame('tv', (TV_W - w) / 2, 104, w, 22);
@@ -99,11 +118,43 @@ export class TvUI {
   // ---------------------------------------------------------------- pieces
   private background() {
     const ui = this.ui, t = this.t;
-    // flat deep blue with a faint 16 px grid and a few drifting snow pixels
+    if (this.page === 'main') { this.oceanScene(); return; }
+    // flat deep blue with a faint 16 px grid scrolling slowly, and drifting snow pixels
     ui.fill(0, 0, TV_W, TV_H, '#06144a');
-    for (let x = 0; x < TV_W; x += 16) ui.fill(x, 0, 1, TV_H, '#0a1d5c');
-    for (let y = 0; y < TV_H; y += 16) ui.fill(0, y, TV_W, 1, '#0a1d5c');
-    for (let i = 0; i < 18; i++) { const x = (i * 97 + Math.floor(Math.sin(t * 0.3 + i) * 4)) % TV_W, y = Math.floor(i * 53 + t * (4 + (i % 3))) % TV_H; ui.fill(x, y, 1, 1, '#5a7ac8'); }
+    const o = Math.floor(t * 4) % 16;
+    for (let x = -o; x < TV_W; x += 16) ui.fill(x, 0, 1, TV_H, '#0a1d5c');
+    for (let y = -o; y < TV_H; y += 16) ui.fill(0, y, TV_W, 1, '#0a1d5c');
+    for (let i = 0; i < 22; i++) { const x = (i * 97 + Math.floor(Math.sin(t * 0.3 + i) * 4)) % TV_W, y = TV_H - 1 - (Math.floor(i * 53 + t * (6 + (i % 4) * 3)) % TV_H); ui.fill(x, y, 1, 1, i % 3 ? '#5a7ac8' : '#9ab8ff'); }
+    if (this.page === 'settings') {
+      // a signal trace along the bottom
+      for (let x = 8; x < TV_W - 8; x++) ui.fill(x, 200 + Math.round(Math.sin(x * 0.12 + t * 6) * 3 * Math.sin(x * 0.02 + t)), 1, 1, '#2a9ad0');
+    }
+  }
+
+  /** the main menu backdrop: banded water, light shafts, parallax ridges and kelp, bubbles, fish and a blobfish */
+  private oceanScene() {
+    const ui = this.ui, t = this.t, ctx = ui.ctx;
+    const bands = ['#123290', '#0f2a80', '#0c236e', '#0a1c5c', '#08164a', '#06103a'];
+    bands.forEach((c, i) => ui.fill(0, i * 40, TV_W, 40, c));
+    // slanted light shafts (flat, one tone lighter)
+    ctx.fillStyle = '#18409e';
+    for (let i = 0; i < 4; i++) {
+      const x0 = ((i * 97 + t * 5) % (TV_W + 120)) - 60;
+      for (let y = 0; y < 150; y += 2) ctx.fillRect(Math.round(x0 + y * 0.45), y, 10 - Math.floor(y / 30), 2);
+    }
+    const L = oceanLayers();
+    const par = (img: HTMLCanvasElement, speed: number, y: number) => { const off = Math.floor((t * speed) % 320); ui.img(img, -off, y); ui.img(img, 320 - off, y); };
+    par(L[0], 3, TV_H - 70);
+    // the blobfish swimming by behind the kelp
+    const bx = ((t * 16) % (TV_W + 60)) - 30, by = 150 + Math.round(Math.sin(t * 1.4) * 5);
+    ui.img(blobSprite(Math.floor(t * 4)), Math.round(bx), by);
+    for (let i = 0; i < 3; i++) if (Math.sin(t * 2 + i) > 0.6) ui.fill(Math.round(bx) + 20, by - 3 - i * 4 - Math.floor((t * 10) % 4), 2, 2, '#9ad8ff');
+    par(L[1], 8, TV_H - 60);
+    // small fish crossing the other way
+    for (let i = 0; i < 4; i++) { const fx = TV_W - ((t * (20 + i * 6) + i * 90) % (TV_W + 40)) + 20; ui.img(fishSprite(i), Math.round(fx), 120 + i * 17 + Math.round(Math.sin(t * 3 + i) * 2), { flipX: true }); }
+    par(L[2], 16, TV_H - 110);
+    // rising bubbles
+    for (let i = 0; i < 10; i++) { const x = (i * 71 + Math.round(Math.sin(t + i) * 3)) % TV_W, y = TV_H - (Math.floor(t * (14 + (i % 3) * 6) + i * 29) % (TV_H + 10)); ui.fill(x, y, 2, 2, '#7ab8ff'); ui.fill(x, y, 1, 1, '#e8f6ff'); }
   }
 
   private header() {
@@ -145,37 +196,56 @@ export class TvUI {
     ui.text(tick + tick, Math.round(off), 229, { font: 'small', color: C.yellow });
   }
 
-  private title(y: number) {
-    const ui = this.ui, t = this.t;
-    const bob = Math.round(Math.sin(t * 1.5) * 2);
-    ui.text('BLOBFISH', TV_W / 2, y + bob, { font: 'big', color: '#fff6c8', color2: '#ffb43a', outline: '#3a1400', shadow: '#000', align: 'center' });
-    ui.text('REEL REBELLION', TV_W / 2, y + 30 + bob, { font: 'title', color: '#bff4ff', color2: '#4ac8ff', outline: '#02203a', align: 'center' });
+  private boot() {
+    const ui = this.ui;
+    ui.fill(0, 0, TV_W, TV_H, '#020818');
+    const lines = ['BLOBFISH TV  OS 2.6', '> TUNING CH 03 ........', '> SIGNAL LOCKED', '> LOADING MENU'];
+    const chars = Math.floor(this.bootT * 60);
+    let n = 0, y = 60;
+    for (const l of lines) {
+      const show = l.slice(0, Math.max(0, chars - n));
+      n += l.length + 4;
+      if (show) ui.text(show, 40, y, { font: 'body', color: y === 60 ? C.yellow : '#6aff7a' });
+      if (show.length < l.length) { if (Math.floor(this.t * 4) % 2 === 0) ui.fill(40 + ui.measure(show, 'body') + 1, y - 1, 5, 9, '#6aff7a'); break; }
+      y += 16;
+    }
   }
 
   private main() {
     const ui = this.ui;
-    this.title(30);
+    if (this.bootT < 1.15) { this.boot(); return; }
+    const ls = logoSize();
+    const bob = Math.round(Math.sin(this.t * 1.5) * 2);
+    drawLogo(ui.ctx, TV_W / 2, 22 + bob, this.t);
+    drawRibbon(ui.ctx, TV_W / 2, 24 + ls.h - 4 + bob, 'REEL REBELLION');
     const items: [string, () => void, boolean][] = [
       ['NEW RUN', () => this.go('config'), true],
       ['RESUME', () => this.onResume?.(), !!META.activeRun],
       ['SETTINGS', () => this.go('settings'), true],
       ['CREDITS', () => this.go('credits'), true],
+      ['PROLOGUE', () => this.onPrologue?.(), !!this.onPrologue],
       ['BACK TO HIDEOUT', () => this.onBack?.(), true],
     ];
     const inp = ui.input;
     if (inp?.keyHit('ArrowDown') || inp?.keyHit('KeyS')) { this.sel = (this.sel + 1) % items.length; audio.play('k_tick1', { vol: 0.2, dry: true }); }
     if (inp?.keyHit('ArrowUp') || inp?.keyHit('KeyW')) { this.sel = (this.sel + items.length - 1) % items.length; audio.play('k_tick1', { vol: 0.2, dry: true }); }
-    const bw = 136, x = (TV_W - bw) / 2;
+    const bw = 136, x0 = (TV_W - bw) / 2;
     items.forEach(([label, fn, en], i) => {
-      const y = 92 + i * 22;
+      // buttons slide in one after another
+      const k = Math.min(1, Math.max(0, (this.menuT - i * 0.06) / 0.22));
+      const x = Math.round(x0 + (1 - k * k * (3 - 2 * k)) * 220);
+      const y = 88 + i * 20;
       const hot = i === this.sel;
       if (ui.hover(x, y, bw, 18) && en) this.sel = i;
-      if (hot) { const a = Math.round(Math.sin(this.t * 6) * 1.5); ui.icon('play', x - 10 + a, y + 5); }
+      if (hot && k >= 1) { const a = Math.round(Math.sin(this.t * 6) * 1.5); ui.icon('play', x - 10 + a, y + 5); }
       const clicked = ui.button('m' + i, label, x, y, bw, 19, { style: i === 0 ? 'gold' : 'tv', disabled: !en, on: hot && en && i !== 0 });
-      if (clicked || (hot && en && inp?.keyHit('Enter'))) fn();
+      if (k >= 1 && (clicked || (hot && en && inp?.keyHit('Enter')))) fn();
     });
-    ui.text(`MASTERY ${META.masteryUnlocked}  ·  RUNS ${META.runs}  ·  WINS ${META.wins}  ·  NEMESES ${META.nemeses.length}`, TV_W / 2, 210, { font: 'small', color: C.dim, align: 'center' });
-    if (Math.sin(this.t * 4) > -0.2) ui.text('↑↓ + ENTER  OR CLICK', TV_W / 2, 222, { font: 'small', color: C.cyan, align: 'center' });
+    ui.fill(40, 210, TV_W - 80, 24, '#020818', 0.85);
+    ui.text(`MASTERY ${META.masteryUnlocked}  \u00b7  RUNS ${META.runs}  \u00b7  WINS ${META.wins}  \u00b7  NEMESES ${META.nemeses.length}`, TV_W / 2, 213, { font: 'small', color: C.dim, align: 'center' });
+    const prompt = 'CLICK OR PRESS ENTER';
+    const pw = ui.text(prompt, TV_W / 2 - 4, 224, { font: 'small', color: C.cyan, align: 'center' });
+    if (Math.floor(this.t * 2.5) % 2 === 0) ui.fill(Math.round(TV_W / 2 - 4 + pw / 2) + 2, 223, 5, 8, C.cyan); // blinking block cursor
   }
 
   private cfgPage() {
@@ -219,25 +289,30 @@ export class TvUI {
     ui.frame('tv', x, y, gw + 12, gw + 44);
     ui.text('LOADOUT', x + 6, y + 6, { font: 'small', color: C.cyan });
     ui.text(`${this.loadout.length}`, x + gw + 6, y + 6, { font: 'small', color: C.yellow, align: 'right' });
-    const gx = x + 6, gy = y + 16;
+    const gx = x + 6 + Math.round(Math.sin(this.t * 70) * 2 * this.shake), gy = y + 16;
     for (let j = 0; j < GRID; j++) for (let i = 0; i < GRID; i++) ui.frame('slotTv', gx + i * cell, gy + j * cell, cell, cell);
     let hoverIt: ItemInst | null = null;
+    const dragging = this.drag?.moved ? this.drag : null;
     for (const it of this.loadout) {
+      if (dragging && dragging.from === 'bag' && dragging.it.uid === it.uid) continue; // lifted out
       const d2 = getItem(it.id);
       const cells = instCells(it);
       const minX = Math.min(...cells.map((c) => c[0])), minY = Math.min(...cells.map((c) => c[1]));
       const maxX = Math.max(...cells.map((c) => c[0])), maxY = Math.max(...cells.map((c) => c[1]));
-      const px = gx + minX * cell, py = gy + minY * cell, pw = (maxX - minX + 1) * cell, ph = (maxY - minY + 1) * cell;
-      for (const [cx, cy] of cells) ui.fill(gx + cx * cell + 1, gy + cy * cell + 1, cell - 2, cell - 2, RARITY_COLOR[d2.rarity], 0.18);
+      // a little bounce right after it lands
+      const dt0 = this.dropT.get(it.uid);
+      const bounce = dt0 !== undefined ? -Math.round(Math.sin(Math.min(1, dt0 / 0.3) * Math.PI) * 3) : 0;
+      const px = gx + minX * cell, py = gy + minY * cell + bounce, pw = (maxX - minX + 1) * cell, ph = (maxY - minY + 1) * cell;
+      for (const [cx, cy] of cells) ui.fill(gx + cx * cell + 2, gy + cy * cell + 2, cell - 4, cell - 4, RARITY_COLOR[d2.rarity], 0.25);
+      if (dt0 !== undefined && dt0 < 0.12) for (const [cx, cy] of cells) ui.rect(gx + cx * cell, gy + cy * cell, cell, cell, '#ffffff');
       ui.item(it.id, px + 1, py + 1, pw - 2, ph - 2, it.level ?? 1);
-      if (cells.some(([cx, cy]) => ui.hover(gx + cx * cell, gy + cy * cell, cell, cell))) hoverIt = it;
-    }
-    if (hoverIt) {
-      ui.cursor = 'remove';
-      ui.tooltip(ui.itemTip(hoverIt.id, hoverIt.level ?? 1, [{ text: 'click: take out', font: 'small', color: '#7a2a1a', gap: 2 }]));
-      if (ui.released && ui.hover(gx, gy, gw, gw)) { this.loadout = this.loadout.filter((l) => l !== hoverIt); audio.play('k_drop2', { vol: 0.3, dry: true }); }
+      if (!dragging && cells.some(([cx, cy]) => ui.hover(gx + cx * cell, gy + cy * cell, cell, cell))) hoverIt = it;
     }
     ui.block(gx, gy, gw, gw);
+    // press on a bag item: pick it up (a tap without moving takes it out)
+    if (hoverIt && ui.pressed && !this.drag) { this.drag = { it: hoverIt, from: 'bag', sx: ui.mx, sy: ui.my, moved: false }; }
+    if (hoverIt && !this.drag) { ui.cursor = 'grab'; ui.tooltip(ui.itemTip(hoverIt.id, hoverIt.level ?? 1, [{ text: 'drag to move \u00b7 click to take out', font: 'small', color: '#7a2a1a', gap: 2 }])); }
+    const bagRect = { gx, gy, gw, cell };
     if (ui.button('auto', 'AUTO', x + 6, gy + gw + 4, 44, 16, { style: 'tv', font: 'small', tip: ['Fill the bag with your best gear'] })) this.autoFill();
     if (ui.button('clear', 'CLEAR', x + gw - 38, gy + gw + 4, 44, 16, { style: 'tv', font: 'small', disabled: !this.loadout.length })) this.loadout = [];
     // station perks summary
@@ -261,16 +336,14 @@ export class TvUI {
       const inb = this.inBag(it.uid);
       ui.frame('slotTv', rx + 1, ry + 1, 20, 20);
       if (inb) ui.rect(rx + 1, ry + 1, 20, 20, C.yellow);
-      if (hov) { ui.rect(rx + 1, ry + 1, 20, 20, C.white); tipIt = it; }
-      ui.item(it.id, rx + 3, ry + 3, 16, 16, it.level ?? 1);
+      if (hov) { ui.rect(rx + 1, ry + 1, 20, 20, C.white); tipIt = it; if (ui.pressed && !this.drag) this.drag = { it, from: 'stash', sx: ui.mx, sy: ui.my, moved: false }; }
+      const lifted = this.drag?.moved && this.drag.from === 'stash' && this.drag.it.uid === it.uid;
+      ui.item(it.id, rx + 3, ry + 3, 16, 16, it.level ?? 1, lifted ? 0.35 : 1);
       if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, rx + 20, ry + 2, { font: 'small', color: C.green, outline: '#000', align: 'right' });
     }, { style: 'tv', cols: 3 });
-    if (tipIt) { const ti = tipIt as ItemInst; ui.tooltip(ui.itemTip(ti.id, ti.level ?? 1, [{ text: this.inBag(ti.uid) ? 'click: take out' : 'click: pack it', font: 'small', color: '#1a4a7a', gap: 2 }])); }
-    if (clicked >= 0) {
-      const it = stash[clicked];
-      if (this.inBag(it.uid)) { this.loadout = this.loadout.filter((l) => l.uid !== it.uid); audio.play('k_drop2', { vol: 0.3, dry: true }); }
-      else this.addToBag(it);
-    }
+    if (tipIt && !this.drag?.moved) { const ti = tipIt as ItemInst; ui.tooltip(ui.itemTip(ti.id, ti.level ?? 1, [{ text: this.inBag(ti.uid) ? 'click: take out' : 'click or drag into the bag', font: 'small', color: '#1a4a7a', gap: 2 }])); }
+    void clicked;
+    this.dragDrop(bagRect);
     // ---- bottom bar: back + ENTER
     if (ui.button('back', 'BACK', 6, 216, 60, 19, { style: 'tv', key: 'Backspace', keyLabel: '' })) this.go('main');
     const pulse = Math.sin(this.t * 5) > 0;
@@ -280,6 +353,55 @@ export class TvUI {
       META.lastConfig = this.config(); META.mastery = this.mastery; saveMeta();
       this.onEnter?.(this.config());
     }
+  }
+
+  /** the loadout drag & drop: lift, preview the target cells, drop with a thunk (or bounce back) */
+  private dragDrop(b: { gx: number; gy: number; gw: number; cell: number }) {
+    const ui = this.ui, d = this.drag;
+    if (!d) return;
+    if (!d.moved && Math.hypot(ui.mx - d.sx, ui.my - d.sy) > 3) { d.moved = true; audio.play('k_pluck1', { vol: 0.35, dry: true }); }
+    const def = getItem(d.it.id);
+    // origin cell under the cursor (the grab point sits in the item's first cell)
+    const cx = Math.floor((ui.mx - b.gx) / b.cell), cy = Math.floor((ui.my - b.gy) / b.cell);
+    const overBag = ui.mx >= b.gx && ui.my >= b.gy && ui.mx < b.gx + b.gw && ui.my < b.gy + b.gw;
+    const probe: ItemInst = { ...d.it, gx: -1, gy: -1, rot: d.from === 'bag' ? d.it.rot : 0 };
+    const ok = overBag && fits(this.loadout, probe, cx, cy, probe.rot);
+    if (d.moved) {
+      ui.cursor = 'grab';
+      if (overBag) {
+        const key = `${cx},${cy},${ok}`;
+        if (key !== this.lastTarget) { this.lastTarget = key; audio.play('k_tick2', { vol: 0.12, dry: true, rate: ok ? 1.3 : 0.8 }); }
+        for (const [x, y] of instCells(probe, probe.rot, cx, cy)) {
+          if (x < 0 || y < 0 || x >= GRID || y >= GRID) continue;
+          ui.fill(b.gx + x * b.cell + 1, b.gy + y * b.cell + 1, b.cell - 2, b.cell - 2, ok ? '#2aa84a' : '#a82a2a', 0.55);
+          ui.rect(b.gx + x * b.cell, b.gy + y * b.cell, b.cell, b.cell, ok ? '#6aff7a' : C.red);
+        }
+      }
+      // the lifted item follows the cursor, raised with a hard shadow
+      const sz = { w: Math.max(...def.shape.map((c) => c[0])) + 1, h: Math.max(...def.shape.map((c) => c[1])) + 1 };
+      const w = sz.w * 16, h = sz.h * 16;
+      const ix = ui.mx - 8, iy = ui.my - 10;
+      ui.fill(ix + 2, iy + 3, w, h, '#000000', 0.45);
+      ui.item(d.it.id, ix, iy, w, h, d.it.level ?? 1);
+    }
+    if (ui.released) {
+      if (!d.moved) {
+        // a tap: toggle
+        if (d.from === 'bag' || this.inBag(d.it.uid)) { this.loadout = this.loadout.filter((l) => l.uid !== d.it.uid); audio.play('k_drop2', { vol: 0.3, dry: true }); }
+        else this.addToBag(d.it);
+      } else if (overBag && ok) {
+        this.loadout = this.loadout.filter((l) => l.uid !== d.it.uid);
+        this.loadout.push({ ...d.it, gx: cx, gy: cy, rot: probe.rot });
+        this.dropT.set(d.it.uid, 0);
+        audio.play('box_thud', { vol: 0.35, dry: true, rate: 1.6 }); audio.play('k_drop3', { vol: 0.3, dry: true });
+      } else if (overBag) {
+        this.shake = 1; audio.play('k_err1', { vol: 0.35, dry: true });
+      } else if (d.from === 'bag') {
+        this.loadout = this.loadout.filter((l) => l.uid !== d.it.uid);
+        audio.play('k_drop2', { vol: 0.3, dry: true });
+      }
+      this.drag = null; this.lastTarget = '';
+    } else if (!ui.down && !ui.pressed) this.drag = null;
   }
 
   private autoFill() {

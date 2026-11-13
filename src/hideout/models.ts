@@ -205,6 +205,18 @@ const BUILD: Record<string, Builder> = {
     k.cyl(plain('#2a3a2a', 0.4, 0.5), 0.04, 0.1, 0.12, -0.7, 1.26, 0.18, { rx: 0.9, seg: 8, open: true });
     k.sphere(glow('#ffe0a0'), 0.03, -0.69, 1.23, 0.21, { w: 5, h: 4 });
     p.lights.push({ pos: new THREE.Vector3(-0.68, 1.15, 0.25), color: '#ffcf8a', intensity: 1.6, dist: 3 });
+    // a little desk fan, spinning
+    k.cyl(plain('#2a3a4a', 0.4, 0.5), 0.07, 0.08, 0.03, -0.3, 0.88, 0.2, { seg: 7 });
+    k.cyl(plain('#2a3a4a', 0.4, 0.5), 0.014, 0.014, 0.18, -0.3, 0.97, 0.2, { seg: 5 });
+    k.cyl(plain('#2a3a4a', 0.4, 0.5), 0.045, 0.045, 0.08, -0.3, 1.07, 0.18, { rx: Math.PI / 2, seg: 7 });
+    const fan = new THREE.Group(); fan.position.set(-0.3, 1.07, 0.24);
+    const kf = new Kit();
+    for (let i = 0; i < 4; i++) kf.box(plain('#c8d0d8', 0.3, 0.6), 0.2, 0.06, 0.01, Math.cos(i * tau / 4) * 0.1, Math.sin(i * tau / 4) * 0.1, 0, { rz: i * tau / 4, chamfer: 0 });
+    kf.add(plain('#9aa0a8', 0.3, 0.8), new THREE.TorusGeometry(0.2, 0.008, 3, 10), 0, 0, 0.03);
+    fan.add(kf.build());
+    p.group.add(fan);
+    const prevTick = p.tick;
+    p.tick = (t, dt) => { prevTick?.(t, dt); fan.rotation.z = -t * 14; };
     // a half-built gizmo
     k.box(plain('#b87a3a', 0.35, 0.8), 0.18, 0.08, 0.12, 0.1, 0.9, 0.1, { ry: 0.4 });
     k.cyl(plain('#b87a3a', 0.35, 0.8), 0.04, 0.04, 0.03, 0.1, 0.96, 0.1, { seg: 8 });
@@ -238,7 +250,7 @@ const BUILD: Record<string, Builder> = {
   },
   rug(k, p) {
     const bp = BLUEPRINTS.rug; void bp;
-    const g = new THREE.PlaneGeometry(3.9, 2.9); g.rotateX(-Math.PI / 2); g.rotateY(Math.PI / 2);
+    const g = new THREE.PlaneGeometry(2.9, 3.9); g.rotateX(-Math.PI / 2); g.rotateY(Math.PI / 2);
     const uv = g.attributes.uv as THREE.BufferAttribute;
     k.add(MAT.rug('red'), g, 0, 0.012, 0, { uv: 'keep', shadow: false });
     void uv;
@@ -327,6 +339,13 @@ const BUILD: Record<string, Builder> = {
     const fc = ['#ff8a2a', '#ffd040', '#40c8ff', '#ff5a8a'];
     for (let i = 0; i < 5; i++) { const f = new THREE.Mesh(fishG, glow(fc[i % 4])); fish.push(f); p.group.add(f); }
     p.group.add(water);
+    // the aquarium-within-the-aquarium: a tiny tank on the gravel with an even tinier fish
+    k.box(plain('#1a1a1a', 0.4, 0.6), 0.26, 0.02, 0.16, -0.05, 0.76, 0.02, { chamfer: 0 });
+    const mini = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, 0.14), retro(new THREE.MeshStandardMaterial({ color: '#9ae8ff', transparent: true, opacity: 0.35, roughness: 0.05, depthWrite: false })));
+    mini.position.set(-0.05, 0.85, 0.02);
+    p.group.add(mini);
+    const tinyFish = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.04, 4).rotateZ(-Math.PI / 2), glow('#ffd040'));
+    p.group.add(tinyFish);
     p.lights.push({ pos: new THREE.Vector3(0, 1.2, 0.4), color: '#7ae0ff', intensity: 1.2, dist: 3.5 });
     p.tick = (t) => {
       fish.forEach((f, i) => {
@@ -334,6 +353,9 @@ const BUILD: Record<string, Builder> = {
         f.position.set(Math.cos(a) * r, 0.9 + ((i * 0.11) % 0.35) + Math.sin(t * 1.3 + i) * 0.03, Math.sin(a) * 0.15);
         f.rotation.y = -a - Math.PI / 2;
       });
+      const b = t * 1.7;
+      tinyFish.position.set(-0.05 + Math.cos(b) * 0.07, 0.85 + Math.sin(t * 2.3) * 0.02, 0.02 + Math.sin(b) * 0.04);
+      tinyFish.rotation.y = -b - Math.PI / 2;
     };
     p.height = 1.4;
   },

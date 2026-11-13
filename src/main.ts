@@ -6,7 +6,7 @@ import { Sandbox } from './dev/sandbox';
 import { DiveScreen } from './game/dive';
 import { Run } from './game/run';
 import { MenuScreen } from './ui/menu';
-import { setupFlow, syncLowQuality } from './game/flow';
+import { setupFlow, syncLowQuality, wantsIntro } from './game/flow';
 import { installHumans } from './game/humansAdapter';
 
 const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> = {
@@ -23,6 +23,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   retro: () => import('./dev/preview_retro'),
   blobstudio: () => import('./dev/preview_blobstudio'),
   run: () => import('./dev/preview_run'),
+  intro: () => import('./dev/preview_intro'),
 };
 
 async function boot() {
@@ -52,9 +53,9 @@ async function boot() {
     game.register(new Sandbox(game));
     game.go('sandbox');
   } else {
-    // the real game (v2): the hideout is the hub and main menu -> runs -> back to the hideout
+    // the real game (v2): the prologue on first boot, then the hideout is the hub and main menu -> runs -> back
     setupFlow(game);
-    game.go('hideout', {});
+    game.go(wantsIntro() ? 'intro' : 'hideout', {});
   }
   game.start();
   document.getElementById('boot')?.classList.add('gone');

@@ -167,38 +167,69 @@ function paintKnit(a: string, b: string): Px {
   return p;
 }
 
-/** a Persian rug: border bands, a medallion, a field of motifs, fringe (non-tiling 64 x 96, flat colours) */
+/** a Persian rug (96 x 128, flat colours): fringe, guard stripes, a border of rosettes and vines, a lattice
+ *  field, corner spandrels and a stepped central medallion with a star */
 function paintRug(kind: string): Px {
-  const W = 64, Hh = 96, p = new Px(W, Hh);
+  const W = 96, Hh = 128, p = new Px(W, Hh);
   const pal = kind === 'blue'
-    ? { field: '#1e2c5a', field2: '#18244c', border: '#7a1e1e', motif: '#d8c8a0', ink: '#0c0e1e', accent: '#c88a2a' }
-    : { field: '#8a1c1c', field2: '#741616', border: '#1e2c5a', motif: '#e0cfa2', ink: '#1a0808', accent: '#d89a2e' };
-  const F = hex(pal.field), F2 = hex(pal.field2), BO = hex(pal.border), M = hex(pal.motif), K = hex(pal.ink), A = hex(pal.accent);
+    ? { field: '#1e2c5a', field2: '#16224a', border: '#7a1e1e', border2: '#5a1414', motif: '#e0cfa2', ink: '#0c0e1e', accent: '#d89a2e', green: '#2e5a3a' }
+    : { field: '#8a1c1c', field2: '#701616', border: '#1e2c5a', border2: '#16224a', motif: '#e8d6a8', ink: '#1a0808', accent: '#d89a2e', green: '#2e5a3a' };
+  const C = Object.fromEntries(Object.entries(pal).map(([k, v]) => [k, hex(v)])) as Record<keyof typeof pal, RGB>;
+  const F = 4; // fringe rows
   p.fill((x, y) => {
-    const dx = Math.min(x, W - 1 - x), dy = Math.min(y, Hh - 1 - y);
-    const d = Math.min(dx, dy - 3);
-    if (dy < 3) return (x % 2 === 0) ? hex('#d8ccb0') : null; // fringe
-    if (d < 0) return null;
-    if (d === 0) return K;
-    if (d <= 2) return d === 1 ? A : K;
-    if (d <= 8) {
-      const u = dx < dy - 3 ? y : x;
-      const z = Math.abs(((u + (d - 3)) % 8) - 4);
-      return (d === 3 || d === 8) ? K : z === (d - 4) % 4 ? M : BO;
+    const dy0 = Math.min(y, Hh - 1 - y);
+    if (dy0 < F) return x % 2 === 0 ? hex(dy0 === 0 ? '#c8bc9a' : '#e8dcc0') : null;
+    const dx = Math.min(x, W - 1 - x), dy = dy0 - F;
+    const d = Math.min(dx, dy);
+    const along = dx < dy ? y : x;
+    // outer guards
+    if (d === 0) return C.ink;
+    if (d === 1 || d === 2) return (along >> 1) % 2 ? C.accent : C.border2;
+    if (d === 3) return C.ink;
+    // main border band (d 4..13): rosettes every 12 px on a dark ground, joined by a vine
+    if (d <= 13) {
+      const bd = d - 4, u = along % 12;
+      const cxu = Math.abs(u - 6), cyb = Math.abs(bd - 4.5);
+      const ros = cxu + cyb;
+      if (ros < 1.6) return C.accent;
+      if (ros < 3.1) return (cxu + cyb) % 2 < 1 ? C.motif : C.green;
+      if (ros < 4) return C.ink;
+      if (bd === 4 || bd === 5) return (u + bd) % 3 === 0 ? C.motif : C.border;
+      return C.border;
     }
-    if (d === 9) return M;
-    const cx = x - W / 2 + 0.5, cy = y - Hh / 2 + 0.5;
-    const md = Math.abs(cx) / 18 + Math.abs(cy) / 26;
+    if (d === 14) return C.ink;
+    if (d === 15 || d === 16) return (along + d) % 4 < 2 ? C.motif : C.accent;
+    if (d === 17) return C.ink;
+    // field
+    const fx = x - W / 2 + 0.5, fy = y - Hh / 2 + 0.5;
+    // stepped medallion (lozenge with 2 px steps)
+    const md = Math.floor(Math.abs(fx) / 2) * 2 / 22 + Math.floor(Math.abs(fy) / 2) * 2 / 32;
     if (md < 1) {
-      if (md > 0.9) return K;
-      if (md > 0.8) return M;
-      const inner = Math.abs(cx) / 7 + Math.abs(cy) / 10;
-      if (inner < 1) return inner > 0.75 ? A : inner > 0.5 ? K : M;
-      return ((Math.abs(cx) + Math.abs(cy)) % 4 < 1) ? A : BO;
+      if (md > 0.92) return C.ink;
+      if (md > 0.84) return C.motif;
+      if (md > 0.78) return C.ink;
+      const inner = Math.abs(fx) / 9 + Math.abs(fy) / 13;
+      if (inner < 1) {
+        // eight-point star
+        const star = Math.min(Math.abs(fx) + Math.abs(fy) * 0.7, Math.max(Math.abs(fx), Math.abs(fy) * 0.7) * 1.3);
+        if (star < 3) return C.accent;
+        if (star < 5) return C.ink;
+        return inner > 0.85 ? C.ink : C.motif;
+      }
+      return (Math.abs(fx) + Math.abs(fy)) % 6 < 1 ? C.accent : C.border;
     }
-    const mx = (x - 10) % 9, my = (y - 12) % 11;
-    if ((mx === 4 && my >= 3 && my <= 7) || (my === 5 && mx >= 2 && mx <= 6)) return M;
-    return (Math.floor(y / 2) + Math.floor(x / 3)) % 7 === 0 ? F2 : F;
+    // corner spandrels (quarter medallions)
+    const sx = Math.abs(fx) - (W / 2 - 18), sy = Math.abs(fy) - (Hh / 2 - 22);
+    if (sx > 0 && sy > 0) { const q = (W / 2 - 18 + 18 - Math.abs(fx)) / 18 + (Hh / 2 - 22 + 18 - Math.abs(fy)) / 18; void q; }
+    const cxs = (W / 2 - 18) - Math.abs(fx), cys = (Hh / 2 - 22) - Math.abs(fy);
+    if (cxs < 0 && cys < 0) { const r = -cxs - cys; if (r < 3) return C.ink; return r % 4 < 2 ? C.border : C.motif; }
+    // lattice field: small diamonds with dot centres
+    const lx = ((x - 18) % 10 + 10) % 10, ly = ((y - 22) % 12 + 12) % 12;
+    const dd = Math.abs(lx - 5) + Math.abs(ly - 6);
+    if (dd === 4) return C.motif;
+    if (dd === 0) return C.accent;
+    if (dd === 1) return C.ink;
+    return (Math.floor(y / 3) + Math.floor(x / 4)) % 9 === 0 ? C.field2 : C.field;
   });
   return p;
 }

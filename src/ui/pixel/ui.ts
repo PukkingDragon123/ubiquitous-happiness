@@ -123,8 +123,15 @@ export class PixelUI {
   private overNext = false;
   /** a press that began over the UI (so a drag that leaves a panel doesn't leak into the world) */
   private pressOnUI = false;
+  /** a widget already took this frame's press */
+  private claimed = false;
+  /** every interactive widget's rect drawn last frame, by id (for tests / tutorials) */
+  rects = new Map<string, [number, number, number, number]>();
+  private rectsNext = new Map<string, [number, number, number, number]>();
   cursor: CursorName = 'arrow';
   drawCursor = false;
+  private lastSeenT = -9;
+  private cursorVisible = true;
   private tips: (() => void)[] = [];
   private lists = new Map<string, ListState>();
   private lastHot: string | null = null;
@@ -191,13 +198,19 @@ export class PixelUI {
     this.ctx.clearRect(0, 0, this.w, this.h);
     this.hot = this.hotNext; this.hotNext = null;
     this.overUI = this.overNext; this.overNext = false;
+    this.claimed = false;
+    this.rects = this.rectsNext; this.rectsNext = new Map();
     this.tips = [];
     if (input) {
       const m = input.mouse;
       let p: [number, number] | null;
       if (map) p = map(m.x, m.y);
       else { const pr = this.pr; p = [Math.floor((m.x * pr) / this.scale), Math.floor((m.y * pr) / this.scale)]; }
-      this.inside = !!p && m.inside;
+      // don't trust mouse.inside for hit tests: in an iframe (claude.ai artifacts) document mouseenter/leave
+      // can be missed, which would make every button dead. Any move or press means the pointer is here.
+      if (m.moved || input.pressed.has('Mouse0')) this.lastSeenT = this.t;
+      this.inside = !!p;
+      this.cursorVisible = m.inside || this.t - this.lastSeenT < 2;
       this.mx = p ? p[0] : -999; this.my = p ? p[1] : -999;
       this.down = input.down.has('Mouse0'); this.pressed = input.pressed.has('Mouse0'); this.released = input.released.has('Mouse0');
       this.rdown = input.down.has('Mouse2'); this.rpressed = input.pressed.has('Mouse2');
@@ -211,7 +224,7 @@ export class PixelUI {
   /** finish a frame: tooltips, cursor, upload */
   end() {
     for (const t of this.tips) t();
-    if (this.drawCursor && this.inside) {
+    if (this.drawCursor && this.inside && this.cursorVisible) {
       const c = cursorArt(this.cursor);
       this.ctx.drawImage(c.cv, this.mx - c.hx, this.my - c.hy);
     }
@@ -223,6 +236,8 @@ export class PixelUI {
 
   /** true while a world drag that started over the UI is held */
   get uiOwnsDrag() { return this.down && this.pressOnUI; }
+  /** the mouse is over UI drawn last frame or so far this frame (call after drawing, before world input) */
+  get mouseOnUI() { return this.overUI || this.overNext || this.claimed; }
 
   // ---------------------------------------------------------------- primitives
   fill(x: number, y: number, w: number, h: number, col: string, alpha = 1) {
@@ -271,6 +286,8 @@ export class PixelUI {
 
   // ---------------------------------------------------------------- interaction
   hover(x: number, y: number, w: number, h: number) { return this.inside && this.mx >= x && this.my >= y && this.mx < x + w && this.my < y + h; }
+  /** register a custom clickable region's rect under an id (see `rects`) */
+  mark(id: string, x: number, y: number, w: number, h: number) { this.rectsNext.set(id, [x, y, w, h]); }
   /** mark a region as UI (swallows the mouse) */
   block(x: number, y: number, w: number, h: number) { if (this.hover(x, y, w, h)) this.overNext = true; }
   panel(kind: SkinKind, x: number, y: number, w: number, h: number, title?: string, o: { titleStyle?: TextOpts; alpha?: number } = {}) {
@@ -293,9 +310,11 @@ export class PixelUI {
 
   private interact(id: string, x: number, y: number, w: number, h: number, disabled = false) {
     const over = this.hover(x, y, w, h);
+    this.rectsNext.set(id, [x, y, w, h]);
     if (over) { this.overNext = true; if (!disabled && (!this.active || this.active === id)) this.hotNext = id; }
     if (disabled) return { over, held: false, clicked: false };
-    if (over && this.pressed && this.hot === id) this.active = id;
+    // claim the press on the frame it happens (works for taps / instant clicks with no hover frame first)
+    if (over && this.pressed && !this.claimed) { this.active = id; this.claimed = true; }
     const held = this.active === id && this.down;
     const clicked = this.active === id && this.released && over;
     if (over && !disabled) this.cursor = 'point';
@@ -519,8 +538,9 @@ export class PixelUI {
       const i = r * cols + c; if (i >= n) break;
       const rx = x + c * cw, ry = y + r * rowH - sc;
       const hov = over && this.hover(rx, Math.max(y, ry), cw, Math.min(rowH, y + h - ry)) && s.drag < 0;
+      if (ry >= y && ry + rowH <= y + h) this.rectsNext.set(id + ':' + i, [rx, ry, cw, rowH]);
       row(i, rx, ry, cw, hov);
-      if (hov) { this.cursor = 'point'; this.hotNext = id + ':' + i; if (this.pressed) this.active = id + ':' + i; if (this.released && this.active === id + ':' + i) clicked = i; }
+      if (hov) { this.cursor = 'point'; this.hotNext = id + ':' + i; if (this.pressed && !this.claimed) { this.active = id + ':' + i; this.claimed = true; } if (this.released && this.active === id + ':' + i) clicked = i; }
     }
     this.unclip();
     if (maxScroll > 0) {

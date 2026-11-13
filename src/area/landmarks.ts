@@ -16,6 +16,7 @@ import { Rng } from '../core/rng';
 import { fbm, hash2 } from '../core/math';
 import { FRONT_Z } from '../gfx/water/surface';
 import { additiveMaterial } from '../world/mats';
+import { heroes } from './heroes';
 
 const TAU = Math.PI * 2;
 
@@ -28,7 +29,7 @@ export function buildLandmarks(scen: Scenery, group: THREE.Group, w: World) {
     case 'arctic': arctic(scen, group, r, w); break;
     case 'abyss': abyss(scen, group, r, w); break;
   }
-  heroes(scen);
+  heroes(scen, group, w);
   dressRocks(scen);
   dressJunk(scen, w);
   foregroundFrame(scen);
@@ -132,7 +133,7 @@ function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
 function graveyard(scen: Scenery, r: Rng) {
   const sh = scen.shape;
   const kinds: WreckKind[] = ['sloop', 'trawler', 'galleon', 'steamer', 'sloop', 'galleon'];
-  const spots: [number, number][] = [[sh.X0 + 18, -14], [sh.wreckX - 26, -22], [sh.wreckX + 24, -12], [sh.X1 - 22, -28], [sh.X0 + 45, -36], [sh.X1 - 50, -40]];
+  const spots: [number, number][] = [[sh.X0 + 12, -16], [sh.wreckX + 40, -22], [sh.wreckX + 24, -12], [sh.X1 - 22, -28], [sh.X0 + 45, -36], [sh.X1 - 50, -40]];
   spots.forEach(([x, z], i) => {
     const kind = kinds[i % kinds.length];
     const parts = buildShip(kind, scen, (x * 77) | 0);
@@ -178,7 +179,7 @@ function graveyard(scen: Scenery, r: Rng) {
   }
   // a great anchor chain arcing from a buried anchor up into the gloom
   {
-    const x = sh.wreckX + r.range(-30, -16), z = -10, y = scen.heightAt(x, z);
+    const x = sh.X1 - r.range(34, 40), z = -10, y = scen.heightAt(x, z);
     const ch = new Soup(), ir = scen.props.get('iron');
     const path: V3[] = [];
     for (let q = 0; q <= 24; q++) { const t = q / 24; path.push([t * 16, Math.sin(t * Math.PI * 0.5) * (-y - 2) * 0.95 - Math.sin(t * Math.PI) * 2, -t * 6]); }
@@ -329,6 +330,7 @@ function abyss(scen: Scenery, group: THREE.Group, r: Rng, w: World) {
     s.glow(0);
     scen.chunk(x).prop.append(s, mat4(x, y, z, 1, 1, 1, r.range(0, 6)));
     vents.push({ x, y: y + H, z, h: H });
+    scen.vents.push({ x, y: y + H, z, h: H });
     scen.glowPts.push({ x, y: y + H + 0.4, z: z + 0.8, col: '#ff9040' });
     // tube worms crowd the warm base
     for (let k = 0; k < 4; k++) placeFloraAt(scen, 'tubeworms', x + r.range(-1.2, 1.2), scen.heightAt(x, z) - 0.05, z + r.range(-0.8, 0.8), r.range(0.9, 1.4));
@@ -444,30 +446,5 @@ export function foregroundFrame(scen: Scenery) {
     if (scen.isReserved(x, 2, 0.5)) continue;
     const z = r.range(2.2, 2.85), R = r.range(0.8, 1.6);
     scen.addRock(r.pick(scen.shapes('boulder')), x, scen.heightAt(x, z) - R * 0.5, z, R * 1.3, R, R * 0.6, r.range(0, 6), { tint: 0.32, topK: 0.4 });
-  }
-}
-
-/** the heroes: reef brain-coral arch + toppled statue, arctic ice cave */
-export function heroes(scen: Scenery) {
-  const r = new Rng(scen.seed ^ 0x4e40), sh = scen.shape;
-  if (scen.a.id === 'reef') {
-    // a giant brain coral grown into an arch
-    const x = sh.wreckX + 22, z = -5, y = scen.heightAt(x, z);
-    const brainUV = scen.flora.atlas.regions.get('brain0') ?? scen.props.get('rock');
-    scen.chunk(x).flora.append(arch(scen.seed + 99, { lintel: 0.32, foot: 1.3 }), mat4(x, y - 0.5, z, 4.5, 5.5, 3.2, 0.15), { uv: brainUV });
-    // a toppled statue: a stone torso and a great head lying in the sand, crusted with coral
-    const sx = sh.wreckX - 24, sz = -4, sy = scen.heightAt(sx, sz);
-    const s = new Soup(), stone = scen.props.get('rock');
-    s.lathe([[0.9, 0], [1.1, 1.2], [1.25, 2.2], [0.9, 2.7], [0.4, 2.9]], 8, stone);
-    s.tube([[1.1, 2.3, 0], [1.9, 1.4, 0.4], [2.2, 0.6, 0.6]], (t) => 0.35 * (1 - t * 0.3), 6, stone, { tip: true });
-    const h = s.count; s.lathe([[0.55, 0], [0.75, 0.4], [0.8, 1.0], [0.62, 1.5], [0, 1.65]], 8, stone); s.transformSince(h, mat4(-1.8, 0.1, 0.8, 1, 1, 1, 0.4, 0, 1.5));
-    s.box([-2.65, 0.5, 0.7], [0.25, 0.35, 0.5], stone);
-    scen.chunk(sx).prop.append(s, mat4(sx, sy - 0.4, sz, 1, 1, 1, 0.3, 0.1, -1.35));
-    for (let k = 0; k < 10; k++) scen.placePlant(r.pick(['staghorn', 'brain', 'seafan', 'tubesponge']), sx + r.range(-2.5, 2.5), sy + r.range(0.3, 1.4), sz + r.range(-0.8, 0.8), r.range(0.7, 1.1));
-  }
-  if (scen.a.id === 'arctic') {
-    // an ice cave: a great glowing arch of blue ice
-    const x = sh.wreckX - 26, z = -6, y = scen.heightAt(x, z);
-    scen.chunk(x).prop.append(arch(scen.seed + 7, { lintel: 0.28, foot: 1.2 }), mat4(x, y - 0.5, z, 6, Math.min(7, -y - 2.5), 3.5, 0.1), { uv: scen.props.get('ice'), glow: 0.45 });
   }
 }

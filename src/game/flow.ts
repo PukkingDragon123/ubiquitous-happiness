@@ -1,6 +1,10 @@
-// v2 flow: HIDEOUT (hub + main menu) -> RUN (three areas of wave defense) -> back to the HIDEOUT with a result card.
+// v2 flow: (first boot: the INTRO prologue + tutorial ->) HIDEOUT (hub + main menu) -> RUN (three areas of wave
+// defense) -> back to the HIDEOUT with a result card.
 //
-//   setupFlow(game); game.go('hideout');
+//   setupFlow(game); game.go(wantsIntro() ? 'intro' : 'hideout');
+//
+// The intro (src/story/intro.ts) ends in the hideout with the 'welcome' modal (the cosy reveal); the TV's PROLOGUE
+// entry replays it.
 //
 // The hideout's TV starts a run (onEnterRun(cfg) after the gear-up cinematic) or resumes META.activeRun
 // (onResume). The run screen calls onEnd(result) when it is lost / won (META already updated) or onQuit() from
@@ -16,6 +20,8 @@ import { MASTERY } from '../hideout/mastery';
 import { ITEMS } from './items';
 import { audio } from '../audio/audio';
 import { POST } from '../gfx/post';
+import { IntroScreen } from '../story/intro';
+import { WelcomeHome } from '../story/welcome';
 
 /**
  * apply META.settings (written by the hideout TV's settings page): audio volumes and the motion blur strength.
@@ -35,7 +41,14 @@ export function syncLowQuality() {
   try { localStorage.setItem('blobfish.lq', META.settings.lowQuality ? '1' : '0'); } catch { /* storage blocked */ }
 }
 
-export interface Flow { hideout: HideoutScreen; run: RunScreen; startRun(cfg: RunConfig): void; resume(): boolean }
+/** first boot (or ?intro=1): play the prologue before the hideout */
+export function wantsIntro() {
+  const q = new URLSearchParams(location.search).get('intro');
+  if (q !== null) return q !== '0';
+  return !META.introDone;
+}
+
+export interface Flow { hideout: HideoutScreen; run: RunScreen; intro: IntroScreen; startRun(cfg: RunConfig): void; resume(): boolean }
 
 export function setupFlow(game: Game): Flow {
   const run = new RunScreen(game);
@@ -50,7 +63,14 @@ export function setupFlow(game: Game): Flow {
     game.go('run', { resume: s });
     return true;
   };
-  const hideout = new HideoutScreen(game, { onEnterRun: startRun, onResume: () => { resume(); } });
+  const intro = new IntroScreen(game);
+  const hideout = new HideoutScreen(game, { onEnterRun: startRun, onResume: () => { resume(); }, onPrologue: () => game.go('intro', {}) });
+  // the prologue ends at home: the welcome card is the cosy reveal (not after a skip)
+  intro.onDone = (skipped) => {
+    META.introDone = true; saveMeta();
+    game.go('hideout', {});
+    if (!skipped) game.openModal('welcome');
+  };
   // the TV settings take effect when you leave the hideout (and at boot)
   const hideoutExit = hideout.exit.bind(hideout);
   hideout.exit = () => { hideoutExit(); applySettings(); };
@@ -59,10 +79,12 @@ export function setupFlow(game: Game): Flow {
   game.register(hideout);
   game.register(run);
   game.register(card);
+  game.register(intro);
+  game.register(new WelcomeHome(game, hideout));
   if (!game.get('backpack')) game.register(new BackpackScreen(game));
   run.onEnd = (r) => { game.go('hideout', {}); game.openModal('result', r); };
   run.onQuit = () => { game.go('hideout', {}); };
-  const flow = { hideout, run, startRun, resume };
+  const flow = { hideout, run, intro, startRun, resume };
   Object.assign(window, { flow, META }); // console handles for testing
   return flow;
 }

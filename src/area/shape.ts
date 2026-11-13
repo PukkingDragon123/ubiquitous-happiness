@@ -13,6 +13,8 @@ export interface Shape {
   back(x: number, z: number): number;
   /** reserved x positions (wreck, buoy, spawn) */
   wreckX: number; buoyX: number; spawnX: number;
+  /** hero set pieces: the kelp light hall's aisle, the graveyard's broken galleon */
+  hallX: number; galleonX: number;
 }
 
 export const SEAM_Z = -3.8;
@@ -22,6 +24,7 @@ export function makeShape(a: AreaDef, seed: number): Shape {
   const wreckX = (seed % 7) - 3;          // near the middle
   const buoyX = X1 - 26 - (seed % 5);     // toward the right end
   const spawnX = X0 + 18;
+  const hallX = wreckX + 27, galleonX = wreckX - 36;
   const edge = (x: number) => {
     // the area ends in rising cliffs (the camera clamps before them)
     const e = Math.max(0, Math.abs(x) - (W / 2 - 14)) / 14;
@@ -69,5 +72,5 @@ export function makeShape(a: AreaDef, seed: number): Shape {
     if (h > cap - 2) h = cap - 2 * Math.exp(-(h - (cap - 2)) / 2);
     return h;
   };
-  return { X0, X1, bed, sand0, back, wreckX, buoyX, spawnX };
+  return { X0, X1, bed, sand0, back, wreckX, buoyX, spawnX, hallX, galleonX };
 }

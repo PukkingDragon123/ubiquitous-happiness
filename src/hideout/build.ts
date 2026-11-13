@@ -295,6 +295,7 @@ export class BuildMode {
     const hov = ui.hover(x, y, w, h);
     const lift = hov && unlocked ? -2 : 0;
     ui.block(x, y, w, h);
+    ui.mark('card:' + bp.id, x, y, w, h);
     if (hov) { this.hoverCard = bp.id; ui.cursor = unlocked ? 'point' : 'arrow'; }
     ui.frame(sel ? 'cardSel' : 'card', x, y + lift, w, h);
     // pinned corner tape

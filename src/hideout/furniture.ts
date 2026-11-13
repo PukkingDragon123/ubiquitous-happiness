@@ -3,7 +3,7 @@
 // walk from the door to every core piece), hands the warm light pool to lamps, and finds walking paths (A*).
 import * as THREE from 'three';
 import { META, saveMeta, type Placement } from '../meta/meta';
-import { BLUEPRINTS, GRID_W, GRID_D, DOOR_CELLS, footprint, cellsOf, placementCentre, type Blueprint } from './blueprints';
+import { BLUEPRINTS, GRID_W, GRID_D, DOOR_CELLS, FIXED_CELLS, footprint, cellsOf, placementCentre, type Blueprint } from './blueprints';
 import { buildProp, type Prop } from './models';
 import type { Room } from './room';
 import { damp } from '../core/math';
@@ -149,6 +149,7 @@ export class Furniture {
     const layer = bp.floor ? occ.floor : occ.obj;
     for (const [cx, cz] of cells) if (layer[idx(cx, cz)]) return fail('Something is in the way');
     if (!bp.floor) for (const [cx, cz] of cells) if (DOOR_CELLS.some(([a, b]) => a === cx && b === cz)) return fail('Keep the door clear');
+    for (const [cx, cz] of cells) if (FIXED_CELLS.some(([a, b]) => a === cx && b === cz)) return fail('The vent stove lives there');
     if (bp.wall) {
       const backOk = rot === 0 ? z === 0 : rot === 1 ? x === 0 : rot === 2 ? z + d === GRID_D : x + w === GRID_W;
       if (!backOk) return fail('Must back onto a wall (R to turn)');
@@ -158,6 +159,7 @@ export class Furniture {
     if (!bp.floor) {
       const block = new Uint8Array(GRID_W * GRID_D);
       for (let i = 0; i < block.length; i++) block[i] = occ.obj[i] ? 1 : 0;
+      for (const [fx, fz] of FIXED_CELLS) block[idx(fx, fz)] = 1;
       for (const [cx, cz] of cells) block[idx(cx, cz)] = 1;
       const reach = flood(block, DOOR_CELLS[0]);
       const targets = META.built.filter((p) => p.uid !== skipUid && BLUEPRINTS[p.bp]?.core).map((p) => ({ bp: p.bp, x: p.x, z: p.z, rot: p.rot }));
@@ -175,6 +177,7 @@ export class Furniture {
     const occ = this.occupancy();
     const block = new Uint8Array(GRID_W * GRID_D);
     for (let i = 0; i < block.length; i++) block[i] = occ.obj[i] ? 1 : 0;
+    for (const [fx, fz] of FIXED_CELLS) block[idx(fx, fz)] = 1;
     const toCell = (v: THREE.Vector3): [number, number] => [Math.max(0, Math.min(GRID_W - 1, Math.floor(v.x + GRID_W / 2))), Math.max(0, Math.min(GRID_D - 1, Math.floor(v.z + GRID_D / 2)))];
     const s = toCell(a), e = toCell(b);
     block[idx(s[0], s[1])] = 0; block[idx(e[0], e[1])] = 0;

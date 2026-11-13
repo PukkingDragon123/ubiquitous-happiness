@@ -24,6 +24,7 @@ import { Shipwreck } from './wreck';
 import { MailBuoy } from './manatee';
 import { placeNodes, ResourceNode } from './nodes';
 import { Ecosystem } from './eco';
+import { Detail } from './detail';
 import { damp } from '../core/math';
 
 export { AREAS, AREA_IDS } from './defs';
@@ -75,6 +76,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
   const shipwreck = new Shipwreck(a, scen, shape.wreckX, world);
   const mailbox = new MailBuoy(a, scen, shape.buoyX, world);
   const nodes = placeNodes(a, scen, world, seed);
+  const detail = new Detail(scen, world, seed);
   scen.finish();
   world.add(shipwreck);
   world.add(mailbox);
@@ -90,6 +92,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
   world.add(plantField);
   scen.sim.onCut = (x, y) => { world.fx.burst('bubble', x, y, 4, 1); world.fx.debrisBurst(x, y, 4, '#8a7224', 1.5, 0.04); world.sfx('sw_swish1', x, 0.4, 1.4); };
   group.add(eco.group);
+  group.add(detail.group);
   const snow = new MarineSnow(a.snow, a.snowCol);
   group.add(snow.points);
   snow.setScale(world.game.h * Math.min(devicePixelRatio || 1, 1.5), world.camera.fov);
@@ -112,6 +115,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
   ];
   let t = 0, blastAge = 99;
   const glowLamps: LampHandle[] = [];
+  const near: { x: number; y: number; z: number; col: string; k: number; d: number }[] = [];
   const impact = (x: number, y: number, r = 1.5, k = 1) => {
     sand.impact(x, y, r, k);
     ENV.uBlast.value.set(x, y, 0, Math.min(1.5, k));
@@ -119,6 +123,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
     blastAge = 0;
     for (const n of nodes) if (n.alive && Math.abs(n.x - x) < r + 1.5) n.shake(k);
     eco.scare(x, y, r * 3);
+    detail.scare(x, y, r * 3);
   };
   // anything that emits an explosion digs the sand
   const onBoom = (d: Record<string, unknown>) => { if (typeof d.x === 'number' && typeof d.y === 'number') impact(d.x, d.y, (d.r as number) ?? 1.6, (d.k as number) ?? 1); };
@@ -153,19 +158,24 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       }
       for (; k < pu.length; k++) pu[k].set(0, -999, 0, 0);
       scen.sim.update(dt, world, cameraX);
+      scen.update(dt, cameraX, t);
+      eco.update(dt, cameraX);
+      detail.update(dt, cameraX);
       if (glowLamps.length) {
-        const near = scen.glowPts.filter((g) => Math.abs(g.x - cameraX) < 11).sort((a, b) => Math.abs(a.x - cameraX) - Math.abs(b.x - cameraX));
+        // pooled point lights on the glow sources nearest the camera: static (vents, lanterns) and moving (lures)
+        near.length = 0;
+        for (const g of scen.glowPts) if (Math.abs(g.x - cameraX) < 11) near.push({ x: g.x, y: g.y, z: g.z, col: g.col, k: 1, d: Math.abs(g.x - cameraX) });
+        for (const g of scen.glowDyn) near.push({ x: g.x, y: g.y, z: g.z, col: g.col, k: g.k, d: Math.abs(g.x - cameraX) + 1.5 });
+        near.sort((a, b) => a.d - b.d);
         glowLamps.forEach((l, i) => {
           const g = near[i];
           if (!g) { l.light.intensity = 0; return; }
           l.set(g.x, g.y, g.z);
           l.light.color.set(g.col);
-          l.light.intensity = 4.5 * (0.8 + 0.2 * Math.sin(t * 1.7 + i * 2));
-          l.light.distance = 7;
+          l.light.intensity = 4.5 * g.k * (0.8 + 0.2 * Math.sin(t * 1.7 + i * 2));
+          l.light.distance = g.k < 1 ? 5 : 7;
         });
       }
-      scen.update(dt, cameraX, t);
-      eco.update(dt, cameraX);
       snow.update(cameraX, p.y, t);
     },
     impact,
@@ -174,7 +184,9 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       // bioluminescence: pooled point lights hang on the glow sources nearest the camera
       for (const l of glowLamps) l.release();
       glowLamps.length = 0;
-      if (rig && scen.glowPts.length) for (let i = 0; i < 3; i++) { const l = rig.lamp(0, -999, 0, '#5af0ff', 0, 7); if (l) glowLamps.push(l); }
+      // dark areas get three; elsewhere a single lamp for the odd lantern or glowing landmark (keeps slots free for flashes)
+      const nLamps = a.glow ? 3 : scen.glowPts.length ? 1 : 0;
+      if (rig) for (let i = 0; i < nLamps; i++) { const l = rig.lamp(0, -999, 0, '#5af0ff', 0, 7); if (l) glowLamps.push(l); }
     },
     dispose() {
       for (const [ev, fn] of [['explosion', onBoom], ['kill', onKill]] as const) {
@@ -182,6 +194,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       }
       for (const l of glowLamps) l.release();
       eco.dispose();
+      detail.dispose();
       for (const n of nodes) n.alive = false;
       shipwreck.alive = false; mailbox.alive = false; plantField.alive = false;
       scen.sim.dispose();

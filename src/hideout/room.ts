@@ -9,6 +9,7 @@ import { MAT, TEX } from './tex';
 import { Kit } from './kit';
 import { oceanFog } from './ocean';
 import { GRID_W, GRID_D } from './blueprints';
+import { MOUNTS } from './decor';
 import { fbm, hash2, damp, clamp01 } from '../core/math';
 import { Px } from '../gfx/px';
 
@@ -185,6 +186,8 @@ export class Room {
   private fairy: { m: THREE.Mesh; ph: number }[] = [];
   floor: THREE.Mesh;
   outerHatch!: THREE.Group;
+  /** the wall segment a world point belongs to (decor rides it) */
+  wallFor: (p: THREE.Vector3) => WallSide = () => this.walls[0];
   grid: THREE.Mesh;
   gridMat: THREE.MeshBasicMaterial;
   private t = 0;
@@ -205,7 +208,7 @@ export class Room {
       [0, HALF_D + 0.9, GRID_W + 3.6, true, -1, [0, 1]],    // 2 front left (+z)
       [HALF_W + 0.9, 0, GRID_D + 3.6, false, -1, [1, 0]],   // 3 front right (+x)
     ];
-    const carve = [{ p: DOOR, r: 1.05 }, { p: PORTHOLE, r: 0.8 }];
+    const carve = [{ p: DOOR, r: 1.05 }, { p: PORTHOLE, r: 0.8 }, ...MOUNTS];
     const wallMat = MAT.rock();
     const SEG = 3;
     sides.forEach(([cx, cz, len, ax, inw, nrm], si) => {
@@ -229,6 +232,7 @@ export class Room {
       return this.walls[side * SEG + k];
     };
     const segAt = (p: THREE.Vector3) => segOf(p.x, p.z);
+    this.wallFor = segAt;
     // the outcrop outside: boulders piled against the walls (they sink with their wall)
     const outM = oceanFog(retro(new THREE.MeshStandardMaterial({ map: TEX.rockOut(), roughness: 0.95, flatShading: true })), 1);
     for (let i = 0; i < 24; i++) {
@@ -304,15 +308,6 @@ export class Room {
     glass.position.z = 0.06;
     port.add(glass);
     segAt(PORTHOLE).group.add(port);
-    // a plank shelf with bottles and a shell on the -x wall
-    const ks = new Kit();
-    ks.box(MAT.wood('drift'), 1.6, 0.06, 0.3, 0, 0, 0);
-    for (const sx of [-0.6, 0.6]) ks.box(MAT.metal('grey'), 0.04, 0.2, 0.25, sx, -0.12, -0.02);
-    const bottleCols = ['#2a6a3a', '#6a3a1a', '#3a5a8a', '#2a6a3a'];
-    for (let i = 0; i < 4; i++) ks.lathe(MAT.plain(`${bottleCols[i]}/0.15/0.1`), [[0.001, 0], [0.06, 0], [0.06, 0.14], [0.025, 0.2], [0.02, 0.26], [0.001, 0.26]], -0.6 + i * 0.16, 0.03, 0, { seg: 7 });
-    ks.lathe(MAT.plain('#e8d8c0/0.5'), [[0.001, 0], [0.09, 0.02], [0.07, 0.08], [0.02, 0.15], [0.001, 0.16]], 0.45, 0.03, 0, { seg: 7, rz: 1.2 });
-    const shelf = ks.build(); shelf.position.set(-HALF_W + 0.22, 1.75, -2); shelf.rotation.y = Math.PI / 2;
-    segOf(-HALF_W, -2).group.add(shelf);
     // stalactites under the overhangs (every wall)
     const sts = this.walls.map(() => new Kit());
     for (let i = 0; i < 44; i++) {

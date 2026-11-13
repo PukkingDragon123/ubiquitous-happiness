@@ -21,6 +21,7 @@ function seed(rich: boolean) {
     { id: 'n2', name: 'Big Marge Okonkwo', title: 'Harpoon Queen', arch: 'spearfisher', level: 1, scars: ['bandage'], memories: ['got away with your pearls'], kills: 1, defeats: 0, seed: 8, alive: true },
   ];
   META.lastConfig = { mastery: 1, startArea: 'kelp', loadout: META.stash.slice(0, 4).map((s) => s.uid) };
+  if (new URLSearchParams(location.search).get('resume') === '1') META.activeRun = { stub: true } as unknown as typeof META.activeRun;
   saveMeta();
 }
 

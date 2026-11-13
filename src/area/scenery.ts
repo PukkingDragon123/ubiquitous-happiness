@@ -60,6 +60,10 @@ export class Scenery {
   rockTops: { x: number; y: number; z: number; r: number }[] = [];
   /** bioluminescent sources near the play plane (the area hangs pooled point lights on the nearest) */
   glowPts: { x: number; y: number; z: number; col: string }[] = [];
+  /** moving light sources (lantern-fish lures...): refreshed every frame by their owners, k = brightness */
+  glowDyn: { x: number; y: number; z: number; col: string; k: number }[] = [];
+  /** hydrothermal vents (abyss): chimney mouth position and height */
+  vents: { x: number; y: number; z: number; h: number }[] = [];
 
   constructor(public a: AreaDef, public shape: Shape, public sand: SandField, public terrain: AreaTerrain, public seed: number) {
     this.rng = new Rng(seed ^ 0x5eed);
@@ -89,6 +93,9 @@ export class Scenery {
     this.sim = new PlantSim(this.mats.flora, this.simR);
     this.group.add(this.sim.mesh);
     this.reserved.push({ x: shape.wreckX, r: 10, z0: -9, z1: 0.2 }, { x: shape.buoyX, r: 3, z0: -3, z1: 3 }, { x: shape.spawnX, r: 4, z0: -1.5, z1: 3 });
+    // hero set pieces keep their ground clear (src/area/heroes.ts)
+    if (a.id === 'kelp') this.reserved.push({ x: shape.hallX, r: 5.2, z0: -16, z1: -1.3 });
+    if (a.id === 'graveyard') this.reserved.push({ x: shape.galleonX + 1, r: 14, z0: -15, z1: -3.2 });
   }
 
   chunk(x: number): Chunk {
