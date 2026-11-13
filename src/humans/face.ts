@@ -9,7 +9,7 @@
 // Expressions blend smoothly (all scalars are springs), with automatic blinking and saccades.
 import * as THREE from 'three';
 import type { V3 } from '../gfx/loft';
-import { Loft, usFor } from '../gfx/loft';
+import { Loft } from '../gfx/loft';
 import { Px, mix, shade } from '../gfx/px';
 import type { RGB } from '../gfx/px';
 import type { HeadShape } from './head';
@@ -213,7 +213,6 @@ export class FaceRig {
   name: ExprName = 'neutral';
   private dazed = 0;
   private hs: number;
-  private browSpan: number;
 
   constructor(S: HeadShape, mat: THREE.Material, private onRed: (k: number) => void) {
     const L = S.L, F = S.F;
@@ -242,7 +241,6 @@ export class FaceRig {
       this.eyes.push({ pivot, ball, up, lo, side, hidden, yaw0: ball.rotation.y });
     }
     // brows: a flattened tapering tube along the brow ridge, its own pivot so it lifts / tilts / knits
-    this.browSpan = 0;
     for (const side of [1, -1]) {
       const B = new Loft(false);
       const a0 = side * (F.eyeA - 13), a1 = side * (F.eyeA + 15);
@@ -277,7 +275,6 @@ export class FaceRig {
       obj.position.set(midL[0], midL[1], midL[2]);
       this.group.add(obj);
       this.brows.push({ obj, base: obj.position.clone(), side });
-      this.browSpan = Math.abs(midL[0]);
     }
     // mouth decal hugging the muzzle
     {
@@ -373,7 +370,6 @@ export class FaceRig {
       b.obj.position.z += (Math.max(0, -s.browY) * 0.004 + s.knit * 0.002 + Math.abs(s.browT) * 0.002) * hs;
       b.obj.rotation.set(0, 0, b.side * (s.browT * 0.38), 'XYZ');
     }
-    void this.browSpan;
   }
 }
 
@@ -382,7 +378,7 @@ function lidGeo(r: number, side: number): THREE.BufferGeometry {
   const B = new Loft(false);
   const nA = 12, rings: { pts: V3[]; v: number }[] = [];
   const lat = [0.3, 0.6, 0.85, 1, 1.06];
-  for (const [i, l] of lat.entries()) {
+  for (const l of lat) {
     const b = Math.min(1, l) * Math.PI / 2;
     const rr = l > 1 ? r * 0.92 : r;
     const pts: V3[] = [];
@@ -393,9 +389,7 @@ function lidGeo(r: number, side: number): THREE.BufferGeometry {
     }
     // v = 1 at the rim (the painted lash line), 0 at the hinge pole
     rings.push({ pts, v: (l / 1.06) * 0.98 });
-    void i;
   }
-  void usFor;
   B.loft(rings, Array.from({ length: nA + 1 }, (_, j) => j / nA), R('LIDS'), 1, { start: [0, r * side, 0], startV: 0 });
   const g = B.build();
   return g;

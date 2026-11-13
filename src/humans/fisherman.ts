@@ -128,7 +128,8 @@ export class Fisherman {
   get height() { return this.dims.rest.head[1] + 0.23 * this.dims.hs; }
   /** Gaff's harpoon muzzle (world) or null */
   harpoonTip(out: THREE.Vector3): THREE.Vector3 | null { const t = this.model.gear.harpoonTip; if (!t) return null; t.updateWorldMatrix(true, false); return out.setFromMatrixPosition(t.matrixWorld); }
-  dispose() { this.group.removeFromParent(); }
+  /** detach and free the per-instance material (shared geometry / textures stay cached for reuse) */
+  dispose() { this.group.removeFromParent(); this.model.mat.dispose(); }
 
   // ---------------------------------------------------------------- frame
   update(dt: number) {
@@ -191,7 +192,9 @@ export class Fisherman {
     const lw = a[CH.LOOKW];
     add('neck', this.lookPitch * 0.35 * lw, this.lookYaw * 0.4 * lw); add('head', this.lookPitch * 0.45 * lw, this.lookYaw * 0.5 * lw);
     // body yaw toward the water (more side-on for big efforts)
-    const wantYaw = -0.74 - (this.state === 'cast' || this.state === 'struggle' || this.state === 'yank' ? 0.12 : 0) + (this.state === 'cheer' || this.state === 'angry' || this.state === 'surprised' || this.state === 'snapFall' ? 0.42 : 0);
+    let wantYaw = -0.74 - (this.state === 'cast' || this.state === 'struggle' || this.state === 'yank' ? 0.12 : 0) + (this.state === 'cheer' || this.state === 'angry' || this.state === 'surprised' || this.state === 'snapFall' ? 0.42 : 0);
+    // in a kayak the legs run along the hull: sit side-on and twist the chest / head back toward the viewer
+    if (this.seating === 'kayak') { const k = this.seatK; wantYaw = wantYaw * (1 - k) - 1.35 * k; add('spine', 0, 0.22 * k); add('chest', 0, 0.3 * k); add('neck', 0, 0.2 * k); add('head', 0, 0.25 * k); }
     this.bodyYaw += (wantYaw - this.bodyYaw) * (1 - Math.exp(-dt * 5));
     this.yawNode.rotation.y = this.bodyYaw;
 
@@ -273,7 +276,8 @@ export class Fisherman {
       const knob = rod.knobLocal(new THREE.Vector3()).applyQuaternion(qRod).add(rod.obj.position);
       const tt = clamp01(a[CH.OFFT]);
       const tgt = fore.lerp(knob, tt);
-      const ax = rodDir.clone().lerp(new THREE.Vector3(-1, 0, 0).applyQuaternion(qRod), tt * 0.6).normalize();
+      // on the crank the fist closes round the knob, whose axis sticks out of the reel's side (rod -x)
+      const ax = rodDir.clone().lerp(new THREE.Vector3(-1, 0, 0).applyQuaternion(qRod), tt).normalize();
       arms('L', offW, tgt, ax);
     }
     // fingers: curl round the grip

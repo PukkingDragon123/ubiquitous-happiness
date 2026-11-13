@@ -132,7 +132,6 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     if (sh.tuck) k += gauss(y, sh.waist + 0.035, 0.022) * (0.018 + 0.012 * fold(1.7));
     else k += gauss(y, sh.topHem + 0.035, 0.03) * 0.012 * fold(0.4);
     k += gauss(y, 1.2, 0.05) * gauss(Math.abs(th), 1.25, 0.3) * 0.016 * fold(2.9);
-    if (L.top.kind === 'sweater') k += Math.sin(th * 40) * 0.004 * gauss(y, 0.89, 0.025); // ribbed hem
     return k;
   };
   const femX = (y: number) => 1 + fem * (-0.14 * gauss(y, 1.1, 0.07) - 0.08 * gauss(y, 1.33, 0.08) + 0.11 * gauss(y, 0.93, 0.05) + 0.05 * gauss(y, 0.86, 0.04));
@@ -359,7 +358,6 @@ function buildOuter(B: Loft, L: Look, d: Dims, sh: Shape, torsoSurf: (y: number,
     if (kind === 'raincoat' || kind === 'slicker') o += Math.sin(deg * 0.11 + y * 30) * 0.0025;
     // the coat hangs off the belly and chest instead of clinging under them
     if (y < 1.05) o += 0.006 * clamp01((1.05 - y) / 0.12);
-    void deg;
     return o;
   };
   // columns: the left half runs from the back seam to the left edge of the front gap, the right half from the
@@ -432,8 +430,6 @@ function buildCollar(B: Loft, L: Look, d: Dims, sh: Shape, nr: number) {
     const ry = [1.42, 1.46, 1.51, 1.56];
     const rr = ry.map((y, i) => ({ pts: ellRing(ny(y), 0, -0.004 * s, (nr + 0.034 + (i === 1 ? 0.008 : 0)) * s, (nr + 0.04) * s, (nr + 0.032) * s, 14, 2.3, 1, (th) => Math.sin(th * 5 + i) * 0.04), v: i / 3, w: [BI.neck, i < 1 ? 0.4 : 1, BI.chest, i < 1 ? 0.6 : 0] as Wt }));
     B.loft(rr, usFor(14), subR(R('EXTRA'), 0, 0.7, 0.5, 1), 9, {});
-    // hanging tail
-    B.box([0.05 * s, ny(1.33), (nr + 0.08) * s * L.build.mass], [0.07 * s, 0.22 * s, 0.02 * s], subR(R('EXTRA'), 0.5, 0.7, 0.62, 1), [BI.chest, 1], new THREE.Matrix4().makeRotationZ(0.1).multiply(new THREE.Matrix4().makeRotationX(0.25)));
   }
 }
 

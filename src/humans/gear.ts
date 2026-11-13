@@ -17,7 +17,7 @@ import { ellRing, clamp01 } from './rig';
 import type { HeadShape } from './head';
 import { R, subR } from './page';
 import { fillSub } from './paint';
-import { band, nz, hh, knitK, ribK, canvas, fur, metal, oilskin, wood, cotton } from './fabric';
+import { band, nz, hh, knitK, ribK, canvas, fur, metal, oilskin, cotton } from './fabric';
 
 export interface Gear {
   hat: THREE.Object3D | null;
@@ -401,11 +401,14 @@ function buildHat(B: Loft, L: Look, S: HeadShape) {
       B.loft(fr, HANG.filter((a) => Math.abs(a) <= 75).map((_, i, arr) => i / (arr.length - 1)), subR(reg2, 0, 0.5, 0.6, 1), 2, {});
       B.loft(fr.map((r) => ({ ...r, pts: r.pts.map((p) => [p[0] * 0.92, p[1], p[2] * 0.92] as V3) })), HANG.filter((a) => Math.abs(a) <= 75).map((_, i, arr) => i / (arr.length - 1)), subR(reg2, 0, 0.5, 0.6, 1), 3, { flip: true });
       for (const k of [1, -1]) {
-        const ang = [70, 85, 100, 115, 130].map((a) => a * k);
-        const rows = [0.13, 0.08, 0.035, 0.0];
-        const grid = rows.map((y) => ang.map((a) => sk(y, a, 0.022 + (0.13 - y) * 0.06)));
-        const nr = rows.map((y) => ang.map((a) => { const t = (a * Math.PI) / 180; return [Math.sin(t), 0, Math.cos(t)] as V3; }));
-        slab(B, grid, nr, 0.012 * hs, subR(reg2, 0.6, 0.5, 1, 1), subR(reg2, 0.6, 0, 1, 0.5), 5 + (k > 0 ? 0 : 2));
+        // a padded flap over each ear: wide at the crown, tapering to a rounded tip, a tie string hanging off it
+        const rows = [0.14, 0.1, 0.06, 0.025, 0.0, -0.012];
+        const half = [32, 31, 28, 23, 15, 6];
+        const grid = rows.map((y, i) => [-1, -0.5, 0, 0.5, 1].map((f) => sk(y, k * (100 + f * half[i]), 0.022 + (0.14 - y) * 0.07)));
+        const nr = rows.map((_, i) => [-1, -0.5, 0, 0.5, 1].map((f) => { const t = (k * (100 + f * half[i]) * Math.PI) / 180; return [Math.sin(t), 0, Math.cos(t)] as V3; }));
+        slab(B, grid, nr, 0.02 * hs, subR(reg2, 0.6, 0.5, 1, 1), subR(reg2, 0.6, 0, 1, 0.5), 5 + (k > 0 ? 0 : 2));
+        const tip = sk(-0.004, k * 100, 0.034);
+        B.tube([tip, [tip[0], tip[1] - 0.03 * hs, tip[2] + 0.01 * hs], [tip[0] - k * 0.006 * hs, tip[1] - 0.07 * hs, tip[2] + 0.004 * hs]], () => 0.0018 * hs, 4, subR(reg, 0, 0, 0.1, 0.1), 8 + (k > 0 ? 0 : 1));
       }
       // fur round the back
       const bk = [0.11, 0.135].map((y, i) => ({ pts: HANG.filter((a) => Math.abs(a) >= 120).sort((p, q) => (p < 0 ? p + 360 : p) - (q < 0 ? q + 360 : q)).map((a) => sk(y, a, 0.024 - i * 0.002)), v: i }));
@@ -475,7 +478,6 @@ function buildGlasses(B: Loft, BL: Loft, L: Look, S: HeadShape) {
 
 // ------------------------------------------------------------------ gear painting
 buildGear.paint = function (P: Px, L: Look, S: Shape) {
-  void S;
   const hc = L.hatCol, hc2 = L.hatCol2;
   switch (L.hat) {
     case 'captain': case 'captainBlack': {
@@ -570,7 +572,6 @@ buildGear.paint = function (P: Px, L: Look, S: Shape) {
   fillSub(P, 'GEAR', 0.56, 0.6, 0.66, 1, (u, v, x, y) => band([70, 46, 30], 0.9 + (hh(x, y, 7) - 0.5) * 0.15, x, y));
   fillSub(P, 'GEAR', 0.66, 0.6, 0.86, 1, (u, v, x, y) => metal([70, 72, 76], x, y, 0.8 + Math.sin(u * 9) * 0.15 + (nz(x, y, 5, 18) > 0.7 ? -0.15 : 0)));
   fillSub(P, 'GEAR', 0.86, 0.6, 1, 1, (u, v, x, y) => metal([196, 200, 206], x, y, 0.9 + v * 0.2));
-  void wood;
 };
 
 function straw(c: RGB, x: number, y: number): RGB {

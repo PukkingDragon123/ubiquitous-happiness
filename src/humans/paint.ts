@@ -118,7 +118,6 @@ function paintHead(P: Px, L: Look, S: Shape) {
     }
     // the hair on the scalp under the shells (where the shells are thin or absent)
     if (L.hair.style !== 'none' && hy > hairStart(L, deg) && !(L.hair.style === 'sides' && hy > 0.15 && a < 120)) c = hairCol(shade(L.hair.col, 0.82), L.hair.grey, x * 0.8, y * 1.0, x, y, 0.85);
-    void S;
     return c;
   });
 }
@@ -290,8 +289,6 @@ function topPx(L: Look, S: Shape, deg: number, y: number, x: number, py: number,
       const stripe = Math.floor(py / 6) % 2 === 0;
       let c = cotton(stripe ? T.col : T.col2, x, py, k, 23);
       if (part === 'torso' && deg > -30 && deg < 30) {
-        const e = fishEmblem(x, py, ((deg + 0) / 360) * 224, 0, 1) && 0;
-        void e;
         const fx = (deg / 360) * 224, fy = (y - 1.27) * 267;
         const m = fishEmblem(fx, fy, 0, 0, 13);
         if (m === 1) c = cotton(T.col3, x, py, 1, 24);
@@ -353,7 +350,6 @@ function legsPx(L: Look, S: Shape, deg: number, x: number, py: number, k = 1): R
     case 'skirt': return band(G.col, k * (1 + (nz(x, py, 10, 97) - 0.5) * 0.1), x, py, 0.06);
     default: return L.arch === 'proAngler' ? canvas(G.col, x, py, k, 98) : denim(G.col, x, py, k, 99);
   }
-  void S; void deg;
 }
 
 function paintTorso(P: Px, L: Look, S: Shape) {
@@ -393,7 +389,6 @@ function paintTorso(P: Px, L: Look, S: Shape) {
 }
 
 function paintArms(P: Px, L: Look, S: Shape) {
-  const O = L.outer;
   for (const key of ['ARM_L', 'ARM_R'] as const) {
     const mir = key === 'ARM_L' ? 1 : -1;
     fillReg(P, key, (u, v, x, y) => {
@@ -409,7 +404,6 @@ function paintArms(P: Px, L: Look, S: Shape) {
       if (L.extras.watch && key === 'ARM_L' && ay < -0.47 && ay > -0.5) {
         c = Math.abs(deg - 90) < 30 ? (Math.abs(deg - 90) < 20 ? [40, 44, 48] : metal([190, 190, 196], x, y)) : band([40, 34, 30], 1, x, y);
       }
-      void O;
       return c;
     });
   }

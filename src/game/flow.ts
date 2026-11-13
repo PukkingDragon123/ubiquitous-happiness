@@ -10,6 +10,7 @@ import { BackpackScreen } from '../backpack/backpack';
 import { PICKUP } from './pickup';
 import { EVENT_POOLS } from './events';
 import { Rng } from '../core/rng';
+import { installHumans } from './humansAdapter';
 
 const SAVE = 'blobfish.save';
 
@@ -59,6 +60,7 @@ export function setupFlow(game: Game) {
   game.register(menu); game.register(dive); game.register(map);
   game.register(new BackpackScreen(game));
 
+  installHumans();
   // item hooks for pickups, shops and chests
   PICKUP.itemName = (id) => getItem(id).name;
   PICKUP.itemVisual = (id) => itemMesh(id, 1);

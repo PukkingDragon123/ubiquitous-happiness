@@ -27,8 +27,11 @@ export interface AnglerRig {
   setTension(k: number): void;
   lookAt(x: number, y: number): void;
   setMood?(k: number): void;
+  setFacing?(dir: number): void;
+  setSeating?(k: 'stand' | 'sit' | 'kayak'): void;
+  pullToward?(x: number | null, y?: number): void;
 }
-export interface Vessel { group: THREE.Object3D; update(dt: number, water: unknown): void; seats: THREE.Object3D[]; underwaterColliders(): { x: number; y: number; r: number }[] }
+export interface Vessel { group: THREE.Object3D; update(dt: number, water: never): void; seats: THREE.Object3D[]; underwaterColliders(): { x: number; y: number; r: number }[]; setX?(x: number): void }
 export interface RigFactory { rig(arch: string, seed: number): AnglerRig; vessel(kind: string, seed: number): Vessel }
 
 /** a crude stand-in used until the humans module is wired in */
@@ -132,10 +135,11 @@ export class Angler implements Entity {
     this.resolve = this.def.resolve;
     this.vessel = factory.vessel(this.def.vessel, seed);
     this.rig = factory.rig(this.def.arch, seed);
-    this.vessel.group.position.set(x, 0, -0.4);
-    const seat = this.vessel.seats[0];
+    if (this.vessel.setX) this.vessel.setX(x); else this.vessel.group.position.set(x, 0, -0.4);
+    const seat = this.vessel.seats[Math.floor(seed % Math.max(1, this.vessel.seats.length))] ?? this.vessel.seats[0];
     (seat ?? this.vessel.group).add(this.rig.group);
-    this.rig.group.scale.x = facing;
+    if (this.rig.setFacing) { this.rig.setFacing(facing); this.rig.setSeating?.((seat?.userData.seating as 'stand' | 'sit' | 'kayak') ?? 'stand'); }
+    else this.rig.group.scale.x = facing;
     this.obj.add(this.vessel.group);
     this.sinker = buildSinker();
     this.sinker.visible = false;
@@ -154,7 +158,7 @@ export class Angler implements Entity {
   }
 
   update(dt: number, w: World) {
-    this.vessel.update(dt, w.water);
+    this.vessel.update(dt, w.water as never);
     this.rig.update(dt);
     this.obj.updateMatrixWorld(true);
     this.rig.rodTip(this.tip);
@@ -329,6 +333,8 @@ export class Angler implements Entity {
     const pull = Math.min(16, L.tensionFish * 0.55) * (1 - st.reelResist) * (p.rock > 0.5 ? 0.15 : 1);
     p.applyForce(dx / dl * pull, dy / dl * pull);
     if (p.hook) { p.hook.pullX = L.px[k]; p.hook.pullY = L.py[k]; p.hook.tension = pull; }
+    this.rig.pullToward?.(mouth.x, mouth.y);
+    this.rig.lookAt(p.x, p.y);
     // jerk: tapping space while hooked yanks back against the line
     if (p.struggleTap && !this.sys.qte.active) {
       p.sb.accel(-dx / dl * 160 * st.struggle * (1 - p.pressure * 0.5), -dy / dl * 160 * st.struggle * (1 - p.pressure * 0.5), dt);
@@ -408,6 +414,7 @@ export class Angler implements Entity {
   }
 
   private unhook(w: World, p: Blobfish) {
+    this.rig.pullToward?.(null);
     p.hooked = false; p.hook = null; p.carried = null;
     this.reelLoop?.stop(); this.dragLoop?.stop(); this.reelLoop = this.dragLoop = null;
     this.sys.qte.cancel();

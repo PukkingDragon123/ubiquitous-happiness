@@ -123,13 +123,12 @@ function rodAsset(L: Look): RodAsset {
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, sp.len / 2, 0), sp.len);
   // crank handle (a separate rigid mesh that spins about its axis)
   const CB = new Loft(false);
-  const ax = crank.axis, cr = crank.r;
+  const cr = crank.r;
   // the arm from the hub to the knob, along local +x of the crank frame; knob a fat barrel
   CB.box([cr / 2, 0, 0], [cr, 0.006, 0.004], reg('METAL'));
   const knob = [0, 0.004, 0.018, 0.024].map((d, i) => ({ pts: ellRing(0, cr, 0, 0.007 + (i === 1 || i === 2 ? 0.002 : 0), 0.007 + (i === 1 || i === 2 ? 0.002 : 0), 0.007, 8, 2, 1).map((p) => [p[0], p[2], 0.004 + d] as V3), v: i / 3 }));
   CB.loft(knob, usFor(8), reg('KNOB'), 1, { start: [cr, 0, 0.004], end: [cr, 0, 0.03] });
   const crankGeo = CB.build();
-  void ax;
   const mat = new THREE.MeshStandardMaterial({ map: paintRod(L, sp), roughness: 0.45, metalness: 0.1, vertexColors: true });
   const a: RodAsset = { geo, mat, spec: sp, boneY, crank, crankGeo };
   assets.set(key, a);

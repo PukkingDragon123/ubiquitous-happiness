@@ -12,11 +12,11 @@ import { float } from '../gfx/water/sim';
 import type { Floater } from '../gfx/water/sim';
 import type { WaterFX } from '../gfx/water/water';
 import { Rng } from '../core/rng';
-import { hex } from '../gfx/px';
+import { hex, Px as PxN } from '../gfx/px';
 import { Atlas, planks, growth, ropeCol, rubber, torus, cyl, bucket, textSampler, HULL_TEXT, HULL_TEXT_GOLD, glassMat, lampMat, spotMat, band, nz, hh, wood, metal, mix, shade } from './props';
 import type { PxRect } from './props';
 import { ellRing } from './rig';
-import { quilted, canvas as canvasFab, pvc } from './fabric';
+import { pvc } from './fabric';
 
 export type BoatKind = 'rowboat' | 'dinghy' | 'skiff' | 'trawler' | 'kayak';
 export interface Collider { x: number; y: number; r: number }
@@ -40,16 +40,22 @@ export interface Vessel {
 interface HullDef {
   L: number; hb: (t: number) => number; keel: (t: number) => number; sheer: (t: number) => number;
   p: number; q: number; thick: number; strakes: number; ns: number; nt: number;
+  /** stem rake: how far the bow's top reaches forward of its foot (m) */
+  rake?: number;
 }
 interface Sec { s: number; side: number; inner: boolean }
 /** the section loop: outer +z gunwale -> keel -> outer -z gunwale -> inner -z -> inner keel -> inner +z */
+const loops = new Map<number, Sec[]>();
 function loopOf(ns: number): Sec[] {
+  const hit = loops.get(ns);
+  if (hit) return hit;
   const out: Sec[] = [];
   for (let i = 0; i <= ns; i++) out.push({ s: 1 - i / ns, side: 1, inner: false });
   for (let i = 1; i <= ns; i++) out.push({ s: i / ns, side: -1, inner: false });
   for (let i = 0; i <= ns; i++) out.push({ s: 1 - i / ns, side: -1, inner: true });
   for (let i = 1; i <= ns; i++) out.push({ s: i / ns, side: 1, inner: true });
   out.push(out[0]);
+  loops.set(ns, out);
   return out;
 }
 function hullPt(H: HullDef, t: number, sec: Sec): V3 {
@@ -67,7 +73,10 @@ function hullPt(H: HullDef, t: number, sec: Sec): V3 {
     z = Math.max(0, z - th * Math.sin(phi));
     y += th * Math.cos(phi);
   }
-  return [-H.L / 2 + t * H.L, y, sec.side * z];
+  // a raked stem: toward the bow the upper hull reaches forward over the cutwater
+  const k = H.keel(t), sh = H.sheer(t);
+  const rk = H.rake ? H.rake * Math.pow(Math.max(0, (t - 0.72) / 0.28), 1.6) * Math.max(0, Math.min(1, (y - k) / (sh - k || 1))) : 0;
+  return [-H.L / 2 + t * H.L + rk, y, sec.side * z];
 }
 function buildHull(B: Loft, H: HullDef, reg: Reg, g: number) {
   const loop = loopOf(H.ns);
@@ -246,7 +255,7 @@ const C = (h: string): RGB => hex(h);
 function rowboat(r: Rng): Vessel {
   const L = 3.7;
   const H: HullDef = {
-    L, p: 0.85, q: 1.25, thick: 0.035, strakes: 7, ns: 10, nt: 30,
+    L, p: 0.85, q: 1.25, thick: 0.035, strakes: 7, ns: 10, nt: 30, rake: 0.3,
     hb: (t) => 0.7 * Math.pow(Math.sin(Math.min(1, t * 0.95 + 0.12) * Math.PI) , 0.55) * (t < 0.08 ? 0.82 + t * 2 : 1) * (t > 0.92 ? Math.max(0, (1 - t) / 0.08) ** 0.6 : 1),
     keel: (t) => -0.24 + 0.1 * Math.pow(Math.abs(t - 0.45) * 2, 3) + (t > 0.9 ? (t - 0.9) * 2.5 : 0),
     sheer: (t) => 0.4 + 0.22 * Math.pow(Math.max(0, t - 0.55) / 0.45, 2.2) + 0.08 * Math.pow(Math.max(0, 0.15 - t) / 0.15, 2),
@@ -342,7 +351,7 @@ function outboard(b: Boat, B: Loft, A: Atlas, x: number, top: number, size: numb
 function dinghy(r: Rng): Vessel {
   const L = 3.2;
   const H: HullDef = {
-    L, p: 0.7, q: 1.4, thick: 0.03, strakes: 0, ns: 10, nt: 26,
+    L, p: 0.7, q: 1.4, thick: 0.03, strakes: 0, ns: 10, nt: 26, rake: 0.25,
     hb: (t) => 0.72 * Math.pow(Math.sin(Math.min(1, t * 0.88 + 0.2) * Math.PI), 0.45) * (t > 0.9 ? Math.max(0, (1 - t) / 0.1) ** 0.5 : 1),
     keel: (t) => -0.2 + 0.05 * Math.abs(t - 0.4) + (t > 0.78 ? ((t - 0.78) / 0.22) ** 2 * 0.42 : 0),
     sheer: (t) => 0.36 + 0.14 * Math.pow(Math.max(0, t - 0.6) / 0.4, 2),
@@ -382,7 +391,7 @@ function dinghy(r: Rng): Vessel {
 function skiff(r: Rng): Vessel {
   const L = 4.8;
   const H: HullDef = {
-    L, p: 0.45, q: 1.7, thick: 0.035, strakes: 0, ns: 10, nt: 30,
+    L, p: 0.45, q: 1.7, thick: 0.035, strakes: 0, ns: 10, nt: 30, rake: 0.35,
     hb: (t) => 0.92 * Math.pow(Math.sin(Math.min(1, t * 0.82 + 0.3) * Math.PI), 0.4) * (t > 0.9 ? Math.max(0, (1 - t) / 0.1) ** 0.5 : 1),
     keel: (t) => -0.22 + (t > 0.7 ? ((t - 0.7) / 0.3) ** 2 * 0.55 : 0),
     sheer: (t) => 0.42 + 0.08 * Math.pow(Math.max(0, t - 0.6) / 0.4, 2),
@@ -464,8 +473,8 @@ function kayak(r: Rng): Vessel {
 function trawler(r: Rng): Vessel {
   const L = 11;
   const H: HullDef = {
-    L, p: 0.75, q: 1.35, thick: 0.08, strakes: 0, ns: 12, nt: 40,
-    hb: (t) => 1.9 * Math.pow(Math.sin(Math.min(1, t * 0.85 + 0.22) * Math.PI), 0.42) * (t > 0.88 ? Math.max(0, (1 - t) / 0.12) ** 0.5 : 1),
+    L, p: 0.75, q: 1.35, thick: 0.08, strakes: 0, ns: 12, nt: 40, rake: 1.3,
+    hb: (t) => 1.9 * Math.pow(Math.sin(Math.min(1, t * 0.85 + 0.22) * Math.PI), 0.42) * (t > 0.7 ? Math.max(0, (1 - t) / 0.3) ** 0.75 : 1),
     keel: (t) => -1.9 + (t > 0.72 ? ((t - 0.72) / 0.28) ** 2 * 1.8 : 0) + (t < 0.1 ? (0.1 - t) * 4 : 0),
     sheer: (t) => 1.25 + 0.75 * Math.pow(Math.max(0, t - 0.55) / 0.45, 2) + 0.2 * Math.pow(Math.max(0, 0.12 - t) / 0.12, 2),
   };
@@ -511,10 +520,12 @@ function trawler(r: Rng): Vessel {
   cyl(B, [mx - 0.2, cy + 2.4, 0], [-4.6, cy + 3.6, 0.1], 0.06, 0.04, A.reg(metR), 5, 8);
   B.tube([[mx, cy + 5.1, 0], [-1.5, cy + 4.3, 0.05], [-4.6, cy + 3.6, 0.1]], () => 0.012, 4, A.reg(ropeR), 6);
   B.tube([[-4.6, cy + 3.6, 0.1], [-4.75, cy + 2.6, 0.1]], () => 0.014, 4, A.reg(ropeR), 7);
+  // the net: a bag of see-through mesh hanging from the block (its own alpha-tested material), cork floats on it
+  const NB = new Loft(false);
   {
-    // the net: a bulging bag hanging from the block, dripping toward the deck
-    const rings = Array.from({ length: 7 }, (_, i) => { const t = i / 6, rr = 0.05 + Math.sin(t * Math.PI * 0.9) * 0.24; return { pts: ellRing(cy + 2.6 - t * 1.25, -4.75 + Math.sin(t * 2) * 0.06, 0.1, rr, rr * 0.8, rr * 0.8, 12, 2, 1, (th) => Math.sin(th * 5 + i) * 0.12), v: t }; });
-    B.loft(rings, usFor(12), A.reg(netR), 8, { end: [-4.72, cy + 1.25, 0.1] });
+    const rings = Array.from({ length: 8 }, (_, i) => { const t = i / 7, rr = 0.06 + Math.sin(t * Math.PI * 0.9) * 0.3; return { pts: ellRing(cy + 2.6 - t * 1.5, -4.75 + Math.sin(t * 2) * 0.06, 0.1, rr, rr * 0.85, rr * 0.85, 14, 2, 1, (th) => Math.sin(th * 5 + i) * 0.14 * t), v: t }; });
+    NB.loft(rings, usFor(14), { x: 0, y: 0, w: 1, h: 1 }, 1, { end: [-4.7, cy + 1.05, 0.1] });
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2, t = 0.35 + (i % 2) * 0.2, rr = 0.06 + Math.sin(t * Math.PI * 0.9) * 0.3; B.box([-4.75 + Math.cos(a) * rr, cy + 2.6 - t * 1.5, 0.1 + Math.sin(a) * rr * 0.85], [0.07, 0.05, 0.07], A.reg(ringR, 0, 0, 0.12, 1)); }
   }
   // stern gantry (an A-frame) and bow rail
   for (const z of [-1.4, 1.4]) cyl(B, [-5.0, H.sheer(0.05) - 0.3, z], [-4.8, H.sheer(0.05) + 2.3, z * 0.4], 0.07, 0.06, A.reg(metR), 9, 8);
@@ -538,6 +549,13 @@ function trawler(r: Rng): Vessel {
   const mat = spotMat(tex, 0.62);
   b.mesh(B, mat);
   const gm = new THREE.Mesh(glass.build(), glassMat()); b.body.add(gm);
+  {
+    const P = new PxN(64, 64);
+    P.fill((x, y) => ((x + y) % 8 === 0 || (x - y + 64) % 8 === 0 ? [120, 140, 96, 255] : (x + y) % 8 === 1 || (x - y + 64) % 8 === 1 ? [70, 84, 56, 255] : null));
+    const t = P.texture(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(4, 3);
+    const nm = new THREE.Mesh(NB.build(), new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95, emissive: 0x1a2014 }));
+    nm.castShadow = true; b.body.add(nm);
+  }
   // running lights: masthead, port / starboard, a deck flood
   const L1 = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), lampMat(0xfff1c8)); L1.position.set(mx, cy + 5.25, 0); b.body.add(L1);
   const L2 = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), lampMat(0x40ff70)); L2.position.set(cx + 1.0, cy + 2.25, 1.3); b.body.add(L2);
@@ -554,6 +572,5 @@ function trawler(r: Rng): Vessel {
   b.seat(-2.5, H.sheer(0.5) - 0.31, 0.5, 'stand', -1);
   b.seat(4.0, H.sheer(0.85) - 0.31, 0.2, 'stand', 1);
   b.seat(-1.2, H.sheer(0.5) - 0.31, 0.6, 'stand', -1);
-  void quilted; void canvasFab;
   return b;
 }

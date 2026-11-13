@@ -8,7 +8,7 @@
 import type { V3, Wt } from '../gfx/loft';
 import { Loft, usFor } from '../gfx/loft';
 import type { Dims } from './rig';
-import { BI, ellRing, gauss, vOf, clamp01 } from './rig';
+import { BI, ellRing, vOf, clamp01 } from './rig';
 import type { Look } from './looks';
 import { R, VMAP, subR } from './page';
 

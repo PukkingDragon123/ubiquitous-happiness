@@ -56,7 +56,6 @@ export class P {
 
 const sm = (t: number) => t * t * (3 - 2 * t);
 const cl = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
-const seg = (t: number, a: number, b: number) => sm(cl((t - a) / (b - a)));
 const L = (a: number, b: number, t: number) => a + (b - a) * t;
 const D = Math.PI / 180;
 

@@ -8,7 +8,8 @@
 //   [ ]                    previous / next fisherman (the camera follows)      L  toggle name labels
 //   E                      cycle expressions on the focused fisherman            F  flip his facing
 // URL: &mode=close (close camera on the focused fisherman), &i=<index>, &state=<state>, &seed=<n>, &look=1
-// (everyone watches the stand-in blobfish), &d=<camera distance>, &look=<biome look>.
+// (everyone watches the stand-in blobfish), &d=<camera distance>, &cx=<camera x>, &prof=1 (build timings),
+// &solo=kid,grandma (just those, close-up; add &expr=<name>, &t=<sec> + &hold=1 to freeze a pose, &lookcam=1).
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { MockScreen } from './mockWorld';
@@ -41,9 +42,10 @@ class HumansPreview extends MockScreen {
     const t0 = performance.now();
     if (q.get('solo')) { this.setupSolo(q.get('solo')!.split(',') as Archetype[], seed); return; }
     // spots along the shore, left to right
-    const ice = makeIceShelf(seed), dock = makeDock(seed);
-    const row = makeBoat('rowboat', seed), din = makeBoat('dinghy', seed + 1), sk = makeBoat('skiff', seed + 2), kay = makeBoat('kayak', seed + 3), tr = makeBoat('trawler', seed + 4);
-    console.info('vessels built in', Math.round(performance.now() - t0), 'ms');
+    const timed = <T,>(n: string, f: () => T): T => { const a = performance.now(); const r = f(); if (q.get('prof')) console.info(`[humans] ${n} built in ${Math.round(performance.now() - a)} ms`); return r; };
+    const ice = timed('ice', () => makeIceShelf(seed)), dock = timed('dock', () => makeDock(seed));
+    const row = timed('rowboat', () => makeBoat('rowboat', seed)), din = timed('dinghy', () => makeBoat('dinghy', seed + 1)), sk = timed('skiff', () => makeBoat('skiff', seed + 2)), kay = timed('kayak', () => makeBoat('kayak', seed + 3)), tr = timed('trawler', () => makeBoat('trawler', seed + 4));
+    if (q.get('prof')) console.info('vessels built in', Math.round(performance.now() - t0), 'ms');
     const place: [Vessel, number][] = [[ice, -44], [dock, -24], [row, -14], [din, -6.5], [sk, 1.5], [kay, 9.5], [tr, 22]];
     for (const [v, x] of place) { v.setX(x); this.scene.add(v.group); this.vessels.push(v); }
     const crew: [Archetype, Vessel, number][] = [
@@ -71,7 +73,7 @@ class HumansPreview extends MockScreen {
       f.play(this.auto ? STORY[e.step][0] : (q.get('state') as State));
       this.es.push(e);
     });
-    console.info('crew built in', Math.round(performance.now() - t0), 'ms total');
+    if (q.get('prof')) console.info('crew built in', Math.round(performance.now() - t0), 'ms total');
     this.focus = Math.min(this.es.length - 1, +(q.get('i') || 0));
     this.camX = this.es[this.focus].v.x;
     this.camDist = +(q.get('d') || (q.get('mode') === 'close' ? 3.6 : 16));
@@ -173,7 +175,7 @@ class HumansPreview extends MockScreen {
     if (q.get('cx')) this.camX = +q.get('cx')!;
     if (q.get('mode') === 'close' || (q.get('solo') && q.get('mode') !== 'wide')) {
       ef.f.headWorld(tip);
-      this.camTarget.set(tip.x + +(q.get('ox') || 0), tip.y - 0.8 - +(q.get('oy') || 0.45), 0);
+      this.camTarget.set(tip.x + +(q.get('ox') || 0), Math.max(tip.y - 0.45, 0.35) - 0.8 - +(q.get('oy') || 0), 0);
     } else this.camTarget.set(this.camX, +(q.get('cy') || 0.4), 0);
   }
 }

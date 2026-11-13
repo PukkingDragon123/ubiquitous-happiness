@@ -223,7 +223,7 @@ export class DiveScreen implements Screen {
       // frame both the fish and the fisherman's rod tip
       tx = (p.x + hookedA.line.tip.x) / 2; ty = (p.y + hookedA.line.tip.y) / 2 - 0.5;
       dist = clamp(Math.hypot(p.x - hookedA.line.tip.x, p.y - hookedA.line.tip.y) * 1.1 + 8, 14, 24);
-    } else if (p.y > -4.5) { ty = damp(ty, p.y + 1.2, 1, 1); }
+    } else if (p.y > -4.5) { ty = damp(ty, p.y + 1.2, 1, 1); dist = 13; }
     const floor = this.ocean.terrain.floorAt(tx);
     ty = clamp(ty, floor + 3.2, 2.2);
     this.camDist = damp(this.camDist, dist, 2.5, dt);

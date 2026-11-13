@@ -44,7 +44,7 @@ export class Ocean {
     const bg = b.floor + (fbm(x * 0.05, z * 0.07, 4, this.seed + 5) - 0.5) * b.amp * 3 + Math.max(0, -z - 22) * 0.32 + Math.max(0, fbm(x * 0.02, z * 0.02, 2, this.seed + 8) - 0.55) * 14;
     const h = f * (1 - k) + bg * k;
     // the back of the diorama rises into canyon walls but never breaks the surface
-    const cap = -3.2;
+    const cap = -7.5;
     return h > cap - 2 ? cap - 2 * Math.exp(-(h - (cap - 2)) / 2) : h;
   }
 
@@ -168,12 +168,12 @@ export class Ocean {
       g.add(km);
     }
     // background spires and boulders fading into the blue
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 2; k++) {
       const m = new THREE.Mesh(rockGeometry(rng.int(0, 9)), rockMaterial(b));
-      const z = rng.range(-26, -52), x = rng.range(x0, x1);
+      const z = rng.range(-34, -56), x = rng.range(x0, x1);
       const base = this.heightAt(x, z);
       const s = rng.range(3, 7);
-      const sy = Math.min(s * rng.range(0.8, 2.0), Math.max(1.5, (-4 - base) / 0.75));
+      const sy = Math.min(s * rng.range(0.8, 2.0), Math.max(1.5, (-8 - base) / 0.75));
       m.position.set(x, base + sy * 0.25, z);
       m.scale.set(s, sy, s);
       g.add(m);

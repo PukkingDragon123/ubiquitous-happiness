@@ -6,6 +6,7 @@ import { DiveScreen } from './game/dive';
 import { Run } from './game/run';
 import { MenuScreen } from './ui/menu';
 import { setupFlow } from './game/flow';
+import { installHumans } from './game/humansAdapter';
 
 const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> = {
   fish: () => import('./dev/preview_fish'),
@@ -23,6 +24,7 @@ async function boot() {
   const q = new URLSearchParams(location.search);
   const pv = q.get('preview');
   const dv = q.get('dive');
+  installHumans();
   if (q.get('menu') !== null) {
     const menu = new MenuScreen(game);
     game.register(menu);

@@ -13,7 +13,6 @@ import { uw } from '../gfx/shaders/underwater';
 import { Atlas, planks, growth, ropeCol, rubber, torus, cyl, bucket, lampMat, spotMat, band, nz, hh, wood, metal, mix, shade } from './props';
 import type { Vessel, Collider } from './boats';
 import { ellRing } from './rig';
-import { fur } from './fabric';
 
 const C = (h: string): RGB => hex(h);
 
@@ -255,6 +254,5 @@ export function makeIceShelf(seed: number): Vessel {
   const m = new THREE.Mesh(B.build(), mat); m.castShadow = true; m.receiveShadow = true; s.group.add(m);
   s.seat(-0.75, top + 0.36, -0.35, 'sit', 1);
   s.seat(0.8, top, -0.35, 'stand', -1);
-  void fur; void spotMat; void rubber; void growth; void ropeCol; void planks; void torus; void wood;
   return s;
 }
