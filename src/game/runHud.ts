@@ -118,7 +118,7 @@ export class RunHud {
     ui.drawCursor = s.paused;
     ui.begin(input, dt);
     let choice: string | null = null;
-    if (s.phase !== 'dead' && s.phase !== 'fade') {
+    if (s.phase !== 'dead' && s.phase !== 'fade' && s.phase !== 'sailing') {
       this.inWorld(s);
       this.hearts(s);
       this.waveBox(s);
@@ -145,7 +145,9 @@ export class RunHud {
       ui.img(art, 5 + (i % 10) * 10, 5 + Math.floor(i / 10) * 9 + bob);
     }
     const y = 5 + Math.ceil(n / 10) * 9 + 2;
-    const aw = ui.text(`${s.areaName.toUpperCase()}`, 5, y, { font: 'small', color: C.white, outline: C.ink });
+    // the area's name when there's room beside the wave counter, else just the count
+    const name = ui.w >= 400 ? s.areaName.toUpperCase() : 'AREA';
+    const aw = ui.text(name, 5, y, { font: 'small', color: C.white, outline: C.ink });
     ui.text(` ${s.areaIdx + 1}/${s.areaCount}`, 5 + aw, y, { font: 'small', color: C.dim, outline: C.ink });
   }
 
@@ -169,7 +171,7 @@ export class RunHud {
       if (s.holdK > 0) ui.fill(x0 + lw + 5, y + 10, Math.round((kw - 2) * s.holdK), 1, C.gold);
       ui.fill(cx - 30, y + 14, Math.round(60 * Math.max(0, s.interT / Math.max(1, s.interMax))), 1, '#5ac8ff', 0.8);
     } else if (s.phase === 'cleared') {
-      const msg = s.wreck.ready ? 'SET SAIL AT THE WRECK' : 'REPAIR THE WRECK TO SAIL ON';
+      const msg = s.wreck.ready ? 'SET SAIL AT THE WRECK' : 'REPAIR THE WRECK';
       ui.text(msg, cx, y, { font: 'small', color: Math.floor(this.t * 2) % 2 ? C.gold : C.white, outline: C.ink, align: 'center' });
     }
   }
@@ -308,7 +310,7 @@ export class RunHud {
     this.banners = this.banners.filter((x) => x.t < x.life);
     if (!b || b.t >= b.life) return;
     const a = Math.min(1, b.t * 4, (b.life - b.t) * 2);
-    const font = b.small ? 'title' : 'big';
+    const font = b.small || ui.measure(b.title, 'big') > ui.w - 16 ? 'title' : 'big';
     const y = Math.round(ui.h * (b.small ? 0.36 : 0.3) - (1 - Math.min(1, b.t * 3)) * 6);
     const bw = Math.max(ui.measure(b.title, font), ui.measure(b.sub, 'small')) + 24;
     ui.fill(Math.round((ui.w - bw) / 2), y - 4, bw, ui.lh(font) + (b.sub ? ui.lh('small') + 2 : 0) + 6, '#000000', 0.3 * a);
@@ -324,7 +326,7 @@ export class RunHud {
     ui.panel('wood', x, y, w, h, 'PAUSED');
     const ix = x + 14, bw = w - 28;
     let out: string | null = null;
-    if (ui.button('p:resume', 'RESUME', ix, y + 18, bw, 20, { style: 'green', key: 'Escape' })) out = 'resume';
+    if (ui.button('p:resume', 'RESUME', ix, y + 18, bw, 20, { style: 'green', keyLabel: 'ESC' })) out = 'resume';
     if (ui.button('p:bag', 'BACKPACK', ix, y + 42, bw, 20, { style: 'wood', key: 'Tab' })) out = 'bag';
     if (ui.button('p:quit', 'QUIT TO HIDEOUT', ix, y + 66, bw, 20, { style: 'red', tip: ['The run is saved: RESUME it from the TV.'] })) out = 'quit';
     ui.text(`${s.areaName} · wave ${s.wave}/${s.waves}`, x + w / 2, y + 92, { font: 'small', color: '#3a2408', align: 'center' });

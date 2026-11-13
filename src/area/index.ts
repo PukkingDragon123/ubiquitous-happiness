@@ -9,7 +9,7 @@
 //   area.impact(x, y, r, k)                                         (explosions dig the sand; also on emit('explosion'))
 //   area.dispose()
 import * as THREE from 'three';
-import type { World } from '../game/types';
+import type { World, Entity } from '../game/types';
 import type { Look, LampHandle } from '../gfx/lighting';
 import { AREAS, AreaDef, AreaId, areaDef } from './defs';
 import { makeShape, Shape } from './shape';
@@ -17,6 +17,7 @@ import { Scenery } from './scenery';
 import { SandField } from '../world/sand';
 import { AreaTerrain } from '../world/areaTerrain';
 import { ENV } from '../world/mats';
+import { MEADOW, meadowLook } from '../world/meadow';
 import { MarineSnow } from '../world/ocean';
 import { buildLandmarks } from './landmarks';
 import { Shipwreck } from './wreck';
@@ -79,6 +80,15 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
   world.add(mailbox);
   for (const n of nodes) world.add(n);
   const eco = new Ecosystem(a, scen, world, seed);
+  meadowLook(a.look.sun, a.look.sunI, a.look.hemiSky, a.look.hemiGround, a.look.hemi);
+  // swords and harpoons cut seaweed: a field entity whose slash() the blade sweep calls
+  const plantField: Entity = {
+    kind: 'plants', team: 'neutral', x: 0, y: 0, vx: 0, vy: 0, r: 0, alive: true,
+    update() {},
+    slash(ax: number, ay: number, bx: number, by: number) { return scen.sim.cut(ax, ay, bx, by) > 0; },
+  };
+  world.add(plantField);
+  scen.sim.onCut = (x, y) => { world.fx.burst('bubble', x, y, 4, 1); world.fx.debrisBurst(x, y, 4, '#8a7224', 1.5, 0.04); world.sfx('sw_swish1', x, 0.4, 1.4); };
   group.add(eco.group);
   const snow = new MarineSnow(a.snow, a.snowCol);
   group.add(snow.points);
@@ -104,6 +114,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
   const impact = (x: number, y: number, r = 1.5, k = 1) => {
     sand.impact(x, y, r, k);
     ENV.uBlast.value.set(x, y, 0, Math.min(1.5, k));
+    scen.sim.impulse(x, y, r, k);
     blastAge = 0;
     for (const n of nodes) if (n.alive && Math.abs(n.x - x) < r + 1.5) n.shake(k);
     eco.scare(x, y, r * 3);
@@ -130,6 +141,17 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       blastAge += dt; ENV.uBlast.value.z = blastAge;
       ENV.uCurrent.value = damp(ENV.uCurrent.value, 0.18 + Math.sin(t * 0.13) * 0.12, 1, dt);
       sand.step(dt);
+      // pushers for the meadow: the player and the nearest moving things
+      const pu = MEADOW.uPushers.value;
+      pu[0].set(p.x, p.y, p.r, Math.min(1.2, 0.5 + Math.hypot(p.vx, p.vy) / 4));
+      let k = 1;
+      for (const e of world.entities) {
+        if (k >= pu.length) break;
+        if (!e.alive || !e.obj || e.kind === 'resource' || e.kind === 'shipwreck' || e.kind === 'mailbuoy' || e.kind === 'plants' || Math.abs(e.x - cameraX) > 14) continue;
+        pu[k++].set(e.x, e.y, Math.max(0.25, Math.min(1.5, e.r)), Math.min(1.1, 0.4 + Math.hypot(e.vx, e.vy) / 4));
+      }
+      for (; k < pu.length; k++) pu[k].set(0, -999, 0, 0);
+      scen.sim.update(dt, world, cameraX);
       scen.update(dt, cameraX, t);
       eco.update(dt, cameraX);
       snow.update(cameraX, p.y, t);
@@ -142,7 +164,8 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       }
       eco.dispose();
       for (const n of nodes) n.alive = false;
-      shipwreck.alive = false; mailbox.alive = false;
+      shipwreck.alive = false; mailbox.alive = false; plantField.alive = false;
+      scen.sim.dispose();
       scen.dispose();
       sand.dispose();
       group.removeFromParent();

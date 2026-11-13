@@ -15,6 +15,7 @@ import { Soup, mat4 } from '../world/lp';
 import { Atlas } from '../world/atlas';
 import { FloraKit, SPECIES, simRegions } from '../world/flora';
 import { PlantSim, type SimRegions } from '../world/plantsim';
+import { makeMeadowChunked, MC, type MeadowItem } from '../world/meadow';
 import { boulder, spire, arch, crustPainter, pillows } from '../world/rockgen';
 import { rockTile, groundTile, strataTile, sectionTile } from '../world/texlib';
 import { floraMaterial, rockMaterial, groundMaterial, sectionMaterial, propMaterial, spriteMaterial } from '../world/mats';
@@ -114,6 +115,45 @@ export class Scenery {
     this.buildRocks();
     this.buildFar();
     for (const rule of this.a.flora) this.placeFlora(rule);
+    this.buildMeadow();
+  }
+
+  // ------------------------------------------------------------------ crossed-quad pixel meadows (MOLEFORGE technique)
+  private buildMeadow() {
+    const M = MC;
+    const mix: Record<string, [number, number][]> = {
+      reef: [[M.eelShort, 3], [M.eelMid, 3], [M.eelTall, 1.5], [M.turtle, 3], [M.spike, 1.2], [M.greenAlgae, 1.5], [M.caulerpa, 1], [M.halimeda, 1], [M.anemone, 0.6], [M.duster, 0.6], [M.sponge, 0.6], [M.shells, 1], [M.coralNub, 1], [M.starLitter, 0.4], [M.pebbles, 0.6], [M.lettuce, 0.6], [M.redAlgae, 0.8]],
+      kelp: [[M.kelpling, 2], [M.brownAlgae, 3], [M.redAlgae, 3], [M.lettuce, 2], [M.greenAlgae, 2], [M.anemone, 0.8], [M.starLitter, 0.8], [M.pebbles, 1.5], [M.shells, 0.8], [M.eelMid, 1]],
+      graveyard: [[M.deadGrass, 3], [M.hydroid, 2], [M.lace, 1], [M.duster, 1], [M.seapen, 1.5], [M.pebbles, 1], [M.shells, 0.6], [M.whips, 0.6], [M.brownAlgae, 0.8]],
+      arctic: [[M.brownAlgae, 2], [M.hydroid, 1.5], [M.pebbles, 3], [M.starLitter, 1], [M.lace, 1], [M.deadGrass, 1], [M.anemone, 0.6]],
+      abyss: [[M.glow, 3], [M.worms, 2], [M.lace, 1], [M.pebbles, 1], [M.seapen, 0.6], [M.duster, 0.6]],
+    };
+    const dens = { reef: 1, kelp: 0.8, graveyard: 0.35, arctic: 0.55, abyss: 0.6 }[this.a.id] ?? 0.7;
+    const pale = this.a.id === 'graveyard' ? 0.78 : 1;
+    const table = mix[this.a.id] ?? mix.reef;
+    const r = this.rng.fork(9191);
+    const items: MeadowItem[] = [];
+    const sh = this.shape;
+    const bands: [number, number, number, number, number][] = [
+      // z0, z1, clumps per metre of x, size min, size max
+      [1.4, 2.8, 1.2, 1.1, 1.8], [-0.9, 1.2, 4.5, 0.55, 1.1], [-4, -0.9, 5, 0.6, 1.2], [-12, -4, 4, 0.8, 1.5], [-26, -12, 1.6, 1.2, 2.0],
+    ];
+    for (const [z0, z1, perM, s0, s1] of bands) {
+      const n = Math.round((sh.X1 - sh.X0 + 50) * perM * dens);
+      // patches: meadows grow in drifts, not evenly
+      for (let i = 0; i < n; i++) {
+        const x = r.range(sh.X0 - 25, sh.X1 + 25), z = r.range(z0, z1);
+        if (this.isReserved(x, z, -1)) continue;
+        if (Math.sin(x * 0.19 + z * 0.3) + Math.sin(x * 0.07 - z * 0.11) * 1.2 < -0.9 && r.chance(0.8)) continue;
+        const cell = r.weighted(table, (e) => e[1])[0];
+        const fg = z > 1.4;
+        const t = (fg ? 0.42 : 1) * pale * r.range(0.82, 1.12);
+        items.push({ x, y: this.heightAt(x, z) - 0.03, z, rot: r.range(0, Math.PI), size: r.range(s0, s1), cell, tint: t });
+      }
+    }
+    const g = makeMeadowChunked(items);
+    for (const m of g.children) this.disposables.push((m as THREE.Mesh).geometry);
+    this.group.add(g);
   }
 
   // ------------------------------------------------------------------ the gameplay sand strip

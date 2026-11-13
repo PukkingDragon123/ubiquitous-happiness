@@ -5,4 +5,4 @@ export { HideoutScreen, type HideoutOpts } from './screen';
 export { BLUEPRINTS, BLUEPRINT_LIST, stationsBuilt, stationPerks, isUnlocked, defaultLayout, type Blueprint } from './blueprints';
 export { MASTERY, MAX_MASTERY, masteryMods, masteryScalars, AREAS } from './mastery';
 export { CRAFTS, upgradeCost } from './recipes';
-export { BlobHero, defaultHero, type HideoutHero, type HeroFactory, type HeroAnim, type HeroSlot } from './hero';
+export { defaultHero, type HideoutHero, type HeroFactory, type HeroAnim, type HeroSlot } from './hero';

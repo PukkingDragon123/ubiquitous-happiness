@@ -64,6 +64,8 @@ export class RunWorld implements World {
   }
 }
 
+let heartGeo: THREE.IcosahedronGeometry | undefined, heartMat: THREE.MeshStandardMaterial | undefined;
+
 /** a dropped item / heart: bobs, sparkles, gets pulled in by the magnet stat, pops when collected */
 export class LootPickup implements Entity {
   kind = 'pickup'; team: Team = 'neutral';
@@ -81,8 +83,9 @@ export class LootPickup implements Entity {
       this.obj.add(v);
       this.r = 0.45;
     } else {
-      const s = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), new THREE.MeshStandardMaterial({ color: '#ff5a7a', roughness: 0.8, emissive: '#600010', flatShading: true }));
-      this.obj.add(s);
+      heartGeo ??= new THREE.IcosahedronGeometry(0.16, 0);
+      heartMat ??= new THREE.MeshStandardMaterial({ color: '#ff5a7a', roughness: 0.85, emissive: '#600010', flatShading: true });
+      this.obj.add(new THREE.Mesh(heartGeo, heartMat));
     }
   }
   update(dt: number, w: World) {

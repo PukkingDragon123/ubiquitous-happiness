@@ -106,6 +106,7 @@ export class RunScreen implements Screen {
   private ambience: ReturnType<typeof audio.loop> | null = null;
   private heartbeat = 0;
   private sailT = 0;
+  private wakeT = 0;
   private bossWave = false;
   private god = false;
   private v = new THREE.Vector3();
@@ -252,6 +253,7 @@ export class RunScreen implements Screen {
     const a = this.area = buildArea(w, id, (this.seed + idx * 7919) >>> 0);
     this.light.applyLook(a.look);
     a.setLighting(this.light);
+    fx.ambient(id);
     water.sim.setSwell(a.swell);
     POST.uExposure.value = a.look.exposure * (1 - this.scal.darkness);
     const sp = a.spawns.player;
@@ -551,7 +553,7 @@ export class RunScreen implements Screen {
   // ---------------------------------------------------------------- frame
   update(dt: number) {
     const w = this.world, p = this.player, inp = this.game.input, a = this.area;
-    if (!w || !a) return;
+    if (!w || !a || this.ended) return;
     // ---- pause (Esc): the world freezes under the pixel menu
     if (inp.hit('pause') && this.phase !== 'dead' && this.phase !== 'fade') { this.paused = !this.paused; audio.play(this.paused ? 'k_open1' : 'k_close1', { vol: 0.5, dry: true }); }
     this.game.cursor = this.paused ? 'none' : 'aim';
@@ -568,13 +570,17 @@ export class RunScreen implements Screen {
     const due = this.seq.filter((s) => s.t <= 0);
     this.seq = this.seq.filter((s) => s.t > 0);
     for (const s of due) s.fn();
-    if (this.world !== w) return; // an area change happened
+    if (this.ended || this.world !== w) return; // the run ended / an area change happened
     // ---- the blobfish stays inside the area
     const b = a.bounds;
     if (p.x < b.x0) p.applyForce((b.x0 - p.x) * 140 - Math.min(0, p.vx) * 14, 0);
     if (p.x > b.x1) p.applyForce((b.x1 - p.x) * 140 - Math.max(0, p.vx) * 14, 0);
     if (this.god) { p.hp = p.maxHp; }
     p.update(dt, w);
+    // a little pixel wake behind the swimming blobfish
+    const spd = Math.hypot(p.vx, p.vy);
+    this.wakeT -= dt;
+    if (p.alive && spd > 1.4 && this.wakeT <= 0) { this.wakeT = 0.07; w.fx.wake(p.x - (p.vx / spd) * p.r, p.y - (p.vy / spd) * p.r, { x: p.vx, y: p.vy }, spd / 5); }
     for (let i = 0; i < w.entities.length; i++) { const e = w.entities[i]; if (e.alive) e.update(dt, w); }
     for (let i = w.entities.length - 1; i >= 0; i--) {
       const e = w.entities[i];

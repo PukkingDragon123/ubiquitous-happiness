@@ -91,11 +91,12 @@ class ResultCard implements Screen {
     yy += ui.lh('small') + 4;
     // who did it
     if (!win && r.killer) {
-      ui.text(r.killer.nemesis ? 'SLAIN BY YOUR NEMESIS' : 'SLAIN BY', cx, yy, { font: 'small', color: '#ffb0a0', align: 'center' });
+      ui.text('SLAIN BY', cx, yy, { font: 'small', color: '#ffb0a0', align: 'center' });
       yy += ui.lh('small');
       ui.text(r.killer.name.toUpperCase(), cx, yy, { font: 'title', color: '#ffffff', color2: '#ffd860', outline: '#000', align: 'center' });
       yy += ui.lh('title');
-      if (r.killer.title) { ui.text(r.killer.title, cx, yy, { font: 'small', color: '#c8b8a8', align: 'center' }); yy += ui.lh('small'); }
+      const sub = [r.killer.title, r.killer.nemesis ? 'now your nemesis' : ''].filter(Boolean).join(' · ');
+      if (sub) { ui.text(sub, cx, yy, { font: 'small', color: r.killer.nemesis ? '#ff9a7a' : '#c8b8a8', align: 'center' }); yy += ui.lh('small'); }
       yy += 3;
     }
     if (win && r.unlocked !== undefined) {

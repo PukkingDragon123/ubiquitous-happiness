@@ -76,9 +76,12 @@ export class Cinematic {
   onDone?: (cfg: RunConfig) => void;
   /** caption shown in the letterbox */
   caption = '';
+  /** a soft warm fill that follows the hero on camera (classic cinematic key/fill) */
+  private fill = new THREE.PointLight('#ffd2a0', 0, 5, 1.2);
 
   constructor(private hero: HideoutHero, private furn: Furniture, private room: Room, private rig: CamRig, private scene: THREE.Object3D, private sparks: Motes, private bubbles: Motes) {
     this.walker = new Walker(hero);
+    this.scene.add(this.fill);
   }
 
   start(cfg: RunConfig) {
@@ -161,6 +164,10 @@ export class Cinematic {
     const want = this.step === 'fade' || this.step === 'done' ? 1 : 1;
     this.letterbox = damp(this.letterbox, want, 3, dt);
     const hp = r.position;
+    // fill light between the camera and the hero, a little above
+    const cam = this.rig.cam.position;
+    this.fill.position.copy(hp).lerp(cam, 0.18).add(new THREE.Vector3(0, 1.4, 0));
+    this.fill.intensity = damp(this.fill.intensity, this.step === 'outside' || this.step === 'fade' ? 1.5 : 4.5, 3, dt);
     switch (this.step) {
       case 'stand': {
         // hop off the seat onto the floor in front of it
@@ -294,7 +301,7 @@ export class Cinematic {
     this.flyers = [];
     this.hero.clearGear?.();
     this.hero.setGear?.(DEFAULT_GEAR);
-    this.active = false; this.step = 'done'; this.fade = 0; this.letterbox = 0; this.caption = '';
+    this.active = false; this.step = 'done'; this.fade = 0; this.letterbox = 0; this.caption = ''; this.fill.intensity = 0;
     this.rig.shot = null; this.rig.k = 4.5;
     this.room.door.target = 0;
   }

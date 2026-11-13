@@ -379,7 +379,7 @@ export class Room {
     this.tvLight = new THREE.PointLight('#9ad8ff', 2.4, 6.5, 1.8);
     this.group.add(this.tvLight);
     // the key light: a warm, shadow-casting cone from the main lamp (handed over by the furniture)
-    this.keyLamp = new THREE.SpotLight('#ffb064', 0, 0, 1.15, 0.55, 2);
+    this.keyLamp = new THREE.SpotLight('#ffb064', 0, 0, 1.2, 0.6, 1);
     this.keyLamp.castShadow = !lowQuality;
     this.keyLamp.shadow.mapSize.set(1024, 1024);
     this.keyLamp.shadow.bias = -0.0006;

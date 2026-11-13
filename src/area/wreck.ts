@@ -232,16 +232,13 @@ export function buildShip(kind: WreckKind, scen: Scenery, seed: number): Parts {
     parts.bags.transformSince(from, mat4(x, y, z, 1, 1, 1));
     parts.bags.tube([[x, y, z], [x, D.D * 0.8, z * 0.95]], () => 0.02, 3, P.get('rope'));
   }
-  // growth on the wreck: the area's own pixel-art flora clinging to the hull / deck (scraped off at stage 2)
-  const growthSp = { reef: ['seafan', 'softcoral', 'tubesponge', 'featheralgae'], kelp: ['sealettuce', 'sargassum', 'featheralgae'], graveyard: ['plumose', 'hydroid', 'wrack'], arctic: ['softcoralCold', 'plumose'], abyss: ['tubeworms', 'glowcoral'] }[scen.a.id] ?? [];
-  for (let i = 0; i < 16 && growthSp.length; i++) {
-    const vs = scen.sprites.get(rng.pick(growthSp)), v = rng.pick(vs);
-    const x = rng.range(-L * 0.42, L * 0.42), onDeck = rng.chance(0.65);
-    const y = onDeck ? D.D + 0.02 : rng.range(D.D * 0.35, D.D * 0.8), z = onDeck ? rng.range(-B * 0.4, B * 0.6) : B * 1.0;
-    const k = rng.range(0.8, 1.2);
-    const card = scen.sprites.cardSoup(2);
-    parts.growth.append(card, mat4(x, y, z, v.w * k, v.h * k, 1, rng.range(-0.3, 0.3)), { uv: rng.chance(0.5) ? v.uv : { u0: v.uv.u1, u1: v.uv.u0, v0: v.uv.v0, v1: v.uv.v1 }, glow: v.glow });
-    for (let q = parts.growth.count - card.count; q < parts.growth.count; q++) parts.growth.S[q * 4 + 3] *= v.flex;
+  // growth on the wreck: the area's own 3D flora clinging to the hull / deck (scraped off at stage 2)
+  const growthSp = { reef: ['staghorn', 'brain', 'softcoral', 'anemone'], kelp: ['sealettuce', 'redweed', 'anemone'], graveyard: ['plumose', 'hydroid', 'brownweed'], arctic: ['softcoralCold', 'plumose'], abyss: ['tubeworms', 'glowcoral'] }[scen.a.id] ?? [];
+  for (let i = 0; i < 14 && growthSp.length; i++) {
+    const v = scen.flora.get(rng.pick(growthSp));
+    const x = rng.range(-L * 0.4, L * 0.4), onDeck = rng.chance(0.6);
+    const y = onDeck ? D.D + 0.05 : rng.range(D.D * 0.3, D.D * 0.8), z = onDeck ? rng.range(-B * 0.6, B * 0.6) : B * 0.95;
+    parts.growth.append(rng.pick(v), mat4(x, y, z, rng.range(0.6, 1.1), rng.range(0.6, 1.1), rng.range(0.6, 1.1), rng.range(0, 6), onDeck ? 0 : Math.PI / 2 * 0.8, 0));
   }
   return parts;
 }
@@ -304,7 +301,7 @@ export class Shipwreck implements Entity {
     };
     add('hullBroken', M.prop); add('hullFixed', M.prop); add('deck', M.prop); add('deckBroken', M.prop); add('cabin', M.prop);
     add('mastBroken', M.prop); add('mastFull', M.prop); add('rigging', M.prop, false); add('lampsDark', M.prop); add('lampsLit', M.prop);
-    add('sailTorn', M.cloth); add('sailNew', M.cloth); add('bags', M.propSway); add('flag', M.cloth, false); add('growth', M.sprite, false);
+    add('sailTorn', M.cloth); add('sailNew', M.cloth); add('bags', M.propSway); add('flag', M.cloth, false); add('growth', M.flora);
     this.ship.rotation.order = 'YXZ';
     this.obj.add(this.ship);
     this.obj.position.set(x, this.floor, this.z);
