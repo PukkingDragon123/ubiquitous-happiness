@@ -34,7 +34,7 @@ export const POST = {
   uGradeLift: { value: new THREE.Vector3(0.0, 0.012, 0.03) },
   uGain: { value: new THREE.Vector3(1.03, 1.0, 0.97) },
   uVignette: { value: 0.35 },
-  uChroma: { value: 0.0012 },
+  uChroma: { value: 0.0007 },
   uBloom: { value: 0.55 },
   uBloomThreshold: { value: 0.85 },
   uFlash: { value: new THREE.Vector4(1, 1, 1, 0) }, // rgb + amount (hit flashes, ability flashes)
