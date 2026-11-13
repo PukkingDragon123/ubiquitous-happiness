@@ -428,7 +428,7 @@ export class BlobModel {
     this.finL = new THREE.Mesh(finGeo(0.33, 0.3, 0.05, R_FIN), finMat);
     this.finR.position.set(...bodyPoint(0.6, 0.18, -0.03)); this.finL.position.set(...bodyPoint(0.6, 0.82, -0.03));
     this.finR.castShadow = this.finL.castShadow = true;
-    this.tail = new THREE.Mesh(finGeo(0.26, 0.34, 0.0, R_TAIL), finMat);
+    this.tail = new THREE.Mesh(finGeo(0.2, 0.3, 0.0, R_TAIL), finMat);
     this.tail.position.set(-0.6, 0.04, 0);
     this.tail.castShadow = true;
     this.body.add(this.finR, this.finL, this.tail);

@@ -17,12 +17,13 @@ export const RINGS = [0.03, 0.12, 0.24, 0.38, 0.5, 0.6, 0.68, 0.78, 0.87, 0.94, 
 // ------------------------------------------------------------------ profile (t: 0 tail .. 1 front)
 // Psychrolutes marcidus: a huge fat gelatinous head that is most of the fish, sagging jowls, a quick taper into a
 // slim tail stalk with a small fan. The head is wider than tall; the lower face hangs below the chin line.
-const KT = [0, 0.1, 0.22, 0.36, 0.5, 0.64, 0.76, 0.86, 0.93, 0.975, 1];
-// flattened (dorsoventrally depressed): the head is ~1.5x wider than tall and spreads sideways as it sags
-const KTOP = [0.03, 0.065, 0.12, 0.19, 0.26, 0.31, 0.335, 0.335, 0.305, 0.24, 0.08];
-const KBOT = [0.03, 0.06, 0.11, 0.18, 0.25, 0.3, 0.335, 0.355, 0.35, 0.3, 0.1];
-const KWID = [0.025, 0.08, 0.16, 0.28, 0.4, 0.5, 0.56, 0.58, 0.55, 0.45, 0.14];
-const KCY = [0.04, 0.03, 0.02, 0.01, 0.0, -0.01, -0.03, -0.05, -0.065, -0.08, -0.09];
+const KT = [0, 0.08, 0.18, 0.3, 0.42, 0.55, 0.68, 0.8, 0.9, 0.96, 1];
+// a fat gelatinous blob: the body stays round almost to the end and ends in a short stub with a small fan;
+// the head mass is ~1.6x wider than tall and the whole thing hangs a little lower toward the face
+const KTOP = [0.03, 0.075, 0.155, 0.235, 0.295, 0.335, 0.355, 0.355, 0.325, 0.255, 0.08];
+const KBOT = [0.03, 0.075, 0.16, 0.25, 0.32, 0.37, 0.4, 0.41, 0.39, 0.33, 0.1];
+const KWID = [0.025, 0.085, 0.21, 0.36, 0.47, 0.555, 0.6, 0.61, 0.58, 0.48, 0.14];
+const KCY = [0.05, 0.04, 0.02, 0.0, -0.01, -0.02, -0.035, -0.05, -0.065, -0.08, -0.09];
 const X0 = -0.62, XL = 1.12;
 function interp(keys: number[], t: number) {
   t = clamp01(t);
@@ -43,7 +44,8 @@ export function bodyPoint(t: number, u: number, out = 0): V3 {
   const ang = u * TAU;
   const s = Math.sin(ang), c = -Math.cos(ang);
   // jowls: the lower front cheeks sag and bulge out (fat, gelatinous)
-  const jowl = c < 0 ? 1 + smooth(0.6, 0.9, t) * smooth(0.0, -0.7, c) * 0.17 : 1;
+  // the whole lower half sags and spreads like a water balloon (pear-shaped cross-section), most at the jowls
+  const jowl = c < 0 ? 1 + (smooth(0.12, 0.45, t) * 0.14 + smooth(0.6, 0.9, t) * 0.1) * smooth(0.0, -0.7, c) : 1;
   // neck crease: loose skin folds in behind the head (top and flanks)
   const crease = 1 - Math.exp(-((t - 0.6) ** 2) / (2 * 0.028 ** 2)) * smooth(-0.4, 0.3, c) * 0.06;
   const ry = (c >= 0 ? p.top : p.bot * jowl) * crease;
