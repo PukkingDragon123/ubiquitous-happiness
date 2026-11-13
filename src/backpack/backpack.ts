@@ -21,6 +21,9 @@ import { POST } from '../gfx/post';
 import { audio } from '../audio/audio';
 import { STYLES, textCanvas, type TextStyle } from '../ui/text';
 import { Tag, Floaters, Cursor, type CursorKind } from './ui';
+import { BuildPanel } from './buildPanel';
+import { setBonuses, SETS } from '../game/items';
+import { retroAll } from '../gfx/retro';
 import { clamp, damp, hash2 } from '../core/math';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
@@ -99,6 +102,8 @@ export class BackpackScreen implements Screen {
   private cursor = new Cursor();
   private mergeLabel: THREE.Mesh | null = null; private mergeKey = '';
   private blob: THREE.Mesh;
+  /** the BUILD panel: set bonuses + granted skills (pixel UI kit) */
+  private build = new BuildPanel();
   // dangly bits (world space verlet)
   private chain = { p1: new THREE.Vector3(), o1: new THREE.Vector3(), p2: new THREE.Vector3(), o2: new THREE.Vector3(), init: false };
   private tagp = { p: new THREE.Vector3(), o: new THREE.Vector3(), yaw: 0, yawV: 0, init: false };
@@ -127,6 +132,9 @@ export class BackpackScreen implements Screen {
     this.scene.add(this.blob);
     this.placeBag(0);
     this.layoutCamera();
+    // PS1 look: vertex snapping + affine texture swim on the physical bag and its surroundings
+    retroAll(this.bag.root); retroAll(this.env.group);
+    this.overlays.unshift(this.build.ui.layer);
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -167,6 +175,7 @@ export class BackpackScreen implements Screen {
     this.ocam.right = w; this.ocam.bottom = -h; this.ocam.updateProjectionMatrix();
     this.S = Math.max(1, Math.round(h / 400));
     this.CS = Math.max(1, Math.round(h / 800));
+    this.build.resize(w, h, this.game.renderer.getPixelRatio());
     this.fx.setPixelScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
     this.layoutCamera();
   }
@@ -369,6 +378,7 @@ export class BackpackScreen implements Screen {
     const inp = this.game.input;
     if (inp.hit('bag') || inp.keyHit('Escape')) { if (this.st > 0.3) { this.close(); return; } }
     if (this.held) { this.interactHeld(); return; }
+    if (this.build.ui.overUI) { if (this.hover) { this.hover = null; this.hoverT = 0; } return; }
     // hover
     const r = this.mouseRay();
     this.ray.camera = this.camera;
@@ -629,22 +639,30 @@ export class BackpackScreen implements Screen {
         for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) if (occ[y][x] === p.merge.inst.uid) cells.set(y * GRID + x, 'merge');
       } else for (const [x, y] of cs) { const gx = p.gx + x, gy = p.gy + y; if (gx >= 0 && gy >= 0 && gx < GRID && gy < GRID) cells.set(gy * GRID + gx, p.ok ? 'ok' : 'bad'); }
     }
+    const setCol = new Map<number, string>();
     if (!this.held) {
       const occ = this.run ? occupancy(this.run.items) : null;
+      const htags = this.hover ? (getItem(this.hover.inst.id).tags ?? []).filter((t) => SETS[t] && SETS[t].kind === 'build') : [];
       if (occ) for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
         const u = occ[y][x]; if (!u) continue;
         const v = this.vis.get(u);
         if (v && v === this.hover) cells.set(y * GRID + x, 'hover');
         else if (v && this.isPartner(v)) cells.set(y * GRID + x, 'partner');
+        else if (v && htags.length) {
+          // set-mates: other packed items sharing a build tag glow in the set's colour
+          const t = (getItem(v.inst.id).tags ?? []).find((tg) => htags.includes(tg));
+          if (t) { cells.set(y * GRID + x, 'set'); setCol.set(y * GRID + x, SETS[t].color); }
+        }
       }
     }
     this.bag.cellGlows.forEach((m, i) => {
       const mat = m.material as THREE.MeshBasicMaterial;
       const st = cells.get(i);
       const base = this.held ? 0.16 : 0;
-      const target = st === 'ok' ? 0.95 : st === 'bad' ? 0.8 : st === 'merge' ? 0.75 + Math.sin(this.t * 10) * 0.25 : st === 'hover' ? 0.45 : st === 'partner' ? 0.3 + Math.sin(this.t * 6) * 0.15 : base;
+      const target = st === 'ok' ? 0.95 : st === 'bad' ? 0.8 : st === 'merge' ? 0.75 + Math.sin(this.t * 10) * 0.25 : st === 'hover' ? 0.45 : st === 'partner' ? 0.3 + Math.sin(this.t * 6) * 0.15 : st === 'set' ? 0.4 + Math.sin(this.t * 5) * 0.1 : base;
       mat.opacity = damp(mat.opacity, target, 18, dt);
-      if (st) mat.color.set(st === 'ok' ? '#8fffd8' : st === 'bad' ? '#ff4a3a' : st === 'hover' ? '#ffe8c0' : '#ffd060');
+      if (st === 'set') mat.color.set(setCol.get(i) ?? '#ffffff');
+      else if (st) mat.color.set(st === 'ok' ? '#8fffd8' : st === 'bad' ? '#ff4a3a' : st === 'hover' ? '#ffe8c0' : '#ffd060');
       else mat.color.lerp(new THREE.Color('#9fd8e0'), 1 - Math.exp(-dt * 8));
     });
   }
@@ -754,7 +772,11 @@ export class BackpackScreen implements Screen {
     // hover tag
     const hv = !this.held && this.hover && this.hoverT > 0.12 && this.state === 'open' ? this.hover : null;
     const CS = this.CS;
-    if (hv) this.tag.set({ id: hv.inst.id, level: hv.inst.level || 1, hints: this.hints(hv) }, CS);
+    if (hv) this.tag.set({ id: hv.inst.id, level: hv.inst.level || 1, hints: this.hints(hv), sets: this.run ? setBonuses(this.run) : [] }, CS);
+    // the BUILD panel slides in while the bag is open; the hovered item's sets light up
+    const show = this.state === 'open' || (this.state === 'opening' && this.st > 0.6) ? 1 : 0;
+    const focus = this.held ?? hv;
+    this.build.draw(this.game.input, dt, this.run, show, focus ? (getItem(focus.inst.id).tags ?? []).filter((t) => SETS[t]) : []);
     const anchor = hv ?? null;
     let ix = 0, iy = 0, cx = 0, cy = 0;
     if (anchor) {
@@ -768,6 +790,9 @@ export class BackpackScreen implements Screen {
         cy = iy - chh * 0.35;
       } else { cx = ix; cy = iy - chh - 46 * CS; if (cy < 8) cy = iy + 40 * CS; }
       cx = clamp(cx, cw / 2 + 6, this.w - cw / 2 - 6); cy = clamp(cy, 10 * CS, this.h - chh - 6);
+      // dodge the BUILD panel: slide below it when the card would cover it
+      const R = this.build.rect;
+      if (R.w > 0 && cx + cw / 2 > R.x && cx - cw / 2 < R.x + R.w && cy < R.y + R.h) cy = Math.min(this.h - chh - 6, R.y + R.h + 10);
     } else { cx = this.tag.x; cy = this.tag.y; ix = cx; iy = cy + 20; }
     this.tag.update(dt, !!anchor, cx, cy, ix, iy, CS);
     // merge preview label next to the fin

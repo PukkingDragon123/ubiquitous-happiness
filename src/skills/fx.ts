@@ -59,3 +59,12 @@ export const FX = {
 };
 
 export const col = (c: string) => new THREE.Color(c);
+
+/** a tinted billowing cloud (agent A's 'smoke' volume sprite; grey, so it takes any colour) */
+export function cloud(w: World, x: number, y: number, color: string, o: { n?: number; spread?: number; size?: number; life?: number; bright?: number; speed?: number } = {}) {
+  const n = o.n ?? 6;
+  for (let i = 0; i < n; i++) emit(w, 'smoke', x + (Math.random() - 0.5) * (o.spread ?? 0.6) * 2, y + (Math.random() - 0.5) * (o.spread ?? 0.6), {
+    color, bright: o.bright ?? 1, size: (o.size ?? 1) * (0.7 + Math.random() * 0.5), size1: (o.size ?? 1) * 1.9, life: (o.life ?? 2.4) * (0.8 + Math.random() * 0.4),
+    vx: (Math.random() - 0.5) * (o.speed ?? 0.8), vy: (Math.random() - 0.3) * (o.speed ?? 0.8), drag: 1.5, grav: 0, drift: 0.6, delay: Math.random() * 0.15,
+  });
+}

@@ -103,7 +103,7 @@ export function manaBoltShot(w: World, p: SkillCaster, x: number, y: number, ang
   w.add(new Projectile({
     x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, r: 0.14, dmg, kind: 'laser', life: 0.85, homing: 4.5, cutLines: true, src: p,
     mesh: boltMesh(color), hitSfx: 'zap',
-    trail: (ww, pr) => { if (Math.random() < 0.7) emit(ww, 'magic', pr.x, pr.y, { color, size: 0.18, life: 0.35, vx: -pr.vx * 0.05, vy: -pr.vy * 0.05, bright: 1.5 }); },
+    trail: (ww, pr) => { emit(ww, 'magic', pr.x, pr.y, { color, size: 0.3, life: 0.4, vx: -pr.vx * 0.05, vy: -pr.vy * 0.05, bright: 1.6 }); if (Math.random() < 0.5) ww.fx.emit('glow', pr.x, pr.y, { color, size: 0.7, life: 0.1 }); },
     onEnd: (ww, pr) => { FX.magic(ww, pr.x, pr.y, color, 8); },
   }));
   FX.muzzle(w, x, y, ang, 0.5);
@@ -116,8 +116,11 @@ export class Lightning implements Entity {
   obj: THREE.Mesh;
   private geo = new THREE.BufferGeometry();
   private t = 0;
+  private w0: number;
   constructor(public pts: { x: number; y: number }[], public life = 0.25, color = '#bff4ff', public width = 0.07) {
-    this.obj = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    // opaque, depth-writing and HDR-bright (so the post fog treats it as solid and the bloom catches it); it fades by thinning
+    this.w0 = width;
+    this.obj = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.5), side: THREE.DoubleSide }));
     this.obj.frustumCulled = false;
     this.obj.renderOrder = 22;
     this.build();
@@ -126,11 +129,11 @@ export class Lightning implements Entity {
     const P: number[] = [];
     for (let i = 0; i + 1 < this.pts.length; i++) {
       const a = this.pts[i], b = this.pts[i + 1];
-      const n = Math.max(2, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.35));
+      const n = Math.max(2, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.5));
       let prev = { x: a.x, y: a.y };
       for (let k = 1; k <= n; k++) {
         const t = k / n;
-        const jit = k === n ? 0 : 0.28;
+        const jit = k === n ? 0 : 0.55;
         const cur = { x: a.x + (b.x - a.x) * t + (Math.random() - 0.5) * jit, y: a.y + (b.y - a.y) * t + (Math.random() - 0.5) * jit };
         const dx = cur.x - prev.x, dy = cur.y - prev.y, l = Math.hypot(dx, dy) || 1;
         const nx = (-dy / l) * this.width, ny = (dx / l) * this.width;
@@ -143,8 +146,8 @@ export class Lightning implements Entity {
   update(dt: number) {
     this.t += dt;
     if (this.t > this.life) { this.alive = false; return; }
-    if (Math.random() < 0.5) this.build();
-    (this.obj.material as THREE.MeshBasicMaterial).opacity = 1 - this.t / this.life;
+    this.width = this.w0 * (1 - this.t / this.life);
+    if (Math.random() < 0.5 || this.width < this.w0 * 0.6) this.build();
   }
 }
 

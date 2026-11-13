@@ -201,13 +201,16 @@ export const BUILD_PAINT: Record<string, (c: Ic) => void> = {
     c.glint(10, 14, 1);
   },
   warConch(c) {
-    const sh = c.mat(pal('#3a1a14', '#7a3a2a', '#c87a5a', '#f0b090', '#ffd8c0', '#fff6ee'), { spec: 0.55, shin: 14, dither: 0.4 }), inner = c.mat(P.pink, SHINY), br = c.mat(P.brass, METAL);
-    const g = c.dome(36, 16, 22, 11, sh, { pinch: -0.3, h: 9, rot: 0.05 });
-    c.groove(curve((t) => [18 + t * 36, 16 + Math.sin(t * 16) * 7 * (1 - t * 0.4)], 40), 0.8, 0.8, 0.25, g);
-    for (let k = 0; k < 6; k++) c.crystal(26 + k * 6, 7, -1.57 - 0.2, 4, 1.6, sh, { z: 6 });
-    c.dome(52, 18, 8, 6, inner, { z: 3, h: 4 });
-    c.tube([[4, 16], [14, 16]], 2.4, br, { z: 2 }); c.ring(4, 16, 1.6, 3.4, 1.2, br, { z: 3 });
-    c.glint(30, 11, 1);
+    const sh = c.mat(pal('#3a1a14', '#7a3a2a', '#c87a5a', '#f0b090', '#ffd8c0', '#fff6ee'), { spec: 0.55, shin: 14, dither: 0.4 }), lip = c.mat(P.pink, { ...SHINY, spec: 0.7 }), br = c.mat(P.brass, METAL);
+    // spire (left, pointed) widening into the body whorl, knobbly shoulder, flared pink lip (right)
+    const body = c.slab([[6, 15], [20, 6], [40, 3], [54, 6], [60, 14], [56, 24], [40, 29], [22, 25]], sh, { h: 8, round: true });
+    for (let k = 0; k < 4; k++) c.groove(bez([10 + k * 9, 8 + k * 0.5], [14 + k * 9, 16], [10 + k * 9, 24]), 0.7, 0.9, 0.3, body);
+    c.paint((x, y) => (y > 18 ? -0.12 : null), body);
+    for (let k = 0; k < 6; k++) c.dome(22 + k * 6, 5 + Math.abs(k - 3) * 0.6, 2.2, 2.6, sh, { z: 6 });
+    c.slab([[42, 14], [58, 8], [63, 18], [58, 29], [46, 27]], lip, { h: 4, round: true, z: 4 });
+    c.dome(53, 19, 4, 5, c.mat(P.coral, SOFT), { z: 6, h: 1 });
+    c.tube([[2, 15], [8, 15]], 2.2, br, { z: 2 }); c.ring(2, 15, 1.4, 3, 1, br, { z: 3 });
+    c.glint(30, 7, 1);
   },
   heroCape(c) {
     const m = c.mat(CAPE, { spec: 0.25, shin: 10, dither: 0.5 }), gold = c.mat(P.gold, METAL);

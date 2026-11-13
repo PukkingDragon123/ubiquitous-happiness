@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { Px, ramp, pxNoise, hex } from '../gfx/px';
 import { hash2 } from '../core/math';
 import { textCanvas, STYLES, type TextStyle } from '../ui/text';
-import { getItem, statLines, RARITY_COLOR, type Rarity } from '../game/items';
+import { getItem, statLines, RARITY_COLOR, SETS, type Rarity, type SetState } from '../game/items';
 
 const nearest = (cv: HTMLCanvasElement) => {
   const t = new THREE.CanvasTexture(cv);
@@ -19,9 +19,27 @@ const NAME_FILL: Record<Rarity, [string[], string]> = {
   epic: [['#f0c0ff', '#c070f0', '#8a3ac0'], '#24082e'],
   legendary: [['#fff0a0', '#ffc040', '#e88a10'], '#3a1800'],
 };
-const INK = { desc: '#4a2e1c', good: '#2a6a24', bad: '#a02818', note: '#284a8e', ability: '#7a26a0', hint: '#7a5a3a', sub: '#8a6a48' };
+const INK = { desc: '#4a2e1c', good: '#2a6a24', bad: '#a02818', note: '#284a8e', ability: '#7a26a0', hint: '#7a5a3a', sub: '#8a6a48', skill: '#1a5a8a' };
 
-export interface CardInfo { id: string; level: number; hints: string[]; merge?: string }
+export interface CardInfo { id: string; level: number; hints: string[]; merge?: string; sets?: SetState[] }
+
+/** a darker, inkier version of a set colour that reads on paper */
+const inky = (c: string) => { const [r, g, b] = hex(c); return `rgb(${Math.round(r * 0.55)},${Math.round(g * 0.5)},${Math.round(b * 0.55)})`; };
+
+/** a little pixel badge with a tag name (used on cards and in the build panel) */
+export function tagChip(tag: string): HTMLCanvasElement {
+  const set = SETS[tag];
+  const col = set?.color ?? '#9a8a6a';
+  const t = textCanvas(tag.toUpperCase(), { font: 'Tiny5', px: 8, fill: '#ffffff', outline: inky(col) });
+  const w = t.w + 4, h = t.h + 1;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = inky(col); c.fillRect(1, 0, w - 2, h); c.fillRect(0, 1, w, h - 2);
+  c.fillStyle = col; c.fillRect(1, 1, w - 2, h - 2);
+  c.fillStyle = 'rgba(255,255,255,0.35)'; c.fillRect(1, 1, w - 2, 1);
+  c.drawImage(t.canvas, 2, 0);
+  return cv;
+}
 
 /** paint the paper tag for an item; returns the canvas and the string-hole position */
 export function paintCard(ci: CardInfo): { canvas: HTMLCanvasElement; w: number; h: number; hole: [number, number] } {
@@ -34,12 +52,30 @@ export function paintCard(ci: CardInfo): { canvas: HTMLCanvasElement; w: number;
   const name = textCanvas(d.name, nameSt);
   const sub = textCanvas(`${d.kind.toUpperCase()}  ·  ${d.rarity.toUpperCase()}`, body(INK.sub, 'Tiny5', 8));
   parts.push({ c: name, gap: 0, center: true }, { c: sub, gap: -6, center: true });
+  // build / element tags as a row of pixel chips
+  const tags = (d.tags ?? []).filter((t) => SETS[t]);
+  if (tags.length) {
+    const chips = tags.map(tagChip);
+    const cw = chips.reduce((a, c) => a + c.width + 2, -2), chh = Math.max(...chips.map((c) => c.height));
+    const row = document.createElement('canvas'); row.width = cw; row.height = chh;
+    let x = 0; for (const c of chips) { row.getContext('2d')!.drawImage(c, x, 0); x += c.width + 2; }
+    parts.push({ c: { canvas: row, w: cw, h: chh }, gap: 3, center: true });
+  }
   parts.push({ c: textCanvas(d.desc, body(INK.desc), maxW), gap: 6 });
   const lines = statLines(ci.id, ci.level);
   lines.forEach((l, k) => {
-    const col = l.key === 'note' ? INK.note : l.key === 'ability' ? INK.ability : l.good ? INK.good : INK.bad;
+    const col = l.key === 'note' ? INK.note : l.key === 'ability' ? INK.ability : l.key === 'skill' ? INK.skill : l.good ? INK.good : INK.bad;
     parts.push({ c: textCanvas(l.text, body(col), maxW), gap: k === 0 ? 4 : -6 });
   });
+  // the sets this item feeds: count and the next (or best) bonus
+  if (ci.sets?.length && tags.length) {
+    parts.push({ c: textCanvas('SET BONUS', body(INK.sub, 'Tiny5', 8)), gap: 5 });
+    for (const st of ci.sets.filter((x) => tags.includes(x.tag))) {
+      const next = st.tiers.find((t) => !t.active), best = [...st.tiers].reverse().find((t) => t.active);
+      const line = next ? `${st.name} ${st.count}/${next.n}: ${next.text}` : `${st.name} ${st.count}: ${best?.text ?? ''}`;
+      parts.push({ c: textCanvas(line, body(inky(st.color)), maxW), gap: -6 });
+    }
+  }
   if (ci.hints.length) {
     parts.push({ c: textCanvas('FUSES WITH', body(INK.sub, 'Tiny5', 8)), gap: 6 });
     ci.hints.slice(0, 3).forEach((h) => parts.push({ c: textCanvas(h, body(INK.hint), maxW), gap: -7 }));
@@ -136,7 +172,7 @@ export class Tag {
     this.group.visible = false;
   }
   set(info: CardInfo, S: number) {
-    const key = info.id + '|' + info.level + '|' + info.hints.join(',') + '|' + (info.merge ?? '');
+    const key = info.id + '|' + info.level + '|' + info.hints.join(',') + '|' + (info.merge ?? '') + '|' + (info.sets ?? []).map((x) => x.tag + x.count).join(',');
     if (key === this.key && this.mesh) return;
     this.key = key;
     if (this.mesh) { this.pivot.remove(this.mesh); (this.mesh.material as THREE.MeshBasicMaterial).map?.dispose(); this.mesh.geometry.dispose(); }

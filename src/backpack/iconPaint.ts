@@ -18,6 +18,8 @@ export interface PrimOpts { z?: number; group?: number; behind?: boolean; mask?:
 const LX = -0.42, LY = -0.59, LZ = 0.71;          // light from the top-left, toward the viewer
 const HX = -0.22, HY = -0.31, HZ = 0.92;          // half vector for specular
 const EDGE = 1.6;
+/** global multiplier on per-material dithering: 0 = clean, hand-painted cel bands */
+const DITHER = 0;
 
 export class Ic {
   w: number; h: number;
@@ -232,12 +234,16 @@ export class Ic {
     this.px(x, y, c);
     for (let k = 1; k <= size; k++) { this.px(x - k, y, c); this.px(x + k, y, c); this.px(x, y - k, c); this.px(x, y + k, c); }
   }
-  /** noise-driven speckles (pores, grit, rust spots): fn picks a material or brightness for chosen pixels */
+  /** sparse detail clusters (pores, grit, spots): at most one per 3x3 cell, evenly spread, never per-pixel noise */
   speckle(density: number, seed: number, fn: (x: number, y: number, i: number) => void, onlyGroup = -1) {
-    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+    const cellP = Math.min(1, density * 9);
+    for (let cy = 0; cy < this.h; cy += 3) for (let cx = 0; cx < this.w; cx += 3) {
+      if (hash2(cx, cy, seed) >= cellP) continue;
+      const x = cx + 1, y = cy + ((cx / 3) & 1);
+      if (!this.in(x, y)) continue;
       const i = this.i(x, y);
       if (this.M[i] < 0 || (onlyGroup >= 0 && this.G[i] !== onlyGroup)) continue;
-      if (hash2(x, y, seed) < density) fn(x, y, i);
+      fn(x, y, i);
     }
   }
 
@@ -279,7 +285,8 @@ export class Ic {
       t += sp;
       t = Math.max(t, m.emit);
       const n = m.pal.length - 1;
-      let q = Math.round(clamp01(t) * n + (bayer(x, y) - 0.5) * m.dither);
+      // clean cel bands: no ordered dithering (DITHER = 0 keeps the old option for reference)
+      let q = Math.round(clamp01(t) * n + (bayer(x, y) - 0.5) * m.dither * DITHER);
       q = Math.max(sp > 0.55 ? n : 0, Math.min(n, q));
       let col = m.pal[Math.max(0, q)];
       if (m.irid) {

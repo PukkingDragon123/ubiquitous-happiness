@@ -3,7 +3,8 @@
 // sea mine, net trap). A few dozen faceted polys each, every one with a small painted pixel page.
 import * as THREE from 'three';
 import { Loft, usFor, type V3 } from '../gfx/loft';
-import { Px, ramp, hex, mix, pxNoise, worley } from '../gfx/px';
+import { Px, hex, worley } from '../gfx/px';
+import { T, tone, rect, bevel, planks, rivet, rust, cylinder, gemFacets } from './texkit';
 import { hash2, TAU } from '../core/math';
 import { psxMat, mesh, facet, xf, uvTo } from '../player/psx';
 
@@ -13,27 +14,27 @@ const tex = (key: string, w: number, h: number, fn: (p: Px) => void) => {
   if (!t) { const p = new Px(w, h); fn(p); t = p.texture(); cache.set(key, t); }
   return t;
 };
-const R = (cs: string[], n = 5, d = 0.6) => ramp(cs, n, d);
 const matCache = new Map<string, THREE.Material>();
 const M = (key: string, make: () => THREE.Material) => { let m = matCache.get(key); if (!m) { m = make(); matCache.set(key, m); } return m; };
 
-const RUST = () => tex('rust', 32, 32, (p) => { const r = R(['#1a0c08', '#3e1c10', '#6a3418', '#9a5a2a', '#c8884a'], 5); p.fill((x, y) => r(0.45 + (pxNoise(x, y, 5, 3, 2) - 0.5) * 0.7 + (hash2(x, y, 4) > 0.9 ? -0.2 : 0), x, y)); });
-const DARKMETAL = () => tex('dmetal', 32, 32, (p) => { const r = R(['#0c0e14', '#1e2230', '#343a4e', '#56607a', '#8a96b0'], 5, 0.4); p.fill((x, y) => { const rust = pxNoise(x, y, 6, 3, 9) > 0.62; return rust ? R(['#3a1a0c', '#6a3418', '#a05a28'], 3)(hash2(x, y, 2), x, y) : r(0.5 + (y < 6 ? 0.2 : 0) + (pxNoise(x, y, 3, 2, 5) - 0.5) * 0.3, x, y); }); });
-const WOOD = () => tex('swood', 32, 32, (p) => { const r = R(['#2a1a0e', '#55361c', '#86592e', '#b48450', '#dcb47e'], 5); p.fill((x, y) => r(0.5 + (pxNoise(x * 0.3, y * 3, 4, 2, 7) - 0.5) * 0.7 + (y % 8 === 0 ? -0.25 : 0), x, y)); });
-const glow = (key: string, cs: string[]) => tex(key, 16, 16, (p) => { const r = R(cs, 5, 0.3); p.fill((x, y) => r(0.45 + (1 - Math.hypot(x - 5, y - 5) / 12) * 0.6, x, y)); });
+const RUST = () => tex('rust', 32, 32, (p) => { bevel(p, 0, 0, 32, 32, ['#2a120a', '#4e2412', '#74381a', '#9a5226', '#c07a40'], 2); for (const [x, y, l] of [[6, 4, 9], [17, 8, 12], [26, 3, 7]]) rust(p, x, y, l); rect(p, 3, 20, 10, 2, '#3a1a0c'); rect(p, 18, 24, 8, 2, '#3a1a0c'); });
+const DARKMETAL = () => tex('dmetal', 32, 32, (p) => { bevel(p, 0, 0, 32, 16, T.slate, 2); bevel(p, 0, 16, 32, 16, T.slate, 2); for (const x of [3, 14, 25]) { rivet(p, x, 3, T.slate); rivet(p, x, 19, T.slate); rust(p, x + 1, 6, 5); } });
+const WOOD = () => tex('swood', 32, 32, (p) => planks(p, 0, 0, 32, 32, T.oak, { vertical: false, plank: 8, seed: 4, knots: 2 }));
+const glow = (key: string, cs: string[]) => tex(key, 16, 16, (p) => gemFacets(p, 0, 0, 16, 16, cs));
 
 // ------------------------------------------------------------------ projectiles
 export function boltMesh(color = '#9a7aff'): THREE.Object3D {
   const g = new THREE.Group();
   const c = new THREE.Color(color);
-  g.add(mesh(facet(xf(new THREE.OctahedronGeometry(0.09, 0), [0, 0, 0], [0, 0, 0], [2.2, 0.9, 0.9])), M('bolt' + color, () => psxMat(glow('bolt' + color, ['#1a0a4a', '#' + c.clone().multiplyScalar(0.5).getHexString(), color, '#e8e0ff', '#ffffff']), { emissive: color, emissiveK: 2.2, rough: 0.1 })), false));
+  g.add(mesh(facet(xf(new THREE.OctahedronGeometry(0.13, 0), [0, 0, 0], [0, 0, 0], [2.4, 1, 1])), M('bolt' + color, () => psxMat(glow('bolt' + color, ['#1a0a4a', '#' + c.clone().multiplyScalar(0.5).getHexString(), color, '#e8e0ff', '#ffffff']), { emissive: color, emissiveK: 2.2, rough: 0.1 })), false));
   return g;
 }
 export function shardMesh(): THREE.Object3D {
-  return mesh(facet(xf(new THREE.OctahedronGeometry(0.1, 0), [0, 0, 0], [0, 0, 0], [2.6, 0.7, 0.7])), M('shard', () => psxMat(glow('ice', ['#1a4a7a', '#4aa0d8', '#a8e8ff', '#e8ffff', '#ffffff']), { emissive: '#4ab8f0', emissiveK: 0.8, rough: 0.05, metal: 0.3 })), false);
+  return mesh(facet(xf(new THREE.OctahedronGeometry(0.17, 0), [0, 0, 0], [0, 0, 0], [2.8, 0.75, 0.75])), M('shard', () => psxMat(glow('ice', ['#1a4a7a', '#4aa0d8', '#a8e8ff', '#e8ffff', '#ffffff']), { emissive: '#4ab8f0', emissiveK: 0.8, rough: 0.05, metal: 0.3 })), false);
 }
 export function magmaMesh(): THREE.Object3D {
-  const t = tex('magma', 32, 32, (p) => { const r = R(['#1a0402', '#5a0c04', '#c03008', '#ff8a10', '#ffe060', '#fffbd0'], 6, 0.4); p.fill((x, y) => { const [f1, f2] = worley(x, y, 8, 3, 32); const crack = f2 - f1 < 2; return crack ? r(0.85 + hash2(x, y, 1) * 0.15, x, y) : r(0.15 + pxNoise(x, y, 4, 2, 3) * 0.25, x, y); }); });
+  // cooled black crust plates with bright molten cracks between them
+  const t = tex('magma', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const [f1, f2] = worley(x, y, 8, 3, 32); const e = f2 - f1; p.set(x, y, tone(T.lava, e < 1.2 ? 4 : e < 2.4 ? 3 : e < 3.5 ? 1 : 0)); } });
   return mesh(facet(new THREE.IcosahedronGeometry(0.2, 0)), M('magma', () => psxMat(t, { emissive: '#ff6a10', emissiveK: 1.2, emissiveMap: t, rough: 0.8 })), false);
 }
 export function nailMesh(): THREE.Object3D {
@@ -54,7 +55,7 @@ export function harpoonMesh(scale = 1): THREE.Object3D {
 }
 export function inkBombMesh(): THREE.Object3D {
   const g = new THREE.Group();
-  const t = tex('inkbomb', 16, 16, (p) => { const r = R(['#06040c', '#14102a', '#2a2050', '#4a3a80'], 4); p.fill((x, y) => r(0.4 + (x + y < 10 ? 0.4 : 0) - (x + y > 24 ? 0.2 : 0), x, y)); p.rect(6, 6, 4, 4, '#e8e0ff'); p.set(7, 7, '#1a1030'); p.set(8, 8, '#1a1030'); });
+  const t = tex('inkbomb', 16, 16, (p) => { bevel(p, 0, 0, 16, 16, ['#06040c', '#14102a', '#2a2050', '#4a3a80', '#6a5aa8'], 1); rect(p, 6, 6, 4, 4, '#e8e0ff'); p.set(7, 7, '#1a1030'); p.set(8, 8, '#1a1030'); });
   g.add(mesh(facet(new THREE.IcosahedronGeometry(0.13, 0)), M('ink', () => psxMat(t, { rough: 0.3, metal: 0.2 }))));
   g.add(mesh(facet(xf(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 6), [0, 0.13, 0])), M('inkcap', () => psxMat(DARKMETAL(), { metal: 0.8 }))));
   g.add(mesh(facet(xf(new THREE.CylinderGeometry(0.008, 0.008, 0.1, 3), [0.02, 0.2, 0], [0, 0, -0.4])), M('fuse', () => psxMat(null, { color: '#c8a060' }))));
@@ -70,7 +71,7 @@ export function vialMesh(): THREE.Object3D {
 const NET = () => tex('net', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const gx = (x + y) % 8, gy = (x - y + 64) % 8; if (gx < 1 || gy < 1) p.set(x, y, gx < 1 && gy < 1 ? '#f0e0b0' : '#b89a62'); } });
 export function netBallMesh(): THREE.Object3D {
   const g = new THREE.Group();
-  g.add(mesh(new THREE.IcosahedronGeometry(0.18, 1), M('netball', () => psxMat(NET(), { alphaTest: 0.5, side: THREE.DoubleSide, flat: false }))));
+  g.add(mesh(new THREE.IcosahedronGeometry(0.18, 1), M('netball', () => psxMat(NET(), { alphaTest: 0.5, side: THREE.DoubleSide}))));
   for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU; g.add(mesh(facet(xf(new THREE.CylinderGeometry(0.04, 0.04, 0.06, 6), [Math.cos(a) * 0.19, Math.sin(a) * 0.19, 0])), M('cork', () => psxMat(null, { color: '#c89050', rough: 0.9 })))); }
   return g;
 }
@@ -81,7 +82,7 @@ export function netTrapMesh(): THREE.Object3D {
   const pa = geo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < pa.count; i++) pa.setZ(i, Math.sin(pa.getX(i) * 6) * 0.03 + hash2(i, 1, 3) * 0.04);
   geo.rotateX(-Math.PI / 2);
-  g.add(mesh(geo, M('nettrap', () => psxMat(NET(), { alphaTest: 0.5, side: THREE.DoubleSide, flat: false }))));
+  g.add(mesh(geo, M('nettrap', () => psxMat(NET(), { alphaTest: 0.5, side: THREE.DoubleSide}))));
   for (let k = 0; k < 6; k++) g.add(mesh(facet(xf(new THREE.CylinderGeometry(0.04, 0.04, 0.07, 6), [(k % 3 - 1) * 0.6, 0.03, (k < 3 ? -1 : 1) * 0.36], [Math.PI / 2, 0, 0])), M('cork', () => psxMat(null, { color: '#c89050', rough: 0.9 }))));
   return g;
 }
@@ -115,13 +116,14 @@ export function turretMesh(): { root: THREE.Group; head: THREE.Group; muzzle: TH
   const root = new THREE.Group(), head = new THREE.Group();
   const wood = M('swood', () => psxMat(WOOD(), { rough: 0.85 }));
   for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + 0.5; root.add(mesh(facet(xf(new THREE.CylinderGeometry(0.03, 0.04, 0.7, 5), [Math.cos(a) * 0.2, 0.3, Math.sin(a) * 0.2], [Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4])), wood)); }
-  const can = tex('can', 32, 16, (p) => { const r = R(['#4a0a0a', '#8a1a14', '#c83a1c', '#f07a3a'], 4); p.fill((x, y) => (y < 2 || y > 13 ? hex(y === 0 || y === 15 ? '#4a4a52' : '#b8b8c8') : y > 5 && y < 10 ? (x % 5 === 0 ? hex('#2a2a30') : hex('#f0e8d0')) : r(0.6 + (x < 6 ? 0.2 : 0) - (pxNoise(x, y, 3, 2, 3) > 0.7 ? 0.3 : 0), x, y))); });
+  // a sardine tin: red enamel, a cream label with a fish, crimped steel rims
+  const can = tex('can', 32, 16, (p) => { cylinder(p, 0, 0, 32, 16, T.red, false); rect(p, 0, 6, 32, 4, '#f0e8d0'); for (let x = 3; x < 32; x += 10) { rect(p, x, 7, 5, 2, '#6a7a8a'); p.set(x + 5, 7, '#6a7a8a'); p.set(x + 5, 8, '#6a7a8a'); p.set(x + 1, 7, '#1a1a20'); } for (const y of [0, 15]) rect(p, 0, y, 32, 1, tone(T.steel, 1)); for (const y of [1, 14]) for (let x = 0; x < 32; x += 2) p.set(x, y, tone(T.steel, 4)); });
   const canM = M('can', () => psxMat(can, { metal: 0.4, rough: 0.45 }));
   head.add(mesh(facet(xf(new THREE.CylinderGeometry(0.17, 0.17, 0.3, 8), [0, 0, 0], [0, 0, Math.PI / 2])), canM));
   const pipe = M('pipe', () => psxMat(DARKMETAL(), { metal: 0.8, rough: 0.4 }));
   head.add(mesh(facet(xf(new THREE.CylinderGeometry(0.05, 0.05, 0.42, 6), [0.32, 0.02, 0], [0, 0, Math.PI / 2])), pipe));
   head.add(mesh(facet(xf(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 6), [0.52, 0.02, 0], [0, 0, Math.PI / 2])), pipe));
-  head.add(mesh(facet(xf(new THREE.BoxGeometry(0.16, 0.12, 0.12), [-0.18, 0.1, 0])), M('battery', () => psxMat(tex('bat', 16, 16, (p) => { p.fill((x, y) => (y < 4 ? hex(x < 8 ? '#d02020' : '#202020') : mix(hex('#1a1a20'), hex('#3a3a48'), x / 16))); p.rect(3, 8, 10, 3, '#e8c020'); }), { rough: 0.5 }))));
+  head.add(mesh(facet(xf(new THREE.BoxGeometry(0.16, 0.12, 0.12), [-0.18, 0.1, 0])), M('battery', () => psxMat(tex('bat', 16, 16, (p) => { bevel(p, 0, 4, 16, 12, T.slate, 1); rect(p, 0, 0, 8, 4, '#d02020'); rect(p, 8, 0, 8, 4, '#202020'); p.rect(3, 8, 10, 3, '#e8c020'); }), { rough: 0.5 }))));
   head.add(mesh(facet(xf(new THREE.OctahedronGeometry(0.035, 0), [0.0, 0.2, 0])), new THREE.MeshBasicMaterial({ color: '#40ff60' }), false));
   head.position.y = 0.66;
   root.add(head);
@@ -159,9 +161,10 @@ export function ballistaMesh(): { root: THREE.Group; head: THREE.Group; bolt: TH
 // ------------------------------------------------------------------ pet crab
 export function crabMesh(): { root: THREE.Group; legs: THREE.Object3D[]; claws: { arm: THREE.Group; pin: THREE.Object3D }[]; eyes: THREE.Object3D[] } {
   const root = new THREE.Group();
+  // red-orange shell: a darker band at the rim, pale bumps in deliberate rows, a cream underside
   const shell = tex('crab', 32, 32, (p) => {
-    const r = R(['#3a0804', '#7a1a0a', '#c03a14', '#ee6a2a', '#ffa860', '#ffe0b0'], 6);
-    p.fill((x, y) => { const [f1] = worley(x, y, 7, 4, 32); return r(0.55 - f1 / 22 + (pxNoise(x, y, 3, 2, 8) - 0.5) * 0.3 + (y > 24 ? -0.3 : 0) + (hash2(x, y, 2) > 0.93 ? 0.3 : 0), x, y); });
+    rect(p, 0, 0, 32, 24, tone(T.coral, 2)); rect(p, 0, 0, 32, 3, tone(T.coral, 3)); rect(p, 0, 20, 32, 4, tone(T.coral, 1)); rect(p, 0, 24, 32, 8, tone(['#6a4a3a', '#a08068', '#d8c0a0', '#f0e0c8'], 2));
+    for (let y = 6; y < 18; y += 5) for (let x = (y % 2) * 3 + 2; x < 32; x += 6) { p.set(x, y, tone(T.coral, 4)); p.set(x + 1, y + 1, tone(T.coral, 1)); }
   });
   const sm = M('crab', () => psxMat(shell, { rough: 0.5 }));
   const cara = new THREE.IcosahedronGeometry(0.22, 1);
@@ -209,9 +212,10 @@ export function crabMesh(): { root: THREE.Group; legs: THREE.Object3D[]; claws: 
 // ------------------------------------------------------------------ piranha
 export function piranhaMesh(): { root: THREE.Group; tail: THREE.Object3D; jaw: THREE.Object3D } {
   const root = new THREE.Group();
+  // silver-grey back over a blood-red belly, a few dark spots on the flank in rows
   const skin = tex('piranha', 32, 16, (p) => {
-    const back = R(['#1a2028', '#3a4858', '#6a7a8a', '#a8b8c4', '#e0e8f0'], 5), belly = R(['#4a0808', '#8a1414', '#d02a1a', '#ff6a3a', '#ffb080'], 5);
-    p.fill((x, y) => { const v = y / 15; const spk = hash2(x, y, 7) > 0.88 ? -0.25 : 0; return v > 0.62 ? belly(0.55 + (pxNoise(x, y, 3, 2, 4) - 0.5) * 0.3, x, y) : back(0.75 - v * 0.6 + spk, x, y); });
+    rect(p, 0, 0, 32, 3, tone(T.shark, 1)); rect(p, 0, 3, 32, 4, tone(T.steel, 3)); rect(p, 0, 7, 32, 3, tone(T.steel, 2)); rect(p, 0, 10, 32, 6, tone(T.red, 3)); rect(p, 0, 10, 32, 1, tone(T.red, 4));
+    for (let x = 3; x < 30; x += 4) p.set(x, 5 + (x % 8 ? 0 : 1), tone(T.shark, 1));
   });
   const sm = M('piranha', () => psxMat(skin, { rough: 0.35, metal: 0.2 }));
   const L = new Loft();
@@ -248,11 +252,14 @@ export function piranhaMesh(): { root: THREE.Group; tail: THREE.Object3D; jaw: T
 // ------------------------------------------------------------------ octopus pal
 export function octopusMesh(): { root: THREE.Group; arms: THREE.Object3D[][]; mantle: THREE.Mesh } {
   const root = new THREE.Group();
+  // pink-purple skin, a paler top, deliberate darker spots, pale sucker rings on the lower half
   const skin = tex('octo', 32, 32, (p) => {
-    const r = R(['#2a0a2e', '#5a1a5a', '#9a3a8a', '#d06ab0', '#f8a8d8', '#fff0f8'], 6);
-    p.fill((x, y) => { const [f1, , id] = worley(x, y, 6, 2, 32); const spot = f1 < 1.6 && id > 0.4; return r(0.55 + (pxNoise(x, y, 5, 3, 1) - 0.5) * 0.3 - (spot ? 0.3 : 0) + (y < 10 ? 0.12 : 0), x, y); });
+    const O = ['#2a0a2e', '#5a1a5a', '#9a3a8a', '#d06ab0', '#f8a8d8'];
+    rect(p, 0, 0, 32, 32, tone(O, 3)); rect(p, 0, 0, 32, 8, tone(O, 4)); rect(p, 0, 24, 32, 8, tone(O, 2));
+    for (const [x, y] of [[4, 10], [14, 13], [24, 9], [9, 18], [20, 19], [28, 16]]) { p.ellipse(x + 0.5, y + 0.5, 1.6, 1.3, tone(O, 1)); }
+    for (let x = 2; x < 32; x += 5) { p.set(x, 27, tone(O, 4)); p.set(x + 1, 27, tone(O, 4)); p.set(x, 28, tone(O, 1)); }
   });
-  const sm = M('octo', () => psxMat(skin, { rough: 0.4, flat: false, sss: [1, 0.4, 0.6], sssK: 0.5 }));
+  const sm = M('octo', () => psxMat(skin, { rough: 0.4, sss: [1, 0.4, 0.6], sssK: 0.5 }));
   const mg = new THREE.IcosahedronGeometry(0.26, 1);
   mg.scale(0.9, 1.15, 0.9);
   mg.translate(0, 0.18, 0);
@@ -284,4 +291,30 @@ export function octopusMesh(): { root: THREE.Group; arms: THREE.Object3D[][]; ma
     arms.push(segs);
   }
   return { root, arms, mantle };
+}
+
+// ------------------------------------------------------------------ frost nova star: crystal spikes radiating from a point
+export function iceStarMesh(n = 10): THREE.Group {
+  const g = new THREE.Group();
+  const m = M('shard', () => psxMat(glow('ice', ['#1a4a7a', '#4aa0d8', '#a8e8ff', '#e8ffff', '#ffffff']), { emissive: '#4ab8f0', emissiveK: 0.8, rough: 0.05, metal: 0.3 }));
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * TAU + hash2(k, 1, 7) * 0.3, len = 0.9 + hash2(k, 2, 7) * 0.8;
+    const c = new THREE.ConeGeometry(0.16 + hash2(k, 3, 7) * 0.08, len, 4);
+    c.translate(0, len / 2, 0);
+    const sp = mesh(facet(c), m, false);
+    sp.rotation.set(0, 0, a - Math.PI / 2);
+    sp.rotateX((hash2(k, 4, 7) - 0.5) * 1.2);
+    g.add(sp);
+  }
+  g.add(mesh(facet(new THREE.IcosahedronGeometry(0.3, 0)), m, false));
+  return g;
+}
+/** the warrior's clam shield (held in front during Clam Bash) */
+export function clamShieldMesh(): THREE.Group {
+  const g = new THREE.Group();
+  const t = tex('clam', 32, 32, (p) => { const C = ['#2a2a3a', '#5a5a78', '#9a9ab8', '#d0d0e8', '#ffffff']; for (let x = 0; x < 32; x++) rect(p, x, 0, 1, 32, tone(C, x % 5 === 0 ? 1 : x % 5 === 1 ? 4 : 3)); for (let y = 6; y < 32; y += 8) rect(p, 0, y, 32, 1, tone(C, 2)); });
+  const geo = new THREE.SphereGeometry(0.42, 10, 4, 0, Math.PI, 0, Math.PI * 0.5);
+  geo.rotateZ(-Math.PI / 2); geo.scale(0.45, 1, 1);
+  g.add(mesh(facet(geo), M('clam', () => psxMat(t, { rough: 0.35, metal: 0.2, side: THREE.DoubleSide }))));
+  return g;
 }

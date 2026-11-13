@@ -6,7 +6,7 @@ import type { Entity, World, Team, DamageKind } from '../game/types';
 import type { SkillCaster } from './types';
 import { strike, foes, nearestFoe } from './combat';
 import { applyStatus } from './status';
-import { FX, emit } from './fx';
+import { FX, emit, cloud } from './fx';
 import { crabMesh, piranhaMesh, octopusMesh } from './models';
 import { damp, dampAngle } from '../core/math';
 
@@ -161,7 +161,7 @@ export class InkPal extends Summon {
         if (this.squeeze <= 0) { this.squeeze = 0.5; strike(w, this.p, e, 0.6 * this.power, 0, -1, 'crush', { quiet: true }); }
         if (this.st > 1.6) {
           // squirt: an ink cloud that blinds everyone near
-          for (let i = 0; i < 22; i++) w.fx.emit('ink', this.x, this.y, { spread: 0.4, speed: 2.6, life: 3.2, size: 1.0 + Math.random() * 0.9, color: '#20163a', alpha: 0.95 });
+          cloud(w, this.x, this.y, '#8a6aff', { n: 10, spread: 1, size: 1.3, life: 3, bright: 1.5, speed: 2 });
           for (const f of foes(w, this.x, this.y, 3.4)) { applyStatus(w, f, 'blind', 4 * this.power, { src: this.p }); strike(w, this.p, f, 1 * this.power, f.x - this.x, f.y - this.y, 'spike', { quiet: true }); }
           w.emit('ink', { x: this.x, y: this.y, r: 3.4 });
           w.sfx('gloop', this.x, 0.8, 0.7);

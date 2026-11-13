@@ -115,9 +115,10 @@ export class Blobfish implements SkillCaster {
     this.obj.add(this.trail.mesh);
     // laser beams (two eye beams converge)
     this.laser = new THREE.Group();
-    const beamMat = new THREE.MeshBasicMaterial({ color: '#ff5a7a', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
-    const coreMat = new THREE.MeshBasicMaterial({ color: '#fff0f4', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    for (const [r, m] of [[0.07, beamMat], [0.025, coreMat]] as const) {
+    // opaque HDR beams: the post fog is depth-based, so solid depth-writing beams read right (and bloom)
+    const beamMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff5a7a').multiplyScalar(2.2) });
+    const coreMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0f4').multiplyScalar(3) });
+    for (const [r, m] of [[0.06, beamMat], [0.03, coreMat]] as const) {
       const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 6, 1, true), m);
       c.geometry.translate(0, 0.5, 0); c.geometry.rotateZ(-Math.PI / 2);
       this.laser.add(c);

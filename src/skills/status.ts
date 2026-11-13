@@ -69,7 +69,7 @@ class StatusSystem implements Entity {
         if (!sn) { this.obj.remove(s.net); s.net = undefined; }
       }
       if ((s.t.stun ?? 0) > 0 && Math.random() < dt * 6) emit(w, 'star', e.x + (Math.random() - 0.5) * e.r, e.y + e.r + 0.15, { vx: (Math.random() - 0.5) * 0.8, vy: 0.4, color: '#fff2a0', size: 0.14, life: 0.5, grav: 0 });
-      if ((s.t.blind ?? 0) > 0 && Math.random() < dt * 5) w.fx.emit('ink', e.x + (Math.random() - 0.5) * e.r, e.y + e.r * 0.4, { size: 0.35, color: '#1a1030', alpha: 0.85, vy: -0.3, life: 1.2 });
+      if ((s.t.blind ?? 0) > 0 && Math.random() < dt * 4) emit(w, 'smoke', e.x + (Math.random() - 0.5) * e.r, e.y + e.r * 0.5, { size: 0.45, size1: 0.8, color: '#8a6aff', bright: 1.4, vy: -0.2, life: 1.2, drag: 2 });
       if ((s.t.poison ?? 0) > 0 && Math.random() < dt * 4) w.fx.emit('bubble', e.x, e.y, { color: '#9aff6a', size: 0.1, spread: e.r * 0.6, vy: 0.5, life: 1 });
       if ((s.t.burn ?? 0) > 0 && Math.random() < dt * 8) emit(w, 'ember', e.x, e.y, { spread: e.r * 0.6, vy: 0.8, color: '#ff8a30', life: 0.6, size: 0.15 });
       if (!any) { this.drop(s); this.list.delete(e); (e as Entity & { status?: StatusMap }).status = {}; }

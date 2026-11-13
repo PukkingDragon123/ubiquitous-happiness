@@ -9,6 +9,7 @@
 //   &skill=megalodon                       auto-cast that skill at the dummies every few seconds (with &blob=...)
 //   &auto=1                                auto-cast the build's skills in turn
 //   &mega=1                                the megalodon model alone, turning slowly (art review)
+//   &bag=mage                              the backpack with that build packed: BUILD panel, tag chips, set glows
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import type { Entity, World, Team, DamageKind } from '../game/types';
@@ -25,7 +26,8 @@ import { FX } from '../skills/fx';
 import { psxMat, mesh, facet, xf, page } from '../player/psx';
 import { ramp } from '../gfx/px';
 import { textSprite, STYLES } from '../ui/text';
-import type { Run } from '../game/run';
+import { Run as RunCls, type Run } from '../game/run';
+import { BackpackScreen } from '../backpack/backpack';
 
 const BUILDS: BuildId[] = ['default', 'mage', 'warrior', 'summoner', 'tinkerer', 'rogue'];
 const LABEL: Record<BuildId, string> = { default: 'Blobfish', mage: 'Mage', warrior: 'Warrior', summoner: 'Toymaker', tinkerer: 'Tinkerer', rogue: 'Rogue' };
@@ -129,7 +131,7 @@ class BuildsPreview extends MockScreen {
       const x = (i - (list.length - 1) / 2) * gap;
       const p = new BlobPuppet(BUILD_GEAR[b], (q.get('anim') as BlobAnim) || 'idle');
       p.root.position.set(x, this.world.terrain.floorAt(x) + 0.02, -1.5);
-      p.heading = -0.55;
+      p.root.rotation.y = -0.55;
       this.scene.add(p.root);
       const label = textSprite(LABEL[b], STYLES.title, 0.24);
       label.position.set(x, this.world.terrain.floorAt(x) + 1.5, -1.5);
@@ -168,7 +170,7 @@ class BuildsPreview extends MockScreen {
     this.scene.add(blob.obj);
     for (const [x, y] of [[2, -4.5], [4.5, -6], [6.5, -3.8], [3.5, -2.8], [8, -6.5]] as [number, number][]) this.world.add(new Dummy(x, y));
     this.overlays.push({ scene: this.bar.scene, camera: this.bar.camera as unknown as THREE.Camera });
-    this.camDist = 13;
+    this.camDist = parseFloat(this.q.get('dist') || '11');
     const sets = setBonuses(this.world.run).map((s) => `${s.name} ${s.count}${s.tier ? ` (${s.tier})` : ''}`).join('   ');
     const lbl = textSprite(`${LABEL[b]}: ${sets}`, STYLES.small, 0.22);
     this.animLabel = lbl;
@@ -234,4 +236,24 @@ class BuildsPreview extends MockScreen {
   }
 }
 
-export default function make(game: Game): Screen { return new BuildsPreview(game, 'builds'); }
+/** &bag=mage: the backpack screen with that build packed (set panel, tag chips, set-mate glows) */
+function bagPreview(game: Game, b: BuildId): Screen {
+  const q = new URLSearchParams(location.search);
+  const run = new RunCls(7);
+  packBuild(run, b);
+  // a couple of loose extras on the board to try merging / packing
+  for (const id of ['manaCrystal', 'scrap', 'seashell']) run.addItem(id);
+  const bp = new BackpackScreen(game);
+  const warm = parseFloat(q.get('warm') || '2');
+  const open = () => { bp.enter({ run, onClose: () => setTimeout(open, 1200) }); for (let k = 0; k < warm * 60; k++) bp.update(1 / 60); };
+  const enter = bp.enter.bind(bp);
+  bp.enter = (d?: unknown) => (d ? enter(d) : open());
+  (window as unknown as { bp: BackpackScreen }).bp = bp;
+  return bp;
+}
+
+export default function make(game: Game): Screen {
+  const bag = new URLSearchParams(location.search).get('bag') as BuildId | null;
+  if (bag) return bagPreview(game, bag);
+  return new BuildsPreview(game, 'builds');
+}

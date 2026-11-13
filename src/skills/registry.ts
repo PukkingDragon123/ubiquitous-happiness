@@ -10,9 +10,9 @@ import type { Stats } from '../game/run';
 import type { SkillDef, SkillCaster } from './types';
 import { strike, foes, nearestFoe, blast, skillMods } from './combat';
 import { applyStatus } from './status';
-import { FX, emit } from './fx';
+import { FX, emit, cloud } from './fx';
 import { Projectile, Lightning, Effect, manaBoltShot } from './projectiles';
-import { shardMesh, magmaMesh, inkBombMesh, vialMesh, netBallMesh } from './models';
+import { shardMesh, magmaMesh, inkBombMesh, vialMesh, netBallMesh, iceStarMesh, clamShieldMesh } from './models';
 import { PetCrab, Piranha, InkPal } from './summons';
 import { JunkTurret, Ballista, SeaMine, NetTrap } from './gadgets';
 import { MegalodonSummon } from './megalodon';
@@ -52,8 +52,15 @@ export const SKILLS: Record<string, SkillDef> = {
         w.add(new Projectile({ x: p.x + Math.cos(a) * 0.5, y: p.y + Math.sin(a) * 0.5, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 0.12, dmg: 1.2 * P, kind: 'spike', life: 0.55, src: p, mesh: shardMesh(), status: ['slow', 3], cutLines: true, trail: (ww, pr) => { if (Math.random() < 0.4) emit(ww, 'snow', pr.x, pr.y, { size: 0.08, life: 0.6 }); } }));
       }
       for (const e of foes(w, p.x, p.y, 2.8 + lv * 0.3)) { applyStatus(w, e, 'freeze', 2.2 + lv * 0.4, { src: p }); strike(w, p, e, 1.5 * P, e.x - p.x, e.y - p.y, 'spike', { quiet: true }); }
-      FX.shock(w, p.x, p.y, 1.6, '#c8f4ff'); FX.magic(w, p.x, p.y, '#8ae0ff', 22); FX.light(w, p.x, p.y, '#8ae0ff', 8, 0.3);
-      w.fx.emit('snow', p.x, p.y, { n: 40, spread: 1.4, speed: 2, life: 1.6, size: 0.06 });
+      FX.shock(w, p.x, p.y, 2.4, '#c8f4ff'); FX.magic(w, p.x, p.y, '#8ae0ff', 30); FX.light(w, p.x, p.y, '#8ae0ff', 10, 0.4);
+      w.fx.emit('snow', p.x, p.y, { n: 70, spread: 1.6, speed: 3.5, life: 1.8, size: 0.09 });
+      // a star of ice crystals bursts out of the blobfish, then shatters
+      const star = iceStarMesh(12);
+      const fxE = new Effect(p.x, p.y, 0.55, (_ww, e) => {
+        const k = e.t / 0.55, grow = Math.min(1, e.t / 0.12);
+        star.position.set(e.x, e.y, 0.3); star.scale.setScalar((0.3 + grow * 1.1 + k * 0.2) * (1 + lv * 0.08)); star.rotation.z = e.t * 0.6;
+      }, (ww, e) => { ww.fx.debrisBurst(e.x, e.y, 22, '#bfeaff', 5, 0.1); FX.sparks(ww, e.x, e.y, 18, undefined, 6, '#e8fbff'); ww.sfx('ice', e.x, 0.8, 0.8); });
+      fxE.obj.add(star); w.add(fxE);
       w.sfx('ice_big', p.x, 0.9); w.sfx('magic2', p.x, 0.5, 0.8); w.game.flash('#c8f4ff', 0.18); w.game.addShake(0.15);
       p.setExpr('attack', 0.5);
     },
@@ -78,7 +85,8 @@ export const SKILLS: Record<string, SkillDef> = {
       if (pts.length < 2) { const a = angTo(p, x, y); pts.push({ x: t.x + Math.cos(a) * 5, y: t.y + Math.sin(a) * 5 }); }
       // lines in the way get fried too
       for (const e of w.entities) if (e.alive && e.slash) for (let i = 0; i + 1 < pts.length; i++) e.slash(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 6, w);
-      w.add(new Lightning(pts, 0.3, '#bff4ff', 0.08)); w.add(new Lightning(pts, 0.2, '#ffffff', 0.03));
+      w.add(new Lightning(pts, 0.4, '#7fd8ff', 0.16)); w.add(new Lightning(pts, 0.32, '#ffffff', 0.05));
+      for (const q of pts) { w.fx.emit('glow', q.x, q.y, { color: '#9fe8ff', size: 1.4, size1: 0.3, life: 0.3 }); FX.magic(w, q.x, q.y, '#bff4ff', 6); }
       FX.light(w, t.x, t.y, '#bff4ff', 8, 0.2); w.game.flash('#e0faff', 0.12);
       w.sfx('zap', p.x, 0.9); w.sfx('thunder', p.x, 0.4, 1.4);
     },
@@ -109,7 +117,7 @@ export const SKILLS: Record<string, SkillDef> = {
       for (let k = 0; k < 7 + lv * 2; k++) setTimeout(() => {
         const aa = a + (Math.random() - 0.5) * 0.5, sp = 6 + Math.random() * 3;
         w.add(new Projectile({ x: t.x, y: t.y, vx: Math.cos(aa) * sp, vy: Math.sin(aa) * sp, r: 0.18, dmg: 0.9 * P, kind: 'zap', life: 1.1, drag: 1.2, src: p, knock: 5, cutLines: true,
-          trail: (ww, pr) => emit(ww, 'bubbleBig', pr.x, pr.y, { n: 1, size: 0.22, life: 0.08, vy: 0 }),
+          trail: (ww, pr) => { emit(ww, 'bubbleBig', pr.x, pr.y, { n: 1, size: 0.42, life: 0.06, vy: 0 }); if (Math.random() < 0.3) emit(ww, 'bubble', pr.x, pr.y, { size: 0.1 }); },
           onEnd: (ww, pr) => { emit(ww, 'bubble', pr.x, pr.y, { n: 6, spread: 0.15, speed: 1.6 }); ww.sfx('pop', pr.x, 0.3, 1 + Math.random()); } }));
       }, k * 45);
       w.sfx('bubbles_a', p.x, 0.8);
@@ -135,16 +143,20 @@ export const SKILLS: Record<string, SkillDef> = {
       p.lunge(dx, dy, 13);
       p.invuln = Math.max(p.invuln, 0.4);
       const hit = new Set();
-      w.add(new Effect(p.x, p.y, 0.4, (ww) => {
+      const shield = clamShieldMesh();
+      const eff = new Effect(p.x, p.y, 0.45, (ww, ef) => {
+        shield.position.set(p.x + dx * 0.55, p.y + dy * 0.55, 0.65); shield.rotation.set(0, 0, Math.atan2(dy, dx)); shield.scale.setScalar(Math.min(1, ef.t * 10) * 1.2);
+        if (Math.random() < 0.5) emit(ww, 'bubble', p.x - dx * 0.4, p.y - dy * 0.4, { size: 0.12, speed: 1 });
         for (const e of foes(ww, p.x + dx * 0.6, p.y + dy * 0.6, 0.9)) {
           if (hit.has(e)) continue; hit.add(e);
           strike(ww, p, e, 2 * pw(p, ['warrior']), dx, dy + 0.3, 'crush', { stopTime: 0.06 });
           applyStatus(ww, e, 'stun', 1.2 + lv * 0.3, { src: p });
           e.vx += dx * 9; e.vy += dy * 9 + 2;
           ww.sfx('clank', e.x, 0.9, 0.8); ww.game.addShake(0.2);
-          FX.shock(ww, e.x, e.y, 0.7, '#fff0c0');
+          FX.shock(ww, e.x, e.y, 0.9, '#fff0c0');
         }
-      }));
+      });
+      eff.obj.add(shield); w.add(eff);
       w.sfx('swish_b', p.x, 0.8, 0.8); p.setExpr('attack', 0.5);
     },
   },
@@ -229,7 +241,7 @@ export const SKILLS: Record<string, SkillDef> = {
     cast(w, p, x, y, lv) {
       const a = angTo(p, x, y);
       const e = nearestFoe(w, x, y, 3) ?? nearestFoe(w, p.x, p.y, 7.5, { dx: Math.cos(a), dy: Math.sin(a), cos: 0.4 });
-      w.fx.emit('ink', p.x, p.y, { n: 8, spread: 0.3, speed: 1.5, size: 0.8, color: '#1a1030', alpha: 0.9, life: 1.5 });
+      cloud(w, p.x, p.y, '#8a6aff', { n: 4, spread: 0.3, size: 0.8, life: 1.2, bright: 1.4 });
       if (!e) { p.lunge(Math.cos(a), Math.sin(a), 14); w.sfx('swish_a', p.x, 0.6, 1.4); return; }
       const side = Math.sign(e.x - p.x) || 1;
       const bx = e.x + side * (e.r + 0.6), by = e.y + 0.1;
@@ -238,7 +250,7 @@ export const SKILLS: Record<string, SkillDef> = {
       p.facing = -side;
       p.aim.set(-side, 0);
       p.invuln = Math.max(p.invuln, 0.35);
-      w.fx.emit('ink', p.x, p.y, { n: 6, spread: 0.3, speed: 1.2, size: 0.7, color: '#1a1030', alpha: 0.9, life: 1.2 });
+      cloud(w, p.x, p.y, '#8a6aff', { n: 4, spread: 0.3, size: 0.8, life: 1.2, bright: 1.4 });
       setTimeout(() => {
         if (!e.alive) return;
         const crit = (p.stats.sets?.rogue ?? 0) >= 6 ? 3.5 : 2.5;
@@ -260,7 +272,7 @@ export const SKILLS: Record<string, SkillDef> = {
           ww.sfx('k_glass', pr.x, 0.8); ww.sfx('steam1', pr.x, 0.5);
           const cx = pr.x, cy = pr.y, R = 2.2 + lv * 0.3;
           ww.add(new Effect(cx, cy, 5, (www, ef, dt) => {
-            if (Math.random() < dt * 30) www.fx.emit('ink', cx + (Math.random() - 0.5) * R * 1.6, cy + (Math.random() - 0.5) * R, { size: 0.9 + Math.random() * 0.6, color: '#3a8a2a', alpha: 0.55, life: 1.4, vy: 0.2 });
+            if (Math.random() < dt * 7) cloud(www, cx, cy, '#6aff3a', { n: 1, spread: R * 0.7, size: 1.2, life: 1.8, bright: 3.2, speed: 0.4 });
             if (Math.random() < dt * 20) emit(www, 'bubble', cx + (Math.random() - 0.5) * R * 1.6, cy + (Math.random() - 0.5) * R, { color: '#aaff7a', size: 0.1 });
             if (Math.floor(ef.t * 2) !== Math.floor((ef.t - dt) * 2)) for (const e of foes(www, cx, cy, R)) applyStatus(www, e, 'poison', 2.5, { dps: (1.2 + (p.stats.poison ?? 0)) * P, src: p });
           }));
@@ -276,7 +288,8 @@ export const SKILLS: Record<string, SkillDef> = {
       w.add(new Projectile({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 2, r: 0.15, dmg: 0.5, kind: 'explosion', life: 1.3, grav: -8, src: p, mesh: inkBombMesh(), spin: 5,
         trail: (ww, pr) => { if (Math.random() < 0.6) emit(ww, 'spark', pr.x, pr.y + 0.15, { color: '#ffd080', size: 0.12, life: 0.15 }); },
         onEnd: (ww, pr) => {
-          for (let i = 0; i < 28; i++) ww.fx.emit('ink', pr.x, pr.y, { spread: 0.4, speed: 3, life: 3.4, size: 1.0 + Math.random(), color: '#140e28', alpha: 0.95 });
+          cloud(ww, pr.x, pr.y, '#8a6aff', { n: 12, spread: 1.1, size: 1.3, life: 3, bright: 1.5, speed: 2.2 });
+          FX.magic(ww, pr.x, pr.y, '#8a6aff', 10);
           for (const e of blast(ww, p, pr.x, pr.y, 3 + lv * 0.3, 1.2 * P, 'explosion', { quiet: true })) applyStatus(ww, e, 'blind', 4 + lv, { src: p });
           ww.emit('ink', { x: pr.x, y: pr.y, r: 3.2 });
           FX.shock(ww, pr.x, pr.y, 1, '#8a7ac0'); ww.sfx('gloop', pr.x, 0.9, 0.6); ww.sfx('boom_uw1', pr.x, 0.4, 1.4);

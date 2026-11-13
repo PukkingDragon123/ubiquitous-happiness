@@ -13,7 +13,7 @@ export interface PsxMatOpts {
 
 export function psxMat(map: THREE.Texture | null, o: PsxMatOpts = {}): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({
-    map, flatShading: o.flat ?? true, roughness: o.rough ?? 0.75, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide,
+    map, flatShading: o.flat ?? true, roughness: Math.max(0.3, o.rough ?? 0.75), metalness: Math.min(0.35, o.metal ?? 0), // PS1: no env maps, so metal stays mostly diffuse side: o.side ?? THREE.FrontSide,
     alphaTest: o.alphaTest ?? 0, color: o.color ?? '#ffffff', vertexColors: !!o.vertexColors,
   });
   if (o.emissive !== undefined) { m.emissive = new THREE.Color(o.emissive); m.emissiveIntensity = o.emissiveK ?? 1; if (o.emissiveMap) m.emissiveMap = o.emissiveMap; }
