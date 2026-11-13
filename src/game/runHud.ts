@@ -336,10 +336,10 @@ export class RunHud {
     ui.panel('wood', x, y, w, h, 'PAUSED');
     const ix = x + 14, bw = w - 28;
     let out: string | null = null;
-    if (ui.button('p:resume', 'RESUME', ix, y + 18, bw, 20, { style: 'green', keyLabel: 'ESC' })) out = 'resume';
+    if (ui.button('p:resume', 'RESUME', ix, y + 18, bw, 20, { style: 'green' })) out = 'resume';
     if (ui.button('p:bag', 'BACKPACK', ix, y + 42, bw, 20, { style: 'wood', key: 'Tab' })) out = 'bag';
     if (ui.button('p:quit', 'QUIT TO HIDEOUT', ix, y + 66, bw, 20, { style: 'red', tip: ['The run is saved: RESUME it from the TV.'] })) out = 'quit';
-    ui.text(`${s.areaName} · wave ${s.wave}/${s.waves}`, x + w / 2, y + 92, { font: 'small', color: '#3a2408', align: 'center' });
+    ui.text(`${s.areaName.toUpperCase()} · WAVE ${s.gWave}/${s.gTotal}`, x + w / 2, y + 92, { font: 'small', color: '#ffe7b0', outline: '#140a06', align: 'center' });
     if (out) audio.play('k_click1', { vol: 0.3, dry: true });
     return out;
   }

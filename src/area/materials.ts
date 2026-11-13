@@ -13,10 +13,11 @@ export const EXTRA_MATERIALS: ItemDef[] = [
 ];
 
 /** fallbacks while the defs above are missing from items.ts */
-const FALLBACK: Record<string, string> = { manaCrystal: 'amethyst', scrapMetal: 'rustyNail', seashell: 'seaGlass' };
+const FALLBACK: Record<string, string> = { manaCrystal: 'amethyst', scrapMetal: 'scrap', seashell: 'seaGlass' };
 
 /** a material id that items.ts knows (the id itself once E has added it) */
 export function materialId(id: string): string {
+  if (id === 'scrapMetal' && ITEMS.scrap) return 'scrap';
   if (ITEMS[id]) return id;
   return FALLBACK[id] && ITEMS[FALLBACK[id]] ? FALLBACK[id] : 'lineScrap';
 }

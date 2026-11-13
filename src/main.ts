@@ -6,7 +6,7 @@ import { Sandbox } from './dev/sandbox';
 import { DiveScreen } from './game/dive';
 import { Run } from './game/run';
 import { MenuScreen } from './ui/menu';
-import { setupFlow } from './game/flow';
+import { setupFlow, syncLowQuality } from './game/flow';
 import { installHumans } from './game/humansAdapter';
 
 const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> = {
@@ -27,6 +27,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
 
 async function boot() {
   await loadFonts();
+  syncLowQuality();
   const game = new Game(document.getElementById('game') as HTMLCanvasElement);
   (window as unknown as { game: Game }).game = game;
   const q = new URLSearchParams(location.search);

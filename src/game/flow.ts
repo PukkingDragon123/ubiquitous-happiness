@@ -15,6 +15,25 @@ import { META, saveMeta, type RunConfig, type RunResult } from '../meta/meta';
 import { MASTERY } from '../hideout/mastery';
 import { ITEMS } from './items';
 import { audio } from '../audio/audio';
+import { POST } from '../gfx/post';
+
+/**
+ * apply META.settings (written by the hideout TV's settings page): audio volumes and the motion blur strength.
+ * Low quality is read by the Game at boot (syncLowQuality() before it is built); a change needs a reload.
+ */
+export function applySettings() {
+  const st = META.settings;
+  audio.volume.master = st.volume; audio.volume.music = st.music;
+  audio.setVolumes();
+  const k = Math.max(0, st.motionBlur);
+  POST.uMotionBlur.value = 2.0 * k;
+  POST.uMotionTrail.value = 0.35 * Math.min(1, k);
+}
+/** before the Game is built: META.settings.lowQuality -> the 'blobfish.lq' flag the Game reads (?lq= wins) */
+export function syncLowQuality() {
+  if (new URLSearchParams(location.search).get('lq') !== null) return;
+  try { localStorage.setItem('blobfish.lq', META.settings.lowQuality ? '1' : '0'); } catch { /* storage blocked */ }
+}
 
 export interface Flow { hideout: HideoutScreen; run: RunScreen; startRun(cfg: RunConfig): void; resume(): boolean }
 
@@ -32,6 +51,10 @@ export function setupFlow(game: Game): Flow {
     return true;
   };
   const hideout = new HideoutScreen(game, { onEnterRun: startRun, onResume: () => { resume(); } });
+  // the TV settings take effect when you leave the hideout (and at boot)
+  const hideoutExit = hideout.exit.bind(hideout);
+  hideout.exit = () => { hideoutExit(); applySettings(); };
+  applySettings();
   const card = new ResultCard(game, hideout);
   game.register(hideout);
   game.register(run);

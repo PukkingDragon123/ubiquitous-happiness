@@ -235,6 +235,7 @@ export class RunScreen implements Screen {
     this.area?.dispose();
     w.clear();
     this.player?.dispose();
+    this.light.sun.shadow.dispose();
     this.scene.clear(); this.overlay.clear();
   }
 
@@ -700,6 +701,10 @@ export class RunScreen implements Screen {
   private hudState(prompt: HudState['prompt'] = null): HudState {
     const p = this.player, a = this.area, wk = a.shipwreck, mb = a.mailbox, d = this.dir;
     const counts = this.bagCounts();
+    const needs = wk.needs();
+    // costRow treats ids missing from `have` as plenty: list every needed id, 0 when not carried
+    const have: Record<string, number> = {};
+    for (const id of Object.keys(needs)) have[id] = counts[id] ?? 0;
     return {
       hp: p.hp, maxHp: p.maxHp,
       areaName: a.name, areaIdx: this.areaIdx, areaCount: RUN_AREAS,
@@ -711,12 +716,12 @@ export class RunScreen implements Screen {
       loose: this.looseGear().map((i) => i.id),
       manatee: { state: mb.manatee.state, eta: mb.eta, wait: mb.waitLeft },
       wreck: {
-        hp: wk.hp, maxHp: wk.maxHp, stage: wk.stage, stages: 4, stageName: wk.stageName, needs: wk.needs(), ready: wk.ready,
+        hp: wk.hp, maxHp: wk.maxHp, stage: wk.stage, stages: 4, stageName: wk.stageName, needs, ready: wk.ready,
         at: this.anchor(wk.x, wk.floor + wk.dims.D + 2.4, wk.z * 0.3), dist: Math.abs(wk.x - p.x),
       },
       buoy: { at: this.anchor(mb.x, mb.y + 0.8, -0.6), dist: Math.abs(mb.x - p.x) },
       player: this.anchor(p.x, p.y + 0.5, 0),
-      prompt, have: counts, paused: this.paused,
+      prompt, have, paused: this.paused,
     };
   }
 }
