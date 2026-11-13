@@ -1,280 +1,273 @@
-// Natural surfaces: sand (dry / wet / rippled), rock (granite, basalt, limestone, mossy), coral rock, kelp
-// blade, ice, bone. World surfaces are painted at ~32 px per metre (a 64 px tile covers 2 m).
-import { Surf, pal, mixc, scl, clamp01, smooth, hex, type RGB } from './core';
+// Natural surfaces, painted as deliberate shapes with clean 4-6 tone hue-shifted ramps: sand (dry / wet / rippled),
+// rock (granite blocks, basalt columns, limestone strata, mossy blocks), coral rock knobs, kelp blade, ice, bone.
+// World surfaces are ~32 px per metre (a 64 px tile covers 2 m).
+import { Surf, hramp, mixc, hex, type RGB } from './core';
 
 // ------------------------------------------------------------------------------------------------ sand
-const SAND_DRY = pal('#5f523f', '#76674f', '#8b7b5f', '#9f8f71', '#b2a283', '#c3b594', '#d2c6a8');
-const SAND_WET = pal('#2f281f', '#3d3428', '#4b4031', '#5a4d3b', '#6a5b46', '#7b6b53', '#8d7c62');
-const GRAINS_DARK = pal('#3a342c', '#2e2a26', '#4a3f34');
-const GRAINS_PALE = pal('#cfc4ac', '#d6ccb6', '#c8bca0');
-const GRAINS_WARM = pal('#a2765a', '#8a6248', '#b48a64');
-
-function sandBase(s: Surf, P: RGB[], dark: number) {
-  s.each((x, y) => {
-    const macro = s.n(x, y, 3, 3, 1), meso = s.n(x, y, 10, 2, 2), g = s.r(x, y, 3);
-    const t = 0.18 + macro * 0.45 + meso * 0.22 + (g - 0.5) * 0.36 - dark;
-    s.set(x, y, s.pick(P, t, x, y, 1.2));
-    s.setH(x, y, 0.5 + (macro - 0.5) * 0.3 + (g - 0.5) * 0.12);
-  });
+/** a few hand-placed pebbles and shell flecks (lit upper-left, contact shadow) */
+function pebbles(s: Surf, n: number, P: RGB[], seed: number) {
+  for (let k = 0; k < n; k++) {
+    const x = Math.floor(s.r(k, 1, seed) * s.w), y = Math.floor(s.r(k, 2, seed) * s.h), r = 1 + Math.floor(s.r(k, 3, seed) * 2);
+    s.ball(x, y, r + 0.4, r * 0.75 + 0.3, P, { shadow: 0.8, h: 0.25 });
+  }
+}
+function shells(s: Surf, n: number, c: RGB, d: RGB, seed: number) {
+  for (let k = 0; k < n; k++) {
+    const x = Math.floor(s.r(k, 1, seed) * s.w), y = Math.floor(s.r(k, 2, seed) * s.h);
+    s.set(x, y, c); s.set(x + 1, y, c); s.set(x + 2, y + 1, d); s.set(x - 1, y + 1, d);
+  }
 }
 
 export function sand(s: Surf) {
-  sandBase(s, SAND_DRY, 0);
-  s.speckle(GRAINS_DARK, 0.035, 1, -0.04);
-  s.speckle(GRAINS_PALE, 0.01, 2, 0.05);
-  s.speckle(GRAINS_WARM, 0.012, 3);
-  // footprint-less, wind-scoured: a few small pebbles and shell flecks
-  for (let k = 0; k < 4; k++) s.bump2(Math.floor(s.r(k, 0, 40) * s.w), Math.floor(s.r(k, 1, 40) * s.h), 1, pal('#4a4038', '#6a6056', '#8a8276', '#aaa496'), 0.25);
-  s.cavity(hex('#5a4c3a'), 0.25, 1, 0.1);
-  s.each((x, y) => s.R(x, y, 0.92 + s.r(x, y, 8) * 0.06));
+  const P = hramp('#b5a27c', 5, 0.42);
+  // two broad, hard-edged tone zones; faint wind ripples as clean 1 px lines
+  s.each((x, y) => {
+    const z = s.zone(x, y, 2, 2, 1);
+    let k = 2 + z;
+    const yy = y + Math.round(Math.sin((x / s.w) * Math.PI * 2 * 2 + Math.floor(y / 9)) * 1.5);
+    if (yy % 9 === 0) k = Math.min(4, k + 1); else if (yy % 9 === 1) k = Math.max(1, k - 1);
+    s.set(x, y, P[k]);
+    s.setH(x, y, yy % 9 === 0 ? 0.6 : 0.5);
+    s.R(x, y, 0.95);
+  });
+  pebbles(s, Math.round(s.w * s.h / 700), hramp('#8a8070', 4, 0.5), 40);
+  shells(s, Math.round(s.w * s.h / 900), hex('#e8dfcc'), P[1], 41);
   s.bump = 2;
 }
 
 export function sandWet(s: Surf) {
-  sandBase(s, SAND_WET, 0.02);
-  s.speckle(GRAINS_DARK.map((c) => scl(c, 0.8)), 0.04, 1, -0.04);
-  s.speckle(GRAINS_PALE.map((c) => scl(c, 0.82)), 0.016, 2, 0.05);
-  s.speckle(pal('#2a2c1e', '#30301f'), 0.01, 4); // organic detritus
-  // standing film of water in the low spots: darker, glossy
+  const P = hramp('#7a6a50', 5, 0.42);
   s.each((x, y) => {
-    const m = s.n(x, y, 4, 3, 30);
-    const wet = smooth(0.45, 0.65, m);
-    if (wet > s.ct(x, y)) { s.shade(x, y, 0.86); s.R(x, y, 0.18); }
-    else s.R(x, y, 0.55 + s.r(x, y, 9) * 0.15);
+    const z = s.zone(x, y, 2, 2, 3);
+    s.set(x, y, P[1 + z]);
+    s.setH(x, y, 0.5);
+    s.R(x, y, 0.85);
   });
-  s.cavity(hex('#2a241c'), 0.35, 1, 0.08);
+  // standing water: clean puddle shapes, darker inside, a 1 px glint on the far rim
+  for (let k = 0; k < 3; k++) {
+    const cx = s.r(k, 1, 10) * s.w, cy = s.r(k, 2, 10) * s.h, rx = 4 + s.r(k, 3, 10) * 6, ry = rx * 0.45;
+    for (let y = Math.floor(cy - ry); y <= cy + ry; y++) for (let x = Math.floor(cx - rx); x <= cx + rx; x++) {
+      const d = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
+      if (d > 1) continue;
+      s.set(x, y, P[0]); s.setH(x, y, 0.42); s.R(x, y, 0.6);
+      if (d > 0.7 && y < cy) s.set(x, y, P[3]);
+    }
+  }
+  pebbles(s, Math.round(s.w * s.h / 800), hramp('#5a554c', 4, 0.5), 11);
+  shells(s, Math.round(s.w * s.h / 1200), hex('#c8bfac'), P[0], 12);
   s.bump = 2;
 }
 
-/** underwater ripple sand: asymmetric ripples (gentle stoss, steep lee), detritus collecting in the troughs */
+/** underwater ripple sand: clean asymmetric bands (lit crest, slope, shadowed lee), detritus in the troughs */
 export function sandRipple(s: Surf) {
-  const lam = Math.max(6, Math.round(s.w / Math.round(s.w / 11)));
-  const waves = Math.round(s.w / lam);
+  const P = hramp('#b19d76', 6, 0.45);
+  const per = 8;
   s.each((x, y) => {
-    const warp = (s.n(x, y, 2, 2, 50) - 0.5) * 2.4 + (s.n(x, y, 5, 2, 51) - 0.5) * 0.7;
-    const ph = ((x / s.w) * waves + warp + y / s.h * 0) % 1;
-    const f = ((ph % 1) + 1) % 1;
-    // asymmetric profile: slow rise, sharp drop
-    const prof = f < 0.72 ? Math.sin((f / 0.72) * Math.PI * 0.5) : Math.cos(((f - 0.72) / 0.28) * Math.PI * 0.5);
-    const g = s.r(x, y, 3);
-    const lit = f < 0.72 ? 0.62 + prof * 0.25 : 0.32 + prof * 0.2; // stoss faces the light
-    const t = lit * 0.7 + s.n(x, y, 3, 2, 52) * 0.25 + (g - 0.5) * 0.28 - 0.05;
-    s.set(x, y, s.pick(SAND_DRY, t, x, y, 1.1));
-    s.setH(x, y, 0.3 + prof * 0.45 + (g - 0.5) * 0.06);
-    s.R(x, y, 0.9);
-    // troughs collect dark detritus and shell grit
-    if (prof < 0.18 && s.r(x, y, 60) < 0.32) s.set(x, y, s.r(x, y, 61) < 0.7 ? hex('#4a4232') : hex('#d8cfbc'));
+    const band = Math.floor(y / per);
+    const wob = Math.round(Math.sin((x / s.w) * Math.PI * 2 * 2 + band * 1.7) * 1.6 + Math.sin((x / s.w) * Math.PI * 2 + band) * 0.8);
+    const f = ((y + wob) % per + per) % per;
+    // 0: crest highlight, 1-3: lit stoss slope, 4-5: flat, 6: lee shadow, 7: trough
+    const k = [5, 4, 4, 3, 3, 3, 1, 2][f];
+    s.set(x, y, P[k]);
+    s.setH(x, y, [0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.35, 0.3][f]);
+    s.R(x, y, 0.95);
+    // detritus collects in the troughs: short dark dashes at hashed spots
+    if (f === 7 && s.r(Math.floor(x / 5), band, 20) < 0.3 && x % 5 < 2) s.set(x, y, P[0]);
   });
-  s.speckle(GRAINS_DARK, 0.02, 1, -0.03);
-  s.speckle(GRAINS_PALE, 0.01, 2, 0.03);
-  s.bump = 5;
+  shells(s, Math.round(s.w * s.h / 1000), hex('#e8e0cc'), P[1], 21);
+  s.bump = 4;
 }
 
 // ------------------------------------------------------------------------------------------------ rock
-const GRANITE = pal('#2f2c2b', '#423e3b', '#55504b', '#68625b', '#7b746c', '#8e867d', '#a1998f', '#b6aea3');
-function granitePaint(s: Surf, P: RGB[]) {
-  // at ~32 px/m the crystals are sub-pixel: granite reads as a fine salt-and-pepper speckle over a soft mottle
+/** irregular stone blocks from a coarse voronoi: dark joints, bevelled edges, one base tone per block */
+function blocks(s: Surf, cells: number, seed: number, gapW = 1.1) {
   s.each((x, y) => {
-    const n = s.n(x, y, 3, 3, 1) * 0.65 + s.n(x, y, 12, 2, 7) * 0.35;
-    const base = s.pick(P, 0.22 + n * 0.55 + (s.r(x, y, 2) - 0.5) * 0.3, x, y, 1.2);
-    s.setH(x, y, 0.45 + n * 0.25 + s.r(x, y, 4) * 0.08);
-    const h = s.r(x, y, 1);
-    let c = base;
-    if (h < 0.07) c = mixc(base, hex('#b49a8e'), 0.35); // feldspar (pinkish)
-    else if (h < 0.1) { c = mixc(base, hex('#d8d4cc'), 0.35); s.addH(x, y, 0.05); } // quartz
-    else if (h < 0.17) c = scl(base, 0.62); // biotite / hornblende
-    s.set(x, y, c);
-    s.R(x, y, 0.8 + s.r(x, y, 5) * 0.12);
+    const [f1, f2, id] = s.wor(x, y, cells, seed);
+    s.setId(x, y, f2 - f1 < gapW ? -1 : id);
   });
-  // a few short joints and hairline cracks (nothing spanning the tile: that would show the repeat)
-  for (let k = 0; k < 3; k++) s.crack(Math.floor(s.r(k, 2, 31) * s.w), Math.floor(s.r(k, 3, 31) * s.h), 8 + Math.floor(s.r(k, 4, 31) * s.w * 0.25), s.r(k, 5, 31) - 0.5, s.r(k, 6, 31) - 0.5, P[1], P[5], 0.5, 0.18, 7 + k);
-  for (let k = 0; k < 4; k++) s.crack(Math.floor(s.r(k, 7, 31) * s.w), Math.floor(s.r(k, 8, 31) * s.h), 3 + Math.floor(s.r(k, 9, 31) * 5), s.r(k, 10, 31) - 0.5, s.r(k, 11, 31) - 0.5, P[2], null, 0.7, 0.08, 20 + k);
 }
-export function granite(s: Surf) {
-  granitePaint(s, GRANITE);
-  s.cavity(hex('#1e1c1b'), 0.45, 2, 0.12);
-  s.grime(hex('#3a4038'), 0.5, 3, 0.6); // faint biofilm
-  s.bump = 3.5;
+/** mineral flecks on a coarse grid (one deliberate 1-2 px cluster per cell), only inside blocks */
+function flecks(s: Surf, step: number, cols: RGB[], seed: number) {
+  for (let gy = 0; gy < s.h; gy += step) for (let gx = 0; gx < s.w; gx += step) {
+    const x = gx + Math.floor(s.r(gx, gy, seed) * step), y = gy + Math.floor(s.r(gx, gy, seed + 1) * step);
+    if (s.id(x, y) < 0) continue;
+    const c = cols[Math.floor(s.r(gx, gy, seed + 2) * cols.length)];
+    s.set(x, y, c); if (s.r(gx, gy, seed + 3) < 0.5) s.set(x + 1, y, c);
+  }
 }
 
-const BASALT = pal('#141416', '#1c1c1f', '#252529', '#2f2f34', '#3a3a3f', '#46454b', '#545258');
-export function basalt(s: Surf) {
-  // columnar-jointed blocks (voronoi), each a slightly different tone, bevelled edges
-  s.each((x, y) => {
-    const [f1, f2, id] = s.wor(x, y, 2, 1);
-    const e = f2 - f1;
-    const n = s.n(x, y, 8, 3, 2), m = s.n(x, y, 3, 3, 6);
-    let t = 0.3 + id * 0.2 + (n - 0.5) * 0.45 + (m - 0.5) * 0.3 + (s.r(x, y, 3) - 0.5) * 0.25;
-    let h = 0.6 + (n - 0.5) * 0.25;
-    if (e < 0.8 && s.r(x, y, 7) < 0.85) { t = 0.04; h = 0.2; } else if (e < 1.8) { t += 0.1; h = 0.55; }
-    s.set(x, y, s.pick(BASALT, t, x, y));
-    s.setH(x, y, h);
-    s.R(x, y, 0.82);
-  });
-  // vesicles: frozen gas bubbles (dark pit, lit lower rim)
-  for (let k = 0; k < (s.w * s.h) / 110; k++) {
-    const x = Math.floor(s.r(k, 1, 40) * s.w), y = Math.floor(s.r(k, 2, 40) * s.h);
-    s.set(x, y, BASALT[0]); s.addH(x, y, -0.2);
-    if (s.r(k, 3, 40) < 0.5) { s.set(x + 1, y, BASALT[0]); s.addH(x + 1, y, -0.2); }
-    s.set(x, y + 1, BASALT[5]);
-  }
-  // iron oxide weathering
-  s.grime(hex('#5a3424'), 0.55, 3, 0.62, 3);
-  s.speckle(pal('#6a6870', '#585660'), 0.02, 5);
-  s.cavity(hex('#0a0a0c'), 0.35, 1, 0.12);
+export function granite(s: Surf) {
+  const P = hramp('#7a736a', 6, 0.55);
+  blocks(s, 3, 1);
+  s.bevel(P, (id) => 2 + Math.floor(s.r(id, 0, 2) * 2), { gap: P[0], rough: () => 0.85 });
+  flecks(s, 5, [P[0], hex('#c4b4a6'), hex('#b8b0a6')], 3);
+  // two deliberate cracks
+  for (let k = 0; k < 2; k++) s.crack(s.jag(s.r(k, 1, 4) * s.w, s.r(k, 2, 4) * s.h, s.r(k, 3, 4) * 6.28, 6, 2.5, 1.2, k), P[0], P[4]);
   s.bump = 4;
 }
 
-const LIME = pal('#5c5649', '#746c5c', '#8a826f', '#9f9781', '#b2aa92', '#c3bca4', '#d2ccb6');
-export function limestone(s: Surf) {
+export function basalt(s: Surf) {
+  const P = hramp('#3e3e44', 6, 0.6, 0.02);
+  // columns: vertical strips of irregular width, each broken by horizontal joints at its own heights
+  const cols = Math.max(4, Math.round(s.w / 11));
+  const cw = s.w / cols;
   s.each((x, y) => {
-    const xx = x + (s.n(x, y, 2, 2, 3) - 0.5) * 8;
-    const bed = Math.sin((y / s.h) * Math.PI * 2 * 4 + (s.n(x, y, 3, 2, 4) - 0.5) * 3);
-    const n = s.n(x, y, 4, 3, 1);
-    const t = 0.32 + n * 0.45 + bed * 0.06 + (s.r(x, y, 2) - 0.5) * 0.2 + Math.sin((xx / s.w) * Math.PI * 14) * 0.04;
-    s.set(x, y, s.pick(LIME, t, x, y));
-    s.setH(x, y, 0.5 + n * 0.25 + bed * 0.04);
-    s.R(x, y, 0.88);
-    // thin bedding planes
-    if (Math.abs(bed) > 0.985 && s.r(x, y, 5) < 0.8) { s.set(x, y, LIME[1]); s.addH(x, y, -0.12); }
+    const c = Math.floor(x / cw), fx = x - c * cw;
+    if (fx < 1) { s.setId(x, y, -1); return; }
+    const rows = 2 + Math.floor(s.r(c, 0, 5) * 2), off = s.r(c, 1, 5) * s.h;
+    const yy = (y + off) % s.h, rh = s.h / rows, row = Math.floor(yy / rh);
+    if (yy - row * rh < 1) { s.setId(x, y, -1); return; }
+    s.setId(x, y, c * 8 + row);
   });
-  // fossils: small shell arcs and crinoid discs
-  for (let k = 0; k < (s.w * s.h) / 1400; k++) {
-    const cx = s.r(k, 1, 50) * s.w, cy = s.r(k, 2, 50) * s.h, r = 1.2 + s.r(k, 3, 50) * 1.6, rot = s.r(k, 4, 50) * 6.28;
-    for (let a = 0; a < Math.PI * (s.r(k, 5, 50) < 0.5 ? 1 : 2); a += 0.35) {
-      const x = cx + Math.cos(a + rot) * r, y = cy + Math.sin(a + rot) * r * 0.75;
-      s.blend(x, y, LIME[6], 0.55); s.blend(x + 1, y + 1, LIME[2], 0.35);
-    }
+  s.bevel(P, (id) => 2 + Math.floor(s.r(id, 0, 6) * 2), { gap: P[0], rough: () => 0.85 });
+  // vesicles: deliberate pits (dark pixel, lit lower lip)
+  for (let gy = 2; gy < s.h; gy += 7) for (let gx = 2; gx < s.w; gx += 6) {
+    if (s.r(gx, gy, 7) < 0.45) continue;
+    const x = gx + Math.floor(s.r(gx, gy, 8) * 4), y = gy + Math.floor(s.r(gx, gy, 9) * 4);
+    if (s.id(x, y) < 0) continue;
+    s.set(x, y, P[0]); s.set(x, y + 1, P[4]); s.addH(x, y, -0.2);
   }
-  // solution pits
-  for (let k = 0; k < (s.w * s.h) / 160; k++) { const x = Math.floor(s.r(k, 1, 60) * s.w), y = Math.floor(s.r(k, 2, 60) * s.h); s.set(x, y, LIME[0]); s.addH(x, y, -0.25); s.set(x, y + 1, LIME[5]); }
-  s.drips(hex('#4a4a3c'), Math.round(s.w / 10), s.h * 0.5, 0.22, 2);
-  s.cavity(hex('#3a362c'), 0.4, 2, 0.1);
+  s.bump = 4;
+}
+
+export function limestone(s: Surf) {
+  const P = hramp('#b0a68e', 6, 0.5);
+  // strata of varying thickness; vertical joints break each layer into blocks
+  const layers: number[] = [];
+  let y0 = 0;
+  while (y0 < s.h) { const t = 6 + Math.floor(s.r(layers.length, 0, 10) * 7); layers.push(y0); y0 += t; }
+  const layerOf = (y: number) => { let l = 0; for (let i = 0; i < layers.length; i++) if (y >= layers[i]) l = i; return l; };
+  s.each((x, y) => {
+    const l = layerOf(y);
+    if (y === layers[l]) { s.setId(x, y, -1); return; }
+    const joints = 2 + Math.floor(s.r(l, 1, 11) * 2), off = s.r(l, 2, 11) * s.w, jw = s.w / joints;
+    const xx = (x + off) % s.w;
+    if (xx % jw < 1) { s.setId(x, y, -1); return; }
+    s.setId(x, y, l * 8 + Math.floor(xx / jw));
+  });
+  s.bevel(P, (id) => (Math.floor(id / 8) % 2 === 0 ? 3 : 2) + (s.r(id, 0, 12) < 0.3 ? -1 : 0), { gap: P[0], rough: () => 0.9 });
+  // a fossil shell and two solution pits per tile, all hand-placed
+  const fx = Math.floor(s.r(1, 1, 13) * s.w), fy = Math.floor(s.r(1, 2, 13) * s.h);
+  for (let a = 0; a < 6.0; a += 0.5) { const r = 1 + a * 0.35; s.set(fx + Math.round(Math.cos(a) * r), fy + Math.round(Math.sin(a) * r * 0.8), P[1]); }
+  for (let k = 0; k < 2; k++) { const x = Math.floor(s.r(k, 3, 13) * s.w), y = Math.floor(s.r(k, 4, 13) * s.h); s.set(x, y, P[0]); s.set(x + 1, y, P[1]); s.set(x, y + 1, P[4]); }
+  // dark water stains running down from two joints
+  for (let k = 0; k < 2; k++) { const x = Math.floor(s.r(k, 5, 13) * s.w), y = layers[Math.floor(s.r(k, 6, 13) * layers.length)]; s.streak(x, y + 1, 8, P[1], P[2], 2); }
   s.bump = 3;
 }
 
-const MOSS = pal('#13170c', '#1b2110', '#242c14', '#2f3718', '#3b421c', '#494f22', '#585d2a');
 export function rockMossy(s: Surf) {
-  granitePaint(s, GRANITE.map((c) => mixc(c, hex('#4a5040'), 0.15)));
-  s.cavity(hex('#1e1c1b'), 0.4, 2, 0.1);
-  // cushion moss / algal turf: domed clumps lit from above, dark crevices
+  const P = hramp('#6e6c62', 6, 0.55);
+  const M = hramp('#56662e', 5, 0.5, 0.05);
+  blocks(s, 3, 21);
+  s.bevel(P, (id) => 2 + Math.floor(s.r(id, 0, 22) * 2), { gap: P[0], rough: () => 0.88 });
+  // moss caps on the upper surface of every block: a band below its top edge, ragged in clean steps
   s.each((x, y) => {
-    const m = s.n(x, y, 3, 3, 70) * 0.75 + s.n(x, y, 9, 2, 71) * 0.25;
-    const cover = smooth(0.42, 0.6, m);
-    if (cover < s.ct(x, y)) return;
-    const [f1, f2, id, px, py] = s.wor(x, y, s.w / 4, 72);
-    const e = f2 - f1;
-    const lit = clamp01(0.55 - ((x - px) + (y - py)) * 0.12 + (id - 0.5) * 0.35);
-    s.set(x, y, e < 0.8 ? MOSS[0] : s.pick(MOSS, lit * 0.85 + 0.1, x, y));
-    s.setH(x, y, 0.75 + (1 - f1 / 3) * 0.15);
-    s.R(x, y, 0.95);
+    const a = s.id(x, y);
+    if (a < 0) return;
+    let up = 0;
+    while (up < 7 && s.id(x, y - up - 1) === a) up++;
+    const depth = 2 + Math.floor(s.r(a, Math.floor(x / 3), 23) * 3);
+    if (up < depth) {
+      s.set(x, y, up === 0 ? M[4] : up === depth - 1 ? M[1] : M[2 + (up === 1 ? 1 : 0)]);
+      s.setH(x, y, 0.75); s.R(x, y, 0.97);
+    } else if (up === depth && s.r(x, a, 24) < 0.25) s.set(x, y, M[0]); // a drip of moss hanging over the edge
   });
-  s.speckle(pal('#6a7036', '#5e6430'), 0.006, 9);
-  s.bump = 3.5;
-}
-
-// ------------------------------------------------------------------------------------------------ coral
-const CORAL = pal('#4a423a', '#62584c', '#7c705f', '#968a76', '#ada28c', '#c2b8a0', '#d6cdb6');
-const CORALLINE = pal('#5e3a40', '#74484e', '#8a5a5e', '#9e6e70', '#b08484');
-const TURF = pal('#2e3418', '#3e4620', '#4e582a', '#626c34');
-/** dead reef rock: knobbly bleached limestone (old coral heads), pitted with corallite cups and borer holes, muted
- *  coralline crust on the knob tops, green-brown turf algae settling in the hollows */
-export function coralRock(s: Surf) {
-  const hk = new Float32Array(s.w * s.h);
-  s.each((x, y) => {
-    const [f1] = s.wor(x, y, 4, 1), [g1] = s.wor(x, y, 9, 2);
-    const k1 = Math.max(0, 1 - f1 / (s.w / 4 * 0.75)), k2 = Math.max(0, 1 - g1 / (s.w / 9 * 0.7));
-    hk[y * s.w + x] = Math.sqrt(k1) * 0.65 + Math.sqrt(k2) * 0.25 + s.n(x, y, 8, 2, 3) * 0.1;
-  });
-  const Hh = (x: number, y: number) => hk[s.i(x, y)];
-  s.each((x, y) => {
-    const h = Hh(x, y);
-    const lit = clamp01(0.5 + ((Hh(x - 1, y - 1) - Hh(x + 1, y + 1)) * 3.2) + (h - 0.5) * 0.4);
-    const [p1] = s.wor(x, y, s.w / 4.5, 4);
-    let t = lit * 0.75 + 0.12 + (s.r(x, y, 5) - 0.5) * 0.18;
-    let c: RGB = s.pick(CORAL, t, x, y, 1.1);
-    s.setH(x, y, h);
-    s.R(x, y, 0.92);
-    if (p1 < 1.0 && h > 0.25) { c = s.pick(CORAL, t - 0.45, x, y); s.addH(x, y, -0.15); } // corallite cups
-    // coralline crust on the tops, turf in the hollows
-    const cr = s.n(x, y, 3, 3, 80);
-    if (h > 0.55 && cr > 0.58 && (cr - 0.58) * 6 > s.ct(x, y)) { c = s.pick(CORALLINE, lit * 0.8 + 0.1, x, y); s.R(x, y, 0.75); }
-    if (h < 0.32 && s.n(x, y, 4, 2, 82) > 0.45) { c = s.pick(TURF, lit * 0.7 + s.r(x, y, 83) * 0.2, x, y); s.R(x, y, 0.98); }
-    s.set(x, y, c);
-  });
-  for (let k = 0; k < (s.w * s.h) / 300; k++) { const x = Math.floor(s.r(k, 1, 90) * s.w), y = Math.floor(s.r(k, 2, 90) * s.h); s.set(x, y, hex('#1a1612')); s.addH(x, y, -0.35); s.blend(x + 1, y + 1, CORAL[5], 0.5); }
-  s.cavity(hex('#2a241e'), 0.45, 1, 0.12);
+  flecks(s, 6, [P[0], P[5]], 25);
   s.bump = 4;
 }
 
-// ------------------------------------------------------------------------------------------------ kelp
-const KELP = pal('#1c180a', '#2a240e', '#3a3212', '#4c4216', '#5e521c', '#726424', '#88782e', '#a08e3a');
-/** giant kelp blade: x across the blade, y along it. Bullate corrugations, darker edges, a pale midrib */
-export function kelp(s: Surf) {
-  s.each((x, y) => {
-    const u = x / s.w;
-    const edge = 1 - Math.abs(u - 0.5) * 2;
-    const wav = Math.sin((y / s.h) * Math.PI * 2 * 6 + (s.n(x, y, 2, 2, 1) - 0.5) * 3 + Math.abs(u - 0.5) * 6);
-    const n = s.n(x, y, 3, 3, 2);
-    const t = 0.28 + wav * 0.14 + n * 0.3 + edge * 0.18 + (s.r(x, y, 3) - 0.5) * 0.12 + s.na(x, y, 16, 2, 2, 4) * 0.12;
-    s.set(x, y, s.pick(KELP, t, x, y));
-    s.setH(x, y, 0.5 + wav * 0.2);
-    s.R(x, y, 0.38 + s.r(x, y, 4) * 0.1);
-    // translucent glow toward the middle: kelp is backlit, warmer gold where thin
-    if (Math.abs(u - 0.5) < 0.03) { s.set(x, y, KELP[6]); s.addH(x, y, 0.1); }
-  });
-  // bryozoan crusts (pale lacy patches) and small dark rot spots
-  for (let k = 0; k < Math.max(2, s.w / 20); k++) {
-    const cx = s.r(k, 1, 30) * s.w, cy = s.r(k, 2, 30) * s.h, r = 2 + s.r(k, 3, 30) * 3;
-    for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) { const d = Math.hypot(x, y) / r; if (d < 1 && (1 - d) * 1.4 > s.ct(cx + x, cy + y)) s.blend(cx + x, cy + y, hex('#a8a48e'), 0.55); }
+// ------------------------------------------------------------------------------------------------ coral
+/** dead reef rock: packed knobs (old coral heads) ball-lit, polyp cups on a grid, coralline crust and turf */
+export function coralRock(s: Surf) {
+  const P = hramp('#b0a48c', 6, 0.55);
+  const C = hramp('#9a6a72', 4, 0.45);
+  const T = hramp('#4e5428', 4, 0.5);
+  s.each((x, y) => { s.set(x, y, T[0]); s.setH(x, y, 0.2); s.R(x, y, 0.95); });
+  // knobs from a voronoi: each cell's point is a knob centre, radius from its nearest neighbour gap
+  const cells = Math.max(3, Math.round(s.w / 13));
+  const cw = s.w / cells;
+  for (let gy = 0; gy < cells; gy++) for (let gx = 0; gx < cells; gx++) {
+    const cx = (gx + 0.5 + (s.r(gx, gy, 31) - 0.5) * 0.6) * cw, cy = (gy + 0.5 + (s.r(gx, gy, 32) - 0.5) * 0.6) * cw;
+    const r = cw * (0.45 + s.r(gx, gy, 33) * 0.2);
+    const pal_ = s.r(gx, gy, 34) < 0.3 ? C : P;
+    for (const [ox, oy] of [[0, 0], [s.w, 0], [-s.w, 0], [0, s.h], [0, -s.h]]) s.ball(cx + ox, cy + oy, r, r * 0.9, pal_, { rim: pal_[0], h: 0.5 });
+    // polyp cups: dark pixel + lit lip, on a small grid inside the knob
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      if ((i + j) % 2 !== 0) continue;
+      const px = Math.round(cx + i * r * 0.45), py = Math.round(cy + j * r * 0.45);
+      s.set(px, py, pal_[0]); s.set(px + 1, py + 1, pal_[Math.min(pal_.length - 1, 4)]); s.addH(px, py, -0.2);
+    }
   }
-  for (let k = 0; k < s.w / 12; k++) { const x = s.r(k, 1, 40) * s.w, y = s.r(k, 2, 40) * s.h; s.set(x, y, KELP[0]); s.blend(x + 1, y, KELP[1], 0.6); s.blend(x, y + 1, KELP[1], 0.6); }
-  s.bump = 2.5;
+  s.bump = 5;
+}
+
+// ------------------------------------------------------------------------------------------------ kelp
+/** giant kelp blade: x across, y along. Golden-brown, pale midrib, lighter vein bands, darker ruffled edges */
+export function kelp(s: Surf) {
+  const P = hramp('#7a6a2a', 6, 0.55, 0.05);
+  const mid = s.w / 2;
+  s.each((x, y) => {
+    const u = Math.abs(x + 0.5 - mid) / mid; // 0 at the midrib, 1 at the edge
+    // bullations: diagonal bands between veins (chevrons pointing up the blade)
+    const ch = (y + Math.floor(u * mid * 0.6)) % 8;
+    let k = ch < 3 ? 3 : ch < 6 ? 2 : 4;
+    if (u > 0.82) k = 1;                                  // thin, darker ruffled edge
+    if (u > 0.92 && (y % 4) < 2) k = 0;
+    if (u < 0.05) k = 5;                                  // midrib
+    else if (u < 0.09) k = 4;
+    s.set(x, y, P[k]);
+    s.setH(x, y, ch < 3 ? 0.6 : 0.5);
+    s.R(x, y, 0.75);
+  });
+  // a pale bryozoan crust patch and two small rot spots, hand-placed
+  const bx = Math.floor(s.w * 0.7), by = Math.floor(s.r(1, 1, 5) * s.h);
+  for (let j = 0; j < 4; j++) for (let i = 0; i < 5; i++) if ((i + j) % 2 === 0 || (i > 0 && i < 4 && j > 0 && j < 3)) s.set(bx + i, by + j, hex('#a8a48a'));
+  for (let k = 0; k < 2; k++) { const x = Math.floor(s.w * (0.25 + k * 0.1)), y = Math.floor(s.r(k, 2, 5) * s.h); s.rect(x, y, 2, 2, P[0]); }
+  s.bump = 2;
 }
 
 // ------------------------------------------------------------------------------------------------ ice
-const ICE = pal('#23404e', '#335a6a', '#4a7486', '#6690a2', '#86acbc', '#a8c8d4', '#cce2ea', '#ecf6fa');
 export function ice(s: Surf) {
+  const P = hramp('#7cb4cc', 6, 0.5, 0.02);
+  // big fracture planes: straight lines split the tile into shards; each shard a flat tone, deeper ones bluer
+  const lines: [number, number, number][] = [];
+  for (let k = 0; k < 4; k++) lines.push([s.r(k, 1, 3) * Math.PI, s.r(k, 2, 3) * s.w, s.r(k, 3, 3) * s.h]);
   s.each((x, y) => {
-    const deep = s.n(x, y, 2, 3, 1), n = s.n(x, y, 6, 2, 2);
-    const t = 0.25 + deep * 0.45 + n * 0.2 + (s.r(x, y, 3) - 0.5) * 0.08;
-    s.set(x, y, s.pick(ICE, t, x, y, 0.8));
-    s.setH(x, y, 0.5 + (n - 0.5) * 0.15);
-    s.R(x, y, 0.12 + (1 - deep) * 0.2);
-    s.A(x, y, 0.82 + deep * 0.18);
+    let id = 0;
+    lines.forEach(([a, lx, ly], k) => { if ((x - lx) * Math.sin(a) - (y - ly) * Math.cos(a) > 0) id |= 1 << k; });
+    s.setId(x, y, id);
   });
-  // fracture planes: straight bright lines with a dark twin
-  for (let k = 0; k < 5; k++) {
-    let x = s.r(k, 1, 20) * s.w, y = s.r(k, 2, 20) * s.h;
-    const a = s.r(k, 3, 20) * Math.PI, L = s.w * (0.3 + s.r(k, 4, 20) * 0.5);
-    for (let i = 0; i < L; i++) { s.blend(x, y, ICE[7], 0.7); s.blend(x + 1, y + 1, ICE[1], 0.4); x += Math.cos(a); y += Math.sin(a); }
+  s.bevel(P, (id) => 2 + (id % 3), { hi: 2, rough: () => 0.6 });
+  s.each((x, y) => s.A(x, y, 0.85 + (s.id(x, y) % 3) * 0.05));
+  // trapped bubble strings: 1 px pale rings
+  for (let k = 0; k < 4; k++) {
+    let x = s.r(k, 4, 3) * s.w, y = s.r(k, 5, 3) * s.h;
+    for (let i = 0; i < 4; i++) { s.set(x, y, P[5]); s.set(x + 1, y, P[4]); y -= 2 + s.r(k, i, 6) * 2; x += s.r(k, i, 7) < 0.5 ? 1 : 0; }
   }
-  // trapped bubbles (strings of white dots) and frost bloom
-  for (let k = 0; k < (s.w * s.h) / 90; k++) {
-    const x = Math.floor(s.r(k, 1, 30) * s.w), y = Math.floor(s.r(k, 2, 30) * s.h);
-    s.set(x, y, ICE[7]); if (s.r(k, 3, 30) < 0.4) s.set(x, y - 1, ICE[6]);
-  }
-  s.grime(ICE[7], 0.6, 4, 0.66, 5, 0.65);
   s.bump = 1.5;
 }
 
 // ------------------------------------------------------------------------------------------------ bone
-const BONE = pal('#4a4234', '#655b48', '#80755e', '#9a8f76', '#b2a78c', '#c8bea2', '#dcd4ba');
-/** aged bone: longitudinal fibrous grain along x, porous patches, brown stains, hairline cracks */
+/** aged bone: long grain lines along x, porous ends, a brown stain, a hairline crack */
 export function bone(s: Surf) {
+  const P = hramp('#c2b494', 6, 0.5);
+  const lines = Array.from({ length: 6 }, (_, k) => Math.floor(s.r(k, 0, 1) * s.h));
   s.each((x, y) => {
-    const fib = s.na(x, y, 3, 18, 3, 1);
-    const n = s.n(x, y, 3, 3, 2);
-    const t = 0.45 + (fib - 0.5) * 0.5 + (n - 0.5) * 0.4 + (s.r(x, y, 3) - 0.5) * 0.12;
-    s.set(x, y, s.pick(BONE, t, x, y));
-    s.setH(x, y, 0.5 + (fib - 0.5) * 0.2);
-    s.R(x, y, 0.62);
-    // cancellous pores
-    const p = s.n(x, y, 4, 2, 4);
-    if (p > 0.64 && s.r(x, y, 5) < (p - 0.64) * 3) { s.set(x, y, BONE[1]); s.addH(x, y, -0.2); }
+    let k = 3 + s.zone(x, y, 2, 2, 2) - 1;
+    for (const ly of lines) if (y === ly && (x + ly * 3) % 23 < 15) k -= 1;
+    s.set(x, y, P[Math.max(1, k + 1)]);
+    s.setH(x, y, 0.5);
+    s.R(x, y, 0.8);
   });
-  s.grime(hex('#6a4a2a'), 0.6, 3, 0.58, 2);
-  for (let k = 0; k < 3; k++) s.crack(s.r(k, 1, 9) * s.w, s.r(k, 2, 9) * s.h, s.w * 0.3, 1, (s.r(k, 3, 9) - 0.5) * 0.4, BONE[1], null, 0.4, 0.15, k);
-  s.cavity(hex('#3a3024'), 0.4, 1, 0.12);
-  s.bump = 2.5;
+  // pores: a few deliberate clusters
+  for (let k = 0; k < 4; k++) {
+    const cx = Math.floor(s.r(k, 1, 2) * s.w), cy = Math.floor(s.r(k, 2, 2) * s.h);
+    for (const [dx, dy] of [[0, 0], [2, 1], [1, 3], [-1, 2]]) { s.set(cx + dx, cy + dy, P[1]); s.addH(cx + dx, cy + dy, -0.2); }
+  }
+  // stain: a clean blob one ramp step browner
+  const st = mixc(P[2], hex('#7a5a3a'), 0.4);
+  const sx = s.r(3, 3, 2) * s.w, sy = s.r(3, 4, 2) * s.h;
+  for (let y = -3; y <= 3; y++) for (let x = -6; x <= 6; x++) if ((x / 6) ** 2 + (y / 3) ** 2 < 1) s.set(sx + x, sy + y, st);
+  s.crack(s.jag(s.r(5, 1, 2) * s.w, s.r(5, 2, 2) * s.h, 0.1, 6, 3, 0.8, 9), P[0], P[4], 0.15);
+  s.bump = 2;
 }

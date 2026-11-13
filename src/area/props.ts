@@ -4,8 +4,9 @@
 import type { Atlas } from '../world/atlas';
 import type { UVR } from '../world/lp';
 import { paintPlanks, paintMetal } from '../world/texlib';
-import { ramp, hex, mix, pxNoise, worley, RGB } from '../gfx/px';
-import { hash2 } from '../core/math';
+import { hex, RGB } from '../gfx/px';
+import { hueRamp } from '../world/pixart';
+import { cells } from '../world/texlib';
 import { Rng } from '../core/rng';
 import type { AreaDef } from './defs';
 
@@ -21,40 +22,40 @@ export class PropKit {
     switch (r) {
       case 'planksOld': return A.paint(r, 64, 64, (p, w, h) => paintPlanks(p, w, h, { base: woodOld(a), seed: 11, rot: 0.55, algae: algae(a), barnacles: a.id === 'arctic' ? 0 : 26, nails: true }));
       case 'planksHoles': return A.paint(r, 64, 64, (p, w, h) => { paintPlanks(p, w, h, { base: woodOld(a), seed: 11, rot: 0.55, algae: algae(a), barnacles: 20, nails: true }); holes(p, w, h, 5); });
-      case 'planksNew': return A.paint(r, 64, 64, (p, w, h) => paintPlanks(p, w, h, { base: ['#3a2410', '#6a4420', '#9a6a34', '#c8945a', '#e8b878'], seed: 21, nails: true }));
-      case 'deck': return A.paint(r, 64, 64, (p, w, h) => paintPlanks(p, w, h, { base: woodOld(a).map((c) => c), seed: 31, rot: 0.4, algae: algae(a), plankH: 6 }));
-      case 'hullPaint': return A.paint(r, 64, 64, (p, w, h) => hullPaint(p, w, h, a, false));
-      case 'hullPaintHoles': return A.paint(r, 64, 64, (p, w, h) => { hullPaint(p, w, h, a, true); holes(p, w, h, 4); });
+      case 'planksNew': return A.paint(r, 64, 64, (p, w, h) => paintPlanks(p, w, h, { base: ['#3a2410', '#6a4420', '#a8743a', '#c8945a', '#e8b878'], seed: 21, nails: true }));
+      case 'deck': return A.paint(r, 64, 64, (p, w, h) => paintPlanks(p, w, h, { base: woodOld(a), seed: 31, rot: 0.4, algae: algae(a), plankH: 6 }));
+      case 'hullPaint': return A.paint(r, 64, 64, (p, w, h) => hullPaint(p, w, h, a));
+      case 'hullPaintHoles': return A.paint(r, 64, 64, (p, w, h) => { hullPaint(p, w, h, a); holes(p, w, h, 4); });
       case 'steel': return A.paint(r, 64, 64, (p, w, h) => paintMetal(p, w, h, { paint: steelPaint(a), rust: 0.45, seed: 41, rivets: 1, plate: 16 }));
       case 'steelHoles': return A.paint(r, 64, 64, (p, w, h) => { paintMetal(p, w, h, { paint: steelPaint(a), rust: 0.55, seed: 41, rivets: 1, plate: 16 }); holes(p, w, h, 4); });
-      case 'rope': return A.paint(r, 8, 32, (p, w, h) => { const R = ramp(['#2a2010', '#5a4a2a', '#8a7448', '#b8a070'], 5, 0.7); p.fill((x, y) => R(0.5 + (((x + y) % 4) < 2 ? 0.25 : -0.15) + (hash2(x, y, 3) - 0.5) * 0.15, x, y)); });
+      case 'rope': return A.paint(r, 8, 32, (p) => { const T = hueRamp('#8a7448', 4); p.fill((x, y) => T[((x + y) % 4) < 2 ? 2 : (x + y) % 4 === 2 ? 3 : 1]); });
       case 'sail': return A.paint(r, 48, 48, (p, w, h) => sail(p, w, h, false));
       case 'sailTorn': return A.paint(r, 48, 48, (p, w, h) => sail(p, w, h, true));
-      case 'brass': return A.paint(r, 16, 16, (p, w, h) => { const R = ramp(['#2a1a08', '#6a4a18', '#b08a3a', '#f0d080'], 6, 0.7); p.fill((x, y) => R(0.45 + (pxNoise(x, y, 4, 2, 5) - 0.5) * 0.6 + (x + y < 8 ? 0.2 : 0), x, y)); });
-      case 'iron': return A.paint(r, 16, 16, (p, w, h) => paintMetal(p, w, h, { paint: ['#141414', '#242424', '#343434', '#4a4a4a'], rust: 0.5, seed: 51 }));
-      case 'rock': return A.paint(r, 32, 32, (p, w, h) => { const R = ramp(a.pal.rock, 8, 0.7); p.fill((x, y) => { const [f1, f2] = worley(x, y, 9, 4, 32); return R(0.45 + (pxNoise(x, y, 8, 3, 3, 32) - 0.5) * 0.6 - (f2 - f1 < 1 ? 0.25 : 0), x, y); }); });
-      case 'copper': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, ['#2a1408', '#7a3a18', '#c8703a', '#f0b080'], '#3a9a7a'));
-      case 'ironOre': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, ['#1a1818', '#4a4040', '#7a6a62', '#b0a098'], '#8a4a2a'));
-      case 'gold': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, ['#3a2808', '#8a6418', '#e0b030', '#fff0a0'], null));
-      case 'gemViolet': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, ['#1a0830', '#4a1a7a', '#8a4ac8', '#d0a8ff']));
-      case 'gemCyan': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, ['#082030', '#1a5a7a', '#40b0d0', '#b0f0ff']));
-      case 'gemGreen': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, ['#082010', '#1a6a2a', '#40c060', '#b0ffc0']));
-      case 'gemRed': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, ['#300808', '#7a1a1a', '#d04040', '#ffb0a0']));
-      case 'mana': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, ['#101040', '#2a3aa0', '#5a8aff', '#d0f0ff']));
-      case 'shell': return A.paint(r, 16, 16, (p, w, h) => { const R = ramp(['#5a4838', '#a08870', '#d8c4a8', '#fff4e4'], 6, 0.7); p.fill((x, y) => R(0.5 + Math.sin(x * 1.6) * 0.2 + (y % 5 === 0 ? -0.15 : 0) + (hash2(x, y, 2) - 0.5) * 0.12, x, y)); });
-      case 'shellPink': return A.paint(r, 16, 16, (p, w, h) => { const R = ramp(['#5a2a2a', '#b06060', '#f0a0a0', '#fff0e8'], 6, 0.7); p.fill((x, y) => R(0.5 + Math.sin(x * 1.6) * 0.2 + (y % 4 === 0 ? -0.18 : 0) + (hash2(x, y, 4) - 0.5) * 0.12, x, y)); });
-      case 'pearl': return A.paint(r, 8, 8, (p, w, h) => p.fill((x, y) => mix(hex('#e8e4f0'), hex('#fffaf0'), Math.max(0, 1 - Math.hypot(x - 2.5, y - 2.5) / 5)) as RGB));
-      case 'bone': return A.paint(r, 16, 32, (p, w, h) => { const R = ramp(['#4a4438', '#8a8270', '#c8c0a8', '#ece8d8'], 6, 0.7); p.fill((x, y) => R(0.55 + (pxNoise(x, y, 5, 2, 7) - 0.5) * 0.5 + (hash2(x, y, 8) > 0.95 ? -0.3 : 0), x, y)); });
-      case 'ice': return A.paint(r, 32, 32, (p, w, h) => { const R = ramp(['#2a5a7a', '#5a9ac0', '#a0d8f0', '#e8f8ff', '#ffffff'], 7, 0.7); p.fill((x, y) => { const [f1, f2] = worley(x, y, 10, 9, 32); return R(0.5 + (pxNoise(x, y, 10, 3, 9, 32) - 0.5) * 0.5 + (f2 - f1 < 1 ? 0.3 : 0) - y / 128, x, y); }); });
-      case 'crate': return A.paint(r, 32, 32, (p, w, h) => { paintPlanks(p, w, h, { base: woodOld(a), seed: 61, rot: 0.3, algae: algae(a), plankH: 8, nails: true }); for (let i = 0; i < w; i++) { p.set(i, 0, '#141008'); p.set(i, h - 1, '#141008'); p.set(0, i, '#141008'); p.set(w - 1, i, '#141008'); p.set(i, i, '#3a2a18'); } });
-      case 'glassLit': return A.paint(r, 8, 8, (p, w, h) => p.fill((x, y) => mix(hex('#ffd890'), hex('#fff8e0'), Math.max(0, 1 - Math.hypot(x - 3.5, y - 3.5) / 4)) as RGB));
-      case 'lamp': return A.paint(r, 8, 8, (p, w, h) => p.fill(() => hex('#fff0c0')));
+      case 'brass': return A.paint(r, 16, 16, (p) => { const T = hueRamp('#b08a3a', 5); p.fill((x, y) => T[x + y < 7 ? 4 : x + y < 14 ? 3 : x + y < 22 ? 2 : 1]); });
+      case 'iron': return A.paint(r, 16, 16, (p, w, h) => paintMetal(p, w, h, { paint: ['#141414', '#242424', '#3a3a3c', '#4a4a4a'], rust: 0.5, seed: 51, plate: 8 }));
+      case 'rock': return A.paint(r, 32, 32, (p) => { const T = hueRamp(a.pal.rock[2], 5); p.fill((x, y) => { const c = cells(x, y, 11, 4, 32); const l = Math.hypot(c.dx, c.dy) || 1; const e = c.f2 - c.f1; return T[e < 0.9 ? 0 : e < 2.2 ? ((c.dx / l) * -0.6 + (c.dy / l) * -0.8 > 0.15 ? 4 : 1) : c.id > 0.5 ? 3 : 2]; }); });
+      case 'copper': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, '#c8703a', '#3a9a7a'));
+      case 'ironOre': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, '#7a6a62', '#8a4a2a'));
+      case 'gold': return A.paint(r, 16, 16, (p, w, h) => nugget(p, w, h, '#e0b030', null));
+      case 'gemViolet': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, '#8a4ac8'));
+      case 'gemCyan': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, '#40b0d0'));
+      case 'gemGreen': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, '#40c060'));
+      case 'gemRed': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, '#d04040'));
+      case 'mana': return A.paint(r, 16, 32, (p, w, h) => gem(p, w, h, '#5a8aff'));
+      case 'shell': return A.paint(r, 16, 16, (p) => { const T = hueRamp('#d8c4a8', 5); p.fill((x, y) => T[(x % 4 === 0 ? 1 : x % 4 === 1 ? 3 : 2) + (y % 5 === 0 ? -1 : 0) + (y < 3 ? 1 : 0)]); });
+      case 'shellPink': return A.paint(r, 16, 16, (p) => { const T = hueRamp('#e8a0a0', 5); p.fill((x, y) => T[(x % 4 === 0 ? 1 : x % 4 === 1 ? 3 : 2) + (y % 4 === 0 ? -1 : 0) + (y < 3 ? 1 : 0)]); });
+      case 'pearl': return A.paint(r, 8, 8, (p) => { const T = hueRamp('#e8e4f0', 4); p.fill((x, y) => T[Math.hypot(x - 2.5, y - 2.5) < 1.6 ? 3 : Math.hypot(x - 2.5, y - 2.5) < 4 ? 2 : 1]); });
+      case 'bone': return A.paint(r, 16, 32, (p) => { const T = hueRamp('#d8d0bc', 5); p.fill((x, y) => T[x < 3 ? 4 : x > 12 ? 1 : (y % 9 === 0 ? 1 : 3)]); });
+      case 'ice': return A.paint(r, 32, 32, (p) => { const T = hueRamp('#9ad4ee', 5, { spread: 1.3 }); p.fill((x, y) => { const c = cells(x, y, 12, 9, 32); const e = c.f2 - c.f1, l = Math.hypot(c.dx, c.dy) || 1; return T[e < 0.8 ? 4 : e < 2 ? ((c.dx / l) * -0.6 + (c.dy / l) * -0.8 > 0.1 ? 4 : 1) : c.id > 0.6 ? 3 : 2]; }); });
+      case 'crate': return A.paint(r, 32, 32, (p, w, h) => { paintPlanks(p, w, h, { base: woodOld(a), seed: 61, rot: 0.3, algae: algae(a), plankH: 8, nails: true }); const D = hueRamp(woodOld(a)[2], 4)[0]; for (let i = 0; i < w; i++) { p.set(i, 0, D); p.set(i, h - 1, D); p.set(0, i, D); p.set(w - 1, i, D); p.set(i, i, D); p.set(i + 1, i, hueRamp(woodOld(a)[2], 4)[3]); } });
+      case 'glassLit': return A.paint(r, 8, 8, (p) => { const T = hueRamp('#ffd890', 4, { hi: 0.97 }); p.fill((x, y) => T[x === 0 || y === 0 || x === 7 || y === 7 ? 1 : x + y < 6 ? 3 : 2]); });
+      case 'lamp': return A.paint(r, 8, 8, (p) => p.fill(() => hex('#fff0c0')));
       case 'black': return A.paint(r, 4, 4, (p) => p.fill(() => [10, 10, 12]));
       case 'buoyRed': return A.paint(r, 16, 32, (p, w, h) => paintMetal(p, w, h, { paint: ['#4a0a08', '#8a1a12', '#c03020', '#e05a40'], rust: 0.25, seed: 71, plate: 64 }));
       case 'buoyWhite': return A.paint(r, 16, 16, (p, w, h) => paintMetal(p, w, h, { paint: ['#7a7a74', '#b8b8b0', '#e0e0d8', '#fafaf4'], rust: 0.2, seed: 73, plate: 64 }));
       case 'postBlue': return A.paint(r, 16, 16, (p, w, h) => paintMetal(p, w, h, { paint: ['#0a1430', '#1a2a5a', '#2a4a8a', '#4a6ab0'], rust: 0.15, seed: 75, plate: 64 }));
-      case 'kelpBundle': return A.paint(r, 16, 32, (p, w, h) => { const R = ramp(['#2a1e08', '#5a4614', '#8a7224', '#c8a840'], 6, 0.7); p.fill((x, y) => R(0.5 + Math.sin(y * 0.9 + x) * 0.15 + (x % 4 === 0 ? -0.2 : 0) + (hash2(x, y, 9) - 0.5) * 0.1, x, y)); });
-      case 'flag': return A.paint(r, 24, 16, (p, w, h) => { p.fill((x, y) => (y < 8 ? hex('#1a2a5a') : hex('#e8e0d0'))); for (let i = 0; i < 6; i++) p.set(4 + i, 3, '#f0d070'); p.set(6, 2, '#f0d070'); p.set(7, 4, '#f0d070'); });
+      case 'kelpBundle': return A.paint(r, 16, 32, (p) => { const T = hueRamp('#9a7424', 5); p.fill((x, y) => T[x % 4 === 0 ? 1 : ((y + x * 2) % 6 === 0 ? 2 : x % 4 === 1 ? 4 : 3)]); });
+      case 'flag': return A.paint(r, 24, 16, (p) => { p.fill((x, y) => (y < 8 ? hex('#1a2a5a') : hex('#e8e0d0'))); for (let i = 0; i < 6; i++) p.set(4 + i, 3, '#f0d070'); p.set(6, 2, '#f0d070'); p.set(7, 4, '#f0d070'); });
     }
     return A.get('black');
   }
@@ -67,64 +68,75 @@ const woodOld = (a: AreaDef) => a.id === 'graveyard' ? ['#26241c', '#423e30', '#
 const algae = (a: AreaDef) => (a.id === 'arctic' ? '#9aa8a8' : a.id === 'abyss' ? '#3a4a5a' : a.id === 'kelp' ? '#5a6a2a' : '#4a6a3a');
 const steelPaint = (a: AreaDef) => (a.id === 'abyss' ? ['#3a2a08', '#7a5a14', '#b08a2a', '#d8b050'] : a.id === 'arctic' ? ['#1a1010', '#4a1a14', '#7a2a20', '#a04030'] : ['#141a1c', '#283234', '#3e4a4c', '#5a6668']);
 
-function holes(p: { set(x: number, y: number, c: RGB | string, a?: number): void }, w: number, h: number, n: number) {
+type Setter = { set(x: number, y: number, c: RGB | string, a?: number): void };
+type Filler = { fill(fn: (x: number, y: number) => RGB | [number, number, number, number] | null): void };
+
+/** jagged holes punched through the planks: black inside, splintered pale wood around */
+function holes(p: Setter, w: number, h: number, n: number) {
   const rng = new Rng(97 + n);
+  const T = hueRamp('#9a7a50', 4);
   for (let k = 0; k < n; k++) {
-    const cx = rng.range(6, w - 6), cy = rng.range(6, h - 6), r = rng.range(3, 7);
-    for (let y = Math.floor(cy - r - 2); y <= cy + r + 2; y++) for (let x = Math.floor(cx - r - 2); x <= cx + r + 2; x++) {
-      const d = Math.hypot((x - cx) * 0.8, y - cy) + (hash2(x, y, k) - 0.5) * 2.5;
-      if (d < r) p.set(x, y, mix([6, 6, 8], [16, 14, 12], hash2(x, y, 1)) as RGB);
-      else if (d < r + 1.6) p.set(x, y, mix([60, 44, 28], [120, 96, 64], hash2(x, y, 2)) as RGB); // splintered rim
+    const cx = rng.range(8, w - 8), cy = rng.range(8, h - 8), r = rng.range(3.5, 6.5);
+    const jag = Array.from({ length: 12 }, () => rng.range(0.75, 1.25));
+    for (let y = Math.floor(cy - r - 3); y <= cy + r + 3; y++) for (let x = Math.floor(cx - r - 3); x <= cx + r + 3; x++) {
+      const a = Math.atan2(y - cy, x - cx), j = jag[Math.floor(((a + Math.PI) / (Math.PI * 2)) * 12) % 12];
+      const d = Math.hypot((x - cx) * 0.8, y - cy) / j;
+      if (d < r) p.set(x, y, d < r - 1 ? [8, 8, 12] : [26, 22, 20]);
+      else if (d < r + 1.5) p.set(x, y, T[(x - cx) + (y - cy) < 0 ? 1 : 3]);
     }
   }
 }
 
-function hullPaint(p: { set(x: number, y: number, c: RGB | string, a?: number): void }, w: number, h: number, a: AreaDef, worn: boolean) {
-  // painted planks: a coloured top strake, a white band, antifouling below, all chipped and fouled
-  const top = a.id === 'kelp' ? ['#0a2a1a', '#1a4a2a', '#2a6a3a', '#4a8a52'] : ['#2a0a08', '#5a1a14', '#8a2a20', '#b04a38'];
-  const R1 = ramp(top, 6, 0.7), R2 = ramp(['#6a6a60', '#a8a89a', '#d8d4c4', '#f0ece0'], 6, 0.7), R3 = ramp(['#200a08', '#4a1a14', '#6a2a1c', '#8a3e28'], 6, 0.7);
+/** painted planks: a coloured top strake, a white band, antifouling below; clean chips and a fouling line */
+function hullPaint(p: Setter, w: number, h: number, a: AreaDef) {
+  const T1 = hueRamp(a.id === 'kelp' ? '#2a6a3a' : '#8a2a20', 5), T2 = hueRamp('#d8d4c4', 5), T3 = hueRamp('#6a2a1c', 5);
+  const W = hueRamp('#7a6c52', 4), G = hueRamp(algae(a), 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const ph = 8, pi = Math.floor(y / ph), py = y - pi * ph;
-    const n = pxNoise(x, y, 6, 3, 13);
-    const R = y < h * 0.3 ? R1 : y < h * 0.4 ? R2 : R3;
-    let c = R(0.5 + (n - 0.5) * 0.4 + (py === 0 ? -0.35 : 0), x, y);
-    const chip = pxNoise(x, y, 5, 2, 17);
-    if (chip > (worn ? 0.6 : 0.7)) c = mix(c, hex('#4a3a24'), 0.75);
-    if (pxNoise(x, y, 9, 2, 19) > 0.72) c = mix(c, hex(algae(a)), 0.6);
+    const pi = Math.floor(y / 8), py = y - pi * 8;
+    const T = y < h * 0.3 ? T1 : y < h * 0.4 ? T2 : T3;
+    let c: RGB = T[py === 0 ? 0 : py === 1 ? 4 : pi % 2 ? 2 : 3];
+    const chip = cells(x, y, 9, 13, 64);
+    if (chip.id > 0.8 && chip.f1 < 2.2) c = W[chip.f1 < 1.2 ? 2 : 1];
+    if (y > h * 0.62 && y < h * 0.62 + 3) c = G[2];
     p.set(x, y, c);
   }
 }
 
-function sail(p: { set(x: number, y: number, c: RGB | string, a?: number): void; fill(fn: (x: number, y: number) => RGB | [number, number, number, number] | null): void }, w: number, h: number, torn: boolean) {
-  const R = ramp(['#4a4436', '#8a826a', '#c0b896', '#e4dcc0'], 6, 0.7);
+/** sail cloth: panels with stitched seams, a darker luff tape, clean stains; torn ones lose ragged pieces */
+function sail(p: Filler, w: number, h: number, torn: boolean) {
+  const T = hueRamp('#c0b896', 5);
+  const rng = new Rng(torn ? 23 : 29);
+  const rips = torn ? Array.from({ length: 4 }, () => ({ x: rng.range(4, w - 4), y: rng.range(h * 0.3, h), r: rng.range(5, 11) })) : [];
   p.fill((x, y) => {
-    if (torn) {
-      const edge = pxNoise(x, y, 6, 3, 23);
-      if (edge > 0.62 || (y > h * 0.55 && pxNoise(x, y * 0.4, 4, 2, 29) > 0.45)) return null;
-    }
-    let k = 0.55 + (pxNoise(x, y, 8, 2, 27) - 0.5) * 0.4 + (x % 12 === 0 ? -0.2 : 0);
-    if (pxNoise(x, y, 7, 2, 31) > 0.7) k -= 0.25; // stains
-    return R(k, x, y);
+    for (const q of rips) { const d = Math.hypot((x - q.x) * 0.7, y - q.y); if (d < q.r + ((x * 7 + y * 3) % 4)) return null; }
+    if (torn && y > h - 4 && (x * 5) % 7 < 3) return null;
+    let t = 3;
+    if (x % 12 === 0) t = 1; else if (x % 12 === 1) t = 4;           // seams
+    if (y < 2 || x < 2) t = 2;                                        // tapes
+    if (cells(x, y, 16, 31, 48).id > 0.85) t -= 1;                    // stains
+    return T[t];
   });
 }
 
-function nugget(p: { fill(fn: (x: number, y: number) => RGB | null): void }, w: number, h: number, pal: string[], patina: string | null) {
-  const R = ramp(pal, 6, 0.7);
+/** an ore nugget: faceted lumps with a lit upper-left face, dark seams, optional patina */
+function nugget(p: Filler, w: number, h: number, base: string, patina: string | null) {
+  const T = hueRamp(base, 5, { spread: 1.1 }), P = patina ? hueRamp(patina, 4) : null;
   p.fill((x, y) => {
-    const [f1, f2] = worley(x, y, 5, 3, 16);
-    let c = R(0.35 + Math.min(1, f2 / 6) * 0.5 + (x + y < 10 ? 0.15 : 0) + (f2 - f1 < 0.8 ? -0.2 : 0), x, y);
-    if (patina && pxNoise(x, y, 4, 2, 5) > 0.66) c = mix(c, hex(patina), 0.6);
-    if (hash2(x, y, 7) > 0.94) c = mix(c, [255, 250, 230], 0.6);
-    return c;
+    const c = cells(x, y, 6, 3, 16), e = c.f2 - c.f1, l = Math.hypot(c.dx, c.dy) || 1, k = (c.dx / l) * -0.6 + (c.dy / l) * -0.8;
+    let t = e < 0.8 ? 0 : k > 0.3 ? 4 : k < -0.3 ? 1 : 2 + (c.id > 0.5 ? 1 : 0);
+    if (P && c.id > 0.75 && t < 3) return P[1];
+    return T[t];
   });
 }
 
-function gem(p: { fill(fn: (x: number, y: number) => RGB | null): void }, w: number, h: number, pal: string[]) {
-  const R = ramp(pal, 6, 0.7);
+/** a gem prism skin: facet stripes, a bright table near the tip, internal flashes on the diagonal */
+function gem(p: Filler, w: number, h: number, base: string) {
+  const T = hueRamp(base, 5, { spread: 1.3 });
   p.fill((x, y) => {
-    const facet = Math.floor(x / 4) % 2;
-    let k = 0.35 + (1 - y / h) * 0.35 + facet * 0.15 + (pxNoise(x, y, 4, 2, 9) - 0.5) * 0.15;
-    if ((x + y * 2) % 11 === 0) k += 0.35; // internal flashes
-    return R(k, x, y);
+    const facet = Math.floor(x / 4) % 3;
+    let t = facet === 0 ? 3 : facet === 1 ? 2 : 1;
+    if (y < h * 0.2) t += 1;
+    if ((x + y * 2) % 13 === 0) t = 4;
+    return T[Math.min(4, t)];
   });
 }

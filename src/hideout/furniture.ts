@@ -70,13 +70,20 @@ export class Furniture {
       it.obj.updateMatrixWorld(true);
       for (const l of it.prop.lights) lights.push({ pos: l.pos.clone().applyMatrix4(it.obj.matrixWorld), l, it });
     }
+    // the first key light (main lamp) gets the shadow-casting spot
+    const key = lights.find((L) => L.l.key);
+    const kl = this.room.keyLamp;
+    if (key) {
+      kl.position.copy(key.pos); kl.target.position.copy(key.pos).add(new THREE.Vector3(0.15, -1, 0.1));
+      kl.color.set(key.l.color); kl.userData.base = 38 * key.l.intensity; kl.userData.src = key.l;
+    } else { kl.userData.base = 0; kl.userData.src = null; kl.intensity = 0; }
     // brightest first
     lights.sort((a, b) => b.l.intensity - a.l.intensity);
     this.room.pool.forEach((pl, i) => {
       const L = lights[i];
       if (!L) { pl.intensity = 0; pl.userData.src = null; return; }
       pl.position.copy(L.pos); pl.color.set(L.l.color); pl.distance = L.l.dist;
-      pl.userData.src = L.l; pl.userData.base = L.l.intensity * 2.6;
+      pl.userData.src = L.l; pl.userData.base = L.l.intensity * (L.l.key ? 1.6 : 2.6);
     });
   }
 
@@ -97,7 +104,7 @@ export class Furniture {
         if (d.axis === 'y') d.pivot.rotation.y = nv * d.open; else d.pivot.rotation.x = nv * d.open;
       }
     }
-    for (const pl of this.room.pool) {
+    for (const pl of [...this.room.pool, this.room.keyLamp]) {
       const src = pl.userData.src as Prop['lights'][0] | null;
       if (!src) continue;
       const f = src.flicker ?? 0;

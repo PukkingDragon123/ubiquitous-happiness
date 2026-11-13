@@ -3,8 +3,8 @@
 // pixels stay crisp on the 3D models.
 //
 //   const p = new Px(128, 64);
-//   const skin = ramp(['#1b2a4a', '#3b6fa8', '#8fd3ff', '#eaffff'], 6);   // banded palette ramp
-//   p.fill((x, y) => skin(fbm(x / 20, y / 20) , x, y));                     // dithered banding at x, y
+//   const skin = ramp(['#1b2a4a', '#3b6fa8', '#8fd3ff', '#eaffff'], 6);   // banded palette ramp (clean bands)
+//   p.fill((x, y) => skin(shapeValue(x, y), x, y));                         // shade deliberate shapes, not noise
 //   p.outline('#0a0f1a');                                                  // 1 px dark outline around alpha
 //   const tex = p.texture();                                               // THREE.CanvasTexture (sRGB, nearest)
 //   const nrm = p.normalMap(heightFn, 2)                                   // optional normal map from a height field
@@ -35,10 +35,11 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) =>
 export const bayer = (x: number, y: number) => BAYER4[(y & 3) * 4 + (x & 3)];
 
 /**
- * A banded palette ramp. ramp(colors, steps)(t, x, y) -> RGB. With x, y given, the band edges are
- * ordered-dithered so gradients read like hand-placed pixel shading rather than smooth airbrush.
+ * A banded palette ramp. ramp(colors, steps)(t, x, y) -> RGB: t is quantised to `steps` clean bands (hard band
+ * edges, like hand-placed pixel shading). Ordered dithering at the band edges is OFF by default (it reads as
+ * screen-door noise); pass dither > 0 to opt back in for a deliberate pattern.
  */
-export function ramp(colors: (string | RGB)[], steps = 0, dither = 0.6) {
+export function ramp(colors: (string | RGB)[], steps = 0, dither = 0) {
   const cs = colors.map((c) => (typeof c === 'string' ? hex(c) : c));
   const at = (t: number): RGB => {
     t = clamp01(t) * (cs.length - 1);
@@ -48,7 +49,7 @@ export function ramp(colors: (string | RGB)[], steps = 0, dither = 0.6) {
   return (t: number, x?: number, y?: number): RGB => {
     if (!steps) return at(t);
     let q = clamp01(t) * steps;
-    if (x !== undefined && y !== undefined) q += (bayer(x, y) - 0.5) * dither;
+    if (dither > 0 && x !== undefined && y !== undefined) q += (bayer(x, y) - 0.5) * dither;
     return at(Math.round(Math.max(0, Math.min(steps, q))) / steps);
   };
 }

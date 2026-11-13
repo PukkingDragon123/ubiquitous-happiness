@@ -2,6 +2,8 @@
 // rubber / metal painters, rope tubes, tyre fenders, cleats, lanterns, crates, buckets and pixel-font names
 // stamped onto painted surfaces (src/ui/text.ts textCanvas).
 import * as THREE from 'three';
+import { cleanPage } from './clean';
+import { DETAIL } from './rig';
 import type { V3, Reg, Wt } from '../gfx/loft';
 import { Loft, usFor } from '../gfx/loft';
 import { Px, mix, shade } from '../gfx/px';
@@ -45,7 +47,7 @@ export class Atlas {
       if (c) this.P.set(x, y, c);
     }
   }
-  texture() { return this.P.texture(); }
+  texture() { return DETAIL.low ? cleanPage(this.P).texture() : this.P.texture(); }
 }
 
 // ------------------------------------------------------------------ painters
@@ -157,6 +159,6 @@ export function lampMat(col = 0xffd88a): THREE.Material {
 }
 /** the vessel / spot material: painted page, lit like water below the surface (uw does nothing above y = 0) */
 export function spotMat(tex: THREE.Texture, rough = 0.78): THREE.MeshStandardMaterial {
-  return uw(new THREE.MeshStandardMaterial({ map: tex, roughness: rough, vertexColors: true }), { caustics: 1, rim: 0 });
+  return uw(new THREE.MeshStandardMaterial({ map: tex, roughness: rough, vertexColors: true, flatShading: DETAIL.low }), { caustics: 1, rim: 0 });
 }
 export { band, nz, hh, wood, metal, mix, shade };

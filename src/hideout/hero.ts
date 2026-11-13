@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { BlobModel, buildSword, outlineAt, SB_N, surf } from '../player/blobModel';
 import { SoftBody } from '../player/softbody';
+import { BlobPuppet } from '../player/puppet';
 import { damp } from '../core/math';
 
 export type HeroAnim = 'idle' | 'walk' | 'sit' | 'hop' | 'gear' | 'cheer' | 'swim' | 'look';
@@ -30,6 +31,8 @@ export interface HideoutHero {
   expression?(name: string): void;
   /** where the hero is looking: a world point (null = straight ahead) */
   lookAt?(p: THREE.Vector3 | null): void;
+  /** swap the worn gear set (BlobPuppet: BlobGear / BUILD_GEAR presets) */
+  setGear?(g: unknown): void;
 }
 export type HeroFactory = () => HideoutHero;
 
@@ -79,10 +82,11 @@ export class BlobHero implements HideoutHero {
   attach(slot: HeroSlot, obj: THREE.Object3D) {
     if (slot === 'hand' && obj.userData.sword) { this.sword.visible = true; return; }
     const anchor = new THREE.Group();
-    const p = slot === 'head' ? surf(0.62, 0, 0.02) : slot === 'back' ? surf(0.3, -0.1, 0.02) : slot === 'side' ? surf(0.45, -Math.PI * 0.55, 0.02) : surf(0.55, Math.PI * 0.75, 0.02);
+    const p = slotPos(slot, 0.12);
     anchor.position.copy(p);
-    if (slot === 'side') anchor.rotation.x = -1.2;
-    if (slot === 'back') anchor.rotation.z = 0.5;
+    if (slot === 'side') anchor.rotation.x = -0.9;
+    if (slot === 'belly') anchor.rotation.x = 0.9;
+    if (slot === 'back') anchor.rotation.z = 0.6;
     anchor.add(obj);
     this.blob.body.add(anchor);
     this.gear.push(anchor);
@@ -90,7 +94,7 @@ export class BlobHero implements HideoutHero {
   clearGear() { for (const g of this.gear) g.removeFromParent(); this.gear = []; this.sword.visible = false; }
   /** world position of a gear slot (for flying gear onto the hero) */
   slotWorld(slot: HeroSlot, out = new THREE.Vector3()) {
-    const p = slot === 'head' ? surf(0.62, 0, 0.1) : slot === 'back' ? surf(0.3, -0.1, 0.1) : slot === 'side' ? surf(0.45, -Math.PI * 0.55, 0.1) : slot === 'hand' ? new THREE.Vector3(0.1, -0.1, 0.6) : surf(0.55, Math.PI * 0.75, 0.1);
+    const p = slot === 'hand' ? new THREE.Vector3(0.1, -0.1, 0.6) : slotPos(slot, 0.14);
     this.blob.body.updateWorldMatrix(true, false);
     return out.copy(p).applyMatrix4(this.blob.body.matrixWorld);
   }
@@ -138,4 +142,18 @@ export class BlobHero implements HideoutHero {
   }
 }
 
-export const defaultHero: HeroFactory = () => new BlobHero();
+/** gear anchor points on the blobfish body (body space): +x nose, +z toward the camera side */
+function slotPos(slot: HeroSlot, out: number): THREE.Vector3 {
+  switch (slot) {
+    case 'head': return surf(0.6, 0, out);
+    case 'back': return surf(0.28, -0.35, out);
+    case 'side': return surf(0.42, Math.PI * 0.5, out);
+    case 'belly': return surf(0.4, -Math.PI * 0.5, out);
+    default: return surf(0.5, 0.4, out);
+  }
+}
+
+/** the default hero: the lead's BlobPuppet (owns the blobfish model; satisfies HideoutHero structurally) */
+export const defaultHero: HeroFactory = () => new BlobPuppet() as unknown as HideoutHero;
+/** the older self-contained adapter, kept for previews / fallback */
+export const legacyHero: HeroFactory = () => new BlobHero();

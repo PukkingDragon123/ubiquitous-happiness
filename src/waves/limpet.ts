@@ -27,7 +27,7 @@ export class LimpetMine implements Entity {
     this.y = target.y + (dy / l) * Math.max(0.5, Math.min(l, target.r * 0.85));
     this.ox = this.x - target.x; this.oy = this.y - target.y;
     geo ??= new THREE.CylinderGeometry(0.22, 0.26, 0.12, 8);
-    const m = new THREE.Mesh(geo, kitMat('limpet', 16, 16, (x, y) => band(y < 3 ? [200, 160, 30] : [40, 46, 40], 0.85 + (hh(x, y, 91) - 0.5) * 0.25, x, y), { rough: 0.5, metal: 0.5 }));
+    const m = new THREE.Mesh(geo, kitMat('limpet', 16, 16, (x, y) => band(y < 3 ? [200, 160, 30] : [40, 46, 40], 0.9, x, y), { rough: 0.5, metal: 0.5 }));
     m.rotation.x = Math.PI / 2; m.castShadow = true;
     this.led = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0xff2010 }));
     this.led.position.z = 0.09;

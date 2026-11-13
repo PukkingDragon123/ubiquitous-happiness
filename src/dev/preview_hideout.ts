@@ -36,5 +36,7 @@ export default function make(game: Game): Screen {
   if (q.get('pitch')) h.rig.user.pitch = Number(q.get('pitch'));
   if (q.get('dist')) h.rig.user.dist = Number(q.get('dist'));
   h.rig.snap();
+  if (q.get('dbg') === 'notails') for (const e of h.hero.extras ?? []) e.visible = false;
+  if (q.get('dbg') === 'nohero') h.hero.root.visible = false;
   return h;
 }

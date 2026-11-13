@@ -76,9 +76,9 @@ export function blueprintArt(id: string, W: number, H: number, o: { yaw?: number
   const ctx = cv.getContext('2d')!;
   const img = ctx.createImageData(W, H);
   const D = img.data;
-  const put = (x: number, y: number, r: number, g: number, b: number, a: number) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const j = (y * W + x) * 4; if (D[j + 3] > a) return; D[j] = r; D[j + 1] = g; D[j + 2] = b; D[j + 3] = a; };
-  // faint fills, banded
-  for (let j = 0; j < W * H; j++) if (Z[j] > -Infinity) { const q = Math.round(shadeBuf[j] * 3) / 3; D[j * 4] = 180; D[j * 4 + 1] = 220; D[j * 4 + 2] = 255; D[j * 4 + 3] = 22 + q * 40; }
+  const put = (x: number, y: number, r: number, g: number, b: number, a: number) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const j = (y * W + x) * 4; if (D[j] === 0xe6 && D[j + 3] === 255) return; D[j] = r; D[j + 1] = g; D[j + 2] = b; D[j + 3] = a; };
+  // flat fills in the blueprint blues: lit faces lighter, others the darker blue (opaque, 2 tones)
+  for (let j = 0; j < W * H; j++) if (Z[j] > -Infinity) { const lit = shadeBuf[j] > 0.62; D[j * 4] = lit ? 0x3a : 0x16; D[j * 4 + 1] = lit ? 0x74 : 0x40; D[j * 4 + 2] = lit ? 0xbc : 0x80; D[j * 4 + 3] = 255; }
   // edges, depth-tested (visible solid, hidden dotted)
   for (let i = 0; i < edges.length; i += 6) {
     let xa = SX(edges[i]), ya = SY(edges[i + 1]); const za = edges[i + 2];
@@ -89,8 +89,8 @@ export function blueprintArt(id: string, W: number, H: number, o: { yaw?: number
       const x = Math.floor(xa + (xb - xa) * t), y = Math.floor(ya + (yb - ya) * t), z = za + (zb - za) * t;
       if (x < 0 || y < 0 || x >= W || y >= H) continue;
       const vis = z >= Z[y * W + x] - 0.04;
-      if (vis) put(x, y, 236, 248, 255, 255);
-      else if ((x + y) % 3 === 0) put(x, y, 150, 200, 240, 120);
+      if (vis) put(x, y, 0xe6, 0xf3, 0xff, 255);
+      else if ((x + y) % 3 === 0 && D[(y * W + x) * 4 + 3] < 255) put(x, y, 0x3a, 0x74, 0xbc, 255);
     }
     void xa; xa = 0;
   }
@@ -105,7 +105,7 @@ export function blueprintArt(id: string, W: number, H: number, o: { yaw?: number
   if (o.dims !== false) {
     const bp = BLUEPRINTS[id];
     if (bp) {
-      ctx.fillStyle = 'rgba(200,232,255,0.9)';
+      ctx.fillStyle = '#3a74bc';
       const yb = H - 2;
       ctx.fillRect(m, yb, W - m * 2, 1);
       ctx.fillRect(m, yb - 2, 1, 3); ctx.fillRect(W - m - 1, yb - 2, 1, 3);

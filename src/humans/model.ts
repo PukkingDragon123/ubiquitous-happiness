@@ -14,6 +14,7 @@ import { buildGear } from './gear';
 import type { Gear } from './gear';
 import { paintDive, paintScars } from './divePaint';
 import { buildDiveGear } from './diveGear';
+import { cleanPage } from './clean';
 import type { DiveGear } from './diveGear';
 
 export interface ModelParts {
@@ -39,14 +40,14 @@ export function modelParts(arch: Archetype, seed: number, scars: readonly string
   const page = paintPage(look, body.shape);
   paintMouths(page, look);
   if (PROF) console.info(`[humans] ${arch}: geometry ${Math.round(t1 - t0)} ms, paint ${Math.round(performance.now() - t1)} ms`);
-  const parts: ModelParts = { look, dims, body, tex: page.texture() };
+  const parts: ModelParts = { look, dims, body, tex: null as unknown as THREE.Texture };
   // gear painters add to the page before upload
-  parts.tex.dispose();
   const P = page;
   buildGear.paint(P, look, body.shape);
   paintDive(P, look, body.shape);
   paintScars(P, look);
-  parts.tex = P.texture();
+  // v2: clean PS2 texture (half res, no speckle, flat tones)
+  parts.tex = DETAIL.low ? cleanPage(P).texture() : P.texture();
   cache.set(key, parts);
   return parts;
 }
@@ -105,5 +106,7 @@ export function buildModel(arch: Archetype, seed: number, scars: readonly string
   head.add(face.group);
   const gear = buildGear(look, body, dims, mat, byName);
   const dive = buildDiveGear(look, body, dims, byName);
+  // divers: the face is painted on the page (PS2 style); the 3D eye / lid / brow rig is hidden
+  if (look.dive && DETAIL.low) face.group.visible = false;
   return { parts, root, mesh, bones: byName, face, mat, gear, dive };
 }

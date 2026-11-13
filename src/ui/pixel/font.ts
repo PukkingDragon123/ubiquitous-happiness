@@ -32,7 +32,7 @@ const def = (family: string, px: number, track = 0): PxFont => ({ family, px, ca
 export const FONTS: Record<FontName, PxFont> = {
   body: def('M6x11', 16),     // m6x11plus: the workhorse
   small: def('M5x7', 16),     // m5x7: compact labels, counts
-  tiny: def('Tiny5', 8),      // Tiny5: micro labels on cards
+  tiny: def('M5x7', 16),      // compact labels on cards (m5x7: chunkier and more readable than Tiny5)
   title: def('Alagard', 16),  // Alagard: headings, numbers
   fancy: def('Jacquard', 24), // Jacquard 24: big blackletter names
   big: def('Alagard', 32),    // Alagard x2 for splash titles

@@ -16,7 +16,8 @@ import { Atlas } from '../world/atlas';
 import { FloraKit, SPECIES } from '../world/flora';
 import { boulder, spire, arch, crustPainter, pillows } from '../world/rockgen';
 import { rockTile, groundTile, strataTile, sectionTile } from '../world/texlib';
-import { floraMaterial, rockMaterial, groundMaterial, sectionMaterial, propMaterial } from '../world/mats';
+import { floraMaterial, rockMaterial, groundMaterial, sectionMaterial, propMaterial, spriteMaterial } from '../world/mats';
+import { SpriteKit, SPRITES } from '../world/sprites';
 import type { SandField } from '../world/sand';
 import type { AreaTerrain } from '../world/areaTerrain';
 import { FRONT_Z } from '../gfx/water/surface';
@@ -27,19 +28,22 @@ import { PropKit } from './props';
 
 export const CHUNK = 30;
 export const ZONES: Record<string, [number, number]> = { fg: [1.3, 2.7], play: [-0.95, 0.9], mid: [-2.6, -16], back: [-16, -42] };
-const ZONE_K: Record<string, number> = { fg: 0.35, play: 0.55, mid: 2.2, back: 2.4 };
+const ZONE_K: Record<string, number> = { fg: 0.35, play: 0.55, mid: 1.6, back: 1.1 };
 
-interface Chunk { rock: Soup; flora: Soup; prop: Soup; glow: Soup }
+/** near soups cast shadows; far ones (z < -7) do not */
+interface Chunk { rock: Soup; flora: Soup; prop: Soup; glow: Soup; rockFar: Soup; floraFar: Soup; sprite: Soup; spriteFar: Soup }
 
 const rgb = (c: string, k = 1): [number, number, number] => { const h = hex(c); return [h[0] / 255 * k, h[1] / 255 * k, h[2] / 255 * k]; };
 
 export class Scenery {
   group = new THREE.Group();
   floraAtlas: Atlas;
+  spriteAtlas: Atlas;
+  sprites: SpriteKit;
   propAtlas: Atlas;
   flora: FloraKit;
   props: PropKit;
-  mats: { rock: THREE.MeshStandardMaterial; ground: THREE.MeshStandardMaterial; sandStrip: THREE.MeshStandardMaterial; section: THREE.MeshStandardMaterial; strata: THREE.MeshStandardMaterial; flora: THREE.MeshStandardMaterial; prop: THREE.MeshStandardMaterial; propSway: THREE.MeshStandardMaterial; glass: THREE.MeshStandardMaterial; cloth: THREE.MeshStandardMaterial };
+  mats: { rock: THREE.MeshStandardMaterial; ground: THREE.MeshStandardMaterial; sandStrip: THREE.MeshStandardMaterial; section: THREE.MeshStandardMaterial; strata: THREE.MeshStandardMaterial; flora: THREE.MeshStandardMaterial; prop: THREE.MeshStandardMaterial; propSway: THREE.MeshStandardMaterial; glass: THREE.MeshStandardMaterial; cloth: THREE.MeshStandardMaterial; sprite: THREE.MeshStandardMaterial };
   private chunks = new Map<number, Chunk>();
   rng: Rng;
   /** extra builders (landmarks) can add their own meshes / per-frame updates */
@@ -56,6 +60,8 @@ export class Scenery {
     this.propAtlas = new Atlas(512, 512);
     this.props = new PropKit(this.propAtlas, a);
     this.flora = new FloraKit(this.floraAtlas, a);
+    this.spriteAtlas = new Atlas(1024, 1024, false);
+    this.sprites = new SpriteKit(this.spriteAtlas, a, seed);
     const rt = rockTile(a), gt = groundTile(a);
     this.mats = {
       rock: rockMaterial(rt),
@@ -65,6 +71,7 @@ export class Scenery {
       strata: sectionMaterial(strataTile(a), 0.5),
       // atlases are painted while the area is built; finish() uploads them
       flora: floraMaterial(new THREE.Texture()),
+      sprite: spriteMaterial(new THREE.Texture()),
       prop: propMaterial(new THREE.Texture()),
       propSway: propMaterial(new THREE.Texture(), { sway: true, side: THREE.DoubleSide }),
       glass: propMaterial(new THREE.Texture(), { rough: 0.15, metal: 0.1 }),
@@ -77,7 +84,7 @@ export class Scenery {
   chunk(x: number): Chunk {
     const i = Math.floor(x / CHUNK);
     let c = this.chunks.get(i);
-    if (!c) { c = { rock: new Soup(), flora: new Soup(), prop: new Soup(), glow: new Soup() }; this.chunks.set(i, c); }
+    if (!c) { c = { rock: new Soup(), flora: new Soup(), prop: new Soup(), glow: new Soup(), rockFar: new Soup(), floraFar: new Soup(), sprite: new Soup(), spriteFar: new Soup() }; this.chunks.set(i, c); }
     return c;
   }
 
@@ -104,15 +111,15 @@ export class Scenery {
 
   // ------------------------------------------------------------------ the gameplay sand strip
   private buildSandStrip() {
-    const S = this.sand, rows = [FRONT_Z, 2.2, 1.4, 0.6, -0.2, -1.0, -1.8, -2.7, SEAM_Z];
-    const step = 0.5, cols = Math.floor((S.x1 - S.x0) / step) + 1;
+    const S = this.sand, rows = [FRONT_Z, 2.1, 1.2, 0.3, -0.6, -1.6, -2.7, SEAM_Z];
+    const step = 0.8, cols = Math.floor((S.x1 - S.x0) / step) + 1;
     const pos: number[] = [], col: number[] = [], w: number[] = [], idx: number[] = [];
     const s = this.seed % 997;
     for (let r = 0; r < rows.length; r++) for (let c = 0; c < cols; c++) {
       const x = S.x0 + c * step, z = rows[r];
       let y = this.heightAt(x, z);
       // faceted irregularity (never on the front edge, which must meet the cross-section wall)
-      if (r > 0) y += (hash2(c, r, s) - 0.5) * 0.08;
+      if (r > 0) y += (hash2(c, r, s) - 0.5) * 0.16;
       pos.push(x, y, z);
       const k = 0.88 + fbm(x * 0.15, z * 0.3, 2, s) * 0.24;
       col.push(k, k, k);
@@ -209,11 +216,12 @@ export class Scenery {
   /** append a sculpted rock: unit shape scaled to (sx, sy, sz) at a base point, tinted + crusted */
   addRock(shapeSoup: Soup, x: number, y: number, z: number, sx: number, sy: number, sz: number, ry: number, o: { topK?: number; tilt?: number; tint?: number } = {}) {
     const ch = this.chunk(x);
-    const from = ch.rock.count;
+    const soup = z < -7 ? ch.rockFar : ch.rock;
+    const from = soup.count;
     const tilt = o.tilt ?? 0;
-    ch.rock.append(shapeSoup, mat4(x, y, z, sx, sy, sz, ry, (this.rng.next() - 0.5) * tilt, (this.rng.next() - 0.5) * tilt));
+    soup.append(shapeSoup, mat4(x, y, z, sx, sy, sz, ry, (this.rng.next() - 0.5) * tilt, (this.rng.next() - 0.5) * tilt));
     const t = o.tint ?? this.rng.range(0.85, 1.12);
-    crustPainter([t, t * this.rng.range(0.97, 1.03), t * this.rng.range(0.96, 1.04)], rgb(this.a.pal.rockTop, 1.25), o.topK ?? 0.7, from, ch.rock);
+    crustPainter([t, t * this.rng.range(0.97, 1.03), t * this.rng.range(0.96, 1.04)], rgb(this.a.pal.rockTop, 1.25), o.topK ?? 0.7, from, soup);
     if (sy > 0.5) this.rockTops.push({ x, y: y + sy * 0.92, z, r: Math.min(sx, sz) * 0.6 });
   }
 
@@ -227,7 +235,7 @@ export class Scenery {
         const sd = this.seed * 13 + k * 101 + kind.length * 7;
         switch (kind) {
           case 'boulder': l.push(boulder(sd, { level: 1, rough: 0.4, cuts: 4, layers: layered ? 3 : 0 })); break;
-          case 'bigboulder': l.push(boulder(sd, { level: 2, rough: 0.55, cuts: 9, cutLo: 0.5, layers: layered ? 5 : 0, recess: 0.12 })); break;
+          case 'bigboulder': l.push(boulder(sd, { level: 1, rough: 0.5, cuts: 7, cutLo: 0.5, layers: layered ? 4 : 0, recess: 0.12 })); break;
           case 'slab': l.push(boulder(sd, { level: 1, rough: 0.25, cuts: 3, box: 0.6, flat: 0.25, layers: layered ? 2 : 0 })); break;
           case 'spire': l.push(spire(sd, { sides: 7, rings: 8, waist: this.a.rock === 'limestone' ? 0.12 : 0.08, lean: (k % 3 - 1) * 0.25 })); break;
           case 'arch': l.push(arch(sd)); break;
@@ -272,19 +280,19 @@ export class Scenery {
       }
     }
     // mid + back rocks and outcrops (no collision)
-    const nMid = Math.round((sh.X1 - sh.X0 + 60) / 3.2);
+    const nMid = Math.round((sh.X1 - sh.X0 + 60) / 5.5);
     for (let i = 0; i < nMid; i++) {
       const x = r.range(sh.X0 - 30, sh.X1 + 30), z = -r.range(2.8, 36) * (r.chance(0.5) ? 1 : 0.5) - 2.6;
       if (this.isReserved(x, z, 1)) continue;
       const far = -z / 36;
       const big = r.chance(0.18 + far * 0.3);
-      const R = big ? r.range(1.6, 3.6) * (1 + far * 0.6) : r.range(0.4, 1.5);
+      const R = big ? r.range(2.2, 4.2) * (1 + far * 0.6) : r.range(0.7, 1.7);
       const kind = a.rock === 'pillow' && r.chance(0.6) ? 'pillow' : big ? 'bigboulder' : r.chance(0.3) ? 'slab' : 'boulder';
       const y = this.heightAt(x, z);
       this.addRock(r.pick(this.shapes(kind)), x, y - R * 0.3, z, R * r.range(0.8, 1.3), R * r.range(0.5, 1.1), R * r.range(0.8, 1.3), r.range(0, 6), { tilt: 0.4 });
     }
-    // spires / sea stacks in the mid-background
-    const nSp = Math.round((sh.X1 - sh.X0) / 18);
+    // spires / sea stacks in the mid-background (rocky areas only)
+    const nSp = a.id === 'kelp' ? Math.round((sh.X1 - sh.X0) / 22) : 0;
     for (let i = 0; i < nSp; i++) {
       const x = r.range(sh.X0 - 10, sh.X1 + 10), z = -r.range(8, 30);
       if (this.isReserved(x, z, 2)) continue;
@@ -306,12 +314,39 @@ export class Scenery {
   }
 
   // ------------------------------------------------------------------ far silhouettes
+  /** a continuous jagged ridge band at depth z: a faceted wall from the seabed up to a stepped skyline */
+  private ridge(z: number, rise: number, amp: number, step: number, seed: number) {
+    const sh = this.shape, s = new Soup();
+    const x0 = sh.X0 - 90, x1 = sh.X1 + 90;
+    const top = (x: number) => {
+      const n = fbm(x * 0.012, z * 0.01, 3, seed) * 1.6 - 0.3;
+      const q = Math.round(n * 5) / 5;           // stepped crests, like mesas and reef walls
+      return Math.min(-3.5, this.shape.back(x, z) + rise + q * amp);
+    };
+    for (let x = x0; x < x1; x += step) {
+      const xa = x, xb = x + step;
+      const ya = top(xa), yb = top(xb), ba = this.shape.back(xa, z) - 3, bb = this.shape.back(xb, z) - 3;
+      const za = z + (hash2(Math.round(xa), seed, 1) - 0.5) * 2.5, zb = z + (hash2(Math.round(xb), seed, 1) - 0.5) * 2.5;
+      const mid = (ya + yb) / 2 + (hash2(Math.round(xa), seed, 2) - 0.5) * amp * 0.25;
+      s.tri([xa, ba, za], [xb, bb, zb], [xb, yb, zb], [0, 0], [1, 0], [1, 1]);
+      s.tri([xa, ba, za], [xb, yb, zb], [xa, ya, za], [0, 0], [1, 1], [0, 1]);
+      // a sloping cap back into the haze
+      s.tri([xa, ya, za], [xb, yb, zb], [(xa + xb) / 2, mid + 1.5, z - 7], [0, 0], [1, 0], [0.5, 1], 1.1, 1.1, 1.2);
+    }
+    const ch = this.chunk(0);
+    ch.rockFar.append(s, new THREE.Matrix4());
+  }
+
   private buildFar() {
     const sh = this.shape, r = this.rng;
-    for (let x = sh.X0 - 80; x < sh.X1 + 80; x += r.range(6, 14)) {
+    const seed = this.seed % 997;
+    // two bold bands behind the playfield: a mid ridge and a taller far one (the water fog lightens them)
+    this.ridge(-34, this.a.id === 'abyss' ? 3 : 6, 5, 4.5, seed + 1);
+    this.ridge(-60, this.a.id === 'abyss' ? 8 : 12, 8, 7, seed + 2);
+    for (let x = sh.X0 - 80; x < sh.X1 + 80; x += r.range(16, 30)) {
       const z = -r.range(42, 78);
       const y = sh.back(x, z);
-      const tall = r.chance(0.45);
+      const tall = r.chance(this.a.id === 'arctic' ? 0 : this.a.id === 'graveyard' ? 0.2 : 0.45);
       const H = tall ? r.range(8, 22) : r.range(4, 9);
       const top = Math.min(y + H, -3.5);
       if (top - y < 2) continue;
@@ -321,14 +356,34 @@ export class Scenery {
   }
 
   // ------------------------------------------------------------------ flora
+  /** one pixel-art sprite plant at (x, y, z); sc scales around its natural size; tall plants reach `reach` metres */
+  placeSprite(id: string, x: number, y: number, z: number, sc = 1, r = this.rng, reach = 0, tint?: [number, number, number]) {
+    const vs = this.sprites.get(id);
+    const v = r.pick(vs);
+    const tall = SPRITES[id].tall;
+    let k = sc * r.range(0.88, 1.12);
+    if (tall && reach > 0) k = reach / v.h;
+    const W = v.w * k, H = v.h * k;
+    const flip = r.chance(0.5);
+    const uv = flip ? { u0: v.uv.u1, u1: v.uv.u0, v0: v.uv.v0, v1: v.uv.v1 } : v.uv;
+    const card = this.sprites.cardSoup(tall ? 12 : H > 1.2 ? 4 : 2);
+    const t = r.range(0.9, 1.08);
+    const ch = this.chunk(x);
+    (z < -7 ? ch.spriteFar : ch.sprite).append(card, mat4(x, y, z, W, H, 1, r.range(-0.3, 0.3)), { sway: true, flexAbs: v.flex * Math.max(1, H), uv, tint: tint ?? [t, t, t], glow: v.glow });
+  }
+
   placeFlora(rule: FloraRule) {
+    if (SPRITES[rule.sp]) { this.placeSpriteRule(rule); return; }
     const S = SPECIES[rule.sp];
     if (!S) return;
     const variants = this.flora.get(rule.sp);
+    const farVariants = this.flora.get(rule.sp, 2, 1);
     const r = this.rng.fork(rule.sp.length * 977 + rule.per10 * 31);
     const W = this.shape.X1 - this.shape.X0 + 40;
     for (const zone of rule.zones) {
       const [z0, z1] = ZONES[zone];
+      // tiny things vanish in the haze: skip them in the back rows
+      if (zone === 'back' && S.size[1] < 0.95 && !S.tall) continue;
       const total = Math.round(rule.per10 * (W / 10) * ZONE_K[zone]);
       const cl = Math.max(1, rule.cluster ?? 1);
       for (let c = 0; c < Math.ceil(total / cl); c++) {
@@ -347,7 +402,7 @@ export class Scenery {
           if (zone === 'play' && S.tall && Math.abs(z) < 0.6) continue;
           let y = onRock ? onRock.y - 0.05 : this.heightAt(x, z) - 0.04;
           if (zone === 'fg' && !onRock) y = this.heightAt(x, z) - 0.04;
-          const v = r.pick(variants);
+          const v = r.pick(z < -9 ? farVariants : variants);
           let sc = r.range(S.size[0], S.size[1]) * (rule.scale ? r.range(rule.scale[0], rule.scale[1]) : 1);
           if (zone === 'back') sc *= 1.25;
           let sy = sc;
@@ -359,16 +414,72 @@ export class Scenery {
           }
           const tint = r.range(0.82, 1.12);
           const mtx = mat4(x, y, z, sc, sy, sc, r.range(0, Math.PI * 2), (r.next() - 0.5) * 0.15, (r.next() - 0.5) * 0.15);
-          this.chunk(x).flora.append(v, mtx, { sway: true, tint: [tint, tint * r.range(0.95, 1.05), tint * r.range(0.93, 1.05)] });
+          const ch = this.chunk(x);
+          (z < -7 ? ch.floraFar : ch.flora).append(v, mtx, { sway: true, tint: [tint, tint * r.range(0.95, 1.05), tint * r.range(0.93, 1.05)] });
         }
       }
     }
   }
 
+  private placeSpriteRule(rule: FloraRule) {
+    const sp = SPRITES[rule.sp];
+    const r = this.rng.fork(rule.sp.length * 977 + rule.per10 * 31 + 5);
+    const W = this.shape.X1 - this.shape.X0 + 40;
+    const natH = sp.h / sp.ppm;
+    for (const zone of rule.zones) {
+      const [z0, z1] = ZONES[zone];
+      if (zone === 'back' && natH < 0.9 && !sp.tall) continue;
+      const total = Math.round(rule.per10 * (W / 10) * ZONE_K[zone]);
+      const cl = Math.max(1, rule.cluster ?? 1);
+      for (let c = 0; c < Math.ceil(total / cl); c++) {
+        let cx = r.range(this.shape.X0 - 20, this.shape.X1 + 20), cz = r.range(Math.min(z0, z1), Math.max(z0, z1));
+        let onRock: { x: number; y: number; z: number; r: number } | null = null;
+        if (rule.onRock && this.rockTops.length && r.chance(0.6)) {
+          const cand = this.rockTops.filter((t) => t.z <= Math.max(z0, z1) + 0.5 && t.z >= Math.min(z0, z1) - 0.5);
+          if (cand.length) { onRock = r.pick(cand); cx = onRock.x; cz = onRock.z; }
+        }
+        for (let m = 0; m < cl; m++) {
+          const x = cx + (r.next() + r.next() - 1) * (onRock ? onRock.r : sp.tall ? 1.6 : 0.9);
+          let z = cz + (r.next() + r.next() - 1) * (onRock ? onRock.r * 0.6 : 0.8);
+          z = Math.max(Math.min(z0, z1), Math.min(Math.max(z0, z1), z));
+          if (this.isReserved(x, z)) continue;
+          if (zone === 'play' && sp.tall && Math.abs(z) < 0.6) continue;
+          const y = (onRock ? onRock.y : this.heightAt(x, z)) - 0.06;
+          let sc = rule.scale ? r.range(rule.scale[0], rule.scale[1]) : 1;
+          if (zone === 'back') sc *= 1.3;
+          if (zone === 'fg') sc *= 1.25;
+          const reach = sp.tall ? (rule.sp === 'giantkelp' ? -y - r.range(0.2, 1.4) : -y * r.range(0.5, 0.75)) : 0;
+          if (sp.tall && reach < 2.5) continue;
+          // the foreground row reads as dark, cool silhouettes framing the play
+          const fg: [number, number, number] | undefined = zone === 'fg' && z > 1.6 ? [0.34, 0.42, 0.52] : undefined;
+          this.placeSprite(rule.sp, x, y, z, sc, r, reach, fg);
+        }
+      }
+    }
+  }
+
+  /** place any plant by id (sprite species or 3D flora) */
+  placePlant(id: string, x: number, y: number, z: number, sc = 1) {
+    if (SPRITES[id]) { this.placeSprite(id, x, y, z, sc); return; }
+    const v = this.flora.get(id), r = this.rng;
+    const t = r.range(0.85, 1.1);
+    const ch = this.chunk(x);
+    (z < -7 ? ch.floraFar : ch.flora).append(r.pick(v), mat4(x, y, z, sc, sc, sc, r.range(0, Math.PI * 2)), { sway: true, tint: [t, t, t] });
+  }
+
   // ------------------------------------------------------------------ finish: merge chunk soups into meshes
   finish() {
     this.mats.flora.map = this.floraAtlas.texture(); this.mats.flora.needsUpdate = true;
+    this.mats.sprite.map = this.spriteAtlas.texture(); this.mats.sprite.needsUpdate = true;
     for (const m of [this.mats.prop, this.mats.propSway, this.mats.glass, this.mats.cloth]) { m.map = this.propAtlas.texture(); m.needsUpdate = true; }
+    const addSprites = (s: Soup) => {
+      if (!s.count) return;
+      const g = s.geometry({ tilt: 0.55 });
+      if (g.boundingSphere) g.boundingSphere.radius += 3;
+      const m = new THREE.Mesh(g, this.mats.sprite);
+      this.group.add(m);
+      this.disposables.push(g);
+    };
     for (const [, c] of this.chunks) {
       const add = (s: Soup, mat: THREE.Material, cast: boolean, recv: boolean) => {
         if (!s.count) return;
@@ -381,7 +492,10 @@ export class Scenery {
         this.disposables.push(g);
       };
       add(c.rock, this.mats.rock, true, true);
+      add(c.rockFar, this.mats.rock, false, true);
       add(c.flora, this.mats.flora, true, false);
+      add(c.floraFar, this.mats.flora, false, false);
+      addSprites(c.sprite); addSprites(c.spriteFar);
       add(c.prop, this.mats.prop, true, true);
     }
     this.chunks.clear();
@@ -393,6 +507,7 @@ export class Scenery {
     for (const d of this.disposables) d.dispose();
     for (const m of Object.values(this.mats)) m.dispose();
     this.floraAtlas.texture().dispose();
+    this.spriteAtlas.texture().dispose();
     this.propAtlas.texture().dispose();
     this.group.removeFromParent();
   }

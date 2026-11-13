@@ -19,19 +19,23 @@ import type { RGB } from '../gfx/px';
 import { clamp, damp } from '../core/math';
 
 const _v = new THREE.Vector3();
+const ddxFar = (a: number, b: number) => a - b;
 
 function hullMat(c: RGB, boss: boolean) {
   return kitMat('subhull' + c.join(',') + boss, 64, 32, (x, y) => {
     let k = 0.82 + (y / 32) * 0.3;
     if (y % 8 === 0 || x % 16 === 0) k -= 0.18;                     // plate seams
     if ((x % 16 === 3 || x % 16 === 12) && y % 8 === 4) k += 0.35;  // rivets
-    if (nz(x, y, 8, 61) > 0.72) k -= 0.15;                          // grime
-    const rust = nz(x, y, 5, 62) > (boss ? 0.68 : 0.8);
-    const col = rust ? mix(c, [110, 60, 30], 0.6) : c;
-    return band(col, k + (hh(x, y, 63) - 0.5) * 0.06, x, y, 0.08);
-  }, { rough: 0.55, metal: 0.45 });
+    if (nz(x * 0.5, y * 0.5, 16, 61) > 0.7) k -= 0.15;              // grime streaks
+    const rust = nz(x * 0.5, y * 0.5, 12, 62) > (boss ? 0.68 : 0.78);
+    let col = rust ? mix(c, [110, 60, 30], 0.6) : c;
+    // a stripe down each flank and a row of lit portholes
+    if ((x >= 13 && x <= 15) || (x >= 49 && x <= 51)) col = boss ? [170, 30, 26] : [30, 30, 34];
+    if ((x === 18 || x === 19 || x === 45 || x === 46) && y % 8 >= 3 && y % 8 <= 4 && y > 8 && y < 26) return [255, 220, 120];
+    return band(col, k, x, y, 0.1);
+  }, { rough: 0.55, metal: 0.45, emissive: 0.22 });
 }
-const glass = () => kitMat('subglass', 8, 8, () => [60, 110, 120], { rough: 0.05, metal: 0.3, emissive: 0.4, transparent: 0.35 });
+const glass = () => kitMat('subglass', 8, 8, (x, y) => (x + y === 5 ? [230, 250, 255] : [90, 150, 160]), { rough: 0.05, metal: 0.3, emissive: 0.5, transparent: 0.3 });
 
 function buildSub(boss: boolean): { group: THREE.Group; prop: THREE.Object3D; seat: THREE.Object3D; lamp: THREE.Mesh; muzzle: THREE.Object3D } {
   const s = boss ? 2.1 : 1;
@@ -43,7 +47,7 @@ function buildSub(boss: boolean): { group: THREE.Group; prop: THREE.Object3D; se
   const rings = xs.map((x, i) => ({ pts: ellRing(0, 0, 0, rr[i] * s, rr[i] * s, rr[i] * s * 0.8, 8, 2.2, 1).map(([a, , c]) => [x * s, a, c] as [number, number, number]), v: i / (xs.length - 1) }));
   // ellRing builds rings round y; remap so the hull runs along x: (x', y', z') = (x, ringX, ringZ)
   B.loft(rings, usFor(8), FULL, 1, { start: [-1.6 * s, 0, 0], end: [1.55 * s, 0, 0] });
-  const col: RGB = boss ? [36, 38, 42] : [222, 176, 36];
+  const col: RGB = boss ? [74, 78, 86] : [222, 176, 36];
   const hull = new THREE.Mesh(B.build(), hullMat(col, boss));
   hull.castShadow = true;
   g.add(hull);
@@ -134,7 +138,9 @@ export class MiniSub implements Entity, Attacker {
     this.ramT -= dt;
     if (this.isBoss && this.hp < this.maxHp * 0.5 && this.ramT < -6) { this.ramT = 2.2; bark(w, ['RAMMING SPEED!', 'Hold on to something, fish!'], this.x, this.y + 1.5, { force: true, style: 'danger' }); }
     if (this.ramT > 0) { tx = p.x + this.facing * 2; ty = p.y; }
-    const sp = this.ramT > 0 ? 7 : this.isBoss ? 1.8 : 2.2;
+    // cruise in fast from far away, then hold station slowly
+    const far = Math.abs(ddxFar(this.x, p.x)) > 14 ? 2.2 : 1;
+    const sp = (this.ramT > 0 ? 7 : this.isBoss ? 1.8 : 2.2) * (this.ramT > 0 ? 1 : far);
     const ddx = tx - this.x, ddy = ty - this.y, dd = Math.hypot(ddx, ddy) || 1;
     this.vx = damp(this.vx, (ddx / dd) * sp * Math.min(1, dd / 2), 1.2, dt);
     this.vy = damp(this.vy, (ddy / dd) * sp * Math.min(1, dd / 2), 1.2, dt);

@@ -1,9 +1,13 @@
-// Surface painter for the realistic pixel texture library. A Surf is a tileable W x H canvas with four
-// channels painted together: colour (sRGB 0..255), height (0..1, for the normal map + cavity grime),
-// roughness and metalness. Painters work like a pixel artist with a photo reference: limited, hue-shifted
-// palettes picked with *clustered* dithering (organic clumps, never a bayer checkerboard on a world surface),
-// structure at three scales (macro tone drift, meso features: cracks / planks / scales / weave, micro grain),
-// then weathering (grime settling in cavities, wear on ridges, drips, stains). Everything wraps at the edges.
+// Surface painter for the realistic CLEAN pixel texture library. A Surf is a tileable W x H canvas with colour
+// (sRGB 0..255), height (0..1: normal map), roughness and metalness channels painted together.
+//
+// The rules (clean PS2-era pixel textures, never noise mush):
+//   - build DELIBERATE SHAPES first (stone blocks, planks, strata, scales, plates) as a region map;
+//   - shade each shape with a 4-6 tone hue-shifted ramp (darks cooler, lights warmer): a base tone per shape,
+//     a 1 px highlight on its top-left edge, a 1 px shadow on its bottom-right edge, dark gaps between shapes
+//     (baked AO + edge highlight);
+//   - add details as hand-placed clusters (cracks, knots, nails, rivets, rust streaks, pores), never per-pixel
+//     random speckle and never a dither fill; large tone zones only as a few clean, hard-edged patches.
 import * as THREE from 'three';
 import { hash2 } from '../../core/math';
 import { Px, hex, type RGB } from '../px';
@@ -18,7 +22,43 @@ export const mixc = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * 
 export const scl = (a: RGB, k: number): RGB => [a[0] * k, a[1] * k, a[2] * k];
 export const pal = (...c: string[]): RGB[] => c.map((h) => hex(h));
 
-/** periodic value noise: lattice wraps every px / py cells */
+// ---------------------------------------------------------------- hue-shifted ramps
+function rgb2hsl([r, g, b]: RGB): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+function hsl2rgb(h: number, s: number, l: number): RGB {
+  h = ((h % 1) + 1) % 1; s = clamp01(s); l = clamp01(l);
+  if (s === 0) return [l * 255, l * 255, l * 255];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t: number) => { t = ((t % 1) + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
+}
+/**
+ * A pixel-art ramp of n tones around a base colour, dark -> light: darks shift hue toward blue-violet and lose a
+ * little saturation, lights shift toward warm yellow (the classic hand-pixelled shading ramp).
+ */
+export function hramp(base: string, n = 5, spread = 0.55, hue = 0.035): RGB[] {
+  const [h, s, l] = rgb2hsl(hex(base));
+  const out: RGB[] = [];
+  const mid = (n - 1) / 2;
+  for (let i = 0; i < n; i++) {
+    const t = (i - mid) / Math.max(1, mid);
+    const nl = clamp01(l + t * spread * (t < 0 ? l : 1 - l));
+    const toward = t < 0 ? 0.64 : 0.12;
+    const dh = ((toward - h + 1.5) % 1) - 0.5;
+    const nh = h + Math.sign(dh) * Math.min(Math.abs(dh), Math.abs(t) * hue);
+    const ns = s + (t < 0 ? -0.06 * -t : 0.04 * t);
+    out.push(hsl2rgb(nh, ns, nl));
+  }
+  return out;
+}
+
+/** periodic value noise (used only for a few broad, hard-edged tone zones) */
 function pnoise(x: number, y: number, px: number, py: number, s: number) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
   const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
@@ -30,22 +70,25 @@ function pnoise(x: number, y: number, px: number, py: number, s: number) {
 export class Surf {
   w: number; h: number; seed: number;
   col: Float32Array; hgt: Float32Array; rgh: Float32Array; met: Float32Array; alp: Float32Array;
+  /** region map for shape-based shading (-1 = gap) */
+  ids: Int32Array;
   usesMetal = false; usesAlpha = false;
   /** normal map strength (height units per pixel) */
   bump = 3;
-  private ctCache: Float32Array | null = null;
 
   constructor(w: number, h: number, seed: number) {
     this.w = w; this.h = h; this.seed = seed;
     const n = w * h;
     this.col = new Float32Array(n * 3); this.hgt = new Float32Array(n).fill(0.5); this.rgh = new Float32Array(n).fill(0.85);
-    this.met = new Float32Array(n); this.alp = new Float32Array(n).fill(1);
+    this.met = new Float32Array(n); this.alp = new Float32Array(n).fill(1); this.ids = new Int32Array(n).fill(-1);
   }
-  i(x: number, y: number) { const w = this.w, h = this.h; return ((((y | 0) % h) + h) % h) * w + ((((x | 0) % w) + w) % w); }
+  i(x: number, y: number) { const w = this.w, h = this.h; return ((((Math.floor(y)) % h) + h) % h) * w + ((((Math.floor(x)) % w) + w) % w); }
 
-  // ---------------------------------------------------------------- noise (all tileable on this canvas)
-  /** fbm in 0..1 with `cells` lattice cells across the tile (x), aspect-correct on y; seed offset s */
-  n(x: number, y: number, cells: number, oct = 3, s = 0) {
+  // ---------------------------------------------------------------- deterministic helpers
+  /** hash 0..1 for an integer key (features, regions: never per-pixel tone jitter) */
+  r(a: number, b: number, s = 0) { return hash2(Math.floor(a), Math.floor(b), this.seed * 7 + s); }
+  /** a broad smooth field 0..1 (cells across the tile), tileable */
+  n(x: number, y: number, cells: number, oct = 2, s = 0) {
     const cx = Math.max(1, Math.round(cells)), cy = Math.max(1, Math.round(cells * this.h / this.w));
     let a = 0, amp = 0.5, tot = 0, f = 1;
     for (let o = 0; o < oct; o++) {
@@ -54,21 +97,11 @@ export class Surf {
     }
     return a / tot;
   }
-  /** anisotropic fbm: separate cell counts for x and y (wood grain, fibres) */
-  na(x: number, y: number, cx: number, cy: number, oct = 3, s = 0) {
-    cx = Math.max(1, Math.round(cx)); cy = Math.max(1, Math.round(cy));
-    let a = 0, amp = 0.5, tot = 0, f = 1;
-    for (let o = 0; o < oct; o++) {
-      a += pnoise((x / this.w) * cx * f, (y / this.h) * cy * f, cx * f, cy * f, this.seed * 131 + s + o * 17) * amp;
-      tot += amp; amp *= 0.5; f *= 2;
-    }
-    return a / tot;
-  }
-  /** per-pixel hash 0..1 (wrapped) */
-  r(x: number, y: number, s = 0) { const w = this.w, h = this.h; return hash2(((x % w) + w) % w, ((y % h) + h) % h, this.seed * 7 + s); }
+  /** a hard-edged zone index 0..levels-1 from a broad field (big clean patches, no mush) */
+  zone(x: number, y: number, cells: number, levels = 2, s = 0) { return Math.min(levels - 1, Math.floor(smooth(0.3, 0.7, this.n(x, y, cells, 2, s)) * levels)); }
   /** tileable worley: [f1, f2, cell id 0..1, nearest point x, y] with `cells` cells across */
-  wor(x: number, y: number, cells: number, s = 0, jitter = 1): [number, number, number, number, number] {
-    const cx = Math.max(1, Math.round(cells)), cy = Math.max(1, Math.round(cells * this.h / this.w));
+  wor(x: number, y: number, cells: number, s = 0, jitter = 1, cyCells?: number): [number, number, number, number, number] {
+    const cx = Math.max(1, Math.round(cells)), cy = Math.max(1, Math.round(cyCells ?? cells * this.h / this.w));
     const sw = this.w / cx, sh = this.h / cy;
     const gx = Math.floor(x / sw), gy = Math.floor(y / sh);
     let f1 = 1e9, f2 = 1e9, id = 0, nx = 0, ny = 0;
@@ -77,29 +110,15 @@ export class Surf {
       const wx = ((ix % cx) + cx) % cx, wy = ((iy % cy) + cy) % cy;
       const px = (ix + 0.5 + (hash2(wx, wy, this.seed + s) - 0.5) * jitter) * sw, py = (iy + 0.5 + (hash2(wx, wy, this.seed + s + 9) - 0.5) * jitter) * sh;
       const d = Math.hypot(x - px, y - py);
-      if (d < f1) { f2 = f1; f1 = d; id = hash2(wx, wy, this.seed + s + 3); nx = px; ny = py; } else if (d < f2) f2 = d;
+      if (d < f1) { f2 = f1; f1 = d; id = wx + wy * cx; nx = px; ny = py; } else if (d < f2) f2 = d;
     }
     return [f1, f2, id, nx, ny];
   }
-  /** clustered dither threshold: smooth ~3 px noise + 2x2 block jitter (hand-pixelled clumps) */
-  ct(x: number, y: number) {
-    if (!this.ctCache) {
-      const W = this.w, Hh = this.h, f = new Float32Array(W * Hh);
-      for (let j = 0; j < Hh; j++) for (let i = 0; i < W; i++) {
-        const nn = this.n(i, j, W / 3, 2, 991);
-        f[j * W + i] = Math.min(0.98, Math.max(0.02, 0.5 + (nn - 0.5) * 1.8 + (this.r(i >> 1, j >> 1, 5) - 0.5) * 0.25));
-      }
-      this.ctCache = f;
-    }
-    return this.ctCache[this.i(x, y)];
+  /** nearest palette entry (clean band, no dithering); x, y, amt are accepted for compatibility and ignored */
+  pick(p: RGB[], t: number, _x?: number, _y?: number, _amt?: number): RGB {
+    return p[Math.max(0, Math.min(p.length - 1, Math.round(clamp01(t) * (p.length - 1))))];
   }
-  /** pick from a palette at t with clustered dithering between neighbouring entries */
-  pick(p: RGB[], t: number, x: number, y: number, amt = 1): RGB {
-    const f = clamp01(t) * (p.length - 1);
-    let k = Math.floor(f);
-    if (f - k > 0.5 + (this.ct(x, y) - 0.5) * amt) k++;
-    return p[Math.min(p.length - 1, Math.max(0, k))];
-  }
+  tone(p: RGB[], k: number): RGB { return p[Math.max(0, Math.min(p.length - 1, Math.round(k)))]; }
 
   // ---------------------------------------------------------------- pixel access
   set(x: number, y: number, c: RGB) { const k = this.i(x, y) * 3; this.col[k] = c[0]; this.col[k + 1] = c[1]; this.col[k + 2] = c[2]; }
@@ -112,85 +131,85 @@ export class Surf {
   R(x: number, y: number, v: number) { this.rgh[this.i(x, y)] = v; }
   M(x: number, y: number, v: number) { this.met[this.i(x, y)] = v; this.usesMetal = true; }
   A(x: number, y: number, v: number) { this.alp[this.i(x, y)] = v; this.usesAlpha = true; }
+  id(x: number, y: number) { return this.ids[this.i(x, y)]; }
+  setId(x: number, y: number, v: number) { this.ids[this.i(x, y)] = v; }
   each(fn: (x: number, y: number) => void) { for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) fn(x, y); }
+  rect(x0: number, y0: number, w: number, h: number, c: RGB) { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) this.set(x, y, c); }
 
-  // ---------------------------------------------------------------- weathering
-  /** grime settles in cavities (height below its neighbourhood), wear brightens ridges */
-  cavity(dark: RGB, amt = 0.5, rad = 2, wear = 0.15, wearCol?: RGB) {
-    const W = this.w, Hh = this.h, src = this.hgt, avg = new Float32Array(W * Hh);
-    for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
-      let s = 0, c = 0;
-      for (let j = -rad; j <= rad; j++) for (let i = -rad; i <= rad; i++) { s += src[this.i(x + i, y + j)]; c++; }
-      avg[y * W + x] = s / c;
-    }
-    for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
-      const d = src[y * W + x] - avg[y * W + x];
-      if (d < -0.01) { const t = clamp01(-d * 6) * amt; if (t > this.ct(x, y) * 0.6) this.blend(x, y, dark, t); }
-      else if (d > 0.02 && wear > 0) { const t = clamp01(d * 6) * wear; this.blend(x, y, wearCol ?? scl(this.get(x, y), 1.25), t); }
-    }
-  }
-  /** noise-masked grime blotches (clustered, not smooth airbrush) */
-  grime(c: RGB, amt: number, cells = 4, thr = 0.55, s = 0, roughTo = -1) {
+  // ---------------------------------------------------------------- shapes
+  /**
+   * Shade the region map: each region gets its base tone (P index); its top/left edge pixels one tone up
+   * (highlight), its bottom/right edge pixels one tone down (shadow); gap pixels (id < 0) get the gap colour.
+   * Height follows (raised shapes, sunken gaps) so the normal map bevels the same edges.
+   */
+  bevel(P: RGB[], base: (id: number) => number, o: { gap?: RGB; hi?: number; lo?: number; rough?: (id: number) => number; skip?: (id: number) => boolean } = {}) {
+    const hi = o.hi ?? 1, lo = o.lo ?? 1;
     this.each((x, y) => {
-      const nn = this.n(x, y, cells, 3, 500 + s) * 0.7 + this.n(x, y, cells * 3, 2, 520 + s) * 0.3;
-      const t = (nn - thr) / (1 - thr);
-      if (t > 0 && t * amt > this.ct(x, y) * 0.8) { this.blend(x, y, c, 0.3 + 0.45 * t); if (roughTo >= 0) this.R(x, y, roughTo); }
+      const a = this.id(x, y);
+      if (a < 0) { if (o.gap) this.set(x, y, o.gap); this.setH(x, y, 0.15); return; }
+      if (o.skip?.(a)) return;
+      const b = base(a);
+      const up = this.id(x, y - 1) !== a, left = this.id(x - 1, y) !== a, down = this.id(x, y + 1) !== a, right = this.id(x + 1, y) !== a;
+      let k = b, h = 0.7;
+      if (down || right) { k = b - lo; h = 0.55; } else if (up || left) { k = b + hi; h = 0.65; }
+      this.set(x, y, this.tone(P, k));
+      this.setH(x, y, h);
+      if (o.rough) this.R(x, y, o.rough(a));
     });
   }
-  /** vertical stains running down (+y is down the texture) */
-  drips(c: RGB, count: number, maxLen: number, alpha = 0.35, s = 0, x0?: number, y0?: number) {
-    for (let k = 0; k < count; k++) {
-      let x = x0 ?? Math.floor(this.r(k, 1, 300 + s) * this.w);
-      const y1 = y0 ?? Math.floor(this.r(k, 2, 300 + s) * this.h);
-      const len = maxLen * (0.3 + this.r(k, 3, 300 + s) * 0.7);
-      for (let y = 0; y < len; y++) {
-        const t = 1 - y / len;
-        this.blend(x, y1 + y, c, alpha * t);
-        if (this.r(x, y1 + y, 310 + s) < 0.12) this.blend(x + 1, y1 + y, c, alpha * t * 0.5);
-        if (this.r(k, y, 320 + s) < 0.03) x += this.r(k, y, 330) < 0.5 ? 1 : -1;
+  /** a shaded ball / pebble / knob lit from the upper left: n tones, optional 1 px dark rim + contact shadow */
+  ball(cx: number, cy: number, rx: number, ry: number, P: RGB[], o: { rim?: RGB; shadow?: number; h?: number; base?: number } = {}) {
+    const n = P.length - 1;
+    for (let y = Math.floor(cy - ry - 1); y <= Math.ceil(cy + ry + 1); y++) for (let x = Math.floor(cx - rx - 1); x <= Math.ceil(cx + rx + 1); x++) {
+      const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 1) {
+        if (o.shadow && d < 1.3 && dx + dy > 0.4) this.shade(x, y, o.shadow);
+        continue;
+      }
+      const lit = (-dx - dy) * 0.45 + (1 - d) * 0.55;
+      let k = Math.round((o.base ?? 0.45) * n + lit * n * 0.75);
+      if (o.rim && d > 0.82 && dx + dy > -0.2) { this.set(x, y, o.rim); this.addH(x, y, (o.h ?? 0.3) * 0.3); continue; }
+      k = Math.max(0, Math.min(n, k));
+      this.set(x, y, P[k]);
+      this.addH(x, y, (o.h ?? 0.3) * Math.sqrt(1 - d * d));
+    }
+  }
+  /** a deliberate jagged crack: 1 px dark core, a lit lower lip, a height dip */
+  crack(pts: [number, number][], dark: RGB, lip: RGB | null, depth = 0.25) {
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const [x0, y0] = pts[k], [x1, y1] = pts[k + 1];
+      const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+      for (let i = 0; i <= n; i++) {
+        const x = Math.round(x0 + ((x1 - x0) * i) / n), y = Math.round(y0 + ((y1 - y0) * i) / n);
+        this.set(x, y, dark); this.addH(x, y, -depth);
+        if (lip) this.set(x, y + 1, lip);
       }
     }
   }
-  /** wandering crack: dark core, height dip, a lit lower lip */
-  crack(x: number, y: number, n: number, dx: number, dy: number, dark: RGB, lip: RGB | null, wob = 0.5, depth = 0.25, s = 0) {
-    let a = Math.atan2(dy, dx);
+  /** a jagged polyline from (x, y) heading along angle a, n segments of ~len px */
+  jag(x: number, y: number, a: number, n: number, len: number, wob: number, s: number): [number, number][] {
+    const pts: [number, number][] = [[x, y]];
     for (let k = 0; k < n; k++) {
-      this.set(x, y, dark); this.addH(x, y, -depth);
-      if (lip) this.blend(x + 1, y + 1, lip, 0.35);
-      this.blend(x - 1, y - 1, dark, 0.25);
-      a += (this.r(k, Math.round(x * 7 + y), 700 + s) - 0.5) * wob;
-      x += Math.cos(a); y += Math.sin(a);
-      if (n > 8 && this.r(k, Math.round(y), 710 + s) < 0.012) this.crack(x, y, Math.floor(n * 0.25), Math.cos(a + 1.2), Math.sin(a + 1.2), dark, lip, wob, depth * 0.7, s + 13);
+      a += (this.r(k, s, 77) - 0.5) * wob;
+      x += Math.cos(a) * len; y += Math.sin(a) * len;
+      pts.push([x, y]);
     }
+    return pts;
   }
-  /** irregular stain with a darker tide-line rim */
-  stain(cx: number, cy: number, r: number, inner: RGB, rim: RGB, s = 0, a = 0.22) {
-    for (let y = Math.floor(cy - r - 2); y <= cy + r + 2; y++) for (let x = Math.floor(cx - r - 2); x <= cx + r + 2; x++) {
-      const ang = Math.atan2(y - cy, x - cx);
-      const wob = r * (0.75 + 0.35 * hash2(Math.floor((ang + 4) * 3), s, 9) + 0.12 * Math.sin(ang * 5 + s));
-      const d = Math.hypot(x - cx, y - cy);
-      if (d < wob - 1) this.blend(x, y, inner, a); else if (d < wob + 0.5) this.blend(x, y, rim, a * 1.8);
-    }
+  /** a streak running down (+y) from (x, y): a clean 2-step fade (rust bleed, water stain) */
+  streak(x: number, y: number, len: number, c: RGB, c2: RGB, w = 1) {
+    for (let i = 0; i < len; i++) for (let j = 0; j < w; j++) this.set(x + j, y + i, i < len * 0.55 ? c : c2);
   }
-  /** a lit bump (pebble, rivet, barnacle base): top-left bright, contact shadow bottom-right */
-  bump2(x: number, y: number, rad: number, p: RGB[], hgt = 0.3) {
-    const n = p.length - 1;
-    for (let j = -rad - 1; j <= rad + 1; j++) for (let i = -rad - 1; i <= rad + 1; i++) {
-      const d = Math.hypot(i, j) / (rad + 0.4);
-      if (d <= 1) {
-        this.set(x + i, y + j, p[Math.max(0, Math.min(n, Math.round(n * 0.55 + (-(i + j) / (rad + 0.5)) * n * 0.35)))]);
-        this.addH(x + i, y + j, hgt * (1 - d * d));
-      } else if (d < 1.35 && i + j > 0) this.shade(x + i, y + j, 0.72);
+  /** darken crevices by one hard step (height below its neighbourhood), lift ridges by a step: baked AO, clean */
+  cavity(k = 0.78, rad = 1, ridge = 1.08) {
+    const W = this.w, Hh = this.h, src = this.hgt, out: [number, number, number][] = [];
+    for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+      let s = 0, c = 0;
+      for (let j = -rad; j <= rad; j++) for (let i = -rad; i <= rad; i++) { s += src[this.i(x + i, y + j)]; c++; }
+      const d = src[y * W + x] - s / c;
+      if (d < -0.06) out.push([x, y, k]); else if (d > 0.08 && ridge !== 1) out.push([x, y, ridge]);
     }
-  }
-  /** sprinkle single pixels */
-  speckle(cols: RGB[], density: number, s = 0, dh = 0) {
-    const n = Math.floor(this.w * this.h * density);
-    for (let k = 0; k < n; k++) {
-      const x = Math.floor(this.r(k, 1, 900 + s) * this.w), y = Math.floor(this.r(k, 2, 900 + s) * this.h);
-      this.set(x, y, cols[Math.floor(this.r(k, 3, 900 + s) * cols.length)]);
-      if (dh) this.addH(x, y, dh);
-    }
+    for (const [x, y, f] of out) this.shade(x, y, f);
   }
 
   // ---------------------------------------------------------------- output

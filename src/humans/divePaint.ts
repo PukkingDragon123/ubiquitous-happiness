@@ -22,16 +22,14 @@ import { hoodOval, faceLayout } from './head';
 const lerpR = (r: readonly number[], v: number) => r[0] + (r[1] - r[0]) * v;
 const DEG = (u: number) => -180 + 360 * u;
 
-/** neoprene texel: knit grain, a slight sheen band, banded + dithered */
+/** neoprene texel: clean flat tone, only the form shading k (no grain speckle) */
 function neo(c: RGB, x: number, y: number, k = 1, seed = 3): RGB {
-  const grain = ((x + (y >> 1)) & 1 ? 0.97 : 1.03) * (1 + (hh(x, y, seed) - 0.5) * 0.06);
-  const mott = 1 + (nz(x, y, 14, seed) - 0.5) * 0.1;
-  return band(c, k * grain * mott, x, y, 0.07);
+  void seed;
+  return band(c, k, x, y, 0.1);
 }
-/** moulded rubber knee / elbow pad: raised dots */
+/** moulded rubber knee / elbow pad: a flat darker plate */
 function pad(c: RGB, x: number, y: number, k = 1): RGB {
-  const dot = (x % 3 === 1 && y % 3 === 1) ? 1.25 : (x % 3 === 2 && y % 3 === 2) ? 0.78 : 0.95;
-  return band(c, k * dot, x, y, 0.08);
+  return band(c, k * 0.85, x, y, 0.1);
 }
 /** camo blotches */
 function camo(D: DiveKit, x: number, y: number, k = 1): RGB {
@@ -39,10 +37,9 @@ function camo(D: DiveKit, x: number, y: number, k = 1): RGB {
   const c = a > 0.62 ? D.col2 : b > 0.66 ? D.col3 : b < 0.3 ? mix(D.col, D.col2, 0.35) : D.col;
   return neo(c, x, y, k, 44);
 }
-/** canvas twill (diagonal weave) */
+/** rubberised canvas: broad soft creases (big shapes, no weave speckle) */
 function twill(c: RGB, x: number, y: number, k = 1, seed = 5): RGB {
-  const w = ((x + y) % 4 < 2) ? 1.04 : 0.95;
-  return band(c, k * w * (1 + (nz(x, y, 9, seed) - 0.5) * 0.16) * (1 + (hh(x, y, seed) - 0.5) * 0.05), x, y, 0.065);
+  return band(c, k * (1 + (nz(x * 0.5, y * 0.5, 18, seed) - 0.5) * 0.16), x, y, 0.1);
 }
 
 /** the suit's base colour / material at a body point (deg round the part, h = height in reference metres) */
@@ -51,9 +48,9 @@ function suitPx(D: DiveKit, x: number, y: number, part: 'torso' | 'arm' | 'leg',
   if (D.suit === 'canvas') {
     // grime rises from the boots, sweat darkens the armpits
     const grime = part === 'leg' ? clamp01((-0.3 - h) / 0.5) * 0.25 : 0;
-    let c = twill(mix(D.col, [52, 44, 34], grime), x, y, k * (1 - (nz(x, y, 30, 7) > 0.7 ? 0.08 : 0)));
+    let c = twill(mix(D.col, [52, 44, 34], grime), x, y, k);
     // seams down the sides
-    if (Math.abs(a - 90) < 1.4 && (y % 3)) c = shade(c, 0.78);
+    if (Math.abs(a - 90) < 1.4) c = shade(c, 0.72);
     return c;
   }
   if (D.pattern === 'camo') return camo(D, x, y, k);
@@ -72,7 +69,7 @@ function suitPx(D: DiveKit, x: number, y: number, part: 'torso' | 'arm' | 'leg',
   let c = neo(col, x, y, k);
   // blind-stitched seams: thin darker lines with dashed stitch texels
   const seam = part === 'torso' ? (Math.abs(a - 62) < 0.8 || Math.abs(a - 118) < 0.8 || Math.abs(h - 1.33) < 0.003) : part === 'leg' ? Math.abs(a - 180) < 1 : Math.abs(a - 180) < 1.2;
-  if (seam) c = (y + x) % 3 ? shade(c, 0.72) : shade(c, 1.2);
+  if (seam) c = shade(c, 0.7);
   return c;
 }
 
@@ -82,20 +79,20 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
     const deg = DEG(u), a = Math.abs(deg), h = lerpR(VMAP.TORSO, v);
     let k = 1 - 0.1 * gauss(h, 1.36, 0.04) * gauss(a, 90, 22) - 0.06 * gauss(h, 0.98, 0.03);
     // a wet sheen down the chest
-    if (D.suit === 'wetsuit') k += 0.1 * gauss(a, 20, 14) * gauss(h, 1.24, 0.06) * (hh(x >> 1, y >> 1, 9) > 0.3 ? 1 : 0.6);
+    if (D.suit === 'wetsuit') k += 0.12 * gauss(a, 20, 16) * gauss(h, 1.24, 0.07);
     let c = suitPx(D, x, y, 'torso', deg, h, k);
     if (D.suit === 'wetsuit') {
       // back zip (deg 180) with teeth and a long pull strap
-      if (a > 176.5 && h > 0.98 && h < 1.44) c = (y & 1) ? metal([60, 62, 66], x, y, 1.1) : band([24, 24, 26], 1, x, y);
-      if (a > 175 && a < 179 && h > 0.86 && h < 0.98) c = band(D.col3, 0.9 + (y % 4 === 0 ? -0.2 : 0), x, y);
+      if (a > 175.5 && h > 0.98 && h < 1.44) c = band([70, 72, 76], 1.1, x, y);
+      if (a > 175 && a < 179 && h > 0.86 && h < 0.98) c = band(D.col3, 0.9, x, y);
       // maker's print on the chest
-      if (deg > 14 && deg < 34 && h > 1.29 && h < 1.31 && hh(x, 0, 3) > 0.35) c = band(D.col3, 1.05, x, y);
+      if (deg > 14 && deg < 34 && h > 1.285 && h < 1.315) c = band(D.col3, 1.05, x, y);
     } else {
       // the Mark V's lacing at the back and a sewn-on patch on the belly
-      if (a > 172 && h > 0.92 && h < 1.3 && (y % 5 < 2) && Math.abs(a - 176) < 3) c = band([200, 186, 150], 1, x, y);
+      if (Math.abs(a - 176) < 2.5 && h > 0.92 && h < 1.3 && Math.floor(h * 60) % 2 === 0) c = band([200, 186, 150], 1, x, y);
       if (deg > -30 && deg < 10 && h > 1.02 && h < 1.12) {
         const pe = Math.min(Math.abs(deg + 30), Math.abs(deg - 10)) < 1 || Math.abs(h - 1.02) < 0.003 || Math.abs(h - 1.12) < 0.003;
-        c = pe ? ((x + y) % 2 ? shade(D.col2, 0.6) : shade(D.col2, 1.1)) : twill(D.col2, x, y, 1, 9);
+        c = pe ? shade(D.col2, 0.6) : twill(D.col2, x, y, 1, 9);
       }
     }
     // BCD jacket: a black wing over the back, a cummerbund round the waist, shoulder straps and a chest strap
@@ -107,7 +104,7 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
       const pocket = h > 1.0 && h < 1.09 && Math.abs(a - 70) < 16;
       if (wing || cumm || strap || chestStrap) {
         const bc: RGB = [26, 27, 30];
-        c = band(bc, 0.95 + (nz(x, y, 6, 21) - 0.5) * 0.14 + (pocket ? 0.12 : 0), x, y, 0.08);
+        c = band(bc, 0.95 + (pocket ? 0.15 : 0), x, y, 0.1);
         if (pocket && (Math.abs(a - 54) < 1 || Math.abs(a - 86) < 1 || Math.abs(h - 1.09) < 0.003)) c = band(bc, 0.6, x, y);
         if (chestStrap && a < 3) c = metal([150, 150, 156], x, y, 1.1);
         if ((strap || cumm) && D.cross) c = band(mix(bc, [200, 200, 196], 0.08), 1, x, y);
@@ -121,7 +118,7 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
     }
     // weight belt: webbing, lead blocks, a stainless buckle
     if (D.belt && h > 0.935 && h < 0.985) {
-      c = band([20, 20, 22], 0.92 + ((x + y) % 2 ? 0.06 : 0), x, y);
+      c = band([20, 20, 22], 0.95, x, y);
       for (const bd of [-130, -60, 60, 130]) if (Math.abs(deg - bd) < 11) c = metal([92, 94, 98], x, y, 0.85 + (Math.abs(h - 0.96) < 0.012 ? 0.15 : -0.05));
       if (a < 8) c = metal([196, 198, 204], x, y, a < 5 && Math.abs(h - 0.96) < 0.01 ? 0.75 : 1.15);
     }
@@ -139,27 +136,27 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
       let c = suitPx(D, x, y, 'arm', deg, ay, k);
       // elbow pads, wrist seals / rubber cuffs, gloves
       if (D.suit === 'wetsuit' && Math.abs(ay + 0.3) < 0.035 && Math.abs(Math.abs(deg) - 180) < 50) c = pad(shade(D.col, 0.9), x, y);
-      if (ay < -0.455 && ay > -0.485) c = D.suit === 'canvas' ? band([24, 22, 22], 0.9 + (y & 1) * 0.1, x, y) : neo(shade(D.col, 0.8), x, y, 1);
+      if (ay < -0.455 && ay > -0.485) c = D.suit === 'canvas' ? band([24, 22, 22], 0.95, x, y) : neo(shade(D.col, 0.8), x, y, 1);
       if (ay < -0.485) c = neo(L.hands.col, x, y, 0.95);
       // squad number / shoulder flash
       if (!left && ay > -0.12 && ay < -0.04 && Math.abs(deg - 90) < 30) {
         if (D.cross) {
           const cx = (deg - 90) / 18, cy = (ay + 0.08) / 0.03;
           if (Math.abs(cx) < 1 && Math.abs(cy) < 1) c = (Math.abs(cx) < 0.33 || Math.abs(cy) < 0.33) ? band(D.col3, 1, x, y) : band([232, 230, 224], 1, x, y);
-        } else if (Math.abs(deg - 90) < 14 && Math.abs(ay + 0.08) < 0.025) c = band(D.suit === 'canvas' ? [120, 30, 30] : D.col3, 0.9 + ((x * 7 + y * 3 + D.num) % 5 === 0 ? 0.3 : 0), x, y);
+        } else if (Math.abs(deg - 90) < 14 && Math.abs(ay + 0.08) < 0.025) c = band(D.suit === 'canvas' ? [120, 30, 30] : D.col3, 1, x, y);
       }
       return c;
     });
   }
   // ---------------- hands (gloves)
-  for (const key of ['HAND_L', 'HAND_R'] as const) fillReg(P, key, (u, v, x, y) => (D.suit === 'canvas' ? band(L.hands.col, 0.9 + (nz(x, y, 5, 23) - 0.5) * 0.2, x, y) : neo(L.hands.col, x, y, 1 - (v < 0.5 ? 0.06 : 0), 24)));
+  for (const key of ['HAND_L', 'HAND_R'] as const) fillReg(P, key, (u, v, x, y) => (D.suit === 'canvas' ? band(L.hands.col, 0.95 - (v < 0.5 ? 0.08 : 0), x, y) : neo(L.hands.col, x, y, 1 - (v < 0.5 ? 0.08 : 0), 24)));
   // ---------------- legs: knee pads, a knife strapped to the right calf, the canvas suit's lacing
   for (const key of ['LEG_L', 'LEG_R'] as const) {
     const right = key === 'LEG_R';
     fillReg(P, key, (u, v, x, y) => {
       const deg = DEG(u), a = Math.abs(deg), ly = lerpR(VMAP.LEG, v);
       if (ly < S.bootTop) {
-        if (L.feet.kind === 'lead') return band([58, 46, 34], 0.9 + (nz(x, y, 5, 25) - 0.5) * 0.25 + (Math.abs(ly - S.bootTop) < 0.012 ? 0.2 : 0), x, y);
+        if (L.feet.kind === 'lead') return band([58, 46, 34], 0.95 + (Math.abs(ly - S.bootTop) < 0.014 ? 0.25 : 0), x, y);
         return neo([24, 24, 26], x, y, 0.95);
       }
       let c = suitPx(D, x, y, 'leg', deg, ly, 1 - 0.1 * gauss(ly, -0.46, 0.03) * gauss(a, 180, 40));
@@ -168,11 +165,11 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
       if (D.knife && right && ly < -0.55 && ly > -0.74) {
         // sheath on the outside of the calf, two rubber straps round it
         const strap = Math.abs(ly + 0.6) < 0.012 || Math.abs(ly + 0.7) < 0.012;
-        if (strap) c = band([30, 30, 32], 0.9 + (x & 1) * 0.1, x, y);
+        if (strap) c = band([30, 30, 32], 0.95, x, y);
         else if (Math.abs(deg + 70) < 14) c = band(ly > -0.6 ? [230, 190, 30] : [34, 34, 36], 0.95 + (Math.abs(deg + 70) > 11 ? -0.2 : 0), x, y);
       }
       // faded maker's print down the left thigh
-      if (!right && D.suit === 'wetsuit' && D.pattern !== 'camo' && Math.abs(deg - 85) < 4 && ly < -0.05 && ly > -0.3 && hh(0, y >> 1, 5) > 0.3) c = band(D.col3, 0.85, x, y);
+      if (!right && D.suit === 'wetsuit' && D.pattern !== 'camo' && Math.abs(deg - 85) < 4 && ly < -0.05 && ly > -0.3 && Math.floor(ly * 70) % 3 !== 0) c = band(D.col3, 0.85, x, y);
       return c;
     });
   }
@@ -181,12 +178,12 @@ function paintSuit(P: Px, L: Look, D: DiveKit, S: Shape) {
     fillReg(P, key, (u, v, x, y) => {
       const aa = Math.abs((u - 0.5) * 360), sole = aa > 89;
       if (L.feet.kind === 'lead') {
-        if (sole) return metal([70, 72, 76], x, y, 0.8 + (y % 3 === 0 ? -0.15 : 0));
-        if (v > 0.5 && aa < 80) return metal([176, 128, 56], x, y, 1 + (nz(x, y, 6, 27) > 0.7 ? -0.25 : 0)); // brass toe cap
+        if (sole) return band([70, 72, 76], 0.8, x, y);
+        if (v > 0.5 && aa < 80) return band([176, 128, 56], 1.05, x, y);                                     // brass toe cap
         if (Math.abs(v - 0.3) < 0.04) return band([40, 30, 22], 1, x, y);                                    // strap
-        return band([66, 52, 40], 0.9 + (nz(x, y, 6, 26) - 0.5) * 0.25, x, y);
+        return band([66, 52, 40], 0.95, x, y);
       }
-      if (sole) return band([66, 66, 70], (y % 2 === 0 && aa > 120) ? 0.75 : 1, x, y);
+      if (sole) return band([66, 66, 70], 0.9, x, y);
       return neo([24, 24, 26], x, y, 1 - (v > 0.6 ? 0.05 : 0), 28);
     });
   }
@@ -201,11 +198,11 @@ function paintHood(P: Px, L: Look, D: DiveKit) {
     if (o < 1) return null;
     let c = neo(D.col, x, y, 0.95 + 0.08 * gauss(hy, 0.17, 0.03));
     if (o < 1.12) c = neo(shade(D.col, 1.25), x, y, 1);     // the rolled face seal
-    if (a > 177 && hy > 0.0) c = (y % 3) ? shade(c, 0.75) : c; // seam over the crown
+    if (a > 177 && hy > 0.0) c = shade(c, 0.75);                // seam over the crown
     // mask strap round the back of the head (silicone, with a buckle near the mask skirt)
     if (D.mask !== 'none' && D.mask !== 'brass' && a > 52 && Math.abs(hy - (Fl.eyeY + 0.008 + (a - 52) * 0.00012)) < 0.011) {
       c = band(D.mask === 'free' || D.mask === 'commando' ? [22, 22, 24] : D.col2, 0.95 + (Math.abs(hy - Fl.eyeY - 0.008 - (a - 52) * 0.00012) > 0.008 ? -0.2 : 0), x, y);
-      if (Math.abs(a - 64) < 3) c = metal([150, 150, 156], x, y);
+      if (Math.abs(a - 64) < 3) c = band([150, 150, 156], 1.1, x, y);
     }
     return c;
   });
@@ -287,10 +284,50 @@ export function paintScars(P: Px, L: Look) {
   void D;
 }
 
+/**
+ * A painted PS2 face (the 3D eye / lid / brow rig is hidden on divers): almond eyes with whites, irises and a
+ * dark upper lash line, heavy brows set in a frown, a nose shadow, a hard mouth line.
+ */
+function paintFace(P: Px, L: Look) {
+  const Fl = faceLayout(L), F = L.face;
+  const dpd = 0.00175;
+  const ink: RGB = shade(L.skin, 0.42);
+  fillReg(P, 'HEAD', (u, v, x, y) => {
+    const deg = (u - 0.5) * 360, hy = lerpR(VMAP.HEAD, v);
+    if (Math.abs(deg) > 60 || hy < 0 || hy > 0.16) return null;
+    for (const side of [1, -1]) {
+      if ((F.eyepatch === 'L' && side === 1) || (F.eyepatch === 'R' && side === -1)) continue;
+      const dx = (deg - side * Fl.eyeA) * dpd, dy = hy - Fl.eyeY;
+      const ew = Fl.eyeR * 1.4, eh = Fl.eyeR * 0.75;
+      const e = (dx / ew) ** 2 + (dy / (dy > 0 ? eh : eh * 0.8)) ** 2;
+      if (e < 1) {
+        if (dy > eh * 0.45) return ink;                                     // upper lash line / lid shadow
+        if (Math.abs(dx + side * Fl.eyeR * 0.1) < Fl.eyeR * 0.42) return Math.abs(dx + side * Fl.eyeR * 0.1) < Fl.eyeR * 0.2 ? [18, 14, 12] : shade(F.iris, 0.9);
+        return [226, 220, 208];
+      }
+      if (e < 1.5 && dy < -eh * 0.3) return shade(L.skin, 0.78);           // lower lid crease
+      // the brow: a thick bar, inner end pulled down into a frown
+      const bx = (deg - side * Fl.eyeA) / 16;
+      const by = Fl.browY - 0.004 + (side * bx < 0 ? -0.006 * Math.abs(bx) : 0.002 * Math.abs(bx));
+      if (Math.abs(bx) < 1.1 && Math.abs(hy - by) < 0.0075 * F.brow) return band(F.browCol, 0.8, x, y);
+    }
+    // nose shadow on the far side and the nostrils
+    if (hy > 0.048 && hy < 0.1 && deg > 4 && deg < 9) return shade(L.skin, 0.8);
+    if (Math.abs(hy - 0.05) < 0.003 && Math.abs(Math.abs(deg) - 5) < 2.5) return shade(L.skin, 0.55);
+    // mouth: a hard line, the lower lip catching light
+    if (Math.abs(deg) < 11 * F.lipK + 2) {
+      if (Math.abs(hy - Fl.mouthY) < 0.0028) return [72, 36, 34];
+      if (hy < Fl.mouthY && hy > Fl.mouthY - 0.008) return mix(L.skin, [190, 110, 100], 0.35);
+    }
+    return null;
+  });
+}
+
 /** overpaint a diver's page (only when the look has a dive kit) */
 export function paintDive(P: Px, L: Look, S: Shape) {
   const D = L.dive;
   if (!D) return;
+  paintFace(P, L);
   paintSuit(P, L, D, S);
   if (D.hood) paintHood(P, L, D);
 }

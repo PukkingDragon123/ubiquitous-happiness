@@ -10,7 +10,7 @@ import { TEX, MAT } from './tex';
 import { hash2, fbm } from '../core/math';
 
 export const FOG = {
-  uFogCol: { value: new THREE.Color('#0e4a66') },
+  uFogCol: { value: new THREE.Color('#13597a') },
   uFogDeep: { value: new THREE.Color('#03141f') },
   uFogCenter: { value: new THREE.Vector2(0, 0) },
   uFogR: { value: 7.5 },
@@ -65,9 +65,9 @@ export function oceanFog<T extends THREE.Material>(mat: T, amount = 1, sway = 0)
 /** the water all around: a dome lit from above, matching the fog colour at the horizon */
 function waterDome(): THREE.Mesh {
   const m = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false,
-    uniforms: { uTop: { value: new THREE.Color('#3fa6c4') }, uMid: FOG.uFogCol, uDeep: FOG.uFogDeep, uTime: FOG.uFogTime },
-    vertexShader: `varying vec3 vD; void main() { vD = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w * 0.9999; }`,
+    side: THREE.BackSide, depthWrite: true,
+    uniforms: { uTop: { value: new THREE.Color('#4ab4d0') }, uMid: FOG.uFogCol, uDeep: FOG.uFogDeep, uTime: FOG.uFogTime },
+    vertexShader: `varying vec3 vD; void main() { vD = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w * 0.99; }`,
     fragmentShader: `uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uDeep; uniform float uTime; varying vec3 vD;
       float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
       void main() {

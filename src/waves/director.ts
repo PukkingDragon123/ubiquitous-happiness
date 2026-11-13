@@ -20,7 +20,9 @@ import { META } from '../meta/meta';
 import { Rng } from '../core/rng';
 import type { WaveArea, WaveOpts, Target } from './types';
 import { areaName } from './types';
-import { Human, Squad, newSquad, ROLES } from './human';
+import { Human, Squad, newSquad, ROLES, VARIANTS } from './human';
+import { modelParts } from '../humans/model';
+import type { Archetype as HArch } from '../humans/looks';
 import type { Role } from './human';
 import { SurfaceBoat } from './boat';
 import type { BoatJob } from './boat';
@@ -61,6 +63,8 @@ export class WaveDirector {
   private save: boolean;
   private x0: number; private x1: number;
   private clearT = 0;
+  /** model looks to build ahead of time, one per frame (arch, seed) */
+  private warm: [HArch, number][] = [];
 
   constructor(public w: World, public area: WaveArea | null, o: WaveOpts = {}) {
     this.mastery = o.mastery ?? 0;
@@ -71,11 +75,14 @@ export class WaveDirector {
     this.x0 = area?.bounds.x0 ?? -30;
     this.x1 = area?.bounds.x1 ?? 30;
     board(w);
+    // pre-build the looks of the early roles so the first spawns don't hitch
+    for (const r of ['harpoon', 'spear', 'knife', 'net', 'medic', 'heavy'] as Role[]) for (let v = 1; v <= VARIANTS; v++) this.warm.push([ROLES[r].arch, v]);
   }
 
   /** humans + vessels still to beat this wave (including ones not spawned yet) */
   get remaining() {
-    return this.queue.length + this.humans.filter((h) => h.alive && h.state !== 'dead').length + this.boats.filter((b) => b.alive && b.state !== 'sinking' && b.job !== 'drop').length + this.subs.filter((s) => s.alive && s.team === 'enemy').length;
+    // support boats don't hold a wave open (they leave once the divers are gone); boss boats and subs do
+    return this.queue.length + this.humans.filter((h) => h.alive && h.state !== 'dead').length + this.boats.filter((b) => b.alive && b.state !== 'sinking' && b.isBoss).length + this.subs.filter((s) => s.alive && s.team === 'enemy').length;
   }
   isBossWave(n = this.wave) { return n > 0 && n % 5 === 0; }
   bossKind(n = this.wave): BossKind { return (['captain', 'trawler', 'titan'] as BossKind[])[(Math.floor(n / 5) - 1 + this.mastery) % 3]; }
@@ -174,7 +181,7 @@ export class WaveDirector {
     h.mountTag(this.w.scene);
     if (p.role === 'heavy' || p.role === 'titan') h.attachHose(this.w);
     if (p.from === 'surface') { this.w.fx.splash(p.x, 1.1); this.w.sfx('splash_b', p.x, 0.6); h.y = Math.min(h.y, this.w.water.heightAt(p.x) - 0.6); }
-    if (p.role === 'heavy' || p.role === 'titan') h.y = this.w.terrain.floorAt(h.x) + h.rig.height * 0.47;
+    if (p.role === 'heavy' || p.role === 'titan') h.y = this.w.terrain.floorAt(h.x) + h.rig.pivotHeight;
     this.humans.push(h);
     if (p.nemesis) this.introduce(h, p.nemesis);
     return h;
@@ -201,7 +208,7 @@ export class WaveDirector {
         const job: BoatJob = u === 'boatCharges' ? 'charges' : u === 'boatLines' ? 'lines' : u === 'trawler' ? 'trawl' : 'drop';
         const kind: BoatKind = u === 'trawler' ? 'trawler' : u === 'boatLines' ? r.pick(['skiff', 'dinghy'] as BoatKind[]) : u === 'diveBoat' ? 'dinghy' : r.pick(['rowboat', 'dinghy', 'skiff'] as BoatKind[]);
         const crew: Archetype[] = job === 'lines' ? ['proAngler', 'oldSalt'] : job === 'charges' ? ['dockWorker'] : ['oldSalt'];
-        const b = new SurfaceBoat(job, kind, this.surfaceX(), side, r.int(1, 1e6), { iq: k.iq, hpMul: k.hpMul, crew, drops: job === 'drop' ? 3 : 0 });
+        const b = new SurfaceBoat(job, kind, this.surfaceX(), side, r.int(1, 3), { iq: k.iq, hpMul: k.hpMul, crew, drops: job === 'drop' ? 3 : 0 });
         if (job === 'drop') {
           const sq = newSquad();
           b.onDrop = (x) => this.queue.push({ t: 0, role: r.pick(['harpoon', 'harpoon', 'knife', 'net'] as Role[]), x, y: this.w.water.heightAt(x) - 0.8, squad: sq, from: 'surface' });
@@ -292,6 +299,7 @@ export class WaveDirector {
     const b = board(w);
     b.time += dt;
     this.t += dt;
+    if (this.warm.length) { const [a, sd] = this.warm.shift()!; modelParts(a, sd); }
     // spawns
     for (let i = this.queue.length - 1; i >= 0; i--) {
       const q = this.queue[i];
@@ -306,6 +314,8 @@ export class WaveDirector {
     this.humans = this.humans.filter((h) => h.alive);
     this.boats = this.boats.filter((x) => x.alive);
     this.subs = this.subs.filter((x) => x.alive);
+    // the divers are done: the support boats pack up and motor off
+    if (this.active && !this.queue.length && !this.humans.some((h) => h.alive && h.state !== 'dead')) for (const bt of this.boats) if (!bt.isBoss && bt.state === 'work' && bt.job !== 'trawl') bt.state = 'leave';
     if (this.active && this.remaining === 0) {
       this.clearT += dt;
       if (this.clearT > 1.2) {

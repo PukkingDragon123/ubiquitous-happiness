@@ -99,22 +99,11 @@ export class TvUI {
   // ---------------------------------------------------------------- pieces
   private background() {
     const ui = this.ui, t = this.t;
-    const ctx = ui.ctx;
-    // deep-sea gradient in hard bands
-    for (let y = 0; y < TV_H; y += 4) {
-      const k = y / TV_H;
-      const r = Math.round(4 + 6 * (1 - k)), g = Math.round(16 + 40 * (1 - k)), b = Math.round(58 + 50 * (1 - k));
-      ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fillRect(0, y, TV_W, 4);
-    }
-    // drifting light shafts (dithered)
-    ctx.fillStyle = 'rgba(120,220,255,0.07)';
-    for (let i = 0; i < 5; i++) {
-      const x0 = ((i * 83 + t * 6) % (TV_W + 80)) - 60;
-      for (let y = 0; y < TV_H; y += 2) ctx.fillRect(Math.round(x0 + y * 0.35), y, 18 - y * 0.05, 1);
-    }
-    // marine snow
-    ctx.fillStyle = 'rgba(200,240,255,0.5)';
-    for (let i = 0; i < 26; i++) { const x = (i * 97 + Math.sin(t * 0.3 + i) * 6) % TV_W, y = (i * 53 + t * (4 + (i % 3))) % TV_H; ctx.fillRect(Math.round(x), Math.round(y), 1, 1); }
+    // flat deep blue with a faint 16 px grid and a few drifting snow pixels
+    ui.fill(0, 0, TV_W, TV_H, '#06144a');
+    for (let x = 0; x < TV_W; x += 16) ui.fill(x, 0, 1, TV_H, '#0a1d5c');
+    for (let y = 0; y < TV_H; y += 16) ui.fill(0, y, TV_W, 1, '#0a1d5c');
+    for (let i = 0; i < 18; i++) { const x = (i * 97 + Math.floor(Math.sin(t * 0.3 + i) * 4)) % TV_W, y = Math.floor(i * 53 + t * (4 + (i % 3))) % TV_H; ui.fill(x, y, 1, 1, '#5a7ac8'); }
   }
 
   private header() {
@@ -219,8 +208,8 @@ export class TvUI {
     ui.img(areaThumb(a.id), x + 24, y + 35);
     ui.textBox(a.desc, x + 6, y + 77, 100, { font: 'tiny', color: '#c8d8ff' });
     // ---- loadout: the 5x5 bag
-    x = 124; y = 20;
-    const cell = 17, gw = cell * GRID;
+    x = 122; y = 20;
+    const cell = 18, gw = cell * GRID;
     ui.frame('tv', x, y, gw + 12, gw + 44);
     ui.text('LOADOUT', x + 6, y + 6, { font: 'small', color: C.cyan });
     ui.text(`${this.loadout.length}`, x + gw + 6, y + 6, { font: 'small', color: C.yellow, align: 'right' });
@@ -260,12 +249,12 @@ export class TvUI {
     const stash = META.stash.filter((s) => ITEMS[s.id]);
     if (!stash.length) ui.textBox('Empty. Extract loot on runs to fill it.', x + 6, y + 20, lw - 10, { font: 'tiny', color: C.dim });
     let tipIt: ItemInst | null = null;
-    const clicked = ui.list('stash', x + 4, y + 16, lw - 6, lh - 4, stash.length, 17, (i, rx, ry, rw, hov) => {
+    const clicked = ui.list('stash', x + 4, y + 16, lw - 6, lh - 4, stash.length, 18, (i, rx, ry, rw, hov) => {
       const it = stash[i];
       const inb = this.inBag(it.uid);
-      if (inb) ui.fill(rx, ry, rw, 16, '#1a4a8a');
-      if (hov) { ui.fill(rx, ry, rw, 16, '#2a6ad0', 0.6); tipIt = it; }
-      ui.item(it.id, rx + 1, ry + 1, 14, 14, it.level ?? 1);
+      if (inb) ui.fill(rx, ry, rw, 17, '#1a4a8a');
+      if (hov) { ui.fill(rx, ry, rw, 17, '#2a6ad0'); tipIt = it; }
+      ui.item(it.id, rx, ry, 16, 16, it.level ?? 1);
       const nm = getItem(it.id).name;
       const short = ui.measure(nm, 'tiny') > rw - 20 ? nm.slice(0, Math.max(3, Math.floor((rw - 22) / 4))) + '.' : nm;
       ui.text(short, rx + 17, ry + 3, { font: 'tiny', color: inb ? C.yellow : C.white });

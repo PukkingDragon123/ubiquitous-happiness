@@ -128,8 +128,8 @@ function netMat() {
       const d = Math.hypot(x - 31.5, y - 31.5) / 32;
       if (d > 1) return null;
       const a = (x + y) % 7, b = (x - y + 70) % 7;
-      if (d > 0.9) return band([60, 56, 50], 0.9 + hh(x, y, 1) * 0.2, x, y); // the lead-line rim
-      return a === 0 || b === 0 ? band([196, 186, 150], 0.85 + nz(x, y, 6, 2) * 0.3, x, y) : null;
+      if (d > 0.9) return band([60, 56, 50], 1, x, y); // the lead-line rim
+      return a === 0 || b === 0 ? band([196, 186, 150], 1, x, y) : null;
     }, { rough: 0.9 }) as THREE.MeshStandardMaterial;
     m.alphaTest = 0.5; m.side = THREE.DoubleSide; m.transparent = false;
     return m;
@@ -290,9 +290,7 @@ function barrel(): THREE.Mesh {
   const m = new THREE.Mesh(barrelGeo, kitMat('dcharge', 32, 32, (x, y) => {
     if (y < 3 || y > 28) return band([60, 60, 64], 0.9 + (x & 1) * 0.1, x, y);
     const stripe = ((x + y) >> 2) & 1;
-    let k = 0.9 + (nz(x, y, 5, 81) - 0.5) * 0.3;
-    if (hh(x, y, 82) > 0.93) k -= 0.4;
-    return band(y > 10 && y < 21 ? (stripe ? [230, 190, 30] : [24, 24, 26]) : [70, 76, 66], k, x, y);
+    return band(y > 10 && y < 21 ? (stripe ? [230, 190, 30] : [24, 24, 26]) : [70, 76, 66], y === 10 || y === 21 ? 0.6 : 0.95, x, y);
   }, { rough: 0.6, metal: 0.4 }));
   m.castShadow = true;
   return m;
@@ -376,7 +374,7 @@ export class Torpedo implements Entity {
       for (const a of [0, Math.PI / 2]) B.box([0, 0, -0.55], [0.36, 0.02, 0.12], FULL, undefined, new THREE.Matrix4().makeRotationZ(a));
       torpGeo = B.build();
     }
-    this.obj = new THREE.Mesh(torpGeo, kitMat('torp', 32, 16, (x, y) => band(x > 26 ? [200, 60, 30] : [70, 78, 70], 0.85 + y / 50 + (hh(x, y, 83) > 0.95 ? -0.3 : 0), x, y), { rough: 0.5, metal: 0.5 }));
+    this.obj = new THREE.Mesh(torpGeo, kitMat('torp', 32, 16, (x, y) => band(x > 26 ? [200, 60, 30] : [70, 78, 70], y < 3 ? 1.2 : 0.85 + y / 50, x, y), { rough: 0.5, metal: 0.5 }));
     this.obj.castShadow = true;
   }
   update(dt: number, w: World) {

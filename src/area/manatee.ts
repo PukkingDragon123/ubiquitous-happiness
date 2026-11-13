@@ -22,39 +22,39 @@ const TAU = Math.PI * 2;
 function paintRegions(scen: Scenery) {
   const A = scen.props.A;
   const skin = A.paint('manateeSkin', 64, 48, (p, w, h) => {
-    const R = ramp(['#24221e', '#46423a', '#6a6458', '#8c857a', '#ada698'], 8, 0.7);
+    const R = ramp(['#24221e', '#46423a', '#6a6458', '#8c857a', '#ada698'], 4, 0);
     p.fill((x, y) => {
       const v = y / h;                                   // 0 = back (top of the texture) .. 1 = belly
       const n = pxNoise(x, y, 10, 3, 3, 64);
-      let t = 0.42 + v * 0.28 + (n - 0.5) * 0.3 + (hash2(x, y, 2) - 0.5) * 0.08;
+      let t = 0.42 + v * 0.28 + (n - 0.5) * 0.3;
       // wrinkle creases around the body
       const cr = Math.sin(x * 0.55 + pxNoise(x, y, 6, 2, 5) * 4);
       if (cr > 0.86) t -= 0.18; else if (cr > 0.7) t += 0.05;
       let c: RGB = R(t, x, y);
       // algae on the back
       const al = pxNoise(x, y, 7, 3, 9, 64);
-      if (v < 0.4 && al > 0.62) c = mix(c, hex(hash2(x, y, 4) > 0.5 ? '#4a5a2a' : '#5e6a34'), 0.55);
+      if (v < 0.4 && al > 0.62) c = mix(c, hex(al > 0.7 ? '#5e6a34' : '#4a5a2a'), 0.55);
       // old propeller scars: pale parallel slashes across the back
       for (let k = 0; k < 3; k++) { const d = Math.abs((x - 20 - k * 4) - (y - 4) * 0.6); if (d < 0.7 && y > 2 && y < 16 && x > 10 && x < 46) c = mix(c, hex('#c8c0b4'), 0.7); }
       return c;
     });
   });
   const muzzle = A.paint('manateeMuzzle', 16, 16, (p, w, h) => {
-    const R = ramp(['#3a3630', '#5e584e', '#827a6e', '#a29a8c'], 6, 0.7);
+    const R = ramp(['#3a3630', '#5e584e', '#827a6e', '#a29a8c'], 4, 0);
     p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, 7) - 0.5) * 0.4 + (y / h) * 0.15, x, y));
     for (let i = 0; i < 26; i++) p.set(hash2(i, 1, 3) * w, 4 + hash2(i, 2, 3) * (h - 6), '#1a1814'); // bristles
   });
   const cap = A.paint('postCap', 16, 16, (p, w, h) => {
-    const R = ramp(['#080c1a', '#121c38', '#1e2e58', '#30467a'], 6, 0.7);
+    const R = ramp(['#080c1a', '#121c38', '#1e2e58', '#30467a'], 4, 0);
     p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, 11) - 0.5) * 0.3 + (y < 3 ? 0.2 : 0), x, y));
     for (let x = 0; x < w; x++) { p.set(x, h - 4, '#8a1a1a'); p.set(x, h - 3, '#a82a22'); } // red band
   });
   const visor = A.paint('postVisor', 8, 8, (p) => p.fill((x, y) => (x + y < 4 ? [70, 70, 80] : [16, 16, 20])));
   const badge = A.paint('postBadge', 8, 8, (p) => p.fill((x, y) => { const e = x === 0 || y === 0 || x === 7 || y === 7; const env = y >= 2 && y <= 5 && x >= 1 && x <= 6; return e ? [120, 80, 20] : env ? (y - 2 === Math.floor(Math.abs(x - 3.5)) ? [90, 60, 16] : [250, 240, 200]) : [230, 180, 60]; }));
   const leather = A.paint('mailLeather', 32, 32, (p, w, h) => {
-    const R = ramp(['#1e1008', '#3e2414', '#62401e', '#8a5e30', '#a87a44'], 7, 0.7);
+    const R = ramp(['#1e1008', '#3e2414', '#62401e', '#8a5e30', '#a87a44'], 4, 0);
     p.fill((x, y) => {
-      let t = 0.5 + (pxNoise(x, y, 6, 3, 13) - 0.5) * 0.35 + (hash2(x, y, 3) - 0.5) * 0.1;
+      let t = 0.5 + (pxNoise(x, y, 6, 3, 13) - 0.5) * 0.35;
       if (x === 2 || x === w - 3 || y === 2 || y === h - 3) t -= 0.2; // stitching line
       if ((x === 2 || x === w - 3 || y === 2 || y === h - 3) && (x + y) % 3 === 0) t += 0.35;
       return R(t, x, y);

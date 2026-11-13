@@ -38,6 +38,6 @@ export function bark(w: World, ev: BarkEvent | string[], x: number, y: number, o
   b.lastBark = b.time;
   const line = pool[Math.floor(Math.random() * pool.length)];
   // with follow, x / y are offsets from the speaker
-  w.text.pop(line, o.follow ? 0 : x, (o.follow ? 0 : y) + 1.1, o.style ?? 'body', { size: o.size ?? 0.24, life: 2.4, vy: 0.08, follow: o.follow });
+  w.text.pop(line, o.follow ? 0 : x, (o.follow ? 0 : y) + 1.1, o.style ?? 'body', { size: o.size ?? 0.3, life: 2.4, vy: 0.08, follow: o.follow });
   return true;
 }

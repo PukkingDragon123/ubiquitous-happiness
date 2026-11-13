@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import type { RunConfig } from '../meta/meta';
 import { META } from '../meta/meta';
 import { ITEMS, itemMesh } from '../game/items';
+import { BUILD_GEAR, DEFAULT_GEAR, type BuildId } from '../player/gear';
 import type { HideoutHero, HeroSlot } from './hero';
 import type { Furniture, Placed } from './furniture';
 import { Furniture as FurnitureCls } from './furniture';
@@ -110,12 +111,12 @@ export class Cinematic {
       if (this.locker) { this.furn.setOpen(this.locker, 1); audio.play('chest_creak', { vol: 0.5, rate: 1.3 }); audio.play('clank1', { vol: 0.35, delay: 0.2 }); }
       // gear: the loadout items (up to 5) + the sword last
       const ids = (this.cfg?.loadout ?? []).map((uid) => META.stash.find((s2) => s2.uid === uid)).filter((it) => it && ITEMS[it.id]).slice(0, 5);
-      const slots: HeroSlot[] = ['back', 'head', 'side', 'belly', 'back'];
+      const slots: HeroSlot[] = ['side', 'head', 'back', 'belly', 'side'];
       const from = this.locker ? this.locker.obj.position.clone().add(new THREE.Vector3(0, 1.25, 0)).addScaledVector(FurnitureCls.front(this.locker.p.rot), 0.2) : r.position.clone().add(new THREE.Vector3(0, 1.5, 0));
       ids.forEach((it, i) => {
         const m = itemMesh(it!.id, it!.level ?? 1);
         const box = new THREE.Box3().setFromObject(m); const sz = box.getSize(new THREE.Vector3());
-        const k = 0.3 / Math.max(0.01, sz.x, sz.y, sz.z);
+        const k = 0.36 / Math.max(0.01, sz.x, sz.y, sz.z);
         const holder = new THREE.Group(); holder.add(m); m.scale.setScalar(k);
         m.position.sub(box.getCenter(new THREE.Vector3()).multiplyScalar(k));
         holder.visible = false;
@@ -139,13 +140,13 @@ export class Cinematic {
     }
     if (s === 'outside') {
       // cut to the rock face outside; the hero bursts out of the outer hatch and swims away
-      r.position.set(-HALF_W - 2.0, 1.0, DOOR.z);
+      r.position.set(-HALF_W - 2.0, 0.6, DOOR.z);
       r.rotation.y = Math.PI;
       hero.play?.('swim');
-      this.swimV.set(-1.4, 0.35, -0.25);
+      this.swimV.set(-1.0, 0.45, -0.7);
       for (let i = 0; i < 40; i++) this.bubbles.emit(r.position.x + Math.random() * 0.3, r.position.y + Math.random() * 0.8, r.position.z + (Math.random() - 0.5) * 1.2, { vy: 0.6 + Math.random(), life: 2.5, size: 0.06 + Math.random() * 0.1 });
       audio.play('splash_b', { vol: 0.5 }); audio.play('bubbles_a', { vol: 0.5 });
-      this.shot = { target: new THREE.Vector3(-HALF_W - 3.2, 1.6, DOOR.z), yaw: -0.5, pitch: 0.1, dist: 9.5, fov: 30 };
+      this.shot = { target: new THREE.Vector3(-HALF_W - 2.6, 1.5, DOOR.z - 0.5), yaw: -1.05, pitch: 0.06, dist: 8.5, fov: 32 };
       this.rig.shot = this.shot; this.rig.snap(); this.rig.k = 1.5;
       this.room.door.target = 0;
       this.caption = '';
@@ -174,16 +175,20 @@ export class Cinematic {
         this.walker.update(dt);
         this.shot.target.lerp(new THREE.Vector3(hp.x, 0.6, hp.z), 1 - Math.exp(-dt * 3));
         this.shot.dist = damp(this.shot.dist, 13, 1.5, dt);
-        if (this.locker) this.shot.yaw = damp(this.shot.yaw, lockerYaw(this.locker) + 0.75, 0.8, dt);
+        if (this.locker) this.shot.yaw = damp(this.shot.yaw, this.profileYaw(this.locker), 0.8, dt);
         if (this.walker.done || this.st > 8) this.goStep('gear');
         break;
       }
       case 'gear': {
-        if (this.locker) faceToward(hero, this.locker.obj.position, dt);
-        const yaw = this.locker ? lockerYaw(this.locker) + 0.9 + Math.sin(this.st * 0.3) * 0.15 : this.shot.yaw;
-        this.shot.target.lerp(new THREE.Vector3(hp.x, 0.62, hp.z), 1 - Math.exp(-dt * 3));
+        const allIn = this.flyers.every((f) => f.landed);
+        // suited up: turn to the camera for the "ready" beat
+        if (allIn) faceToward(hero, this.rig.cam.position, dt, 5);
+        else if (this.locker) faceToward(hero, this.locker.obj.position, dt);
+        const yaw = this.locker ? this.profileYaw(this.locker) + Math.sin(this.st * 0.3) * 0.12 : this.shot.yaw;
+        const mid = this.locker ? hp.clone().lerp(this.locker.obj.position, 0.35) : hp.clone();
+        this.shot.target.lerp(new THREE.Vector3(mid.x, 0.75, mid.z), 1 - Math.exp(-dt * 3));
         this.shot.yaw = damp(this.shot.yaw, yaw, 2, dt);
-        this.shot.dist = damp(this.shot.dist, 7.2, 2, dt); this.shot.pitch = damp(this.shot.pitch, 0.2, 2, dt); this.shot.fov = damp(this.shot.fov, 21, 2, dt);
+        this.shot.dist = damp(this.shot.dist, 8.5, 2, dt); this.shot.pitch = damp(this.shot.pitch, 0.16, 2, dt); this.shot.fov = damp(this.shot.fov, 22, 2, dt);
         let all = true;
         for (const f of this.flyers) {
           f.t += dt;
@@ -209,7 +214,11 @@ export class Cinematic {
             for (let i = 0; i < 14; i++) this.sparks.emit(p.x, p.y, p.z, { vx: (Math.random() - 0.5) * 3, vy: Math.random() * 2.5, vz: (Math.random() - 0.5) * 3, life: 0.6 + Math.random() * 0.4, size: 0.1 });
             audio.play(f.obj.userData.sword ? 'sw_swish1' : ['buckle1', 'cloth1', 'k_pluck1', 'pop1'][Math.floor(Math.random() * 4)], { vol: 0.5 });
             audio.play('pickup_sparkle1', { vol: 0.25, dry: true, rate: 1 + Math.random() * 0.3 });
-            if (f.obj.userData.sword) { hero.play?.('cheer'); this.caption = 'READY'; audio.play('jin_good', { vol: 0.4, dry: true }); }
+            if (f.obj.userData.sword) {
+              // the full outfit for the loadout's archetype pops on (BlobPuppet gear sets)
+              hero.setGear?.(BUILD_GEAR[buildOf(this.cfg)]);
+              hero.play?.('gear'); this.caption = 'READY'; audio.play('jin_good', { vol: 0.4, dry: true });
+            }
           }
         }
         if (all && this.st > 1.2 + this.flyers.length * 0.1) { if (this.st > this.flyers.reduce((m, f) => Math.max(m, f.delay), 0) + 1.6) this.goStep('toDoor'); }
@@ -243,13 +252,15 @@ export class Cinematic {
         break;
       }
       case 'outside': {
-        this.swimV.multiplyScalar(1 + dt * 0.4);
+        this.swimV.multiplyScalar(1 + dt * 0.25);
         r.position.addScaledVector(this.swimV, dt);
         r.rotation.y = damp(r.rotation.y, Math.atan2(-this.swimV.z, this.swimV.x), 3, dt);
         if (Math.random() < dt * 8) this.bubbles.emit(hp.x + 0.3, hp.y + 0.2, hp.z, { vy: 0.4, life: 2, size: 0.05 + Math.random() * 0.05 });
         // camera drifts and tilts up after the hero toward the light
-        this.shot.target.lerp(new THREE.Vector3(hp.x * 0.5 + (-HALF_W - 3.2) * 0.5, 1.6 + Math.max(0, this.st - 1) * 0.9, DOOR.z - this.st * 0.3), 1 - Math.exp(-dt * 1.2));
-        this.shot.pitch = damp(this.shot.pitch, -0.12, 0.6, dt);
+        this.shot.target.lerp(new THREE.Vector3(hp.x * 0.85 + (-HALF_W - 2.6) * 0.15, hp.y * 0.8 + 0.4, hp.z * 0.85 + (DOOR.z - 0.5) * 0.15), 1 - Math.exp(-dt * 2.2));
+        this.shot.dist = damp(this.shot.dist, 10.5, 0.6, dt);
+        this.shot.pitch = damp(this.shot.pitch, -0.18, 0.5, dt);
+        this.shot.fov = damp(this.shot.fov, 26, 0.5, dt);
         if (this.st > 1.6) this.caption = this.cfg ? areaCaption(this.cfg) : '';
         if (this.st > 3.6) this.goStep('fade');
         break;
@@ -264,15 +275,45 @@ export class Cinematic {
   }
   private splashed = false;
 
+  /** a side-on (profile) camera yaw for the hero facing the locker, on whichever side keeps the camera in the room */
+  private profileYaw(it: Placed) {
+    const base = lockerYaw(it);
+    const c = it.obj.position;
+    let best = base + 1.35, bd = Infinity;
+    for (const y of [base + 1.35, base - 1.35]) {
+      const p = new THREE.Vector3(c.x + Math.sin(y) * 6, 0, c.z + Math.cos(y) * 6);
+      const d = Math.max(Math.abs(p.x) - HALF_W, 0) + Math.max(Math.abs(p.z) - 4, 0);
+      if (d < bd) { bd = d; best = y; }
+    }
+    return best;
+  }
+
   /** tidy up after the run starts (or when re-entering the hideout) */
   reset() {
     for (const f of this.flyers) f.obj.removeFromParent();
     this.flyers = [];
     this.hero.clearGear?.();
+    this.hero.setGear?.(DEFAULT_GEAR);
     this.active = false; this.step = 'done'; this.fade = 0; this.letterbox = 0; this.caption = '';
     this.rig.shot = null; this.rig.k = 4.5;
     this.room.door.target = 0;
   }
+}
+
+/** the archetype a loadout leans toward (decides the outfit in the gear-up) */
+function buildOf(cfg: RunConfig | null): BuildId {
+  const tally: Record<string, number> = {};
+  const A: Record<string, BuildId> = {
+    bubbleWand: 'mage', eelBattery: 'mage', laserLens: 'mage', anglerLantern: 'mage', mermaidScale: 'mage',
+    whetstone: 'warrior', filletKnife: 'warrior', harpoonTip: 'warrior', scissors: 'warrior', sharkNecklace: 'warrior', pumiceHeart: 'warrior',
+    rubberDuck: 'summoner', starfish: 'summoner', bottleMessage: 'summoner', spiralShell: 'summoner',
+    reelGear: 'tinkerer', pliers: 'tinkerer', tackleBox: 'tinkerer', grappleHook: 'tinkerer', lineSpool: 'tinkerer',
+    inkSac: 'rogue', pufferSpines: 'rogue', sailFin: 'rogue', netShard: 'rogue',
+  };
+  for (const uid of cfg?.loadout ?? []) { const it = META.stash.find((s) => s.uid === uid); const b = it && A[it.id]; if (b) tally[b] = (tally[b] ?? 0) + 1; }
+  let best: BuildId = 'default', n = 0;
+  for (const [b, c] of Object.entries(tally)) if (c > n) { n = c; best = b as BuildId; }
+  return best;
 }
 
 function lockerYaw(it: Placed) { const f = FurnitureCls.front(it.p.rot); return Math.atan2(f.x, f.z); }

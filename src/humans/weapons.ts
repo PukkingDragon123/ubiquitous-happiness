@@ -32,11 +32,11 @@ export interface Weapon {
   setLoaded(b: boolean): void;
 }
 
-const woodMat = () => kitMat('teak', 32, 16, (x, y) => band(mix([120, 70, 38], [80, 44, 22], nz(x * 0.3, y * 2, 6, 51)), 0.9 + ((y + (x >> 3)) % 3 === 0 ? -0.1 : 0.05) + (hh(x, y, 52) - 0.5) * 0.08, x, y), { rough: 0.6 });
-const plasticMat = (c: RGB) => kitMat('pls' + c.join(','), 16, 16, (x, y) => band(c, 0.92 + y / 80 + (hh(x, y, 53) - 0.5) * 0.06, x, y), { rough: 0.5 });
+const woodMat = () => kitMat('teak', 32, 16, (x, y) => band(y % 5 === 0 ? [88, 50, 26] : [124, 74, 40], 0.92 + y / 60, x, y, 0.1), { rough: 0.6 });
+const plasticMat = (c: RGB) => kitMat('pls' + c.join(','), 16, 16, (x, y) => band(c, y < 2 ? 1.2 : 0.92 + y / 80, x, y, 0.1), { rough: 0.5 });
 const netMat = () => kitMat('netmesh', 32, 32, (x, y) => {
   const a = (x + y) % 6, b = (x - y + 60) % 6;
-  return a === 0 || b === 0 ? band([200, 190, 150], 0.9 + (hh(x, y, 54) - 0.5) * 0.2, x, y) : band([90, 84, 64], 0.55 + nz(x, y, 5, 55) * 0.2, x, y);
+  return a === 0 || b === 0 ? band([200, 190, 150], 1, x, y) : band([90, 84, 64], 0.6, x, y);
 }, { rough: 0.9 });
 
 function mesh(B: Loft, m: THREE.Material) { const o = new THREE.Mesh(B.build(), m); o.castShadow = true; return o; }
@@ -142,7 +142,7 @@ export function makeWeapon(kind: WeaponKind, scale = 1): Weapon {
     case 'medkit': {
       const P = new Loft(false);
       P.box([0, 0, 0.06 * s], [0.08 * s, 0.14 * s, 0.16 * s], FULL);
-      add(mesh(P, kitMat('medkit', 16, 16, (x, y) => ((x > 6 && x < 9 && y > 3 && y < 12) || (y > 6 && y < 9 && x > 3 && x < 12) ? band([200, 30, 30], 1, x, y) : band([230, 228, 220], 0.9 + (hh(x, y, 56) - 0.5) * 0.1, x, y)), { rough: 0.8 })));
+      add(mesh(P, kitMat('medkit', 16, 16, (x, y) => ((x > 6 && x < 9 && y > 3 && y < 12) || (y > 6 && y < 9 && x > 3 && x < 12) ? band([200, 30, 30], 1, x, y) : band([230, 228, 220], 0.95, x, y)), { rough: 0.8 })));
       muzzle.position.set(0, 0, 0.14 * s);
       len = 0.14 * s;
       break;

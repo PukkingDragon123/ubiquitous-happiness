@@ -15,7 +15,7 @@ import { Rng } from '../core/rng';
 import { hex, Px as PxN } from '../gfx/px';
 import { Atlas, planks, growth, ropeCol, rubber, torus, cyl, bucket, textSampler, HULL_TEXT, HULL_TEXT_GOLD, glassMat, lampMat, spotMat, band, nz, hh, wood, metal, mix, shade } from './props';
 import type { PxRect } from './props';
-import { ellRing } from './rig';
+import { ellRing, DETAIL } from './rig';
 import { pvc } from './fabric';
 
 export type BoatKind = 'rowboat' | 'dinghy' | 'skiff' | 'trawler' | 'kayak';
@@ -79,10 +79,12 @@ function hullPt(H: HullDef, t: number, sec: Sec): V3 {
   return [-H.L / 2 + t * H.L + rk, y, sec.side * z];
 }
 function buildHull(B: Loft, H: HullDef, reg: Reg, g: number) {
-  const loop = loopOf(H.ns);
+  // PS2 chunky hull: half the sections / stations
+  const ns = DETAIL.low ? Math.max(4, Math.round(H.ns / 2)) : H.ns, nt = DETAIL.low ? Math.max(8, Math.round(H.nt / 2.5)) : H.nt;
+  const loop = loopOf(ns);
   const us = loop.map((_, i) => i / (loop.length - 1));
-  const rings = Array.from({ length: H.nt + 1 }, (_, i) => {
-    const t = i / H.nt;
+  const rings = Array.from({ length: nt + 1 }, (_, i) => {
+    const t = i / nt;
     return { pts: loop.map((sec) => hullPt(H, t, sec)), v: t };
   });
   B.loft(rings, us, reg, g, { start: [-H.L / 2, (H.keel(0) + H.sheer(0)) / 2 + 0.02, 0], alt: true });

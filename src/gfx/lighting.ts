@@ -1,15 +1,16 @@
-// Lighting rig for the ocean scenes, tuned for a cinematic PS2 mood (Silent Hill 2 / MGS2 / Shadow of the
-// Colossus): a strong key (the sun, refracted through the surface so underwater light comes in steeper than
-// the sun in the sky, from above and behind the play plane, so it rims every silhouette) with real shadows
-// that follow the camera, a low hemisphere ambient so shadows stay dark but readable, a soft cool fill from the
-// camera side (light scattered back by the water column) so faces toward the viewer never go to mud, and a
-// small pool of point lights for lamps and transient flashes (muzzle flashes, explosions, magic).
+// Lighting rig for the ocean scenes, PS2-clean: ONE strong key from the surface (slightly toward the viewer, so the
+// faces we look at are lit and crisp shadows fall back onto the scenery behind), a coloured ambient from the
+// water (hemisphere: water colour above, sand bounce below), a crisp fresnel rim on everything near the play
+// plane (src/gfx/shaders/underwater.ts) so characters pop off the background, and a small pool of point lights
+// for lamps and transient flashes (muzzle flashes, explosions, magic).
 //
 //   const rig = new Lighting();              scene.add(rig.group); rig.applyLook(LOOKS.reef)
-//   const lamp = rig.lamp(x, y, z, '#ffb060', 3, 6);   lamp.set(x, y, z) / lamp.intensity = .. / lamp.release()
+//   const lamp = rig.lamp(x, y, z, '#ffb060', 3, 6);   lamp.set(x, y, z) / lamp.light.intensity = .. / lamp.release()
 //   rig.flash(x, y, '#ffd890', 8, 0.08)                  // auto-decaying point light (also done by fx.muzzle...)
 //
-// Biome palettes tweak colours + water optics + the cinematic grade in one place (applyLook).
+// Per-area palettes (LOOKS) set the water colours the depth fog fades to, the key / ambient / rim colours, and
+// the light grade. Area water: reef bright cyan -> blue, kelp green-teal, graveyard cold grey-blue, arctic pale
+// ice blue, abyss near-black navy.
 import * as THREE from 'three';
 import { UW } from './shaders/underwater';
 import { SKY } from './sky';
@@ -18,98 +19,115 @@ import { SURF } from './water/surface';
 
 export interface Look {
   sky: [string, string]; seaFar: string; sun: string; cloudCover: number;
+  /** water colour at the surface / in the deep: what distant layers fade to */
   scatterTop: string; scatterDeep: string; ext: [number, number, number]; clear: number; rays: number; rayCol: string;
   tir: string; shallow: string; deep: string;
   hemiSky: string; hemiGround: string; hemi: number; sunI: number;
   depthExt: [number, number, number]; depthMin: [number, number, number];
   caustic: number; causticCol: string;
   saturation: number; contrast: number; lift: [number, number, number]; gain: [number, number, number]; exposure: number;
-  // ---- cinematic extras (optional; defaults applied when absent)
-  /** split tone: shadow colour, highlight colour, amount */
-  split?: [string, string, number];
-  /** film grain, black crush, bloom, vignette */
-  grain?: number; black?: number; bloom?: number; vignette?: number;
-  /** soft camera-side fill (scattered light): colour, intensity */
+  // ---- optional extras (defaults applied when absent)
+  /** depth fog: metres of water before fog, density per metre, depth (m) where the water colour reaches scatterDeep */
+  fogNear?: number; fogK?: number; fogDeep?: number;
+  /** crisp rim light near the play plane: colour, strength */
+  rim?: [string, number];
+  /** soft camera-side fill (no shadows): colour, intensity */
   fill?: [string, number];
+  /** subtle split tone: shadow colour, highlight colour, amount */
+  split?: [string, string, number];
+  bloom?: number; vignette?: number; black?: number; grain?: number;
   /** key shadow darkness 0..1 */
   shadow?: number;
   /** distance fog for dry scenes: colour, density per metre */
   fog?: [string, number];
 }
 
+const base = {
+  ext: [0.11, 0.05, 0.035] as [number, number, number], clear: 5, cloudCover: 0.5,
+  caustic: 0.8, causticCol: '#fff6dc', lift: [0, 0, 0.01] as [number, number, number], gain: [1, 1, 1] as [number, number, number],
+};
+
 export const LOOKS: Record<string, Look> = {
   reef: {
-    sky: ['#3f7fc4', '#c7e2ea'], seaFar: '#1a6386', sun: '#fff0d4', cloudCover: 0.5,
-    scatterTop: '#17859e', scatterDeep: '#031428', ext: [0.13, 0.055, 0.04], clear: 6.5, rays: 0.95, rayCol: '#e6fff0',
+    ...base,
+    sky: ['#3f86d8', '#c7ecf7'], seaFar: '#1d6f96', sun: '#fff4e0',
+    scatterTop: '#3ec4dc', scatterDeep: '#1652a0', rays: 0.9, rayCol: '#f0fff8',
     tir: '#2a8fb0', shallow: '#22b3c9', deep: '#0b5a80',
-    hemiSky: '#7cc4dc', hemiGround: '#24343a', hemi: 0.75, sunI: 3.0,
-    depthExt: [0.065, 0.028, 0.017], depthMin: [0.07, 0.11, 0.17], caustic: 0.8, causticCol: '#fff4d8',
-    saturation: 1.0, contrast: 1.1, lift: [0, 0.006, 0.02], gain: [1.03, 1.0, 0.96], exposure: 0.95,
-    split: ['#1a5866', '#ffbe7a', 0.28], fill: ['#8fbccc', 1.7], shadow: 0.9,
+    hemiSky: '#6fd2e8', hemiGround: '#4a5a48', hemi: 1.0, sunI: 3.4,
+    depthExt: [0.022, 0.009, 0.005], depthMin: [0.4, 0.55, 0.65], caustic: 0.8,
+    saturation: 1.1, contrast: 1.08, exposure: 1.0,
+    fogNear: 5, fogK: 0.042, fogDeep: 34, rim: ['#e8fcff', 0.39], fill: ['#9fe0f0', 0.35], split: ['#1d4a66', '#ffc890', 0.08],
   },
   kelp: {
-    sky: ['#4a86c0', '#d0e6de'], seaFar: '#1c5f62', sun: '#fff0cc', cloudCover: 0.62,
-    scatterTop: '#2e9a8c', scatterDeep: '#031c20', ext: [0.15, 0.055, 0.055], clear: 5.5, rays: 1.35, rayCol: '#f2ffd2',
+    ...base,
+    sky: ['#4a8ccc', '#d6efe8'], seaFar: '#1f6a70', sun: '#fff2cc', cloudCover: 0.62,
+    scatterTop: '#3aa68e', scatterDeep: '#0e4446', rays: 1.3, rayCol: '#f6ffd8',
     tir: '#3a9f94', shallow: '#2aa898', deep: '#0d4f52',
-    hemiSky: '#a6dcc0', hemiGround: '#2a3420', hemi: 0.8, sunI: 3.2,
-    depthExt: [0.065, 0.026, 0.022], depthMin: [0.07, 0.12, 0.12], caustic: 1.1, causticCol: '#fffbd0',
-    saturation: 0.98, contrast: 1.12, lift: [0.0, 0.016, 0.01], gain: [1.03, 1.02, 0.94], exposure: 1.0,
-    split: ['#1e5a48', '#ffd08a', 0.3], fill: ['#a8ccb8', 1.6], shadow: 0.92,
+    hemiSky: '#7cc8a8', hemiGround: '#3a4428', hemi: 0.95, sunI: 3.2,
+    depthExt: [0.026, 0.01, 0.009], depthMin: [0.35, 0.5, 0.45], caustic: 1.0, causticCol: '#fffbd0',
+    saturation: 1.08, contrast: 1.1, exposure: 1.0,
+    fogNear: 5, fogK: 0.048, fogDeep: 32, rim: ['#e0ffe8', 0.35], fill: ['#a8e0c4', 0.3], split: ['#1e4a3a', '#ffd890', 0.08],
   },
   graveyard: {
-    sky: ['#56677a', '#b4b8b2'], seaFar: '#24403f', sun: '#e8e2d0', cloudCover: 0.85,
-    scatterTop: '#3c6e68', scatterDeep: '#040e10', ext: [0.17, 0.08, 0.075], clear: 4.5, rays: 0.7, rayCol: '#e0eadc',
+    ...base,
+    sky: ['#56677a', '#b4b8b2'], seaFar: '#24403f', sun: '#e6ecf0', cloudCover: 0.85,
+    scatterTop: '#7890a2', scatterDeep: '#243448', rays: 0.6, rayCol: '#e4eef4',
     tir: '#3a6a64', shallow: '#3a7a70', deep: '#123634',
-    hemiSky: '#8ea8a0', hemiGround: '#20201a', hemi: 0.65, sunI: 2.3,
-    depthExt: [0.075, 0.034, 0.03], depthMin: [0.06, 0.08, 0.08], caustic: 0.45, causticCol: '#e8f0dc',
-    saturation: 0.82, contrast: 1.14, lift: [0.004, 0.012, 0.012], gain: [1.02, 1.0, 0.95], exposure: 0.98,
-    split: ['#244a44', '#d8b080', 0.34], fill: ['#98b0aa', 1.4], shadow: 0.94, grain: 0.07, black: 0.04,
+    hemiSky: '#90a6b6', hemiGround: '#34322c', hemi: 0.9, sunI: 2.8,
+    depthExt: [0.03, 0.014, 0.01], depthMin: [0.35, 0.42, 0.5], caustic: 0.4, causticCol: '#e8f0f4',
+    saturation: 0.88, contrast: 1.1, exposure: 1.0,
+    fogNear: 5, fogK: 0.05, fogDeep: 30, rim: ['#dce8f4', 0.39], fill: ['#a8b8c8', 0.3], split: ['#2a3a4c', '#e8d0b0', 0.08],
   },
   harbor: {
+    ...base,
     sky: ['#6f9fd0', '#e6e0d0'], seaFar: '#3a6a70', sun: '#ffe6c0', cloudCover: 0.7,
-    scatterTop: '#4e9890', scatterDeep: '#081c20', ext: [0.17, 0.075, 0.075], clear: 5, rays: 0.8, rayCol: '#fff4dc',
+    scatterTop: '#4e9c96', scatterDeep: '#143c44', rays: 0.8, rayCol: '#fff4dc',
     tir: '#4a8f88', shallow: '#3f9890', deep: '#164a50',
-    hemiSky: '#c0d8d0', hemiGround: '#3a3428', hemi: 0.85, sunI: 2.8,
-    depthExt: [0.07, 0.03, 0.028], depthMin: [0.09, 0.11, 0.11], caustic: 0.8, causticCol: '#fff0d0',
-    saturation: 0.96, contrast: 1.1, lift: [0.015, 0.012, 0.0], gain: [1.05, 1.0, 0.94], exposure: 1.0,
-    split: ['#2a5a5a', '#ffc080', 0.3],
+    hemiSky: '#a8d0c8', hemiGround: '#4a4436', hemi: 0.95, sunI: 3.0,
+    depthExt: [0.03, 0.013, 0.012], depthMin: [0.35, 0.45, 0.45], caustic: 0.8, causticCol: '#fff0d0',
+    saturation: 1.0, contrast: 1.08, exposure: 1.0,
+    fogNear: 5, fogK: 0.05, fogDeep: 30, rim: ['#f0f8f0', 0.35],
   },
   arctic: {
-    sky: ['#7fa8d6', '#eef4f8'], seaFar: '#2a5a80', sun: '#f4fbff', cloudCover: 0.6,
-    scatterTop: '#68bcd6', scatterDeep: '#051830', ext: [0.11, 0.045, 0.028], clear: 7.5, rays: 1.2, rayCol: '#f4fcff',
+    ...base,
+    sky: ['#7fa8d6', '#eef4f8'], seaFar: '#2a5a80', sun: '#f6fbff', cloudCover: 0.6,
+    scatterTop: '#b4e2f0', scatterDeep: '#3a78a6', rays: 1.1, rayCol: '#f4fcff',
     tir: '#6ab8d8', shallow: '#4cb4d8', deep: '#164a7a',
-    hemiSky: '#c4e4f4', hemiGround: '#3a4a58', hemi: 1.0, sunI: 3.0,
-    depthExt: [0.055, 0.022, 0.013], depthMin: [0.1, 0.14, 0.22], caustic: 0.9, causticCol: '#f0fbff',
-    saturation: 0.9, contrast: 1.08, lift: [0.01, 0.018, 0.035], gain: [0.98, 1.0, 1.04], exposure: 1.02,
-    split: ['#2a4a70', '#ffe4c0', 0.24], fill: ['#c8dcec', 1.8], shadow: 0.85,
+    hemiSky: '#c8ecf8', hemiGround: '#6a8090', hemi: 1.1, sunI: 3.2,
+    depthExt: [0.02, 0.008, 0.004], depthMin: [0.45, 0.58, 0.7], caustic: 0.9, causticCol: '#f0fbff',
+    saturation: 0.95, contrast: 1.06, exposure: 1.0,
+    fogNear: 6, fogK: 0.034, fogDeep: 40, rim: ['#ffffff', 0.35], fill: ['#d8f0ff', 0.35], split: ['#3a5a78', '#fff0dc', 0.06],
   },
   abyss: {
-    sky: ['#1a2a5a', '#5a6a9a'], seaFar: '#0a1a3a', sun: '#c0d0ff', cloudCover: 0.8,
-    scatterTop: '#0f2a40', scatterDeep: '#010309', ext: [0.21, 0.085, 0.06], clear: 4.5, rays: 0.4, rayCol: '#90c0e0',
+    ...base,
+    sky: ['#1a2a5a', '#5a6a9a'], seaFar: '#0a1a3a', sun: '#b8ccff', cloudCover: 0.8,
+    scatterTop: '#0f2440', scatterDeep: '#02060e', rays: 0.25, rayCol: '#90c0e0',
     tir: '#16406a', shallow: '#164a7a', deep: '#04142a',
-    hemiSky: '#3a5070', hemiGround: '#06080e', hemi: 0.6, sunI: 1.2,
-    depthExt: [0.085, 0.042, 0.024], depthMin: [0.04, 0.055, 0.09], caustic: 0.3, causticCol: '#a0c8ff',
-    saturation: 0.88, contrast: 1.14, lift: [0.0, 0.006, 0.018], gain: [0.96, 1.0, 1.05], exposure: 1.05,
-    split: ['#162a3e', '#b8d4e8', 0.24], fill: ['#56708e', 1.3], shadow: 0.95, grain: 0.07, black: 0.035, bloom: 0.7,
+    hemiSky: '#2c4a70', hemiGround: '#080a10', hemi: 0.7, sunI: 1.6,
+    depthExt: [0.03, 0.015, 0.008], depthMin: [0.25, 0.32, 0.45], caustic: 0.25, causticCol: '#a0c8ff',
+    saturation: 1.0, contrast: 1.1, exposure: 1.05,
+    fogNear: 4, fogK: 0.07, fogDeep: 26, rim: ['#7ab4ff', 0.52], fill: ['#4a6a9a', 0.3], split: ['#102038', '#c0d8f0', 0.06], bloom: 0.45,
   },
   sunset: {
+    ...base,
     sky: ['#4a5aa8', '#ffb98a'], seaFar: '#3a4a7a', sun: '#ffcf96', cloudCover: 0.55,
-    scatterTop: '#3e98a8', scatterDeep: '#08142e', ext: [0.12, 0.055, 0.045], clear: 6.5, rays: 1.4, rayCol: '#ffe0b8',
+    scatterTop: '#4aa0b0', scatterDeep: '#122a52', rays: 1.3, rayCol: '#ffe0b8',
     tir: '#5a8aa8', shallow: '#3a8ab0', deep: '#14325a',
-    hemiSky: '#e8b8a0', hemiGround: '#2a2030', hemi: 0.8, sunI: 3.0,
-    depthExt: [0.05, 0.028, 0.02], depthMin: [0.1, 0.08, 0.15], caustic: 1.0, causticCol: '#ffe0b0',
-    saturation: 1.04, contrast: 1.1, lift: [0.02, 0.0, 0.025], gain: [1.06, 0.99, 0.94], exposure: 1.0,
-    split: ['#2a3a6a', '#ffb070', 0.36], fill: ['#d8aa92', 1.6],
+    hemiSky: '#d8b0a0', hemiGround: '#3a2a3a', hemi: 0.9, sunI: 3.2,
+    depthExt: [0.022, 0.012, 0.009], depthMin: [0.4, 0.35, 0.5], caustic: 1.0, causticCol: '#ffe0b0',
+    saturation: 1.06, contrast: 1.08, exposure: 1.0,
+    fogNear: 5, fogK: 0.045, fogDeep: 34, rim: ['#ffd8b8', 0.39], split: ['#2a3a6a', '#ffb070', 0.1],
   },
-  /** dry interior (hideout cave): warm lamp pools against cold rock, distance fog, no water optics */
+  /** dry interior (hideout cave): warm lamp pools against cool rock, distance fog, no water optics */
   hideout: {
-    sky: ['#1a1e26', '#30343a'], seaFar: '#101418', sun: '#a8c0d8', cloudCover: 0.9,
-    scatterTop: '#2a4a52', scatterDeep: '#05080a', ext: [0.2, 0.1, 0.08], clear: 5, rays: 0, rayCol: '#ffffff',
+    ...base,
+    sky: ['#1a1e26', '#30343a'], seaFar: '#101418', sun: '#c8d8e8', cloudCover: 0.9,
+    scatterTop: '#2a4a52', scatterDeep: '#05080a', rays: 0, rayCol: '#ffffff',
     tir: '#2a4a52', shallow: '#2a4a52', deep: '#0a1418',
-    hemiSky: '#5a6a80', hemiGround: '#2a2018', hemi: 0.35, sunI: 0.6,
-    depthExt: [0.06, 0.03, 0.02], depthMin: [0.1, 0.1, 0.1], caustic: 0, causticCol: '#ffffff',
-    saturation: 0.92, contrast: 1.12, lift: [0.006, 0.008, 0.016], gain: [1.05, 1.0, 0.93], exposure: 1.05,
-    split: ['#1c3a48', '#ffb060', 0.38], fill: ['#6a7a90', 0.6], shadow: 0.95, fog: ['#0b0d12', 0.035], grain: 0.065,
+    hemiSky: '#6a7a90', hemiGround: '#3a3024', hemi: 0.6, sunI: 1.0,
+    depthExt: [0.0, 0.0, 0.0], depthMin: [1, 1, 1], caustic: 0, causticCol: '#ffffff',
+    saturation: 1.02, contrast: 1.08, exposure: 1.0,
+    rim: ['#b8c8e0', 0.24], fill: ['#8090a8', 0.25], split: ['#1c3a48', '#ffb060', 0.1], fog: ['#0e1016', 0.03],
   },
 };
 
@@ -123,10 +141,12 @@ export interface LampHandle {
 interface Slot { light: THREE.PointLight; kind: 'free' | 'lamp' | 'flash'; t0: number; dur: number; peak: number }
 
 export class Lighting {
-  sun = new THREE.DirectionalLight('#fff2d6', 2.6);
-  hemi = new THREE.HemisphereLight('#9fe8ff', '#3a5a4a', 0.8);
-  /** soft fill from the camera side, upper left (no shadows) */
-  fill = new THREE.DirectionalLight('#9fc8d8', 1.5);
+  /** the key: from the surface, tilted toward the viewer; crisp shadows */
+  sun = new THREE.DirectionalLight('#fff2d6', 3.2);
+  /** coloured water ambient */
+  hemi = new THREE.HemisphereLight('#6fd2e8', '#4a5a48', 1.0);
+  /** weak camera-side fill (no shadows) */
+  fill = new THREE.DirectionalLight('#9fe0f0', 0.35);
   group = new THREE.Group();
   private slots: Slot[] = [];
 
@@ -135,10 +155,10 @@ export class Lighting {
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     const c = this.sun.shadow.camera as THREE.OrthographicCamera;
     c.left = -22; c.right = 22; c.top = 16; c.bottom = -16; c.near = 1; c.far = 80;
-    this.sun.shadow.bias = -0.0005;
-    this.sun.shadow.normalBias = 0.03;
-    this.sun.shadow.radius = 2;
-    this.sun.shadow.intensity = 0.9;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.025;
+    this.sun.shadow.radius = 1;
+    this.sun.shadow.intensity = 0.85;
     this.group.name = 'lighting';
     this.group.userData.rig = this;
     this.group.add(this.sun, this.sun.target, this.hemi, this.fill, this.fill.target);
@@ -162,8 +182,10 @@ export class Lighting {
   }
   /** keep the shadow frustum on the action */
   follow(x: number, y: number) {
+    // key from the surface, leaning toward the viewer: faces toward the camera are lit, shadows fall behind
     const d = UW.uSunDir.value;
-    this.sun.position.set(x + d.x * 40, y + d.y * 40, d.z * 40);
+    const kd = new THREE.Vector3(d.x * 0.7, d.y, 0.55).normalize();
+    this.sun.position.set(x + kd.x * 40, y + kd.y * 40, kd.z * 40);
     this.sun.target.position.set(x, y, 0);
     this.sun.target.updateMatrixWorld();
     this.fill.position.set(x - 10, y + 9, 26);
@@ -219,16 +241,18 @@ export class Lighting {
     this.hemi.color.set(L.hemiSky); this.hemi.groundColor.set(L.hemiGround); this.hemi.intensity = L.hemi;
     this.sun.color.set(L.sun); this.sun.intensity = L.sunI;
     UW.uDepthExt.value.set(...L.depthExt); UW.uDepthMin.value.set(...L.depthMin); UW.uCaustic.value = L.caustic; UW.uCausticCol.value.set(L.causticCol);
-    // cinematic extras
-    const sp = L.split ?? ['#1d5a66', '#ffb46a', 0.3];
+    // depth fog + extras
+    POST.uFogNear.value = L.fogNear ?? 5; POST.uFogK.value = L.fogK ?? 0.045; POST.uFogDeep.value = L.fogDeep ?? 34;
+    const sp = L.split ?? ['#1d4a66', '#ffc890', 0.08];
     POST.uSplitLo.value.set(sp[0]); POST.uSplitHi.value.set(sp[1]); POST.uSplit.value = sp[2];
-    POST.uGrain.value = L.grain ?? 0.055;
-    POST.uBlack.value = L.black ?? 0.03;
-    POST.uBloom.value = L.bloom ?? 0.5;
-    POST.uVignette.value = L.vignette ?? 0.5;
-    const fill = L.fill ?? ['#9fc8d8', 1.5];
+    POST.uBlack.value = L.black ?? 0;
+    POST.uBloom.value = L.bloom ?? 0.3;
+    POST.uVignette.value = L.vignette ?? 0.2;
+    const rim = L.rim ?? ['#e8fcff', 0.35];
+    UW.uRimGCol.value.set(rim[0]); UW.uRimG.value = rim[1];
+    const fill = L.fill ?? ['#a0c8d8', 0.3];
     this.fill.color.set(fill[0]); this.fill.intensity = fill[1];
-    this.sun.shadow.intensity = L.shadow ?? 0.9;
+    this.sun.shadow.intensity = L.shadow ?? 0.85;
     const fog = L.fog ?? ['#0d0f14', 0];
     POST.uDryFogCol.value.set(fog[0]); POST.uDryFog.value = fog[1];
   }

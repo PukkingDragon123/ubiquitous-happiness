@@ -437,11 +437,12 @@ export class HideoutScreen implements Screen {
     // material summary under the plaque
     const mats = Object.entries(META.materials).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 6);
     if (mats.length) {
-      ui.panel('dark', 6, 40, 128, 14 + Math.ceil(mats.length / 2) * 12, undefined, { alpha: 0.9 });
+      ui.panel('dark', 6, 40, 128, 10 + Math.ceil(mats.length / 2) * 18, undefined, { alpha: 0.9 });
       mats.forEach(([id, n], i) => {
-        const x = 11 + (i % 2) * 62, y = 45 + Math.floor(i / 2) * 12;
-        ui.item(id, x, y, 10, 10);
-        ui.text(`${n}`, x + 12, y + 2, { font: 'tiny', color: '#ffffff' });
+        const x = 11 + (i % 2) * 62, y = 45 + Math.floor(i / 2) * 18;
+        ui.item(id, x, y, 16, 16);
+        ui.text(`${n}`, x + 19, y + 5, { font: 'small', color: '#ffffff' });
+        if (ui.hover(x, y, 50, 16)) ui.tooltip(ui.itemTip(id));
       });
     }
     // action buttons, bottom right
@@ -459,7 +460,7 @@ export class HideoutScreen implements Screen {
     const perks = stationPerks();
     if (perks.arch.length) {
       let px = 8;
-      const py = 58 + (mats.length ? Math.ceil(mats.length / 2) * 12 + 4 : 0);
+      const py = 54 + (mats.length ? Math.ceil(mats.length / 2) * 18 + 2 : 0);
       for (const a of perks.arch) { ui.icon(a === 'mage' ? 'mana' : a === 'warrior' ? 'sword' : a === 'any' ? 'star' : 'gear', px, py); px += 11; }
       if (ui.hover(6, py - 2, px, 12)) ui.tooltip(perks.perks, { maxW: 200 });
     }

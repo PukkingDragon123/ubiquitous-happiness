@@ -38,6 +38,8 @@ export interface AppendOpts {
   glow?: number;
   /** remap the source UVs into a sub-rect (for re-skinning a shared shape) */
   uv?: UVR;
+  /** absolute flex scale (metres), bypassing the size-based scaling */
+  flexAbs?: number;
 }
 
 export class Soup {
@@ -243,7 +245,7 @@ export class Soup {
       if (uvr) { u = uvr.u0 + (uvr.u1 - uvr.u0) * u; v = uvr.v0 + (uvr.v1 - uvr.v0) * v; }
       this.UV.push(u, v);
       this.C.push(s.C[i * 3] * t[0], s.C[i * 3 + 1] * t[1], s.C[i * 3 + 2] * t[2]);
-      if (o.sway) this.S.push(ox, oy, oz, s.S[i * 4 + 3] * fk);
+      if (o.sway) this.S.push(ox, oy, oz, s.S[i * 4 + 3] * (o.flexAbs ?? fk));
       else this.S.push(s.S[i * 4], s.S[i * 4 + 1], s.S[i * 4 + 2], s.S[i * 4 + 3]);
       this.G.push(s.G[i] + (o.glow ?? 0));
     }
@@ -266,7 +268,7 @@ export class Soup {
   }
 
   /** non-indexed BufferGeometry with flat face normals */
-  geometry(o: { sway?: boolean; glow?: boolean } = {}): THREE.BufferGeometry {
+  geometry(o: { sway?: boolean; glow?: boolean; tilt?: number } = {}): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
     // drop degenerate faces (zero-area triangles make NaN normals, and NaN pixels poison the bloom chain)
     const keep: number[] = [];
@@ -295,7 +297,9 @@ export class Soup {
       const ux = pos[o3 * 3 + 3] - ax, uy = pos[o3 * 3 + 4] - ay, uz = pos[o3 * 3 + 5] - az;
       const vx = pos[o3 * 3 + 6] - ax, vy = pos[o3 * 3 + 7] - ay, vz = pos[o3 * 3 + 8] - az;
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l;
+      let l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l;
+      // sprite cards: lean the normal toward the sky so they catch the sun like the seabed does
+      if (o.tilt) { if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; } nx *= 1 - o.tilt; nz *= 1 - o.tilt; ny = ny * (1 - o.tilt) + o.tilt; l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l; }
       for (let k = 0; k < 3; k++) { nor[(o3 + k) * 3] = nx; nor[(o3 + k) * 3 + 1] = ny; nor[(o3 + k) * 3 + 2] = nz; }
       o3 += 3;
     }

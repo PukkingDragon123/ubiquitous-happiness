@@ -50,13 +50,15 @@ const ORIENT = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().
 // ------------------------------------------------------------------ gore cap (a cut seen end-on)
 let capMat: THREE.Material | null = null;
 function goreCapMat() {
+  // a clean cross-section: torn rim, a fat ring, two tones of muscle split along the fibre bundles, bone + marrow
   return (capMat ??= kitMat('goreCap', 32, 32, (x, y) => {
-    const d = Math.hypot(x - 15.5, y - 15.5) / 16;
+    const dx = x - 15.5, dy = y - 15.5, d = Math.hypot(dx, dy) / 16;
     if (d > 1) return null;
-    if (d > 0.86) return band([70, 14, 12], 0.9 + (hh(x, y, 1) - 0.5) * 0.3, x, y);                          // torn edge
-    if (d > 0.74) return band([226, 196, 120], 0.9 + nz(x, y, 3, 2) * 0.2, x, y);                             // fat layer
-    if (d < 0.22) return d < 0.1 ? band([150, 30, 30], 1, x, y) : band([236, 226, 200], 1 + (hh(x, y, 3) - 0.5) * 0.15, x, y); // bone + marrow
-    return band(mix([150, 22, 20], [96, 10, 12], nz(x, y, 4, 4)), 0.9 + ((x + y * 3) % 4 === 0 ? 0.25 : 0), x, y); // muscle
+    if (d > 0.86) return [74, 14, 12];
+    if (d > 0.74) return [214, 182, 112];
+    if (d < 0.24) return d < 0.11 ? [140, 26, 24] : [232, 222, 196];
+    const ang = Math.atan2(dy, dx);
+    return Math.sin(ang * 3 + d * 4) > 0.2 ? [156, 28, 24] : [112, 16, 16];
   }, { rough: 0.3, emissive: 0.15 }));
 }
 /** a low-poly stump cap: a ragged disc facing local -y with a stub of bone */
@@ -118,6 +120,7 @@ export class DiverRig {
   readonly group = new THREE.Group();
   private yawNode = new THREE.Group();
   private tilt = new THREE.Group();
+  private roll = new THREE.Group();
   private orient = new THREE.Group();
   weapon: Weapon;
 
@@ -162,7 +165,7 @@ export class DiverRig {
     this.dims = this.model.parts.dims;
     const s = this.dims.s;
     this.group.name = 'diver:' + arch;
-    this.group.add(this.yawNode); this.yawNode.add(this.tilt); this.tilt.add(this.orient); this.orient.add(this.model.root);
+    this.group.add(this.yawNode); this.yawNode.add(this.tilt); this.tilt.add(this.roll); this.roll.add(this.orient); this.orient.add(this.model.root);
     this.orient.quaternion.copy(ORIENT);
     this.pivotY = this.dims.hipY + 0.16 * s;
     this.model.root.position.set(0, -this.pivotY, 0);
@@ -184,6 +187,8 @@ export class DiverRig {
 
   // ---------------------------------------------------------------- queries
   get scale() { return this.dims.s; }
+  /** height of the body pivot above the soles (walkers stand at floor + this) */
+  get pivotHeight() { return this.pivotY + this.model.parts.body.sole; }
   get height() { return this.dims.rest.head[1] + 0.23 * this.dims.hs; }
   get busy() { return this.act !== null; }
   get action() { return this.act; }
@@ -247,7 +252,10 @@ export class DiverRig {
     this.upright += (wantUp - this.upright) * (1 - Math.exp(-dt * 4));
     const wantYaw = this.facing > 0 ? 0 : -Math.PI;
     this.yaw += (wantYaw - this.yaw) * (1 - Math.exp(-dt * 7));
-    this.yawNode.rotation.y = this.yaw;
+    // upright: a 3/4 view so faces read; prone: rolled a little so the camera sees the back and the tank
+    const cy = Math.cos(this.yaw);
+    this.yawNode.rotation.y = this.yaw - 0.55 * cy * this.upright;
+    this.roll.rotation.x = 0.4 * cy * (1 - this.upright);
     const swimA = THREE.MathUtils.clamp(this.swimAngle, -1.3, 1.3);
     const target = swimA + (Math.PI / 2 - swimA) * this.upright;
     this.bodyAng += (target - this.bodyAng) * (1 - Math.exp(-dt * 5));

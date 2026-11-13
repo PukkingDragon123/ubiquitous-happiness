@@ -23,20 +23,21 @@ function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSi
   const T = o.T ?? 1.8, H = o.H ?? WALL_H;
   const inner = alongX ? cz + inwardSign * T / 2 : cx + inwardSign * T / 2;
   const sx = alongX ? len : T, sz = alongX ? T : len;
-  const g = new THREE.BoxGeometry(sx, H + 0.6, sz, Math.round(sx / 0.55), Math.max(2, Math.round(H / 0.5)), Math.round(sz / 0.55));
+  // big facets: ~1.1 m quads, displaced by low-frequency noise so each face reads as a flat rock slab
+  const g = new THREE.BoxGeometry(sx, H + 0.6, sz, Math.max(1, Math.round(sx / 1.1)), Math.max(1, Math.round(H / 0.95)), Math.max(1, Math.round(sz / 1.1)));
   g.translate(cx, (H + 0.6) / 2 - 0.3, cz);
   const sd = o.seed ?? 0;
   const P = g.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < P.count; i++) {
     const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-    const n1 = fbm(x * 0.45 + 3, y * 0.45 + z * 0.45, 3, 11 + sd) - 0.5, n2 = fbm(z * 0.45 - 7, y * 0.5 + x * 0.4, 3, 12 + sd) - 0.5, n3 = fbm(x * 0.3 + z * 0.3, y * 0.3, 2, 13 + sd) - 0.5;
+    const n1 = fbm(x * 0.32 + 3, y * 0.3 + z * 0.32, 2, 11 + sd) - 0.5, n2 = fbm(z * 0.32 - 7, y * 0.3 + x * 0.32, 2, 12 + sd) - 0.5, n3 = fbm(x * 0.25 + z * 0.25, y * 0.25, 1, 13 + sd) - 0.5;
     const hk = clamp01(y / 0.8); // keep the floor line tidy
-    let dx = n1 * 0.9 * hk, dz = n2 * 0.9 * hk, dy = n3 * 0.5;
+    let dx = n1 * 1.3 * hk, dz = n2 * 1.3 * hk, dy = n3 * 0.6;
     // lean in toward the top (overhang) on the room side
     const lean = Math.max(0, y - 2.6) * 0.22;
     if (alongX) dz += inwardSign * lean; else dx += inwardSign * lean;
     // a jagged ridge on top
-    if (y > H) dy += (fbm(x * 0.7, z * 0.7, 2, 14 + sd) - 0.4) * (H > 2 ? 1.4 : 0.5);
+    if (y > H) dy += (fbm(x * 0.45, z * 0.45, 1, 14 + sd) - 0.4) * (H > 2 ? 1.6 : 0.5);
     // carve a flat recess where a fixture (door, porthole) is mounted: push the rock back behind it
     const outer = inner - inwardSign * T;
     const onInner = alongX ? Math.abs(z - inner) < 0.01 : Math.abs(x - inner) < 0.01;
@@ -68,11 +69,11 @@ function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSi
 
 /** a big weathered boulder (outside) */
 function boulder(r: number, seed: number, mat: THREE.Material): THREE.Mesh {
-  const g = new THREE.IcosahedronGeometry(r, 1);
+  const g = new THREE.IcosahedronGeometry(r, r > 2.5 ? 1 : 0);
   const P = g.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < P.count; i++) {
     const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-    const k = 1 + (fbm(x * 0.6 + seed, y * 0.6, 3, seed) - 0.5) * 0.7;
+    const k = 1 + (fbm(x * 0.5 + seed, y * 0.5, 1, seed) - 0.5) * 0.8;
     P.setXYZ(i, x * k, Math.max(-r * 0.3, y * k * 1.15), z * k);
   }
   const ng = g.index ? g.toNonIndexed() : g; ng.computeVertexNormals();
@@ -176,6 +177,7 @@ export class Room {
   spot: THREE.SpotLight;
   hemi: THREE.HemisphereLight;
   tvLight: THREE.PointLight;
+  keyLamp: THREE.SpotLight;
   pool: THREE.PointLight[] = [];
   caustics = new Caustics();
   door: { pivot: THREE.Group; wheel: THREE.Object3D; open: number; target: number; membrane: THREE.ShaderMaterial };
@@ -191,7 +193,7 @@ export class Room {
     // floor (flagstones) under the room and the walls
     const fg = new THREE.PlaneGeometry(GRID_W + 3, GRID_D + 3, 1, 1); fg.rotateX(-Math.PI / 2);
     const fuv = fg.attributes.uv as THREE.BufferAttribute;
-    for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * (GRID_W + 3) / 4, fuv.getY(i) * (GRID_D + 3) / 4);
+    for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * (GRID_W + 3) / 2, fuv.getY(i) * (GRID_D + 3) / 2);
     this.floor = new THREE.Mesh(fg, MAT.floor());
     this.floor.receiveShadow = true;
     this.group.add(this.floor);
@@ -233,7 +235,7 @@ export class Room {
       const a = (i / 24) * Math.PI * 2 + hash2(i, 1, 3) * 0.2;
       const rx = (HALF_W + 2.4 + hash2(i, 2, 3) * 2.2) * Math.sign(Math.cos(a)) * Math.min(1, Math.abs(Math.cos(a)) * 1.6);
       const rz = (HALF_D + 2.4 + hash2(i, 3, 3) * 2.2) * Math.sign(Math.sin(a)) * Math.min(1, Math.abs(Math.sin(a)) * 1.6);
-      if (rx < -HALF_W && Math.abs(rz - DOOR.z) < 3.2) continue; // keep the outer hatch clear
+      if (rx < -HALF_W + 0.5 && rz > DOOR.z - 3.2) continue; // keep the outer hatch and the exterior camera clear
       const r = 1.8 + hash2(i, 4, 3) * 2.2;
       const b = boulder(r, i, outM);
       b.position.set(rx, r * 0.3, rz);
@@ -351,33 +353,38 @@ export class Room {
       else { m.position.set(side === 1 ? -HALF_W + 0.3 : HALF_W - 0.3, WALL_H + 0.1, u * HALF_D * 0.9); m.rotation.y = Math.PI / 2; }
       segAt(m.position).group.add(m);
     }
-    // warm glow from the fairy lights onto the walls (fades with its wall)
-    for (const [x, y, z, side] of [[-3.0, 3.0, -2.4, 0], [2.4, 3.1, -2.6, 0], [-3.6, 2.9, 1.0, 1], [0, 3.0, 2.6, 2], [3.6, 3.0, 0, 3]] as const) {
-      const fl = new THREE.PointLight('#ffae5a', 5, 6.5, 1.4); fl.position.set(x, y, z); this.group.add(fl);
-      void side; segAt(fl.position).lights.push({ l: fl, base: 5 });
-    }
-
     // ---- lights
-    this.hemi = new THREE.HemisphereLight('#3a6a8a', '#6a4426', 2.0);
+    this.hemi = new THREE.HemisphereLight('#2e5470', '#3a2618', 0.7);
     this.group.add(this.hemi);
-    this.group.add(new THREE.AmbientLight('#3a3040', 0.8));
+    this.group.add(new THREE.AmbientLight('#22202c', 0.25));
     // cold caustic light pouring down through the opening
-    this.spot = new THREE.SpotLight('#a8dcff', 1700, 0, 0.42, 0.7, 2);
+    this.spot = new THREE.SpotLight('#9ad0f0', 650, 0, 0.42, 0.7, 2);
     this.spot.position.set(3, 24, 6);
     this.spot.target.position.set(-0.5, 0, -0.5);
     this.spot.map = this.caustics.tex;
-    this.spot.castShadow = !lowQuality;
+    this.spot.castShadow = false;
     this.spot.shadow.mapSize.set(1024, 1024);
     this.spot.shadow.bias = -0.0004;
     this.spot.shadow.camera.near = 10; this.spot.shadow.camera.far = 40;
     this.group.add(this.spot, this.spot.target);
+    // cold light from the open water above, mostly for the outside of the outcrop
+    const moon = new THREE.DirectionalLight('#8ac4e8', 1.2);
+    moon.position.set(-14, 20, 6); moon.target.position.set(-6, 0, 1);
+    this.group.add(moon, moon.target);
     // a soft cool fill from the porthole
-    const pf = new THREE.PointLight('#5ab8ff', 6, 8, 1.5);
+    const pf = new THREE.PointLight('#5ab8ff', 2.5, 6, 1.6);
     pf.position.set(PORTHOLE.x, PORTHOLE.y - 0.3, PORTHOLE.z + 1.2);
     this.group.add(pf);
     // the TV glow (positioned by the screen)
     this.tvLight = new THREE.PointLight('#9ad8ff', 2.4, 6.5, 1.8);
     this.group.add(this.tvLight);
+    // the key light: a warm, shadow-casting cone from the main lamp (handed over by the furniture)
+    this.keyLamp = new THREE.SpotLight('#ffb064', 0, 0, 1.15, 0.55, 2);
+    this.keyLamp.castShadow = !lowQuality;
+    this.keyLamp.shadow.mapSize.set(1024, 1024);
+    this.keyLamp.shadow.bias = -0.0006;
+    this.keyLamp.shadow.camera.near = 0.2; this.keyLamp.shadow.camera.far = 14;
+    this.group.add(this.keyLamp, this.keyLamp.target);
     // a pool of warm lights handed to lamps / stoves / stations
     for (let i = 0; i < 6; i++) { const l = new THREE.PointLight('#ffb866', 0, 6, 1.7); this.pool.push(l); this.group.add(l); }
 

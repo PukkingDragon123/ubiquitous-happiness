@@ -10,7 +10,9 @@
 //     reds first, so deeper things go cool and dim like real water while glowing things stay bright;
 //   - optional soft "subsurface" wrap light + a wet rim sheen (for fleshy creatures like the blobfish);
 //   - above the surface (y > 0) nothing changes;
-//   - the PS1 retro patch (vertex snapping to the low-res grid, optional affine texture swim: src/gfx/retro.ts).
+//   - a crisp global rim light on silhouette facets near the gameplay plane (UW.uRimG / uRimGCol, per material rimG);
+//   - the PS1 retro patch (vertex snapping, optional affine texture swim: src/gfx/retro.ts) and hard-faceted flat
+//     shading by default (opt out with { smooth: true }).
 // Distance fog / absorption along the view ray is applied later in post (src/gfx/post.ts) from the depth buffer.
 import * as THREE from 'three';
 import { retro, chainKey, type RetroOpts } from '../retro';
@@ -26,18 +28,28 @@ export const UW = {
   /** floor on depth light so the abyss never goes pure black */
   uDepthMin: { value: new THREE.Vector3(0.08, 0.13, 0.2) },
   uCausticScale: { value: 0.55 },
+  /** global crisp rim light (fresnel on the facets) for everything near the gameplay plane: strength + colour */
+  uRimG: { value: 0.35 },
+  uRimGCol: { value: new THREE.Color('#e8fcff') },
 };
 
 export interface UwOpts {
   caustics?: number; depth?: number; sss?: [number, number, number] | null; sssK?: number; rim?: number; rimCol?: [number, number, number];
   /** PS1 vertex snap / affine patch options (src/gfx/retro.ts); false skips it. Applied by default. */
   retro?: RetroOpts | false;
+  /** keep smooth (gouraud) shading; by default every uw() material is hard-faceted (flat shading) */
+  smooth?: boolean;
+  /** allow gloss (roughness < 0.6): wet eyes only; and metalness > 0.2 */
+  glossy?: boolean; metal?: boolean;
+  /** scale of the global rim light on this material (default 1; 0 for background scenery that shouldn't pop) */
+  rimG?: number;
 }
 
 const CAUSTIC_GLSL = /* glsl */ `
 uniform float uTime; uniform float uWaterY; uniform vec3 uSunDir; uniform vec3 uCausticCol; uniform float uCaustic;
 uniform vec3 uDepthExt; uniform vec3 uDepthMin; uniform float uCausticScale;
 uniform float uMatCaustic; uniform float uMatDepth; uniform vec3 uSss; uniform float uSssK; uniform float uRim; uniform vec3 uRimCol;
+uniform float uRimG; uniform vec3 uRimGCol; uniform float uMatRimG;
 varying vec3 vUwWorld; varying vec3 vUwNormal;
 float uwCausticF(vec2 p, float t) {
   vec2 i = p; float c = 1.0; float inten = 0.005;
@@ -76,6 +88,7 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
     uSssK: { value: o.sss ? o.sssK ?? 0.5 : 0 },
     uRim: { value: o.rim ?? 0 },
     uRimCol: { value: new THREE.Vector3(...(o.rimCol ?? [0.7, 0.95, 1.0])) },
+    uMatRimG: { value: o.rimG ?? 1 },
   };
   (m.userData as Record<string, unknown>).uw = local;
   const prev = m.onBeforeCompile;
@@ -111,17 +124,21 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
           float uwSh = 1.0;
         #endif
         vec3 cst = uwCaustics(vUwWorld, uwN) * uCaustic * uMatCaustic * (0.25 + 0.75 * uwSh);
-        reflectedLight.directDiffuse += diffuseColor.rgb * cst * 0.85;
+        reflectedLight.directDiffuse += diffuseColor.rgb * cst * 0.5;
         // soft wrap light: light bleeding through thin flesh toward the dark side
         float wrap = clamp(dot(uwN, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
         reflectedLight.indirectDiffuse += diffuseColor.rgb * uSss * uSssK * (1.0 - wrap) * dl;
         vec3 vdir = normalize(cameraPosition - vUwWorld);
         float fr = pow(1.0 - clamp(dot(uwN, vdir), 0.0, 1.0), 3.0);
         reflectedLight.indirectSpecular += uRimCol * fr * uRim * dl;
+        // global rim: a crisp band on the silhouette facets of things near the play plane (they pop off the water)
+        float rimZ = 1.0 - smoothstep(2.5, 9.0, abs(vUwWorld.z));
+        float rimF = smoothstep(0.52, 0.68, 1.0 - clamp(dot(normal, geometryViewDir), 0.0, 1.0));
+        reflectedLight.indirectSpecular += uRimGCol * rimF * uRimG * uMatRimG * rimZ;
       }`);
   };
   const key = `uw${o.caustics ?? 1}|${o.depth ?? 1}|${o.sss ? 1 : 0}|${o.rim ? 1 : 0}`;
   m.customProgramCacheKey = chainKey(m, prev, key);
-  if (o.retro !== false) retro(mat, o.retro ?? {});
+  if (o.retro !== false) retro(mat, { ...(o.retro ?? {}), smooth: o.smooth ?? (o.retro ? o.retro.smooth : undefined), glossy: o.glossy ?? (o.retro ? o.retro.glossy : undefined), metal: o.metal ?? (o.retro ? o.retro.metal : undefined) });
   return mat;
 }

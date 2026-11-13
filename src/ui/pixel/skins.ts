@@ -4,7 +4,6 @@
 //   skin('wood', 160, 90)                       panel canvas
 //   btnSkin('blue', 'hover', 64, 18)            button canvas (normal | hover | down | disabled | on)
 //   PAD.wood                                    content insets [l, t, r, b]
-import { fbm, hash2 } from '../../core/math';
 
 export type SkinKind = 'wood' | 'stone' | 'blueprint' | 'paper' | 'tv' | 'dark' | 'slot' | 'slotBlue' | 'slotTv' | 'card' | 'cardSel' | 'plaque';
 export type BtnStyle = 'wood' | 'blue' | 'tv' | 'red' | 'green' | 'gold' | 'stone' | 'dark';
@@ -18,15 +17,6 @@ export const PAD: Record<SkinKind, [number, number, number, number]> = {
 type C = [number, number, number];
 const hx = (s: string): C => { const v = parseInt(s.replace('#', ''), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
 const lerpC = (a: C, b: C, t: number): C => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-const BAY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-const bay = (x: number, y: number) => (BAY[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
-/** stepped ramp lookup with ordered dither between bands */
-function band(cols: C[], t: number, x: number, y: number): C {
-  const n = cols.length - 1;
-  const q = Math.max(0, Math.min(n, Math.floor(t * n + bay(x, y))));
-  return cols[q];
-}
-
 class Img {
   w: number; h: number; d: Uint8ClampedArray; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D; img: ImageData;
   constructor(w: number, h: number) {
@@ -45,131 +35,116 @@ class Img {
   done() { this.ctx.putImageData(this.img, 0, 0); return this.cv; }
 }
 
-// ------------------------------------------------------------------ palettes
-const WOOD_FRAME = ['#4a2412', '#6e3a1c', '#8f5428', '#ad6e38', '#c88a4c', '#e2ac6c'].map(hx);
-const WOOD_IN = ['#2c1608', '#3e2010', '#522c16', '#63381e', '#744426'].map(hx);
+// ------------------------------------------------------------------ painters (flat tones only: every pixel is part of a shape)
 const OUT = hx('#140a06');
+const WF = ['#4a2412', '#6e3a1c', '#8f5428', '#b06e38', '#d08c50'].map(hx); // frame planks
+const WI = ['#26120a', '#3a1e10', '#4c2a16', '#5e3820'].map(hx);             // inner boards
 const IRON = ['#1c1c24', '#3a3a46', '#5c5c6c', '#9a9aaa'].map(hx);
 
 function paintWood(w: number, h: number) {
   const im = new Img(w, h);
   const F = 6;
+  const sideBase = [3, 1, 0 + 1, 2]; // top, right, bottom, left
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const corner = (x === 0 || x === w - 1) && (y === 0 || y === h - 1);
-    if (corner) continue;
+    if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     if (x === 0 || y === 0 || x === w - 1 || y === h - 1) { im.set(x, y, OUT); continue; }
     const dl = x, dt = y, dr = w - 1 - x, db = h - 1 - y;
     const dm = Math.min(dl, dt, dr, db);
     if (dm < F) {
-      // frame plank: which side (mitred at the corners)
       const side = dm === dt ? 0 : dm === db ? 2 : dm === dl ? 3 : 1;
-      const along = side === 0 || side === 2 ? x : y, across = dm;
-      const n = fbm(along / 9, across / 1.6 + side * 7, 3, 11 + side);
-      let t = 0.35 + n * 0.55 + Math.sin(along * 0.31 + n * 9) * 0.08;
-      if (side === 0) t += 0.18; if (side === 3) t += 0.08; if (side === 2) t -= 0.22; if (side === 1) t -= 0.12;
-      if (across === 1) t += side === 2 || side === 1 ? -0.1 : 0.22;
-      if (across === F - 1) t -= 0.35;
-      // mitre seam
-      if ((side === 0 || side === 2) && (Math.abs(dl - across) < 0.5 || Math.abs(dr - across) < 0.5)) t -= 0.3;
-      let c = band(WOOD_FRAME, Math.max(0, Math.min(1, t)), x, y);
-      if (hash2(along, across, 5 + side) > 0.985) c = WOOD_FRAME[0];
-      im.set(x, y, c);
+      const along = side === 0 || side === 2 ? x : y;
+      let t = side === 0 ? 3 : side === 3 ? 2 : side === 1 ? 1 : 1;
+      if (dm === 1 && (side === 0 || side === 3)) t = 4;          // lit outer lip
+      else if (dm === 1) t = 2;
+      else if (dm === F - 1) t = 0;                               // shadow at the inner edge
+      else if (dm === 3 && along % 17 < 11) t = Math.max(0, t - 1); // one grain stroke
+      // mitre seam at the corners
+      const corner = (side === 0 || side === 2) && (dl === dm + 0 && dl < F || dr === dm && dr < F);
+      if (corner && dm > 0) t = 0;
+      im.set(x, y, WF[t]);
+      void sideBase;
       continue;
     }
     if (dm === F) { im.set(x, y, hx('#1e0e06')); continue; }
-    // inner planks (horizontal), with seams every 11 px and a top/left inner shadow
+    if (dm === F + 1 && (dt === F + 1 || dl === F + 1)) { im.set(x, y, WI[0]); continue; }
+    // inner boards (horizontal), 11 px tall, staggered butt joints
     const py = y - F - 1, row = Math.floor(py / 11), ry = py - row * 11;
-    const n = fbm((x + row * 37) / 14, ry / 2.2 + row * 3, 3, 21);
-    let t = 0.45 + (n - 0.5) * 0.9 + (hash2(row, 0, 9) - 0.5) * 0.3 + Math.sin(x * 0.18 + n * 6 + row) * 0.08;
-    if (ry === 0) t = 0; else if (ry === 1) t += 0.25; else if (ry === 10) t -= 0.25;
-    if (dm === F + 1) t -= 0.35; if (dm === F + 2 && (dt === F + 2 || dl === F + 2)) t -= 0.2;
-    // board ends (staggered butt joints)
-    const joint = ((row * 53) % 70) + 20;
-    if (x - F === joint || x - F === joint + 96) t = 0.05;
-    im.set(x, y, band(WOOD_IN, Math.max(0, Math.min(1, t)), x, y));
+    let t = row % 2 ? 2 : 1;
+    if (ry === 0) t = 0; else if (ry === 1) t = 3; else if (ry === 10) t = Math.max(0, t - 1);
+    const joint = ((row * 53) % 70) + 22;
+    const jx = (x - F) % 120;
+    if (jx === joint) t = 0; else if (jx === joint + 1 && ry > 0) t = 3;
+    if (ry === 5 && (x + row * 7) % 19 < 8) t = Math.max(0, t - 1); // grain stroke
+    im.set(x, y, WI[t]);
   }
   // iron corner brackets + rivets
   for (const [cx, cy, sx, sy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]] as const) {
-    for (let i = 0; i < 9; i++) for (let j = 0; j < 3; j++) {
-      const px = cx + sx * i, py = cy + sy * j, qx = cx + sx * j, qy = cy + sy * i;
+    for (let i = 0; i < 8; i++) for (let j = 0; j < 3; j++) {
       const k = j === 0 ? 3 : j === 1 ? 2 : 1;
-      if (i < 9 - j) { im.set(px, py, IRON[k]); im.set(qx, qy, IRON[k]); }
+      if (i < 8 - j) { im.set(cx + sx * i, cy + sy * j, IRON[k]); im.set(cx + sx * j, cy + sy * i, IRON[k]); }
     }
-    im.set(cx + sx * 3, cy + sy * 3, IRON[0]); im.set(cx + sx * 2, cy + sy * 2, IRON[3]);
-    im.set(cx + sx * 1, cy + sy * 1, IRON[0]);
+    im.set(cx + sx * 3, cy + sy * 3, IRON[0]);
+    im.set(cx + sx * 1, cy + sy * 1, IRON[3]);
   }
   return im.done();
 }
 
-const STONE = ['#24242c', '#3a3a44', '#4e4e58', '#64646c', '#7c7a80', '#9a969a'].map(hx);
+const STONE = ['#26262e', '#3a3a44', '#50505a', '#686670', '#86848c'].map(hx);
 function paintStone(w: number, h: number) {
   const im = new Img(w, h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     if (x === 0 || y === 0 || x === w - 1 || y === h - 1) { im.set(x, y, OUT); continue; }
-    const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
-    const row = Math.floor(y / 9), off = row % 2 ? 7 : 0, col = Math.floor((x + off) / 15);
-    const bx = (x + off) % 15, by = y % 9;
-    let t = 0.5 + (fbm(x / 6, y / 6, 3, 31) - 0.5) * 0.8 + (hash2(col, row, 4) - 0.5) * 0.3;
-    if (bx === 0 || by === 0) t = 0.05; else if (bx === 1 || by === 1) t += 0.2; else if (bx === 14 || by === 8) t -= 0.2;
-    if (dm < 5) t += dm === 1 ? 0.25 : 0.05; else if (dm === 5) t = 0.02;
-    if (dm > 5 && hash2(x, y, 3) > 0.97) t -= 0.25;
-    let c = band(STONE, Math.max(0, Math.min(1, t)), x, y);
-    // moss in the mortar near the bottom
-    if ((bx === 0 || by === 0) && fbm(x / 9, y / 5, 2, 8) > 0.58 && y > h * 0.5) c = hx('#3c5a2a');
-    im.set(x, y, c);
+    const row = Math.floor(y / 9), off = row % 2 ? 8 : 0, col = Math.floor((x + off) / 16);
+    const bx = (x + off) % 16, by = y % 9;
+    let t = (row * 3 + col) % 3 === 0 ? 2 : 3;
+    if (bx === 0 || by === 0) t = 0; else if (bx === 1 || by === 1) t = 4; else if (bx === 15 || by === 8) t = 1;
+    im.set(x, y, STONE[t]);
   }
   return im.done();
 }
 
-const BP = { paper: hx('#1b4a8c'), paper2: hx('#163f7a'), grid: hx('#33669f'), grid2: hx('#4b82bf'), line: hx('#e4f2ff'), edge: hx('#0a1f42'), ink: hx('#9cc8f4') };
+const BP = { edge: hx('#0b2a5c'), paper: hx('#1d4f94'), grid: hx('#2a5fa6'), grid2: hx('#3a74bc'), line: hx('#e6f3ff') };
 function paintBlueprint(w: number, h: number, card = false, sel = false) {
   const im = new Img(w, h);
+  const edge = sel ? hx('#ffe9a0') : BP.edge, line = sel ? hx('#fff2c0') : BP.line;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
-    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) { im.set(x, y, sel ? hx('#ffe9a0') : BP.edge); continue; }
-    const n = fbm(x / 23, y / 23, 3, 41);
-    let c = lerpC(BP.paper2, BP.paper, 0.4 + n * 0.8);
-    // aged paper: darker toward edges, a few specks and fold creases
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
-    if (dm < 4) c = lerpC(c, BP.edge, (4 - dm) * 0.12);
+    if (dm === 0) { im.set(x, y, edge); continue; }
+    let c = BP.paper;
     const gx = (x - 3) % 8, gy = (y - 3) % 8;
-    if (gx === 0 || gy === 0) c = lerpC(c, ((x - 3) % 32 === 0 || (y - 3) % 32 === 0) ? BP.grid2 : BP.grid, 0.7);
-    if (hash2(x, y, 77) > 0.992) c = lerpC(c, BP.line, 0.25);
-    if (!card && Math.abs(x - Math.floor(w * 0.62)) < 1 && fbm(x, y / 9, 2, 3) > 0.45) c = lerpC(c, BP.paper2, 0.5);
-    // double frame line
-    const fl = card ? 2 : 3;
-    if (dm === fl && x >= fl && y >= fl) c = sel ? hx('#fff2c0') : BP.line;
-    if (!card && dm === fl + 2) c = lerpC(c, BP.line, 0.35);
+    if (gx === 0 || gy === 0) c = ((x - 3) % 32 === 0 || (y - 3) % 32 === 0) ? BP.grid2 : BP.grid;
+    if (card ? dm === 2 : dm === 3) c = line;
+    if (!card && dm === 5) c = BP.grid2;
     im.set(x, y, c);
   }
-  // corner ticks
-  if (!card) for (const [cx, cy] of [[6, 6], [w - 7, 6], [6, h - 7], [w - 7, h - 7]]) { im.set(cx, cy, BP.line); im.set(cx - 1, cy, BP.ink); im.set(cx + 1, cy, BP.ink); im.set(cx, cy - 1, BP.ink); im.set(cx, cy + 1, BP.ink); }
+  if (!card) for (const [cx, cy] of [[8, 8], [w - 9, 8], [8, h - 9], [w - 9, h - 9]]) { for (let k = -2; k <= 2; k++) { im.set(cx + k, cy, BP.line); im.set(cx, cy + k, BP.line); } }
   return im.done();
 }
 
 function paintPaper(w: number, h: number) {
   const im = new Img(w, h);
-  const base = hx('#efdfb4'), dark = hx('#c8a874'), ink = hx('#2a1808');
+  const base = hx('#efdfb4'), lit = hx('#fff6dc'), sh = hx('#c8a874'), ink = hx('#2a1808');
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
-    // ragged deckle edge
-    const rag = hash2(x * 3 + y, x + y * 5, 9) > 0.86 ? 1 : 0;
-    if (dm < rag) continue;
-    if ((x <= 1 || x >= w - 2) && (y <= 1 || y >= h - 2)) { if (dm === 0) continue; }
-    if (dm === 0 || (dm === 1 && rag)) { im.set(x, y, ink); continue; }
-    const n = fbm(x / 11, y / 11, 3, 51);
-    let c = lerpC(dark, base, Math.min(1, 0.55 + n * 0.6 + Math.min(dm, 6) * 0.04));
-    if (hash2(x, y, 52) > 0.985) c = lerpC(c, dark, 0.6);
-    if (dm === 1) c = lerpC(c, hx('#fff6dc'), 0.6);
-    im.set(x, y, c);
+    // dog-eared top-right corner
+    const fx = w - 1 - x, fy = y;
+    if (fx + fy < 5) continue;
+    if (fx + fy === 5) { im.set(x, y, ink); continue; }
+    if (fx + fy < 9 && fx < 5 && fy < 5) { im.set(x, y, sh); continue; }
+    if (dm === 0) { im.set(x, y, ink); continue; }
+    if (x === 1 || y === 1) { im.set(x, y, lit); continue; }
+    if (x === w - 2 || y === h - 2) { im.set(x, y, sh); continue; }
+    im.set(x, y, base);
   }
   return im.done();
 }
 
 function paintTv(w: number, h: number) {
   const im = new Img(w, h);
-  const fill = hx('#0b1a66'), fill2 = hx('#08134c'), cyan = hx('#3ad8ff'), deep = hx('#020818');
+  const fill = hx('#0b1a66'), cyan = hx('#3ad8ff'), deep = hx('#020818');
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
     const cn = Math.min(x, w - 1 - x) + Math.min(y, h - 1 - y);
@@ -177,7 +152,7 @@ function paintTv(w: number, h: number) {
     if (dm === 0 || cn === 2) { im.set(x, y, deep); continue; }
     if (dm === 1 || cn === 3) { im.set(x, y, cyan); continue; }
     if (dm === 2) { im.set(x, y, deep); continue; }
-    im.set(x, y, (y & 1) ? fill2 : fill, 236);
+    im.set(x, y, fill, 240);
   }
   return im.done();
 }
@@ -188,8 +163,8 @@ function paintDark(w: number, h: number) {
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
     if (dm === 0) { im.set(x, y, hx('#02040a')); continue; }
-    if (dm === 1) { im.set(x, y, y === 1 ? hx('#5a6a84') : y === h - 2 ? hx('#0a0e16') : hx('#2c3648')); continue; }
-    im.set(x, y, lerpC(hx('#121a28'), hx('#0a0f18'), y / h), 226);
+    if (dm === 1) { im.set(x, y, y === 1 ? hx('#4a5a74') : y === h - 2 ? hx('#0a0e16') : hx('#26303f')); continue; }
+    im.set(x, y, hx('#111a28'), 232);
   }
   return im.done();
 }
@@ -199,40 +174,36 @@ function paintSlot(w: number, h: number, kind: 'slot' | 'slotBlue' | 'slotTv') {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
     if (kind === 'slotBlue') {
-      const dash = ((x + y) >> 1) & 1;
-      if (dm === 0) { if (dash) im.set(x, y, BP.line, 220); continue; }
-      im.set(x, y, BP.paper2, 120);
+      if (dm === 0) { if (((x + y) >> 1) & 1) im.set(x, y, BP.line); continue; }
+      im.set(x, y, BP.edge, 150);
       continue;
     }
     if (kind === 'slotTv') {
       if (dm === 0) { im.set(x, y, hx('#2a9ad0')); continue; }
-      im.set(x, y, hx('#040c30'), 230);
+      im.set(x, y, hx('#040c30'), 235);
       continue;
     }
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     if (dm === 0) { im.set(x, y, hx('#0e0a12')); continue; }
-    if (x === 1 || y === 1) { im.set(x, y, hx('#0a070c')); continue; }
-    if (x === w - 2 || y === h - 2) { im.set(x, y, hx('#5a4a50')); continue; }
-    const n = fbm(x / 5, y / 5, 2, 61);
-    im.set(x, y, lerpC(hx('#1c1519'), hx('#2a2026'), n), 240);
+    if (x === 1 || y === 1) { im.set(x, y, hx('#08060a')); continue; }
+    if (x === w - 2 || y === h - 2) { im.set(x, y, hx('#4a3c44')); continue; }
+    im.set(x, y, hx('#221a20'), 240);
   }
   return im.done();
 }
 
 function paintPlaque(w: number, h: number) {
-  // brass name plaque with screws
   const im = new Img(w, h);
-  const R = ['#3a2408', '#6a4612', '#a87a24', '#d8aa44', '#f4dc8a'].map(hx);
+  const R = ['#3a2408', '#7a5214', '#b0822a', '#d8aa44', '#f4dc8a'].map(hx);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
     if (dm === 0) { im.set(x, y, OUT); continue; }
-    let t = 0.55 + (fbm(x / 14, y / 3, 2, 71) - 0.5) * 0.5 - y / h * 0.25;
-    if (dm === 1) t = y === 1 || x === 1 ? 0.95 : 0.15;
-    if (dm === 2) t -= 0.1;
-    im.set(x, y, band(R, Math.max(0, Math.min(1, t)), x, y));
+    let t = y < h / 2 ? 3 : 2;
+    if (dm === 1) t = y === 1 || x === 1 ? 4 : 1;
+    im.set(x, y, R[t]);
   }
-  for (const sx of [3, w - 4]) { const sy = Math.floor(h / 2); im.set(sx, sy, R[0]); im.set(sx - 1, sy, R[4]); im.set(sx + 1, sy, R[1]); im.set(sx, sy - 1, R[4]); im.set(sx, sy + 1, R[1]); }
+  for (const sx of [3, w - 4]) { const sy = Math.floor(h / 2); im.set(sx, sy, R[0]); im.set(sx - 1, sy, R[4]); im.set(sx + 1, sy, R[1]); }
   return im.done();
 }
 
@@ -300,12 +271,7 @@ function paintBtn(style: BtnStyle, state: BtnState, w: number, h: number) {
     if (ly === 1) { im.set(x, y, down ? lo : hi); continue; }
     if (lx === 1) { im.set(x, y, down ? lo : shiftC(hi, -0.15)); continue; }
     if (ly === faceH - 1 || lx === lw - 2) { im.set(x, y, down ? face : lo); continue; }
-    // subtle vertical gradient + texture per style
-    let c = lerpC(shiftC(face, 0.06), shiftC(face, -0.06), ly / faceH);
-    if (style === 'wood') c = shiftC(c, (fbm(x / 7, y / 1.5, 2, 81) - 0.5) * 0.35);
-    if (style === 'stone') c = shiftC(c, (fbm(x / 4, y / 4, 2, 82) - 0.5) * 0.3);
-    if (style === 'tv' && (y & 1)) c = shiftC(c, -0.08);
-    im.set(x, y, c);
+    im.set(x, y, face);
   }
   // state 'on' gets a lit pip in the corner
   if (state === 'on') { im.set(w - 4, top + 3, hx('#fff6a0')); im.set(w - 5, top + 3, hx('#ffd040')); im.set(w - 4, top + 4, hx('#ffd040')); }

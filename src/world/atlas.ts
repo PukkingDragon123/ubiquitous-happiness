@@ -14,7 +14,7 @@ export class Atlas {
   regions = new Map<string, UVR>();
   private sx = 0; private sy = 0; private rowH = 0;
   private tex: THREE.Texture | null = null;
-  constructor(public w: number, public h: number) { this.px = new Px(w, h); }
+  constructor(public w: number, public h: number, public mip = true) { this.px = new Px(w, h); }
 
   /** reserve a w x h block (1 px gutter) and return its pixel origin */
   alloc(w: number, h: number): [number, number] {
@@ -42,7 +42,7 @@ export class Atlas {
 
   texture(): THREE.Texture {
     if (!this.tex) {
-      this.tex = this.px.texture({ mip: true });
+      this.tex = this.px.texture({ mip: this.mip });
       // mipmaps on an alpha-cut atlas: keep coverage by not shrinking too far (handled by alphaTest + A2C)
       this.tex.anisotropy = 4;
     }

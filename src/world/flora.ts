@@ -18,7 +18,7 @@ type Pal = string[];
 // ------------------------------------------------------------------ texture generators
 /** a blade / leaf: alpha silhouette widening from the base, midrib, wrinkles, optional bladder + browned tip */
 function blade(p: Region, w: number, h: number, pal: Pal, o: { bladder?: boolean; wrinkle?: number; rib?: number; tip?: string; ruffle?: number; base?: number; seed?: number } = {}) {
-  const R = ramp(pal, 7, 0.7);
+  const R = ramp(pal, 4, 0);
   const s = o.seed ?? 1;
   for (let y = 0; y < h; y++) {
     const t = 1 - y / (h - 1); // 0 base .. 1 tip
@@ -28,11 +28,10 @@ function blade(p: Region, w: number, h: number, pal: Pal, o: { bladder?: boolean
       const edge = wid * (1 - (o.ruffle ?? 0.12) * (0.5 + 0.5 * Math.sin(y * 1.7 + s)));
       if (Math.abs(u) > edge) continue;
       const wr = Math.sin(y * (o.wrinkle ?? 0.9) + u * 2.5 + s) * 0.5 + 0.5;
-      let k = 0.5 + (wr - 0.5) * 0.35 - Math.abs(u) * 0.15 + (hash2(x, y, s) - 0.5) * 0.12;
+      let k = 0.5 + (wr - 0.5) * 0.35 - Math.abs(u) * 0.15;
       if (Math.abs(u) < (o.rib ?? 0.12)) k -= 0.12;
       let c = R(k, x, y);
       if (o.tip && t > 0.82) c = mix(c, hex(o.tip), (t - 0.82) * 4);
-      if (hash2(x, y, s + 7) > 0.97) c = mix(c, [235, 230, 210], 0.5); // epiphyte specks
       p.set(x, y, c);
     }
   }
@@ -46,11 +45,11 @@ function blade(p: Region, w: number, h: number, pal: Pal, o: { bladder?: boolean
 
 /** porous sponge skin: oscula, pores, rough grain */
 function porous(p: Region, w: number, h: number, pal: Pal, seed: number, holes = 0.6) {
-  const R = ramp(pal, 7, 0.7);
+  const R = ramp(pal, 4, 0);
   p.fill((x, y) => {
     const n = pxNoise(x, y, 6, 3, seed, w);
     const [f1, , cid] = worley(x, y, 5, seed + 1, w);
-    let k = 0.55 + (n - 0.5) * 0.5 + (hash2(x, y, seed) - 0.5) * 0.15;
+    let k = 0.55 + (n - 0.5) * 0.5;
     if (f1 < 1.2 && cid < holes) k = 0.08;
     else if (f1 < 2.0 && cid < holes) k -= 0.18;
     return R(k, x, y);
@@ -59,11 +58,11 @@ function porous(p: Region, w: number, h: number, pal: Pal, seed: number, holes =
 
 /** coral branch skin: corallite cups in rows, pale growing tips toward the top */
 function corallite(p: Region, w: number, h: number, pal: Pal, tipCol: string, seed: number) {
-  const R = ramp(pal, 7, 0.7);
+  const R = ramp(pal, 4, 0);
   p.fill((x, y) => {
     const t = 1 - y / (h - 1);
     const cup = ((x + (Math.floor(y / 3) % 2) * 2) % 4 === 0) && (y % 3 === 0);
-    let k = 0.5 + (pxNoise(x, y, 5, 2, seed) - 0.5) * 0.3 + (hash2(x, y, seed) - 0.5) * 0.12;
+    let k = 0.5 + (pxNoise(x, y, 5, 2, seed) - 0.5) * 0.3;
     if (cup) k -= 0.25;
     let c = R(k, x, y);
     if (t > 0.8) c = mix(c, hex(tipCol), (t - 0.8) * 4.5);
@@ -73,24 +72,23 @@ function corallite(p: Region, w: number, h: number, pal: Pal, tipCol: string, se
 
 /** brain coral: meandering ridges and valleys */
 function brainMaze(p: Region, w: number, h: number, pal: Pal, seed: number) {
-  const R = ramp(pal, 7, 0.7);
+  const R = ramp(pal, 4, 0);
   p.fill((x, y) => {
     const a = pxNoise(x, y, 9, 2, seed, w) * 9;
     const v = Math.sin(x * 0.75 + Math.sin(y * 0.33 + a) * 2.2 + a);
     let k = v > 0.25 ? 0.7 + (v - 0.25) * 0.4 : v > -0.2 ? 0.42 : 0.18;
-    k += (hash2(x, y, seed) - 0.5) * 0.12;
     return R(k, x, y);
   });
 }
 
 /** alpha lattice (gorgonian fan, glass sponge): a branching or crossed mesh */
 function lattice(p: Region, w: number, h: number, pal: Pal, seed: number, kind: 'fan' | 'grid') {
-  const R = ramp(pal, 6, 0.7);
+  const R = ramp(pal, 4, 0);
   const rng = new Rng(seed);
   if (kind === 'grid') {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const a = (x + y) % 6 === 0, b = (x - y + 600) % 6 === 0, rim = y < 2 || y > h - 3;
-      if (a || b || rim || (y % 9 === 0 && x % 2 === 0)) p.set(x, y, R(0.45 + hash2(x, y, seed) * 0.4 + (rim ? 0.2 : 0), x, y));
+      if (a || b || rim || (y % 9 === 0 && x % 2 === 0)) p.set(x, y, R(0.55 + (rim ? 0.3 : 0), x, y));
     }
     return;
   }
@@ -112,12 +110,12 @@ function lattice(p: Region, w: number, h: number, pal: Pal, seed: number, kind: 
     if (p.alpha(x, y) && !p.alpha(x + 1, y)) for (let q = 1; q < 4 && !p.alpha(x + q, y); q++) p.set(x + q, y, R(0.5, x + q, y));
   }
   // polyps
-  p.each((x, y, c) => (hash2(x, y, seed + 3) > 0.85 ? mix([c[0], c[1], c[2]], [255, 245, 230], 0.45) : null));
+  p.each((x, y, c) => ((x * 3 + y * 5) % 11 === 0 ? mix([c[0], c[1], c[2]], [255, 245, 230], 0.45) : null));
 }
 
 /** feathery / fronded alpha tuft (weeds, hydroids, plumose crowns, crinoid arms) */
 function fronds(p: Region, w: number, h: number, pal: Pal, seed: number, o: { density?: number; spread?: number; fluffy?: boolean; vertical?: boolean } = {}) {
-  const R = ramp(pal, 6, 0.7);
+  const R = ramp(pal, 4, 0);
   const rng = new Rng(seed);
   const n = Math.round((o.density ?? 1) * w * 0.4);
   for (let k = 0; k < n; k++) {
@@ -138,12 +136,12 @@ function fronds(p: Region, w: number, h: number, pal: Pal, seed: number, o: { de
 
 /** striped tentacle strip, bulbous tip at the top */
 function tentacle(p: Region, w: number, h: number, pal: Pal, tipCol: string, seed: number) {
-  const R = ramp(pal, 6, 0.7);
+  const R = ramp(pal, 4, 0);
   p.fill((x, y) => {
     const t = 1 - y / (h - 1);
     const u = Math.abs((x + 0.5) / w * 2 - 1);
     if (u > 0.95 - t * 0.35) return null;
-    let k = 0.45 + (Math.sin(y * 1.3) > 0.6 ? 0.25 : 0) - u * 0.25 + (hash2(x, y, seed) - 0.5) * 0.1;
+    let k = 0.45 + (Math.sin(y * 1.3) > 0.6 ? 0.25 : 0) - u * 0.25;
     let c = R(k, x, y);
     if (t > 0.86) c = mix(c, hex(tipCol), 0.85);
     return c;
@@ -151,8 +149,8 @@ function tentacle(p: Region, w: number, h: number, pal: Pal, tipCol: string, see
 }
 
 function solid(p: Region, w: number, h: number, pal: Pal, seed: number, n = 0.25) {
-  const R = ramp(pal, 6, 0.7);
-  p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, seed) - 0.5) * n * 2 + (hash2(x, y, seed) - 0.5) * 0.1, x, y));
+  const R = ramp(pal, 4, 0);
+  p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, seed) - 0.5) * n * 2, x, y));
 }
 
 // ------------------------------------------------------------------ species
@@ -165,7 +163,7 @@ export interface Species {
   /** emits a soft point of light (abyss) */
   light?: string;
   /** build variant k (local, metres, base at origin) */
-  build(k: number, A: Atlas, a: AreaDef): Soup;
+  build(k: number, A: Atlas, a: AreaDef, lod?: number): Soup;
   /** tall plants get their own height: build(k, A, a, maxH) */
   tall?: boolean;
 }
@@ -237,21 +235,21 @@ export const SPECIES: Record<string, Species> = {
   },
   staghorn: {
     id: 'staghorn', size: [0.5, 1.0],
-    build(k, A, a) {
+    build(k, A, a, lod = 0) {
       const pals = [['#3a2e22', '#7a6448', '#b09a72', '#d8c8a0'], ['#3a2a3a', '#6a4a6a', '#9a7aa0', '#c8b0d0']];
       const r = A.paint('staghorn' + (k % 2), 16, 32, (p, w, h) => corallite(p, w, h, pals[k % 2], k % 2 ? '#e0d0ff' : '#a0d0f0', 5 + k));
       const s = new Soup();
-      branchTree(s, new Rng(k * 31 + 7), r, { trunk: 0.35, rad: 0.06, depth: 2, spread: 0.9, glowTip: a.glow ? 2.5 : 0 });
+      branchTree(s, new Rng(k * 31 + 7), r, { trunk: 0.35, rad: 0.06, depth: lod ? 1 : 2, spread: 0.9, glowTip: a.glow ? 2.5 : 0, sides: lod ? 3 : 4 });
       return s;
     },
   },
   glowcoral: {
     id: 'glowcoral', size: [0.6, 1.3], glow: 1,
-    build(k, A) {
+    build(k, A, _a, lod = 0) {
       const pals = [['#101828', '#203a5a', '#3a7aa0', '#7cf8ff'], ['#200a28', '#4a1a5a', '#8a3aa0', '#ff8ae8']];
       const r = A.paint('glowcoral' + (k % 2), 16, 32, (p, w, h) => corallite(p, w, h, pals[k % 2], k % 2 ? '#ffb0f0' : '#b0ffff', 9 + k));
       const s = new Soup();
-      branchTree(s, new Rng(k * 37 + 2), r, { trunk: 0.4, rad: 0.05, depth: 2, spread: 0.8, glowTip: 3.2, flex: 0.02 });
+      branchTree(s, new Rng(k * 37 + 2), r, { trunk: 0.4, rad: 0.05, depth: lod ? 1 : 2, spread: 0.8, glowTip: 3.2, flex: 0.02, sides: lod ? 3 : 4 });
       return s;
     },
   },
@@ -259,8 +257,8 @@ export const SPECIES: Record<string, Species> = {
     id: 'table', size: [0.9, 1.7],
     build(k, A) {
       const r = A.paint('table', 32, 32, (p, w, h) => {
-        const R = ramp(['#3a3a28', '#6a6a48', '#9a9a6a', '#c8c89a'], 7, 0.7);
-        p.fill((x, y) => { const dx = x - w / 2, dy = y - h / 2, a = Math.atan2(dy, dx), d = Math.hypot(dx, dy); return R(0.5 + Math.sin(a * 20 + d * 0.3) * 0.15 + (d % 4 < 1 ? -0.15 : 0) + (hash2(x, y, 3) - 0.5) * 0.1, x, y); });
+        const R = ramp(['#3a3a28', '#6a6a48', '#9a9a6a', '#c8c89a'], 4, 0);
+        p.fill((x, y) => { const dx = x - w / 2, dy = y - h / 2, a = Math.atan2(dy, dx), d = Math.hypot(dx, dy); return R(0.5 + Math.sin(a * 20 + d * 0.3) * 0.15 + (d % 4 < 1 ? -0.15 : 0), x, y); });
       });
       const s = new Soup();
       const rng = new Rng(k * 13 + 5);
@@ -313,7 +311,7 @@ export const SPECIES: Record<string, Species> = {
     build(k, A, a) {
       const pal = a.id === 'graveyard' ? ['#20180e', '#4a3a24', '#6a5a3a', '#8a7a5a'] : ['#2a120a', '#5a2a18', '#8a4a2a', '#b07048'];
       const r = A.paint('barrel', 32, 32, (p, w, h) => {
-        const R = ramp(pal, 7, 0.7);
+        const R = ramp(pal, 4, 0);
         p.fill((x, y) => R(0.5 + (Math.sin(x * 0.8) > 0.4 ? 0.2 : -0.05) + (pxNoise(x, y, 5, 2, 4) - 0.5) * 0.3 + (y % 5 === 0 ? -0.1 : 0), x, y));
       });
       const s = new Soup();
@@ -371,8 +369,8 @@ export const SPECIES: Record<string, Species> = {
   },
   giantkelp: {
     id: 'giantkelp', size: [1, 1], tall: true,
-    build(k, A) {
-      const rb = A.paint('kelpblade', 12, 40, (p, w, h) => blade(p, w, h, ['#2a1e08', '#5a4614', '#8a7224', '#b89a38', '#dcc458'], { bladder: true, wrinkle: 1.3, ruffle: 0.22, rib: 0.08, base: 0.5, seed: 4 }));
+    build(k, A, _a, lod = 0) {
+      const rb = A.paint('kelpblade', 12, 40, (p, w, h) => blade(p, w, h, ['#3a2c0e', '#6a541c', '#9a822e', '#c8aa44', '#e8d070'], { bladder: true, wrinkle: 1.3, ruffle: 0.22, rib: 0.08, base: 0.5, seed: 4 }));
       const rs = A.paint('kelpstipe', 4, 16, (p, w, h) => solid(p, w, h, ['#2a2008', '#4a3a12', '#6a5a20'], 3, 0.2));
       const s = new Soup();
       const rng = new Rng(k * 23 + 11);
@@ -384,15 +382,22 @@ export const SPECIES: Record<string, Species> = {
       const fl = (t: number) => Math.pow(t, 1.3) * 1.1;
       s.tube(path, (t) => 0.045 * (1 - t * 0.3), 3, rs, { flex: fl });
       // blades alternate up the stipe
-      for (let y = 0.6; y < H; y += rng.range(0.32, 0.5)) {
-        const t = y / H, side = Math.floor(y * 3) % 2 ? 1 : -1;
+      for (let y = 0.5; y < H; y += rng.range(0.2, 0.32) * (lod ? 2.4 : 1)) {
+        const t = y / H, side = Math.floor(y * 4) % 2 ? 1 : -1;
         const j = Math.min(segs - 1, Math.floor(t * segs)), q = path[j];
-        const ang = rng.range(0, TAU);
-        const L = rng.range(0.55, 0.9) * (t > 0.92 ? 1.3 : 1);
-        const dir: V3 = [Math.cos(ang) * 0.8 * side, rng.range(0.25, 0.6), Math.sin(ang) * 0.8];
+        // blades stream out sideways (mostly in the camera's plane, so the forest reads as golden curtains)
+        const ang = rng.range(-0.6, 0.6);
+        const L = rng.range(1.0, 1.6) * (t > 0.9 ? 1.3 : 1);
+        const dir: V3 = [Math.cos(ang) * side, rng.range(-0.1, 0.35), Math.sin(ang)];
         const bp: V3[] = [];
-        for (let i = 0; i <= 3; i++) { const u = i / 3; bp.push([q[0] + dir[0] * L * u, y + dir[1] * L * u - 0.12 * u * u, q[2] + dir[2] * L * u]); }
-        s.ribbon(bp, (u) => 0.16 * Math.sin(Math.min(1, u * 1.2 + 0.15) * Math.PI) + 0.02, rb, { side: [-dir[2], 0, dir[0]], twist: rng.range(-0.8, 0.8), flex: (u) => fl(t) + u * 0.08, shade: () => 0.75 + t * 0.35, ruffle: 0.3 });
+        for (let i = 0; i <= 3; i++) { const u = i / 3; bp.push([q[0] + dir[0] * L * u, y + dir[1] * L * u - 0.25 * u * u, q[2] + dir[2] * L * u]); }
+        s.ribbon(bp, (u) => 0.34 * Math.sin(Math.min(1, u * 1.2 + 0.15) * Math.PI) + 0.04, rb, { side: [0, 1, 0], twist: rng.range(-0.6, 0.6), flex: (u) => fl(t) + u * 0.12, shade: () => 0.85 + t * 0.35, ruffle: 0.3 });
+      }
+      // the surface canopy: a mat of fronds streaming in the current
+      for (let i = 0; i < (lod ? 3 : 7); i++) {
+        const top = path[segs], ang = rng.range(-0.6, 0.6) + (i % 2 ? Math.PI : 0), L = rng.range(1.2, 2.2), bp: V3[] = [];
+        for (let q = 0; q <= 4; q++) { const u = q / 4; bp.push([top[0] + Math.cos(ang) * L * u, top[1] - u * 0.3, top[2] + Math.sin(ang) * L * u * 0.5]); }
+        s.ribbon(bp, (u) => 0.22 * (1 - u * 0.4), rb, { side: [0, 1, 0], twist: rng.range(-1, 1), flex: (u) => fl(1) + u * 0.3, ruffle: 0.3 });
       }
       return s;
     },
@@ -546,7 +551,7 @@ export const SPECIES: Record<string, Species> = {
     id: 'seapen', size: [0.4, 0.8],
     build(k, A, a) {
       const r = A.paint('seapen', 12, 32, (p, w, h) => {
-        const R = ramp(a.id === 'graveyard' ? ['#3a1a0a', '#8a4a20', '#d08a40', '#ffd090'] : ['#3a0a1a', '#8a2a3a', '#d06070', '#ffc0c0'], 6, 0.7);
+        const R = ramp(a.id === 'graveyard' ? ['#3a1a0a', '#8a4a20', '#d08a40', '#ffd090'] : ['#3a0a1a', '#8a2a3a', '#d06070', '#ffc0c0'], 4, 0);
         for (let y = 0; y < h; y++) {
           const t = 1 - y / (h - 1), wd = t < 0.3 ? 0.8 : Math.sin(Math.min(1, (t - 0.3) / 0.7 * 1.1 + 0.1) * Math.PI) * w * 0.5;
           for (let x = 0; x < w; x++) { const u = Math.abs(x + 0.5 - w / 2); if (u > wd) continue; if (t > 0.3 && u > 1 && (y + Math.floor(u)) % 3 === 0) continue; p.set(x, y, R(0.4 + (1 - u / (w / 2)) * 0.4, x, y)); }
@@ -561,7 +566,7 @@ export const SPECIES: Record<string, Species> = {
     id: 'seapenGlow', size: [0.5, 0.9], glow: 1,
     build(k, A) {
       const r = A.paint('seapenglow', 12, 32, (p, w, h) => {
-        const R = ramp(['#0a1830', '#1a4a7a', '#40a0d0', '#a0f8ff'], 6, 0.7);
+        const R = ramp(['#0a1830', '#1a4a7a', '#40a0d0', '#a0f8ff'], 4, 0);
         for (let y = 0; y < h; y++) {
           const t = 1 - y / (h - 1), wd = t < 0.3 ? 0.8 : Math.sin(Math.min(1, (t - 0.3) / 0.7 * 1.1 + 0.1) * Math.PI) * w * 0.5;
           for (let x = 0; x < w; x++) { const u = Math.abs(x + 0.5 - w / 2); if (u > wd) continue; if (t > 0.3 && u > 1 && (y + Math.floor(u)) % 3 === 0) continue; p.set(x, y, R(0.4 + (1 - u / (w / 2)) * 0.5, x, y)); }
@@ -621,7 +626,7 @@ export const SPECIES: Record<string, Species> = {
   tubeworms: {
     id: 'tubeworms', size: [0.7, 1.4], glow: 1,
     build(k, A) {
-      const rt = A.paint('wormtube', 8, 32, (p, w, h) => { const R = ramp(['#4a4038', '#8a8070', '#c8c0b0', '#f0ece0'], 6, 0.7); p.fill((x, y) => R(0.55 + (y % 4 === 0 ? -0.18 : 0) + (hash2(x, y, 2) - 0.5) * 0.15, x, y)); });
+      const rt = A.paint('wormtube', 8, 32, (p, w, h) => { const R = ramp(['#4a4038', '#8a8070', '#c8c0b0', '#f0ece0'], 4, 0); p.fill((x, y) => R(0.55 + (y % 4 === 0 ? -0.18 : 0), x, y)); });
       const rp = A.paint('wormplume', 8, 8, (p, w, h) => solid(p, w, h, ['#4a0808', '#a01818', '#e83a3a', '#ff8a7a'], 141, 0.4));
       const s = new Soup();
       const rng = new Rng(k * 7 + 5);
@@ -643,8 +648,8 @@ export const SPECIES: Record<string, Species> = {
     build(k, A, a) {
       const pal = a.glow ? ['#20102a', '#5a2a6a', '#a05ab0', '#f0b0ff'] : ['#3a2a10', '#7a5a20', '#c09a40', '#f0d080'];
       const ra = A.paint('crinarm', 8, 32, (p, w, h) => {
-        const R = ramp(pal, 6, 0.7);
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const u = Math.abs(x + 0.5 - w / 2); if (u < 1 || (y % 2 === 0 && u < w / 2 - (y / h) * 1.5)) p.set(x, y, R(0.4 + (1 - u / 4) * 0.4 + (hash2(x, y, 1) - 0.5) * 0.1, x, y)); }
+        const R = ramp(pal, 4, 0);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const u = Math.abs(x + 0.5 - w / 2); if (u < 1 || (y % 2 === 0 && u < w / 2 - (y / h) * 1.5)) p.set(x, y, R(0.4 + (1 - u / 4) * 0.4, x, y)); }
       });
       const rs = A.paint('crinstalk', 4, 16, (p, w, h) => solid(p, w, h, [pal[0], pal[1], pal[2]], 151, 0.2));
       const s = new Soup();
@@ -665,8 +670,8 @@ export const SPECIES: Record<string, Species> = {
     id: 'bacteriaMat', size: [0.8, 1.6], glow: 1,
     build(k, A) {
       const r = A.paint('bacmat', 32, 32, (p, w, h) => {
-        const R = ramp(['#4a2a10', '#a86a28', '#e8c070', '#fff8e0'], 6, 0.7);
-        p.fill((x, y) => { const d = Math.hypot(x - w / 2, y - h / 2) / (w / 2) + (pxNoise(x, y, 6, 3, 7) - 0.5) * 0.7; if (d > 0.95) return null; return R(0.3 + (1 - d) * 0.5 + (hash2(x, y, 4) - 0.5) * 0.2, x, y); });
+        const R = ramp(['#4a2a10', '#a86a28', '#e8c070', '#fff8e0'], 4, 0);
+        p.fill((x, y) => { const d = Math.hypot(x - w / 2, y - h / 2) / (w / 2) + (pxNoise(x, y, 6, 3, 7) - 0.5) * 0.7; if (d > 0.95) return null; return R(0.3 + (1 - d) * 0.5, x, y); });
       });
       const s = new Soup();
       s.glow(0.5);
@@ -687,14 +692,14 @@ export const SPECIES: Record<string, Species> = {
 // ------------------------------------------------------------------ giant clams (decor + harvestable node)
 export function clamRegions(A: Atlas) {
   const shell = A.paint('clamshell', 32, 16, (p, w, h) => {
-    const R = ramp(['#4a4438', '#8a8270', '#c0b8a0', '#ece4cc'], 7, 0.7);
-    p.fill((x, y) => R(0.55 + Math.sin(x * 1.1) * 0.18 + (y % 4 === 0 ? -0.1 : 0) + (hash2(x, y, 3) - 0.5) * 0.12, x, y));
+    const R = ramp(['#4a4438', '#8a8270', '#c0b8a0', '#ece4cc'], 4, 0);
+    p.fill((x, y) => R(0.55 + Math.sin(x * 1.1) * 0.18 + (y % 4 === 0 ? -0.1 : 0), x, y));
   });
   const mantle = A.paint('clammantle', 16, 8, (p, w, h) => {
     p.fill((x, y) => {
       const n = pxNoise(x, y, 3, 2, 5);
       const c: RGB = mix(hex('#1a3a8a'), hex('#3ac8c0'), n);
-      return hash2(x, y, 9) > 0.8 ? mix(c, [140, 255, 240], 0.6) : hash2(x, y, 8) < 0.1 ? hex('#0a1a3a') : c;
+      return (x * 3 + y * 7) % 9 === 0 ? mix(c, [140, 255, 240], 0.6) : (x + y * 3) % 11 === 0 ? hex('#0a1a3a') : c;
     });
   });
   return { shell, mantle };
@@ -743,14 +748,14 @@ export function clamShape(k: number, shell: UVR, mantle: UVR, open: number): Sou
 export class FloraKit {
   variants = new Map<string, Soup[]>();
   constructor(public atlas: Atlas, public area: AreaDef) {}
-  get(sp: string, n = 3): Soup[] {
-    let v = this.variants.get(sp);
+  get(sp: string, n = 3, lod = 0): Soup[] {
+    let v = this.variants.get(sp + '|' + lod);
     if (!v) {
       const S = SPECIES[sp];
       if (!S) throw new Error('unknown flora species ' + sp);
       v = [];
-      for (let k = 0; k < n; k++) v.push(S.build(k, this.atlas, this.area));
-      this.variants.set(sp, v);
+      for (let k = 0; k < n; k++) v.push(S.build(k, this.atlas, this.area, lod));
+      this.variants.set(sp + '|' + lod, v);
     }
     return v;
   }

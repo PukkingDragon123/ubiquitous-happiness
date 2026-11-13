@@ -12,7 +12,7 @@ import { Px, hex, mix } from '../gfx/px';
 import { hash2 } from '../core/math';
 import { META } from '../meta/meta';
 
-export interface PropLight { pos: THREE.Vector3; color: string; intensity: number; dist: number; flicker?: number }
+export interface PropLight { pos: THREE.Vector3; color: string; intensity: number; dist: number; flicker?: number; /** a downward shadow-casting key light (the main lamp) */ key?: boolean }
 export interface Prop {
   group: THREE.Group;
   lights: PropLight[];
@@ -378,7 +378,7 @@ const BUILD: Record<string, Builder> = {
     for (let i = 0; i < 4; i++) k.box(iron, 0.012, 0.13, 0.03, -0.075 + i * 0.05, 0.42, 0.32);
     k.cyl(plain('#5a3a2a', 0.6, 0.3), 0.09, 0.08, 0.12, 0.05, 0.96, 0.05, { seg: 8 }); // kettle
     k.cyl(plain('#5a3a2a', 0.6, 0.3), 0.015, 0.01, 0.1, 0.16, 0.98, 0.05, { rz: -0.8, seg: 4 });
-    p.lights.push({ pos: new THREE.Vector3(0, 0.45, 0.5), color: '#ff8a3a', intensity: 2.2, dist: 4.5, flicker: 1 });
+    p.lights.push({ pos: new THREE.Vector3(0, 0.45, 0.5), color: '#ff8a3a', intensity: 2.2, dist: 4.5, flicker: 1, key: true });
     p.height = 2.8;
   },
   fridge(k, p) {
@@ -412,7 +412,7 @@ const BUILD: Record<string, Builder> = {
     k.lathe(glow('#ffd28a'), [[0.15, 0.28], [0.22, 0.1], [0.255, 0.005]], 0, 1.3, 0, { seg: 8 });
     // fringe
     for (let i = 0; i < 16; i++) { const a = (i / 16) * tau; k.box(plain('#c89a5a', 0.9), 0.02, 0.06, 0.005, Math.cos(a) * 0.265, 1.27, Math.sin(a) * 0.265, { ry: -a + Math.PI / 2 }); }
-    p.lights.push({ pos: new THREE.Vector3(0, 1.32, 0), color: '#ffb866', intensity: 3.2, dist: 6, flicker: 0.15 });
+    p.lights.push({ pos: new THREE.Vector3(0, 1.3, 0), color: '#ffb060', intensity: 2.2, dist: 5, flicker: 0.12, key: true });
     p.height = 1.65;
   },
   candles(k, p) {

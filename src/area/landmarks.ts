@@ -75,7 +75,7 @@ function reef(scen: Scenery, r: Rng) {
     for (let i = 0; i < 10; i++) {
       const u = r.range(-0.7, 0.7), xx = x + u * half;
       const yy = y - 0.4 + Math.cos(u * Math.PI / 2 * 0.95) * top * 0.98;
-      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'seafan', 'softcoral', 'tubesponge']), xx, yy, z + r.range(-0.6, 0.6), r.range(0.7, 1.2));
+      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'seafan', 'softcoral', 'tubesponge', 'sargassum']), xx, yy, z + r.range(-0.6, 0.6), r.range(0.7, 1.2));
     }
   }
   // bommies: coral heads on rock mounds
@@ -86,16 +86,12 @@ function reef(scen: Scenery, r: Rng) {
     scen.addRock(r.pick(scen.shapes('bigboulder')), x, y - R * 0.3, z, R, H, R, r.range(0, 6), { topK: 1.2 });
     for (let k = 0; k < 9; k++) {
       const a = r.range(0, TAU), d = r.range(0, R * 0.7);
-      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'brain', 'table', 'seafan', 'softcoral', 'tubesponge', 'anemone']), x + Math.cos(a) * d, y - R * 0.3 + H * 0.85, z + Math.sin(a) * d * 0.8, r.range(0.8, 1.3));
+      placeFloraAt(scen, r.pick(['staghorn', 'brain', 'brain', 'table', 'seafan', 'softcoral', 'tubesponge', 'anemoneSmall', 'featheralgae']), x + Math.cos(a) * d, y - R * 0.3 + H * 0.85, z + Math.sin(a) * d * 0.8, r.range(0.8, 1.3));
     }
   }
 }
 
-function placeFloraAt(scen: Scenery, sp: string, x: number, y: number, z: number, sc: number) {
-  const v = scen.flora.get(sp), r = scen.rng;
-  const t = r.range(0.85, 1.1);
-  scen.chunk(x).flora.append(r.pick(v), mat4(x, y, z, sc, sc, sc, r.range(0, TAU)), { sway: true, tint: [t, t, t] });
-}
+function placeFloraAt(scen: Scenery, sp: string, x: number, y: number, z: number, sc: number) { scen.placePlant(sp, x, y, z, sc); }
 
 // ------------------------------------------------------------------ kelp cathedral
 function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
@@ -103,16 +99,14 @@ function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
   // aisles: open lanes every ~16 m where the light pours in; ranks of kelp columns between them
   const aisles: number[] = [];
   for (let x = sh.X0 + 8; x < sh.X1; x += r.range(13, 19)) aisles.push(x);
-  for (const z of [-5.5, -9, -13, -19, -26]) {
-    for (let x = sh.X0 - 20; x < sh.X1 + 20; x += r.range(1.4, 2.6)) {
+  for (const z of [-5.5, -9, -14, -22]) {
+    for (let x = sh.X0 - 20; x < sh.X1 + 20; x += r.range(1.6, 2.8) * (z < -12 ? 1.5 : 1)) {
       if (aisles.some((a) => Math.abs(a - x) < 2.6)) continue;
       if (scen.isReserved(x, z, 0.5)) continue;
       const zz = z + r.range(-0.8, 0.8), y = scen.heightAt(x, zz);
       const reach = -y - r.range(0.3, 1.2);
       if (reach < 3) continue;
-      const v = r.pick(scen.flora.get('giantkelp'));
-      const t = r.range(0.8, 1.1);
-      scen.chunk(x).flora.append(v, mat4(x, y - 0.05, zz, r.range(0.9, 1.3), reach / 10, r.range(0.9, 1.3), r.range(0, TAU)), { sway: true, tint: [t, t, t * 0.95] });
+      scen.placeSprite(r.chance(0.18) ? 'bullkelp' : 'giantkelp', x, y - 0.05, zz, 1, r, reach);
     }
   }
   // the canopy: kelp fronds matting the surface cast it in gold; shafts down the aisles

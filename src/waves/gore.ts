@@ -51,7 +51,7 @@ export class LimbGib implements Entity {
     this.obj.rotation.x += this.spin.x * dt * s; this.obj.rotation.y += this.spin.y * dt * s; this.obj.rotation.z += this.spin.z * dt * s;
     this.spin.multiplyScalar(Math.exp(-dt * 0.6));
     // trailing blood from the cut while it's fresh
-    if (this.bleedT > 0) { this.bleedT -= dt; if (Math.random() < dt * 14) bleed(w, this.x, this.y, 0.35 * (this.bleedT / 4) + 0.1); }
+    if (this.bleedT > 0) { this.bleedT -= dt; if (Math.random() < dt * 7) bleed(w, this.x, this.y, 0.3 * (this.bleedT / 4) + 0.08); }
     // buried by the silt after a while
     if (this.life > 30) this.obj.position.y -= dt * 0.05;
     this.obj.position.set(this.x, this.y - Math.max(0, this.life - 30) * 0.05, this.obj.position.z);
@@ -77,11 +77,11 @@ export class LimbGib implements Entity {
 let chunkGeo: THREE.BufferGeometry | null = null;
 let chunkMat: THREE.Material | null = null;
 function fleshMat() {
+  // meat: two muscle tones in broad bands, a fat cap along one edge, a fleck of bone
   return (chunkMat ??= kitMat('flesh', 32, 32, (x, y) => {
-    const n = nz(x, y, 6, 71);
-    if (n > 0.72) return band([230, 206, 150], 0.9 + hh(x, y, 72) * 0.2, x, y);     // fat
-    if (n < 0.22) return band([220, 210, 190], 1, x, y);                               // bone / gristle
-    return band(mix([150, 26, 24], [92, 12, 14], nz(x, y, 3, 73)), 0.9 + ((x + y * 2) % 5 === 0 ? 0.25 : 0), x, y);
+    if (y < 6) return [214, 186, 120];
+    if (x > 22 && y > 22) return [226, 216, 190];
+    return Math.floor((x + y * 0.6) / 7) % 2 ? [150, 26, 24] : [104, 14, 16];
   }, { rough: 0.35, emissive: 0.08 }));
 }
 interface Chunk { m: THREE.Mesh; x: number; y: number; z: number; vx: number; vy: number; spin: number; life: number; s: number }
@@ -111,7 +111,7 @@ export class ChunkField implements Entity {
       c.x += c.vx * dt; c.y += c.vy * dt;
       const fl = w.terrain.floorAt(c.x) + c.s * 0.5;
       if (c.y < fl) { c.y = fl; c.vy = 0; c.vx *= 0.4; c.spin *= 0.5; }
-      if (c.life < 2.5 && Math.random() < dt * 5) bleed(w, c.x, c.y, 0.15);
+      if (c.life < 1.5 && Math.random() < dt * 3) bleed(w, c.x, c.y, 0.12);
       c.m.rotation.x += c.spin * dt; c.m.rotation.z += c.spin * 0.7 * dt;
       c.m.position.set(c.x, c.y - Math.max(0, c.life - 20) * 0.02, c.z);
     }
@@ -155,7 +155,7 @@ export function spawnLimb(w: World, holder: THREE.Object3D | null, vx: number, v
   if (!holder) return null;
   const g = new LimbGib(holder, vx, vy, heavy);
   w.add(g);
-  gore(w, g.x, g.y, 1.6, vx * 0.2, vy * 0.2);
+  gore(w, g.x, g.y, 1.0, vx * 0.2, vy * 0.2);
   chunks(w, g.x, g.y, 3, 2.5);
   return g;
 }

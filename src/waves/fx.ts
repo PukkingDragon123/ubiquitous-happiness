@@ -24,7 +24,7 @@ const emit = (w: World, k: string, x: number, y: number, o: Record<string, unkno
 /** a blood cloud bursting from a wound (amount ~ 0.3 graze .. 3 dismemberment) */
 export function gore(w: World, x: number, y: number, amount = 1, dirX = 0, dirY = 0) {
   const f = X(w);
-  if (typeof f.gore === 'function') f.gore(x, y, amount * 0.75, { x: dirX, y: dirY });
+  if (typeof f.gore === 'function') f.gore(x, y, amount * 0.55, { x: dirX, y: dirY });
   else {
     // fallback (older particle set): a cloud of blood-red pixel puffs that bloom and drift, plus droplets
     const n = Math.round(4 + amount * 7);

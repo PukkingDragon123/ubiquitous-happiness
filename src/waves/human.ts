@@ -49,6 +49,9 @@ export const ROLES: Record<Role, RoleDef> = {
   titan: { arch: 'titan', weapon: 'cannon', name: 'Brass Titan', hp: 90, speed: 0.95, range: [3, 11], dmg: 2, reload: 2.1, projSpeed: 12, armor: 0.5, walker: true, bounty: 60, mass: 10, loot: ['copperOre', 'doubloon', 'ironOre'] },
 };
 
+/** distinct generated looks per role */
+export const VARIANTS = 3;
+
 export interface HumanMods { hpMul?: number; dmgMul?: number; speedMul?: number; reloadMul?: number; iq?: number; elite?: boolean; nemesis?: Nemesis | null; seed?: number }
 
 export class Squad {
@@ -140,7 +143,8 @@ export class Human implements Entity, Attacker {
     this.dmgMul = (m.dmgMul ?? 1) * (1 + lvl * 0.15);
     this.speedMul = (m.speedMul ?? 1) * (this.elite ? 1.1 : 1) * (1 + lvl * 0.05);
     this.reloadMul = (m.reloadMul ?? 1) * (this.elite ? 0.8 : 1) * Math.max(0.55, 1 - lvl * 0.1);
-    const seed = nem ? nem.seed : m.seed ?? Math.floor(Math.random() * 1e6);
+    // a few looks per role (model parts are cached per arch + seed, so spawns don't hitch); nemeses are unique
+    const seed = nem ? nem.seed : ((m.seed ?? Math.floor(Math.random() * 1e6)) % VARIANTS) + 1;
     const arch = (nem ? (nem.arch.split(':')[0] as DiverArch) : null) ?? this.def.arch;
     this.rig = makeDiver(arch, seed, { weapon: this.def.weapon, scars: nem?.scars ?? [] });
     this.callsign = nem ? nem.name : this.def.name;
@@ -190,6 +194,16 @@ export class Human implements Entity, Attacker {
       if (!this.sawPlayer) { this.react = 0.9 - this.iq * 0.6; this.sawPlayer = true; }
       this.seenT = bb.time; bb.seen = { x: p.x, y: p.y, t: bb.time };
     } else this.sawPlayer = false;
+    // smart ones sidestep a blobfish dashing straight at them
+    if (this.iq > 0.5 && this.dodgeCd <= 0 && !this.def.walker && p.alive && dP < 2.8) {
+      const pv = Math.hypot(p.vx, p.vy);
+      if (pv > 5.5 && ((this.x - p.x) * p.vx + (this.y - p.y) * p.vy) / (dP * pv) > 0.75) {
+        const sx = -p.vy / pv, sy = p.vx / pv, side = Math.sign(sx * (this.x - p.x) + sy * (this.y - p.y)) || 1;
+        this.vx += sx * side * 5.5; this.vy += sy * side * 5.5;
+        this.dodgeCd = 2.6 - this.iq;
+        bubbles(w, this.x, this.y, 6, 0.6);
+      }
+    }
     const aggroR = 2.6 + this.iq * 3;
     if (canSee && dP < aggroR) this.provoke(w, 'spot');
     if ((bb.alert.get(this.squad.id) ?? -1) > bb.time && this.focus === 'wreck' && this.provokedUntil < bb.time) { this.focus = 'player'; this.provokedUntil = bb.alert.get(this.squad.id)!; }
@@ -197,7 +211,7 @@ export class Human implements Entity, Attacker {
     if (this.focus === 'player' && this.provokedUntil < bb.time && bb.time - this.seenT > 5 && wreckOk) this.focus = 'wreck';
     if (!wreckOk) this.focus = 'player';
     // ---- bleeding (a blood trail), drowning without the air hose, freediver breath
-    if (this.bleedK > 0.05) { if (Math.random() < dt * 10 * this.bleedK) bleed(w, this.x, this.y, this.bleedK * 0.6); this.bleedK = Math.max(0, this.bleedK - dt * 0.03); }
+    if (this.bleedK > 0.05) { if (Math.random() < dt * 6 * this.bleedK) bleed(w, this.x, this.y, this.bleedK * 0.5); this.bleedK = Math.max(0, this.bleedK - dt * 0.03); }
     if (this.hoseCut) { this.hp -= dt * (this.role === 'titan' ? 1.5 : 1.2); if (Math.random() < dt * 20) bubbles(w, this.x, this.y + this.rig.height * 0.4, 2, 1.2); if (this.hp <= 0) { this.die(w, 0, 1, 'crush', null); return; } }
     if (this.role === 'spear') this.breath -= dt;
     // ---- decide
@@ -218,7 +232,7 @@ export class Human implements Entity, Attacker {
     // ---- where to go
     let gx = this.x, gy = this.y, sprint = 1;
     switch (this.state) {
-      case 'enter': { const o = this.objective ?? p; gx = o.x + (this.x < o.x ? -8 : 8); gy = o.y + 2; break; }
+      case 'enter': { const o = this.objective ?? p; gx = o.x + (this.x < o.x ? -8 : 8); gy = o.y + 2; sprint = 1.5; break; }
       case 'fight': [gx, gy] = this.fightPoint(w, tx, ty, dP, canSee); break;
       case 'cover': {
         if (!this.coverPt || this.stateT > 4 || this.rig.loaded && this.stateT > 1.2) { this.setState('fight', w); break; }
@@ -322,7 +336,7 @@ export class Human implements Entity, Attacker {
       if (w.terrain.sdf(this.x + Math.sign(this.vx) * 0.8, floor + this.pivot) < 0.2) this.vx *= 0.2;
       this.x += this.vx * dt;
       const fl = w.terrain.floorAt(this.x);
-      this.y += (fl + this.rig.height * 0.47 - this.y) * (1 - Math.exp(-dt * 10));
+      this.y += (fl + this.rig.pivotHeight - this.y) * (1 - Math.exp(-dt * 10));
       this.vy = 0;
       if (Math.abs(this.vx) > 0.3 && Math.random() < dt * 3) silt(w, this.x, fl + 0.05, 2);
       this.clampX();
@@ -513,7 +527,7 @@ export class Human implements Entity, Attacker {
     this.hp -= d;
     const mass = this.def.mass;
     this.vx += dirX * 3 / mass; this.vy += dirY * 2 / mass;
-    gore(w, this.x - dirX * 0.2, this.y - dirY * 0.2 + 0.1, 0.35 + Math.min(2, (d / this.maxHp) * 4), dirX, dirY);
+    gore(w, this.x - dirX * 0.2, this.y - dirY * 0.2 + 0.1, 0.25 + Math.min(1.2, (d / this.maxHp) * 2.5), dirX, dirY);
     this.bleedK = Math.min(1, this.bleedK + (d / this.maxHp) * 1.6);
     if (!this.def.walker || d > 3) this.rig.play('flinch', !this.busy || this.rig.action === 'reload');
     if (src && (src.team === 'player' || src === (w.player as Entity))) this.provoke(w, 'hit');
@@ -570,7 +584,7 @@ export class Human implements Entity, Attacker {
     this.rig.die(this.vx, this.vy, dx * 3, dy * 3);
     const wpn = this.rig.dropWeapon();
     if (wpn) { const h = new THREE.Group(); h.position.copy(wpn.position); wpn.position.set(0, 0, 0); h.add(wpn); h.userData.radius = 0.15; w.scene.add(h); spawnProp(w, h, this.vx, this.vy); }
-    gore(w, this.x, this.y, 1.8, dx, dy);
+    gore(w, this.x, this.y, 1.2, dx, dy);
     chunks(w, this.x, this.y, kind === 'explosion' ? 8 : 2, kind === 'explosion' ? 5 : 2);
     if (kind === 'explosion') { for (let i = 0; i < 2; i++) { const pt = this.nearestLimb({ x: this.x + (Math.random() - 0.5) * 3, y: this.y + (Math.random() - 0.5) * 3 }, true); if (pt && pt !== 'head') this.cut(w, pt, dx, dy); } }
     else if ((kind === 'sword' || kind === 'bite') && Math.random() < 0.55) { const pt = this.nearestLimb(src ?? { x: this.x - dx, y: this.y - dy }, true); if (pt) this.cut(w, pt, dx, dy); }
@@ -604,7 +618,7 @@ export class Human implements Entity, Attacker {
     this.rig.update(dt, this.ragWorld);
     this.rig.rag.pelvisWorld(_v);
     if (this.rig.rag.active) { this.x = _v.x; this.y = _v.y; }
-    if (this.deadT < 6 && Math.random() < dt * 6) bleed(w, this.x, this.y, 0.3);
+    if (this.deadT < 5 && Math.random() < dt * 3) bleed(w, this.x, this.y, 0.25);
     if (this.deadT > 35) { this.rig.group.position.y -= dt * 0.1; }
     if (this.deadT > 45) this.alive = false;
   }
@@ -654,6 +668,7 @@ export class Human implements Entity, Attacker {
   dispose(w: World) {
     this.tag?.removeFromParent();
     if (this.hose) this.hose.alive = false;
+    this.rig.dispose();
     void w;
   }
 }

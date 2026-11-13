@@ -1,286 +1,250 @@
-// Man-made surfaces: wood planks (fresh / rotten / painted), rusted steel, riveted hull plates, rope,
-// concrete, glass, plus a neutral grit for tinted debris. ~32 px per metre.
-import { Surf, pal, mixc, scl, clamp01, hex, type RGB } from './core';
+// Man-made surfaces as deliberate shapes: wood planks (fresh / rotten / painted) with grain lines, knots and nails,
+// rusted steel with rust patches and streaks, riveted hull plates with barnacles, rope strands, concrete panels,
+// glass, and a neutral chip pattern for tinted debris. ~32 px per metre.
+import { Surf, hramp, mixc, hex, type RGB } from './core';
 
 // ------------------------------------------------------------------------------------------------ wood
-interface WoodOpts { P: RGB[]; plank: number; seamCol: RGB; knotP: number; nails: boolean }
-/** boards run along x; returns per-pixel plank index + grain value via callback for later passes */
-function woodBoards(s: Surf, o: WoodOpts) {
-  const ph = o.plank;
-  const rows = Math.max(1, Math.round(s.h / ph));
-  const bh = s.h / rows;
+interface WoodOpts { P: RGB[]; rows: number; nails: boolean; seed: number }
+/** boards run along x: bevelled boards with staggered butt joints, 2-3 grain lines each, knots, nails */
+function boards(s: Surf, o: WoodOpts) {
+  const bh = s.h / o.rows;
+  const jointX = (row: number) => Math.floor(s.r(row, 0, o.seed) * s.w);
   s.each((x, y) => {
-    const row = Math.floor(y / bh);
-    const fy = (y - row * bh) / bh;
-    // boards have butt joints at staggered positions (one per row per tile)
-    const jx = Math.floor(s.r(row, 0, 11) * s.w);
-    const seg = ((x - jx + s.w) % s.w) < s.w * 0.5 ? 0 : 1;
-    const board = row * 2 + seg;
-    const tone = (s.r(board, 1, 12) - 0.5) * 0.28;
-    // grain: stretched noise + growth-ring stripes that wander and pinch around knots
-    const warp = (s.na(x, y, 2, rows * 2, 2, 13 + board) - 0.5) * 6;
-    const grain = s.na(x, y + warp * 0.3, 3, rows * 5, 3, 14 + board);
-    const rings = Math.sin((y + warp + s.r(board, 2, 15) * 30) * 1.4 + grain * 5);
-    let t = 0.45 + tone + (grain - 0.5) * 0.5 + rings * 0.09 + (s.r(x, y, 16) - 0.5) * 0.08;
-    // slight cupping: board edges a touch darker
-    t -= Math.pow(Math.abs(fy - 0.5) * 2, 4) * 0.12;
-    s.set(x, y, s.pick(o.P, t, x, y, 0.9));
-    s.setH(x, y, 0.55 + rings * 0.04 + (grain - 0.5) * 0.08 - Math.pow(Math.abs(fy - 0.5) * 2, 6) * 0.15);
-    s.R(x, y, 0.72 + (grain - 0.5) * 0.15);
-    // seams between boards and at the butt joint
-    const jd = Math.abs(((x - jx + s.w) % s.w) - 0) ;
-    if (Math.floor(y + 1) % Math.round(bh) === 0 || jd < 1 || Math.abs(((x - jx + s.w) % s.w) - s.w * 0.5) < 1) {
-      s.set(x, y, o.seamCol); s.setH(x, y, 0.1);
-    }
+    const row = Math.floor(y / bh), fy = y - row * bh;
+    if (fy < 1) { s.setId(x, y, -1); return; }
+    const jx = jointX(row), xx = ((x - jx) % s.w + s.w) % s.w;
+    if (xx === 0 || xx === Math.floor(s.w / 2)) { s.setId(x, y, -1); return; }
+    s.setId(x, y, row * 2 + (xx < s.w / 2 ? 0 : 1));
   });
-  // knots: dark elliptical whorls with a lighter halo of bent grain
-  for (let k = 0; k < (s.w * s.h) / 1400 * o.knotP; k++) {
-    const cx = s.r(k, 1, 20) * s.w, cy = s.r(k, 2, 20) * s.h, r = 1.2 + s.r(k, 3, 20) * 1.6;
-    for (let y = -r * 2; y <= r * 2; y++) for (let x = -r * 4; x <= r * 4; x++) {
-      const d = Math.hypot(x / 2.2, y) / r;
-      if (d < 0.7) { s.set(cx + x, cy + y, o.P[0]); s.addH(cx + x, cy + y, -0.08); }
-      else if (d < 1.0) s.set(cx + x, cy + y, o.P[1]);
-      else if (d < 1.5) s.blend(cx + x, cy + y, o.P[Math.min(o.P.length - 1, 3)], 0.4);
-    }
-  }
-  if (o.nails) {
-    for (let row = 0; row < rows; row++) {
-      const jx = Math.floor(s.r(row, 0, 11) * s.w);
-      for (const off of [3, s.w * 0.5 + 3, -3 + s.w * 0.5, -3]) {
-        const x = Math.round(jx + off), y = Math.round(row * bh + bh * 0.5);
-        s.set(x, y, hex('#1a1612')); s.set(x, y - 1, hex('#3a3632')); s.addH(x, y, -0.1);
-        s.drips(hex('#5a3420'), 1, bh * 1.3, 0.3, row * 7 + off, x, y + 1); // rust bleed
+  const P = o.P;
+  s.bevel(P, (id) => 2 + (s.r(id, 0, o.seed + 1) < 0.4 ? 1 : 0), { gap: P[0], rough: () => 0.85 });
+  // grain: long, slightly stepped lines along each board (one tone down), deliberately few
+  for (let b = 0; b < o.rows * 2; b++) {
+    const row = Math.floor(b / 2);
+    for (let g = 0; g < 3; g++) {
+      let y = Math.floor(row * bh + 2 + s.r(b, g, o.seed + 2) * (bh - 4));
+      const x0 = Math.floor(s.r(b, g + 5, o.seed + 2) * s.w), len = Math.floor(s.w * (0.3 + s.r(b, g + 9, o.seed + 2) * 0.4));
+      for (let i = 0; i < len; i++) {
+        const x = x0 + i;
+        if (s.id(x, y) !== b) continue;
+        if (i > 0 && i % 17 === 0) y += s.r(b, i, o.seed + 3) < 0.5 ? 1 : -1;
+        if (s.id(x, y) === b) s.set(x, y, P[1]);
       }
     }
   }
-  return { rows, bh };
+  // knots: a dark eye with a ring
+  for (let k = 0; k < Math.max(1, Math.round(o.rows * 0.4)); k++) {
+    const row = Math.floor(s.r(k, 1, o.seed + 4) * o.rows);
+    const cx = Math.floor(s.r(k, 2, o.seed + 4) * s.w), cy = Math.floor(row * bh + bh / 2);
+    for (let y = -2; y <= 2; y++) for (let x = -4; x <= 4; x++) {
+      const d = (x / 4) ** 2 + (y / 2) ** 2;
+      if (d < 0.35) s.set(cx + x, cy + y, P[0]); else if (d < 1 && s.id(cx + x, cy + y) >= 0) s.set(cx + x, cy + y, P[1]);
+    }
+  }
+  if (o.nails) for (let row = 0; row < o.rows; row++) {
+    const jx = jointX(row);
+    for (const off of [2, Math.floor(s.w / 2) - 3, Math.floor(s.w / 2) + 2, s.w - 3]) for (const dy of [0.3, 0.7]) {
+      const x = jx + off, y = Math.floor(row * bh + bh * dy);
+      s.set(x, y, hex('#2a2420')); s.set(x + 1, y, hex('#4a4440')); s.set(x, y - 1, hex('#6a6460')); s.addH(x, y, 0.1);
+      if (s.r(x, y, o.seed + 5) < 0.5) s.streak(x, y + 1, 3 + Math.floor(s.r(x, y, o.seed + 6) * 3), hex('#6a3a20'), mixc(P[1], hex('#6a3a20'), 0.5));
+    }
+  }
+  return bh;
 }
 
-const PINE = pal('#3c2a1c', '#4f3824', '#62472e', '#755738', '#876742', '#97774e', '#a6885e');
 export function planks(s: Surf) {
-  woodBoards(s, { P: PINE, plank: 8, seamCol: hex('#22160c'), knotP: 1, nails: true });
-  s.grime(hex('#3a2a1a'), 0.5, 3, 0.62, 1);
-  s.cavity(hex('#1e140c'), 0.35, 1, 0.12);
+  boards(s, { P: hramp('#8a6a46', 5, 0.55), rows: 6, nails: true, seed: 10 });
   s.bump = 3;
 }
 
-const ROT = pal('#17140f', '#221d15', '#2e271c', '#3b3224', '#493e2d', '#584c38', '#685a44');
-/** waterlogged, rotten planks: grey-brown, deep checks along the grain, shipworm holes, algae in the seams */
+/** waterlogged, rotten planks: grey-brown, long splits along the grain, a broken end, algae on the seams */
 export function planksRotten(s: Surf) {
-  const { bh } = woodBoards(s, { P: ROT, plank: 8, seamCol: hex('#0a0806'), knotP: 1.5, nails: true });
-  // deep checks along the grain
-  for (let k = 0; k < (s.w * s.h) / 180; k++) {
-    const x = s.r(k, 1, 30) * s.w, y = s.r(k, 2, 30) * s.h;
-    s.crack(x, y, 4 + s.r(k, 3, 30) * 14, 1, (s.r(k, 4, 30) - 0.5) * 0.1, hex('#0c0a07'), scl(ROT[4], 1.1), 0.15, 0.25, k);
+  const P = hramp('#5a5040', 5, 0.55);
+  const bh = boards(s, { P, rows: 6, nails: true, seed: 20 });
+  const G = hramp('#3e4a26', 3, 0.4);
+  // algae film on the top edge of every board
+  s.each((x, y) => { const fy = y % bh; if (fy >= 1 && fy < 2.5 && s.id(x, y) >= 0 && (x + Math.floor(y / bh) * 7) % 11 < 7) s.set(x, y, G[fy < 2 ? 2 : 1]); });
+  // splits: long dark lines along the grain with a lit lower lip
+  for (let k = 0; k < 4; k++) {
+    const y = Math.floor(s.r(k, 1, 21) * s.h), x = Math.floor(s.r(k, 2, 21) * s.w), len = 8 + Math.floor(s.r(k, 3, 21) * 16);
+    s.crack([[x, y], [x + len * 0.5, y + (s.r(k, 4, 21) < 0.5 ? 1 : 0)], [x + len, y]], hex('#0e0c08'), P[3], 0.3);
   }
-  // missing chunks at board ends
-  for (let k = 0; k < 3; k++) {
-    const cx = s.r(k, 1, 40) * s.w, cy = Math.floor(s.r(k, 2, 40) * (s.h / bh)) * bh + 1, r = 2 + s.r(k, 3, 40) * 3;
-    for (let y = 0; y < r; y++) for (let x = -r * 1.5; x < r * 1.5; x++) if (Math.hypot(x / 1.5, y) < r * (0.7 + s.r(x | 0, y, 41) * 0.3)) { s.set(cx + x, cy + y, hex('#0a0806')); s.setH(cx + x, cy + y, 0.05); }
-  }
-  // shipworm holes (dark dots with pale calcareous lining)
-  for (let k = 0; k < (s.w * s.h) / 140; k++) { const x = s.r(k, 1, 50) * s.w, y = s.r(k, 2, 50) * s.h; s.set(x, y, hex('#060504')); s.addH(x, y, -0.3); s.blend(x + 1, y, hex('#9a9480'), 0.5); }
-  // green-black algae film, salt bloom
-  s.grime(hex('#1e2a16'), 0.8, 3, 0.5, 2, 0.95);
-  s.grime(hex('#8a8a78'), 0.35, 5, 0.7, 3);
-  s.cavity(hex('#050403'), 0.5, 1, 0.1);
-  s.each((x, y) => s.R(x, y, 0.92));
+  // a broken board end: a ragged dark notch
+  const row = Math.floor(s.r(2, 2, 22) * 6), cx = Math.floor(s.r(2, 3, 22) * s.w), cy = Math.floor(row * bh + 1);
+  for (let y = 0; y < bh - 2; y++) { const w = Math.max(0, 4 - Math.abs(y - 2) + (y % 2)); for (let x = 0; x < w; x++) { s.set(cx + x, cy + y, hex('#0a0806')); s.setH(cx + x, cy + y, 0.1); } s.set(cx + w, cy + y, P[3]); }
   s.bump = 4;
 }
 
-/** painted planks: boat paint (teal-green by default, or `tint`) chipped and peeling to grey wood */
+/** painted planks: boat paint (teal-green by default, or `tint`) chipped to bare grey wood along edges and ends */
 export function planksPainted(s: Surf, tint?: string) {
-  const { rows, bh } = woodBoards(s, { P: pal('#3a3026', '#4a3e30', '#5a4c3a', '#6a5a46', '#7a6a54', '#8a7a62'), plank: 8, seamCol: hex('#120e0a'), knotP: 0.6, nails: true });
-  const base = hex(tint ?? '#3f6e68');
-  const PAINT = [scl(base, 0.55), scl(base, 0.72), scl(base, 0.86), base, mixc(base, hex('#e8e4d8'), 0.18), mixc(base, hex('#f0ece0'), 0.32)];
-  s.each((x, y) => {
-    const row = Math.floor(y / bh);
-    const wear = s.n(x, y, 4, 3, 60) * 0.7 + s.n(x, y, 14, 2, 61) * 0.3;
-    // paint wears first along board edges and in patches
-    const fy = (y - row * bh) / bh;
-    const edgeWear = Math.pow(Math.abs(fy - 0.5) * 2, 3) * 0.25;
-    const chip = wear + edgeWear;
-    if (chip > 0.66) return; // bare wood
-    const old = s.get(x, y);
-    if (old[0] < 30 && old[1] < 30) return; // keep seams
-    const t = 0.45 + (s.n(x, y, 3, 2, 62) - 0.5) * 0.35 + (s.r(x, y, 63) - 0.5) * 0.12 - (s.na(x, y, 3, rows * 5, 2, 64) - 0.5) * 0.2;
-    s.set(x, y, s.pick(PAINT, t, x, y));
-    s.addH(x, y, 0.06);
-    s.R(x, y, 0.55);
-    // peeling lip: lighter edge where the paint lifts
-    if (chip > 0.6) { s.set(x, y, PAINT[5]); s.addH(x, y, 0.04); }
+  const W = hramp('#7a6e5c', 5, 0.5);
+  const bh = boards(s, { P: W, rows: 6, nails: true, seed: 30 });
+  const PA = hramp(tint ?? '#3f7a72', 5, 0.5);
+  // chip shapes: clean blobs hugging board edges and ends, bare wood inside, a pale paint lip around them
+  const chips: [number, number, number, number][] = [];
+  for (let k = 0; k < 9; k++) chips.push([s.r(k, 1, 31) * s.w, Math.floor(s.r(k, 2, 31) * 6) * bh + (s.r(k, 3, 31) < 0.5 ? 1 : bh - 1), 2 + s.r(k, 4, 31) * 5, 1.5 + s.r(k, 5, 31) * 2]);
+  const inChip = (x: number, y: number, pad: number) => chips.some(([cx, cy, rx, ry]) => {
+    let dx = x + 0.5 - cx; dx -= Math.round(dx / s.w) * s.w;
+    let dy = y + 0.5 - cy; dy -= Math.round(dy / s.h) * s.h;
+    return (dx / (rx + pad)) ** 2 + (dy / (ry + pad)) ** 2 < 1;
   });
-  s.grime(hex('#2a2a20'), 0.55, 3, 0.6, 1);
-  s.drips(hex('#5a3a22'), Math.round(s.w / 12), bh * 2, 0.25, 4);
-  s.cavity(hex('#14100c'), 0.4, 1, 0.08);
+  s.each((x, y) => {
+    const a = s.id(x, y);
+    if (a < 0 || inChip(x, y, 0)) return;
+    const fy = y % bh;
+    let k = fy < 2 ? 3 : (fy > bh - 2 ? 1 : 2);
+    if (inChip(x, y, 1)) k = 4; // lifted paint lip
+    s.set(x, y, PA[k]);
+    s.R(x, y, 0.8);
+  });
   s.bump = 3;
 }
 
 // ------------------------------------------------------------------------------------------------ metal
-const STEEL = pal('#2a2c2e', '#383b3e', '#474a4e', '#575a5e', '#686b6f', '#7a7d80');
-const RUST = pal('#24140c', '#3a1e10', '#542814', '#6e3418', '#88441e', '#a05a28', '#b87036', '#c88a4a');
-function rustField(s: Surf, x: number, y: number, bias: number) {
-  return s.n(x, y, 3, 4, 10) * 0.7 + s.n(x, y, 12, 2, 11) * 0.3 + bias;
+/** an irregular blob (7-point polygon, wrap-aware) membership test */
+function blobAt(s: Surf, cx: number, cy: number, r: number, seed: number) {
+  return (x: number, y: number) => {
+    let dx = x + 0.5 - cx; dx -= Math.round(dx / s.w) * s.w;
+    let dy = y + 0.5 - cy; dy -= Math.round(dy / s.h) * s.h;
+    const a = Math.atan2(dy, dx), seg = Math.floor(((a + Math.PI) / (Math.PI * 2)) * 7);
+    const rr = r * (0.7 + s.r(seg, seed, 50) * 0.5);
+    return Math.hypot(dx, dy) / rr;
+  };
 }
+
 export function rustSteel(s: Surf) {
+  const S = hramp('#6a6e72', 5, 0.45, 0.02);
+  const R = hramp('#8a4a24', 6, 0.55, 0.05);
+  // plate: two flat tone zones, a faint seam with rivets along the top
   s.each((x, y) => {
-    const n = s.n(x, y, 4, 3, 1), brush = s.na(x, y, 2, 40, 2, 2);
-    s.set(x, y, s.pick(STEEL, 0.3 + n * 0.4 + (brush - 0.5) * 0.3, x, y, 0.8));
-    s.setH(x, y, 0.5);
-    s.R(x, y, 0.38 + n * 0.2); s.M(x, y, 0.85);
-    const r = rustField(s, x, y, 0);
-    if (r > 0.52) {
-      const t = (r - 0.52) / 0.48;
-      if (t * 2.2 > s.ct(x, y) * 0.9) {
-        // rust: flaky, blistered, darker at the core of a patch, bright orange at its fresh edge
-        const k = clamp01(0.62 - t * 0.55 + (s.r(x, y, 12) - 0.5) * 0.35 + (s.n(x, y, 16, 2, 13) - 0.5) * 0.4);
-        s.set(x, y, s.pick(RUST, k, x, y, 1.2));
-        s.setH(x, y, 0.55 + t * 0.25 + s.r(x, y, 14) * 0.08);
-        s.R(x, y, 0.92); s.M(x, y, 0.05);
-      }
-    }
+    s.set(x, y, S[2 + s.zone(x, y, 2, 2, 1) - (y === 0 ? 1 : 0)]);
+    s.setH(x, y, 0.5); s.R(x, y, 0.65); s.M(x, y, 0.2);
   });
-  // pitting and scratches
-  for (let k = 0; k < (s.w * s.h) / 70; k++) { const x = s.r(k, 1, 20) * s.w, y = s.r(k, 2, 20) * s.h; s.shade(x, y, 0.6); s.addH(x, y, -0.12); }
-  for (let k = 0; k < s.w / 10; k++) {
-    let x = s.r(k, 1, 30) * s.w, y = s.r(k, 2, 30) * s.h; const a = (s.r(k, 3, 30) - 0.5) * 0.6, L = 4 + s.r(k, 4, 30) * 10;
-    for (let i = 0; i < L; i++) { s.blend(x, y, STEEL[5], 0.6); x += Math.cos(a); y += Math.sin(a); }
+  for (let x = 3; x < s.w; x += 8) { s.set(x, 2, S[4]); s.set(x + 1, 3, S[0]); s.set(x, 3, S[1]); s.addH(x, 2, 0.2); }
+  // rust patches: dark core, mid body, bright fresh rim
+  for (let k = 0; k < 3; k++) {
+    const cx = s.r(k, 1, 40) * s.w, cy = s.r(k, 2, 40) * s.h, r = 4 + s.r(k, 3, 40) * 6;
+    const f = blobAt(s, cx, cy, r, k);
+    for (let y = Math.floor(cy - r * 1.3); y <= cy + r * 1.3; y++) for (let x = Math.floor(cx - r * 1.3); x <= cx + r * 1.3; x++) {
+      const d = f(x, y);
+      if (d > 1) continue;
+      s.set(x, y, d > 0.8 ? R[4] : d > 0.45 ? R[2] : R[1]);
+      s.setH(x, y, 0.55 + (1 - d) * 0.1); s.R(x, y, 0.95); s.M(x, y, 0);
+    }
+    // streaks bleeding down from the patch
+    for (let i = 0; i < 3; i++) s.streak(Math.round(cx - r * 0.5 + i * r * 0.5), Math.round(cy + r * 0.7), 5 + Math.floor(s.r(k, i, 41) * 9), R[3], R[2]);
   }
-  s.drips(RUST[4], Math.round(s.w / 7), s.h * 0.6, 0.35, 5);
-  s.cavity(RUST[0], 0.35, 1, 0.1);
+  // two bright scratches
+  for (let k = 0; k < 2; k++) { const x = Math.floor(s.r(k, 5, 42) * s.w), y = Math.floor(s.r(k, 6, 42) * s.h); for (let i = 0; i < 7; i++) s.set(x + i, y + Math.floor(i / 3), S[4]); }
   s.bump = 3;
 }
 
-const HULL_PAINT = pal('#24100c', '#341812', '#442018', '#562a20', '#683428');
-const BARN = pal('#5a564c', '#7e786a', '#a29a8a', '#c4bcac', '#ddd6c8');
-/**
- * Riveted hull plating of a long-sunk ship: big lapped plates (~2 x 1 m: one plate across a 64 px tile, two
- * rows), rivet lines along every seam, the steel mostly rust-brown with islands of faded red-black paint,
- * rust bleeding down from rivets, a grey-green growth film and barnacle clusters.
- */
+/** riveted hull plating of a long-sunk ship: big lapped plates, rivet lines, faded red-black paint islands over
+ *  rust, rust streaks from the rivets, barnacle clusters */
 export function hullPlates(s: Surf) {
-  const pw = s.w, ph = s.h / 2;
+  const R = hramp('#7a4628', 6, 0.55, 0.05);
+  const PA = hramp('#5a2a22', 4, 0.45);
+  const B = hramp('#b8b0a0', 4, 0.5);
+  const ph = s.h / 2;
   s.each((x, y) => {
-    const row = Math.floor(y / ph), off = (row & 1) * pw * 0.5;
-    const fx = (((x + off) % pw) + pw) % pw / pw, fy = (y % ph) / ph;
-    const n = s.n(x, y, 3, 3, 1);
-    // base: corroded steel
-    let t = 0.36 + (n - 0.5) * 0.5 + (s.r(x, y, 3) - 0.5) * 0.18 - fy * 0.1;
-    let c = s.pick(RUST, 0.18 + t * 0.7, x, y);
-    s.setH(x, y, 0.5 - fy * 0.08 + s.r(x, y, 4) * 0.05);
-    s.R(x, y, 0.9);
-    // surviving paint islands (flat, slightly raised, crazed edges)
-    const pnt = s.n(x, y, 3, 3, 20) * 0.75 + s.n(x, y, 10, 2, 21) * 0.25;
-    if (pnt > 0.5 && (pnt - 0.5) * 6 > s.ct(x, y) * 0.9) {
-      t = 0.35 + (s.n(x, y, 6, 2, 22) - 0.5) * 0.5 + (s.r(x, y, 23) - 0.5) * 0.15;
-      c = s.pick(HULL_PAINT, t, x, y); s.addH(x, y, 0.05); s.R(x, y, 0.75);
-      if (pnt < 0.53) c = mixc(c, RUST[6], 0.5); // rust creeping under the paint edge
-    }
-    s.set(x, y, c);
-    // seams: the lower plate's top edge lit, a dark lap shadow under the plate above
-    if (fy > 1 - 1.5 / ph) { s.set(x, y, hex('#0e0605')); s.setH(x, y, 0.2); }
-    else if (fy < 1 / ph) { s.blend(x, y, hex('#9a6a4a'), 0.35); s.setH(x, y, 0.6); }
-    if (fx < 1 / pw) { s.set(x, y, hex('#120806')); s.setH(x, y, 0.3); }
-    else if (fx < 2 / pw) s.blend(x, y, hex('#8a5a40'), 0.25);
+    const row = Math.floor(y / ph), off = row * Math.floor(s.w / 2), fy = y - row * ph;
+    const fx = ((x + off) % s.w + s.w) % s.w;
+    if (fy < 1 || fx < 1) { s.setId(x, y, -1); return; }
+    s.setId(x, y, row);
   });
-  // rivet lines along every seam
-  const RIV = pal('#1a0e0a', '#3a2016', '#5a3422', '#7a4a32', '#946048');
+  s.bevel(R, () => 2, { gap: R[0], rough: () => 0.9 });
+  // paint islands: big clean blobs of faded paint, a rust ring at their edge
+  for (let k = 0; k < 3; k++) {
+    const cx = s.r(k, 1, 60) * s.w, cy = s.r(k, 2, 60) * s.h, r = 6 + s.r(k, 3, 60) * 7;
+    const f = blobAt(s, cx, cy, r, k + 10);
+    for (let y = Math.floor(cy - r * 1.3); y <= cy + r * 1.3; y++) for (let x = Math.floor(cx - r * 1.3); x <= cx + r * 1.3; x++) {
+      if (s.id(x, y) < 0) continue;
+      const d = f(x, y);
+      if (d < 0.88) s.set(x, y, PA[(y % ph) < 2 ? 3 : 2]); else if (d < 1) s.set(x, y, R[4]);
+    }
+  }
+  // rivet lines along every seam; rust streaks from some rivets
   for (let row = 0; row < 2; row++) {
-    const off = (row & 1) * pw * 0.5;
-    for (let x = 2; x < s.w; x += 5) { s.bump2(x, Math.round(row * ph + 2), 0, RIV, 0.25); s.bump2(x, Math.round(row * ph + ph - 4), 0, RIV, 0.25); }
-    for (let y = Math.round(row * ph + 6); y < row * ph + ph - 5; y += 5) { s.bump2(Math.round(-off + 3), y, 0, RIV, 0.25); s.bump2(Math.round(-off + 3 + pw), y, 0, RIV, 0.25); }
+    const y = Math.floor(row * ph + 3);
+    for (let x = 2; x < s.w; x += 5) {
+      s.set(x, y, R[4]); s.set(x + 1, y, R[2]); s.set(x, y + 1, R[1]); s.set(x + 1, y + 1, R[0]); s.addH(x, y, 0.25);
+      if (s.r(x, row, 61) < 0.35) s.streak(x, y + 2, 4 + Math.floor(s.r(x, row, 62) * 8), R[3], R[2]);
+    }
   }
-  // rust bleed down from the rivet lines, silt / growth film, barnacles clustered in patches
-  s.drips(RUST[5], Math.round(s.w / 3), ph * 1.2, 0.3, 7);
-  s.grime(hex('#4a4c3e'), 0.55, 3, 0.56, 2, 0.95);
-  for (let k = 0; k < (s.w * s.h) / 140; k++) {
-    const x = Math.round(s.r(k, 1, 80) * s.w), y = Math.round(s.r(k, 2, 80) * s.h);
-    if (s.n(x, y, 3, 2, 81) < 0.58) continue;
-    s.bump2(x, y, s.r(k, 3, 80) < 0.75 ? 1 : 2, BARN, 0.45);
-    s.set(x, y, hex('#1c1a16')); // opening
+  // barnacle clusters: little cones (pale rim, dark opening)
+  for (let k = 0; k < 3; k++) {
+    const cx = Math.floor(s.r(k, 4, 63) * s.w), cy = Math.floor(s.r(k, 5, 63) * s.h);
+    for (let i = 0; i < 5; i++) {
+      const x = cx + Math.floor((s.r(k, i, 64) - 0.5) * 8), y = cy + Math.floor((s.r(k, i, 65) - 0.5) * 6);
+      s.ball(x, y, 1.6, 1.6, B, { shadow: 0.75, h: 0.4 });
+      s.set(x, y, hex('#2a2620'));
+    }
   }
-  s.cavity(hex('#0e0806'), 0.4, 1, 0.1);
   s.bump = 3.5;
 }
 
 // ------------------------------------------------------------------------------------------------ rope
-const HEMP = pal('#2a2318', '#3e3424', '#524631', '#66583e', '#7a6a4c', '#8e7e5e', '#a29272');
-/** three-strand laid rope: x along the rope, y around it (wraps). Diagonal strands with fibre detail */
+/** three-strand laid rope: x along the rope, y around it (wraps). Each strand a rounded band, fibre dashes */
 export function rope(s: Surf) {
-  const period = s.h / 3;
+  const P = hramp('#9a845e', 5, 0.55);
+  const per = s.h / 3;
   s.each((x, y) => {
-    const u = ((y + x * 0.9) % period + period) % period / period; // strand phase
-    const round = Math.sin(u * Math.PI); // strand cross-section
-    const fib = s.na(x - y * 0.9, y + x * 0.9, 24, 6, 2, 1);
-    const t = 0.1 + round * 0.62 + (fib - 0.5) * 0.35 + (s.r(x, y, 2) - 0.5) * 0.12;
-    s.set(x, y, s.pick(HEMP, t, x, y));
-    s.setH(x, y, round * 0.7 + fib * 0.1);
+    const u = (((y + x * 0.9) % per) + per) % per / per;
+    const k = u < 0.08 ? 0 : u < 0.25 ? 1 : u < 0.55 ? 3 : u < 0.75 ? 2 : 1;
+    s.set(x, y, P[k]);
+    s.setH(x, y, Math.sin(u * Math.PI) * 0.7);
     s.R(x, y, 0.95);
-    if (u < 0.06) s.set(x, y, HEMP[0]);
+    // fibre dashes along the strand crown
+    if (k === 3 && ((x + y * 3) % 7) === 0) s.set(x, y, P[4]);
   });
-  s.speckle(pal('#c0aa7a', '#ccb888'), 0.02, 3, 0.05); // stray fibres
-  s.grime(hex('#2a2a1e'), 0.6, 3, 0.55, 2);
   s.bump = 4;
 }
 
 // ------------------------------------------------------------------------------------------------ concrete
-const CON = pal('#3e3e3a', '#4e4e49', '#5e5e58', '#6e6e67', '#7e7e76', '#8e8d85', '#9e9d94');
 export function concrete(s: Surf) {
+  const P = hramp('#8a8a82', 5, 0.45, 0.02);
+  // cast panels (formwork) with bevelled seams, two tone zones, bug holes on a grid, one crack, water stains
+  const pw = s.w / 2, ph = s.h / 3;
   s.each((x, y) => {
-    const n = s.n(x, y, 3, 3, 1), m = s.n(x, y, 10, 2, 2);
-    const form = Math.abs(((y / s.h) * 4) % 1 - 0.5) < 0.02 ? -0.12 : 0; // formwork lines
-    const t = 0.35 + n * 0.35 + m * 0.18 + (s.r(x, y, 3) - 0.5) * 0.2 + form;
-    s.set(x, y, s.pick(CON, t, x, y, 1.1));
-    s.setH(x, y, 0.5 + (m - 0.5) * 0.1);
-    s.R(x, y, 0.9);
+    if (x % pw < 1 || y % ph < 1) { s.setId(x, y, -1); return; }
+    s.setId(x, y, Math.floor(x / pw) + Math.floor(y / ph) * 2);
   });
-  // exposed aggregate pebbles and bug holes
-  for (let k = 0; k < (s.w * s.h) / 120; k++) {
-    const x = Math.round(s.r(k, 1, 10) * s.w), y = Math.round(s.r(k, 2, 10) * s.h);
-    const c = [hex('#6a645a'), hex('#8a8478'), hex('#5a5650'), hex('#a09a8c')][Math.floor(s.r(k, 3, 10) * 4)];
-    s.set(x, y, c); if (s.r(k, 4, 10) < 0.4) s.set(x + 1, y, scl(c, 0.85));
+  s.bevel(P, (id) => 2 + (s.r(id, 0, 1) < 0.35 ? 1 : 0), { gap: P[0], rough: () => 0.95 });
+  for (let gy = 2; gy < s.h; gy += 6) for (let gx = 2; gx < s.w; gx += 7) {
+    if (s.r(gx, gy, 2) < 0.6) continue;
+    const x = gx + Math.floor(s.r(gx, gy, 3) * 4), y = gy + Math.floor(s.r(gx, gy, 4) * 3);
+    if (s.id(x, y) < 0) continue;
+    s.set(x, y, P[0]); s.set(x, y + 1, P[3]); s.addH(x, y, -0.2);
   }
-  for (let k = 0; k < (s.w * s.h) / 220; k++) { const x = s.r(k, 1, 20) * s.w, y = s.r(k, 2, 20) * s.h; s.set(x, y, hex('#1e1e1c')); s.addH(x, y, -0.3); s.blend(x, y + 1, CON[6], 0.5); }
-  s.crack(s.r(0, 1, 30) * s.w, 0, s.h, 0.1, 1, hex('#1a1a18'), CON[5], 0.7, 0.3);
-  s.grime(hex('#c8c8b8'), 0.4, 4, 0.66, 1); // efflorescence
-  s.grime(hex('#2e3424'), 0.55, 3, 0.6, 2, 0.95); // marine growth
-  s.drips(hex('#3a3a32'), Math.round(s.w / 9), s.h * 0.5, 0.25, 3);
-  s.cavity(hex('#1e1e1c'), 0.35, 1, 0.1);
+  s.crack(s.jag(s.r(1, 1, 5) * s.w, 2, 1.5, 7, 3, 1.0, 3), P[0], P[3]);
+  for (let k = 0; k < 3; k++) s.streak(Math.floor(s.r(k, 2, 6) * s.w), Math.floor(Math.floor(s.r(k, 3, 6) * 3) * ph + 1), 10, P[1], P[2], 2);
   s.bump = 2.5;
 }
 
 // ------------------------------------------------------------------------------------------------ glass
-/** grimy glass (portholes, bottles, dive masks): smudges, scratches and a scum ring; alpha: clean = clear */
+/** grimy glass: banded dark tint, two clean diagonal reflection streaks, a grime band low down, scratches */
 export function glass(s: Surf) {
-  const G = pal('#0e1a1c', '#16272a', '#20353a', '#2c464a', '#3e5c60', '#5a7a7c');
+  const P = hramp('#2c4a4e', 5, 0.5, 0.02);
   s.each((x, y) => {
-    const n = s.n(x, y, 2, 3, 1);
-    const smudge = s.n(x, y, 5, 3, 2);
-    const t = 0.3 + n * 0.3 + (y / s.h) * 0.1;
-    s.set(x, y, s.pick(G, t, x, y, 0.7));
-    s.R(x, y, 0.06); s.A(x, y, 0.32 + n * 0.1);
+    const band = Math.floor((y / s.h) * 4);
+    let k = 1 + (band % 2);
+    const d = ((x + y) % s.w + s.w) % s.w;
+    if (d > s.w * 0.15 && d < s.w * 0.15 + 3) k = 4;
+    if (d > s.w * 0.15 + 5 && d < s.w * 0.15 + 6) k = 3;
+    s.set(x, y, P[k]);
+    s.R(x, y, 0.6); s.A(x, y, k >= 3 ? 0.7 : 0.38);
     s.setH(x, y, 0.5);
-    if (smudge > 0.6) { const k = (smudge - 0.6) * 2.5; s.blend(x, y, hex('#6a7468'), k * 0.6); s.R(x, y, 0.06 + k * 0.6); s.A(x, y, 0.4 + k * 0.5); }
+    if (y > s.h * 0.82) { s.set(x, y, mixc(P[2], hex('#5a6448'), 0.5)); s.A(x, y, 0.85); s.R(x, y, 0.9); }
   });
-  for (let k = 0; k < s.w / 6; k++) {
-    let x = s.r(k, 1, 30) * s.w, y = s.r(k, 2, 30) * s.h; const a = s.r(k, 3, 30) * 6.28, L = 3 + s.r(k, 4, 30) * 12;
-    for (let i = 0; i < L; i++) { s.blend(x, y, hex('#a8c4c4'), 0.55); s.A(x, y, 0.7); x += Math.cos(a); y += Math.sin(a); }
-  }
-  s.drips(hex('#4a5040'), Math.round(s.w / 10), s.h * 0.4, 0.3, 4);
+  for (let k = 0; k < 3; k++) { const x = Math.floor(s.r(k, 1, 7) * s.w), y = Math.floor(s.r(k, 2, 7) * s.h * 0.7); for (let i = 0; i < 6; i++) { s.set(x + i, y + (i >> 1), P[4]); s.A(x + i, y + (i >> 1), 0.8); } }
   s.bump = 1;
 }
 
 // ------------------------------------------------------------------------------------------------ grit
-/** neutral grey grit (tinted per instance for debris chunks) */
+/** neutral grey chips (tinted per instance for debris) */
 export function grit(s: Surf) {
-  const G = pal('#8c8c8c', '#a0a0a0', '#b4b4b4', '#c6c6c6', '#d6d6d6', '#e4e4e4');
-  s.each((x, y) => {
-    const n = s.n(x, y, 3, 3, 1);
-    s.set(x, y, s.pick(G, 0.3 + n * 0.5 + (s.r(x, y, 2) - 0.5) * 0.4, x, y));
-    s.setH(x, y, 0.5 + n * 0.3 + s.r(x, y, 3) * 0.1);
-    s.R(x, y, 0.9);
-  });
-  s.speckle(pal('#5a5a5a', '#6a6a6a'), 0.05, 1, -0.1);
-  s.cavity(hex('#606060'), 0.4, 1, 0.1);
+  const P = hramp('#b4b4b4', 5, 0.35, 0);
+  s.each((x, y) => { const [f1, f2, id] = s.wor(x, y, 4, 1); s.setId(x, y, f2 - f1 < 1 ? -1 : id); });
+  s.bevel(P, (id) => 2 + (s.r(id, 0, 2) < 0.5 ? 1 : 0), { gap: P[0], rough: () => 0.9 });
   s.bump = 3;
 }

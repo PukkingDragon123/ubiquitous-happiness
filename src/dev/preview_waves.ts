@@ -130,18 +130,41 @@ class WavesPreview extends MockScreen {
     Object.assign(this.hud.style, { position: 'fixed', left: '8px', top: '8px', color: '#e8f4ff', font: '12px monospace', textShadow: '1px 1px 0 #000', pointerEvents: 'none', whiteSpace: 'pre', zIndex: '10' });
     document.body.appendChild(this.hud);
     window.addEventListener('keydown', (e) => this.key(e.code));
+    const cam = q.get('cam');
+    if (cam === 'wreck') { this.followPlayer = false; this.camTarget.set(this.wreck.x + +(q.get('cx') || 0), -5.5 + +(q.get('cy') || 0), 0); }
+    else if (cam) { const [cx, cy] = cam.split(',').map(Number); this.followPlayer = false; this.camTarget.set(cx, cy, 0); }
+    if (q.get('boat')) { const b = new SurfaceBoat(q.get('boat') as 'charges', q.get('boat') === 'lines' ? 'skiff' : 'dinghy', this.blob.x + 1, 1, 2, { iq: 0.7, crew: q.get('boat') === 'lines' ? ['proAngler'] : ['dockWorker'] }); this.world.add(b); }
     if (q.get('mode') === 'gore') { this.god = true; this.followPlayer = false; this.camTarget.set(1.2, -5.6, 0); return; }
     const only = q.get('spawn');
-    if (only) { for (const r of only.split(',')) this.spawnRole(r as Role, this.blob.x + 6 + Math.random() * 3, this.blob.y + (Math.random() - 0.5) * 2); return; }
+    if (only) {
+      // one squad, already after the blobfish
+      const sq = newSquad();
+      for (const r of only.split(',')) {
+        const h = new Human(r as Role, this.blob.x + 7 + Math.random() * 3, this.blob.y + (Math.random() - 0.5) * 2, sq, this.area, this.wreck, { iq: +(q.get('iq') || 0.7) });
+        this.world.add(h); h.mountTag(this.scene);
+        if (r === 'heavy' || r === 'titan') { h.y = this.world.terrain.floorAt(h.x) + h.rig.pivotHeight; h.attachHose(this.world); }
+      }
+      for (const e of this.world.entities) if (e instanceof Human) e.provoke(this.world, 'spot');
+      return;
+    }
     this.dir = new WaveDirector(this.world, this.area, { mastery: +(q.get('mastery') || 0), nemeses: q.get('nemesis') ? FAKE_NEMESES.map((n) => ({ ...n })) : [], noSave: true, seed: +(q.get('seed') || 7) });
-    this.dir.start(+(q.get('wave') || 1));
-    if (q.get('cam') === 'wreck') { this.followPlayer = false; this.camTarget.set(this.wreck.x + +(q.get('cx') || 0), -5.5 + +(q.get('cy') || 0), 0); }
+    if (q.get('boss')) {
+      // just the boss, right here (use with &god=1)
+      const k = q.get('boss')!;
+      this.dir.wave = 5;
+      if (k === 'captain') { const s = new MiniSub(this.blob.x + 11, -5.5, 0.7, true); s.onDeploy = (x, y) => this.spawnRole('knife', x, y); this.world.add(s); this.dir.subs.push(s); }
+      else if (k === 'trawler') { const b = new SurfaceBoat('cannon', 'trawler', this.blob.x + 3, 1, 1, { iq: 0.7, crew: ['captainGaff', 'dockWorker'], boss: true }); this.world.add(b); this.dir.boats.push(b); }
+      else if (k === 'sub') { const s = new MiniSub(this.blob.x + 9, -5, 0.6); this.world.add(s); this.dir.subs.push(s); }
+      else this.spawnRole('titan', this.blob.x + 7, -6);
+      this.dir.active = true;
+    } else this.dir.start(+(q.get('wave') || 1));
+
     if (q.get('nemesis')) this.spawnNemesis();
   }
 
   private spawnRole(role: Role, x: number, y: number, nem?: Nemesis): Human {
     const h = new Human(role, x, y, newSquad(), this.area, this.wreck, { iq: 0.7, nemesis: nem ?? null });
-    if (role === 'heavy' || role === 'titan') h.y = this.world.terrain.floorAt(x) + h.rig.height * 0.47;
+    if (role === 'heavy' || role === 'titan') h.y = this.world.terrain.floorAt(x) + h.rig.pivotHeight;
     this.world.add(h);
     h.mountTag(this.scene);
     if (role === 'heavy' || role === 'titan') h.attachHose(this.world);
@@ -212,7 +235,7 @@ class WavesPreview extends MockScreen {
     this.camYOff = this.q.get('mode') === 'gore' ? -0.8 : 0.6;
     const d = this.dir;
     this.hud.textContent = d
-      ? `WAVE ${d.wave}${d.isBossWave() ? ' (BOSS ' + d.bossKind() + ')' : ''}  remaining ${d.remaining}  active ${d.active}\nmastery ${d.mastery}  iq ${d.knobs().iq.toFixed(2)}  mods ${d.mods.join(', ') || '-'}\nwreck ${Math.round(this.wreck.hp)}/${this.wreck.maxHp}  blobfish ${this.blob.hp}/${this.blob.maxHp}${this.god ? ' (god)' : ''}\nnemeses promoted: ${d.promoted.map((n) => n.name + ' ' + n.title).join('; ') || '-'}\n[N] next  [B] boss  [K] kill all  [G] dismember  [M] nemesis  [1-7] spawn  [O] boat  [P] sub  [H] god`
+      ? `WAVE ${d.wave}${d.isBossWave() ? ' (BOSS ' + d.bossKind() + ')' : ''}  remaining ${d.remaining}  active ${d.active}\nmastery ${d.mastery}  iq ${d.knobs().iq.toFixed(2)}  mods ${d.mods.join(', ') || '-'}\nwreck ${Math.round(this.wreck.hp)}/${this.wreck.maxHp}  blobfish ${this.blob.hp}/${this.blob.maxHp}${this.god ? ' (god)' : ''}\nnemeses promoted: ${d.promoted.map((n) => n.name + ' ' + n.title).join('; ') || '-'}\nboats ${d.boats.map((b) => b.job + ':' + b.state + '@' + b.x.toFixed(0)).join(' ')}  subs ${d.subs.length}\n${d.humans.slice(0, 8).map((h) => `${h.role}:${h.state}/${h.focus} ${h.x.toFixed(1)},${h.y.toFixed(1)} hp${Math.round(h.hp)}`).join('\n')}\n[N] next  [B] boss  [K] kill all  [G] dismember  [M] nemesis  [1-7] spawn  [O] boat  [P] sub  [H] god`
       : `[1-7] spawn  [G] dismember  [K] kill  [M] nemesis`;
   }
 

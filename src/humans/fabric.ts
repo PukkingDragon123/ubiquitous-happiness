@@ -32,9 +32,12 @@ export function nz(x: number, y: number, scale = 8, seed = 0): number {
 }
 export const hh = (x: number, y: number, s = 0) => hash2(x | 0, y | 0, s);
 
+export let DITHER = false;
+export function setDither(b: boolean) { DITHER = b; }
 /** banded, dithered shade: k ~ 1 is the base colour; steps quantise k like a hand-made ramp */
 export function band(c: RGB, k: number, x: number, y: number, step = 0.075): RGB {
-  const q = Math.round((k + (bayer(x, y) - 0.5) * step * 0.95) / step) * step;
+  // v2: clean hard bands, no ordered-dither speckle (DITHER = true restores the v1 look)
+  const q = Math.round((k + (DITHER ? (bayer(x, y) - 0.5) * step * 0.95 : 0)) / step) * step;
   return shade(c, Math.max(0.15, q));
 }
 

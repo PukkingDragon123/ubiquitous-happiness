@@ -19,6 +19,16 @@ import type { UwOpts } from '../gfx/shaders/underwater';
 
 type CurveIn = Curve | number | [number, number][];
 
+/**
+ * v2 PS1 look: every species is rebuilt at a fraction of its authored resolution (faceted, flat-shaded),
+ * keeping the silhouette, fins and painted texture that make it recognisable.
+ */
+export const LOWPOLY = { seg: 0.34, rings: 0.32, fin: 0.42, finRows: 0.5, eyeSides: 8, eyeRings: 3 };
+const lpSeg = (n: number) => Math.max(8, 2 * Math.round((n * LOWPOLY.seg) / 2));
+const lpRings = (n: number) => Math.max(10, Math.round(n * LOWPOLY.rings));
+const lpCols = (n: number) => Math.max(3, Math.round(n * LOWPOLY.fin));
+const lpRows = (n: number) => Math.max(2, Math.round(n * LOWPOLY.finRows));
+
 export interface PaintCtx {
   t: number; a: number; h: number; side: number; X: number; Y: number; Z: number;
   /** -1 belly .. 0 centreline .. 1 back, relative to the local profile */
@@ -158,7 +168,7 @@ export class FishBuilder extends Kit {
 
   // ----------------------------------------------------------------------------------------- body
   buildBody() {
-    const s = this.s, N = s.seg ?? 28, R = s.rings ?? 46;
+    const s = this.s, N = lpSeg(s.seg ?? 28), R = lpRings(s.rings ?? 46);
     const bodyH = s.bodyH ?? Math.round(this.pg.H / 2);
     this.bodyR = this.pg.band(bodyH);
     const m = s.mouth;
@@ -231,7 +241,7 @@ export class FishBuilder extends Kit {
       let ey = norm(cross(d, ex)); if (ey[1] < 0) ey = scale(ey, -1);
       ex = norm(cross(ey, d)); if (ex[0] < 0) ex = scale(ex, -1);
       const rings: { pts: V3[]; v: number }[] = [];
-      const NS = 18, NR = 9, phiMax = Math.PI * 0.62;
+      const NS = LOWPOLY.eyeSides, NR = LOWPOLY.eyeRings, phiMax = Math.PI * 0.62;
       for (let k = 1; k <= NR; k++) {
         const phi = (phiMax * k) / NR;
         const cc = add(c, scale(d, r * Math.cos(phi))), rr = r * Math.sin(phi);
@@ -257,7 +267,7 @@ export class FishBuilder extends Kit {
     const R = r * 1.13;
     const tilt = e.lidTilt ?? (e.lid === 'angry' ? 0.55 : e.lid === 'sad' ? -0.45 : 0);
     const level = e.lidLevel ?? (e.lid === 'sleepy' ? 0.0 : e.lid === 'hood' ? 0.5 : 0.3);
-    const rows = 5, cols = 9, grid: V3[][] = [];
+    const rows = 3, cols = 5, grid: V3[][] = [];
     for (let i = 0; i < rows; i++) {
       const row: V3[] = [];
       for (let j = 0; j < cols; j++) {
@@ -300,7 +310,7 @@ export class FishBuilder extends Kit {
   buildMedian(f: FinSpec) {
     const L = this.L, top = f.type === 'dorsal';
     const t0 = f.t0 ?? 0.4, t1 = f.t1 ?? 0.7, hC = asCurve(f.h, 0.1), lean = asCurve(f.lean, 0);
-    const cols = f.cols ?? 14, rows = f.rows ?? 5;
+    const cols = lpCols(f.cols ?? 14), rows = lpRows(f.rows ?? 5);
     const rect = this.finRect(f, Math.max(24, Math.round((t1 - t0) * this.pg.W * 0.9)), 32);
     const base: V3[] = [];
     const grid: V3[][] = [];
@@ -343,7 +353,7 @@ export class FishBuilder extends Kit {
         case 'heterocercal': return u < 0.5 ? 0.6 + 0.4 * Math.pow(w, 0.9) : 0.35 + 0.35 * w;
       }
     });
-    const cols = f.cols ?? 13, rows = f.rows ?? 6;
+    const cols = lpCols(f.cols ?? 13), rows = lpRows(f.rows ?? 6);
     const rect = this.finRect(f, 64, 56);
     const base: V3[] = [], grid: V3[][] = [];
     for (let j = 0; j < cols; j++) { const u = j / (cols - 1); base.push([x0 + 0.01 * L, c0 + hTop - (hTop + hBot) * u, 0]); }
@@ -372,7 +382,7 @@ export class FishBuilder extends Kit {
     const ang = ((f.angle ?? (isPel ? 55 : 20)) * Math.PI) / 180;
     const out = (f.out ?? 0.55) * len;
     const ext = f.ext ?? ((u: number) => 0.62 + 0.38 * Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2)) - (f.shape === 'pointed' ? 0.3 * u : 0));
-    const cols = f.cols ?? 8, rows = f.rows ?? 5;
+    const cols = lpCols(f.cols ?? 8), rows = lpRows(f.rows ?? 5);
     const rect = this.finRect(f, isPel ? 32 : 44, isPel ? 24 : 30);
     const ca = Math.cos(ang), sa = Math.sin(ang);
     for (const side of f.pair === false ? [1] : [1, -1]) {
@@ -399,7 +409,7 @@ export class FishBuilder extends Kit {
     // horizontal tail flukes (whales, dolphins): sheet in the xz plane
     const L = this.L, tb = f.t0 ?? 0.97, x0 = this.xAt(tb), y0 = this.cy(tb) * L;
     const len = (f.len ?? 0.12) * L, span = (f.span ?? 0.2) * L;
-    const cols = f.cols ?? 13, rows = f.rows ?? 5;
+    const cols = lpCols(f.cols ?? 13), rows = lpRows(f.rows ?? 5);
     const rect = this.finRect(f, 64, 32);
     const ext = f.ext ?? ((u: number) => { const w = Math.abs(2 * u - 1); return 0.35 + 0.65 * Math.pow(w, 0.7); });
     const base: V3[] = [], grid: V3[][] = [];

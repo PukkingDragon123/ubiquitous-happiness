@@ -135,6 +135,8 @@ export function swimMaterial<T extends THREE.MeshStandardMaterial>(mat: T, sp: S
   const mode = flags.mode ?? 0;
   const key = `fish${mode}${flags.vertical ? 'v' : ''}${flags.morph ? 'm' : ''}${flags.inst ? 'i' : ''}`;
   const local = inst ?? new FishInst();
+  // v2: faceted PS1 shading
+  mat.flatShading = true;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uSwim = local.uSwim; sh.uniforms.uFx = local.uFx; sh.uniforms.uFlashCol = local.uFlashCol;
     sh.uniforms.uShape = sp.uShape; sh.uniforms.uShape2 = sp.uShape2; sh.uniforms.uJawP = sp.uJawP;

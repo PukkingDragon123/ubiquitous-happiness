@@ -56,7 +56,7 @@ class Plankton {
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           vA = step(s, aFood) * (0.55 + 0.45 * sin(uT * (1.5 + s * 4.0) + s * 60.0));
-          gl_PointSize = vA > 0.05 ? max(1.0, (0.018 + s * 0.02) * uScale / -mv.z) : 0.0;
+          gl_PointSize = vA > 0.05 ? max(1.0, (0.011 + s * 0.013) * uScale / -mv.z) : 0.0;
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uCol; varying float vA;

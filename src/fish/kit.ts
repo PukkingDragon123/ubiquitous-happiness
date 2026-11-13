@@ -21,6 +21,7 @@ export class Kit {
 
   /** a cone (spike, papilla, horn) from base p along dir; uv into rect (v = 0 tip) */
   cone(p: V3, dir: V3, len: number, rad: number, rect: Rect, sides = 5, o: { jaw?: number; ao?: number; root?: V3; flutter?: number; phase?: number } = {}) {
+    sides = Math.max(3, Math.min(sides, 4)); // PS1: teeth and spines are 3-4 sided
     const reg = this.pg.reg(rect);
     const d = norm(dir);
     const up: V3 = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
@@ -46,6 +47,8 @@ export class Kit {
   /** swept tube (barbels, lure stalks, tentacles, whiskers) */
   tube(path: V3[], rad: (t: number) => number, sides: number, rect: Rect, o: { flutter?: number; phase?: number; ao?: number; capEnd?: boolean; tentacle?: boolean } = {}) {
     const from = this.lo.count;
+    sides = Math.max(3, Math.round(sides * 0.5));
+    if (path.length > 6) path = path.filter((_, i) => i % 2 === 0 || i === path.length - 1);
     this.lo.tube(path, rad, sides, this.pg.reg(rect), this.newG(), { capEnd: o.capEnd ?? true, capStart: false });
     const p0 = path[0];
     let tot = 0; const cum = [0];
@@ -63,7 +66,7 @@ export class Kit {
   }
   /** lat-long sphere / ellipsoid blob (lure bulbs, warts, pearls) */
   blob(c: V3, r: V3, rect: Rect, o: { ao?: number; flutter?: number; phase?: number; seg?: number } = {}) {
-    const from = this.lo.count, NS = o.seg ?? 10, NR = Math.max(4, Math.round(NS / 2));
+    const from = this.lo.count, NS = Math.max(5, Math.round((o.seg ?? 10) * 0.6)), NR = Math.max(3, Math.round(NS / 2));
     const rings: { pts: V3[]; v: number }[] = [];
     for (let k = 1; k < NR; k++) {
       const phi = (Math.PI * k) / NR, pts: V3[] = [];

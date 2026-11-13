@@ -8,6 +8,7 @@
 //   const g = k.build();
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { hash2 } from '../core/math';
 
 export interface PartOpts { rx?: number; ry?: number; rz?: number; d?: number; uv?: 'box' | 'keep'; shadow?: boolean; jitter?: number }
@@ -46,8 +47,9 @@ export class Kit {
     tmpQ.setFromEuler(tmpE);
     tmpM.compose(tmpP.set(x, y, z), tmpQ, tmpS.set(1, 1, 1));
     g.applyMatrix4(tmpM);
-    if ((o.uv ?? 'box') === 'box') boxUv(g, o.d ?? 1, o.jitter ?? hash2(seq++, 7, 3) * 3);
-    else if (!g.attributes.uv) boxUv(g, o.d ?? 1);
+    const d = o.d ?? 1 / ((mat.userData.tileM as number | undefined) ?? 1);
+    if ((o.uv ?? 'box') === 'box') boxUv(g, d, o.jitter ?? Math.floor(hash2(seq++, 7, 3) * 8) / 8);
+    else if (!g.attributes.uv) boxUv(g, d);
     g.groups = [];
     let l = this.parts.get(mat);
     if (!l) this.parts.set(mat, (l = []));
@@ -55,27 +57,30 @@ export class Kit {
     if (o.shadow === false) this.noShadow.add(mat);
     return g;
   }
-  box(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0, o: PartOpts = {}) {
-    return this.add(mat, new THREE.BoxGeometry(sx, sy, sz), x, y, z, o);
+  /** a box with chamfered edges (one 45 degree bevel) so it catches a hard edge light, PS2 style */
+  box(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0, o: PartOpts & { chamfer?: number } = {}) {
+    const r = o.chamfer ?? Math.min(0.035, Math.min(sx, sy, sz) * 0.18);
+    const g = r > 0.004 ? new RoundedBoxGeometry(sx, sy, sz, 1, r) : new THREE.BoxGeometry(sx, sy, sz);
+    return this.add(mat, g, x, y, z, o);
   }
   /** a box resting on y (bottom at y) */
   slab(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0, o: PartOpts = {}) { return this.box(mat, sx, sy, sz, x, y + sy / 2, z, o); }
   cyl(mat: THREE.Material, rTop: number, rBot: number, h: number, x = 0, y = 0, z = 0, o: PartOpts & { seg?: number; open?: boolean } = {}) {
-    return this.add(mat, new THREE.CylinderGeometry(rTop, rBot, h, o.seg ?? 8, 1, o.open ?? false), x, y, z, o);
+    return this.add(mat, new THREE.CylinderGeometry(rTop, rBot, h, Math.min(o.seg ?? 7, 10), 1, o.open ?? false), x, y, z, o);
   }
   sphere(mat: THREE.Material, r: number, x = 0, y = 0, z = 0, o: PartOpts & { w?: number; h?: number; sx?: number; sy?: number; sz?: number } = {}) {
-    const g = new THREE.SphereGeometry(r, o.w ?? 8, o.h ?? 6);
+    const g = new THREE.SphereGeometry(r, Math.min(o.w ?? 7, 9), Math.min(o.h ?? 5, 6));
     g.scale(o.sx ?? 1, o.sy ?? 1, o.sz ?? 1);
     return this.add(mat, g, x, y, z, o);
   }
   /** a lathe profile [[r, y], ...] around y */
   lathe(mat: THREE.Material, prof: [number, number][], x = 0, y = 0, z = 0, o: PartOpts & { seg?: number } = {}) {
-    const g = new THREE.LatheGeometry(prof.map(([r, yy]) => new THREE.Vector2(r, yy)), o.seg ?? 10);
+    const g = new THREE.LatheGeometry(prof.map(([r, yy]) => new THREE.Vector2(r, yy)), Math.min(o.seg ?? 8, 10));
     return this.add(mat, g, x, y, z, o);
   }
   /** a cushion: a box with its top pushed into a pillow dome (low poly) */
   cushion(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0, o: PartOpts & { puff?: number } = {}) {
-    const g = new THREE.BoxGeometry(sx, sy, sz, 3, 1, 3);
+    const g = new THREE.BoxGeometry(sx, sy, sz, 2, 1, 2);
     const P = g.attributes.position as THREE.BufferAttribute;
     const puff = o.puff ?? 0.35;
     for (let i = 0; i < P.count; i++) {

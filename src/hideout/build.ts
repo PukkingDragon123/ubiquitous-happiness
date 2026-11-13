@@ -216,7 +216,7 @@ export class BuildMode {
   ui(ui: PixelUI, input: Input): boolean {
     let close = false;
     const W = Math.min(ui.w - 8, 470);
-    const H = 116;
+    const H = 124;
     const x0 = Math.round((ui.w - W) / 2), y0 = ui.h - H - 4;
     // materials strip on top
     this.materialsStrip(ui, x0, 4, W);
@@ -237,7 +237,7 @@ export class BuildMode {
     if (input.keyHit('Escape')) { if (this.sel || this.moving || this.tool === 'remove') { this.cancel(); this.tool = 'place'; } else close = true; }
     // cards
     const list = BLUEPRINT_LIST.filter((b) => b.cat === this.cat);
-    const cw = 66, ch = 92, gap = 4;
+    const cw = 66, ch = 100, gap = 4;
     const areaW = tx - 10 - (x0 + 8) - 20;
     const per = Math.max(1, Math.floor((areaW + gap) / (cw + gap)));
     const pages = Math.max(1, Math.ceil(list.length / per));
@@ -298,7 +298,7 @@ export class BuildMode {
     if (hov) { this.hoverCard = bp.id; ui.cursor = unlocked ? 'point' : 'arrow'; }
     ui.frame(sel ? 'cardSel' : 'card', x, y + lift, w, h);
     // pinned corner tape
-    ui.fill(x + w / 2 - 6, y + lift - 2, 12, 4, '#d8c890', 0.85);
+    ui.fill(x + w / 2 - 6, y + lift - 2, 12, 4, '#d8c890');
     let name = bp.name.toUpperCase();
     while (ui.measure(name, 'tiny') > w - 8 && name.length > 3) name = name.slice(0, -2) + '.';
     ui.text(name, x + w / 2, y + lift + 5, { font: 'tiny', color: unlocked ? C.line : C.ink, align: 'center' });
@@ -311,10 +311,10 @@ export class BuildMode {
     // cost: up to 2 rows of icon+count
     const ents = Object.entries(cost);
     ents.forEach(([id, n], i) => {
-      const cx = x + 4 + (i % 2) * 30, cy = y + lift + 66 + Math.floor(i / 2) * 11;
+      const cx = x + 4 + (i % 2) * 30, cy = y + lift + 64 + Math.floor(i / 2) * 17;
       const ok = (META.materials[id] ?? 0) >= n;
-      ui.item(id, cx, cy, 10, 10);
-      ui.text(`${n}`, cx + 11, cy + 2, { font: 'tiny', color: ok ? C.line : C.bad, outline: ok ? null : '#2a0000' });
+      ui.item(id, cx, cy, 16, 16);
+      ui.text(`${n}`, cx + 17, cy + 5, { font: 'small', color: ok ? C.line : C.bad, outline: ok ? null : '#2a0000' });
     });
     if (!unlocked) {
       ui.fill(x + 2, y + 2, w - 4, h - 4, '#06122a', 0.55);
@@ -327,7 +327,7 @@ export class BuildMode {
 
   /** the big plan sheet: art, name, footprint, description, perk, full cost with have/need */
   private sheet(ui: PixelUI, bp: Blueprint, x: number, y: number) {
-    const w = 168, h = 108;
+    const w = 172, h = 112;
     x = Math.max(4, Math.min(ui.w - w - 4, x));
     ui.frame('blueprint', x, y, w, h);
     ui.text(bp.name.toUpperCase(), x + 8, y + 8, { font: 'body', color: C.line });
@@ -340,22 +340,23 @@ export class BuildMode {
     const flags = [bp.wall ? 'WALL' : '', bp.floor ? 'FLOOR LAYER' : '', bp.unique ? 'ONE ONLY' : '', bp.core ? 'CORE' : ''].filter(Boolean).join(' · ');
     if (flags) ui.text(flags, x + 8, y + 76, { font: 'tiny', color: C.ink });
     ui.fill(x + 8, y + 84, w - 16, 1, C.ink);
-    ui.costRow(costOf(bp), x + 8, y + 89, { have: META.materials, showHave: true, size: 11, font: 'tiny' });
+    ui.costRow(costOf(bp), x + 8, y + 88, { have: META.materials, showHave: true, size: 16, font: 'small' });
   }
 
   private materialsStrip(ui: PixelUI, x: number, y: number, w: number) {
     const mats = Object.entries(META.materials).filter(([k, v]) => ITEMS[k] && v > 0).sort((a, b) => b[1] - a[1]);
-    const cw = ui.costWidth(Object.fromEntries(mats), { size: 11, font: 'tiny', gap: 4 });
+    const cw = ui.costWidth(Object.fromEntries(mats), { size: 16, font: 'small', gap: 4 });
     const pw = Math.min(w, cw + 16);
     const px = Math.round((ui.w - pw) / 2);
-    ui.panel('dark', px, y, pw, 18, undefined, { alpha: 0.92 });
+    ui.panel('dark', px, y, pw, 22, undefined, { alpha: 0.92 });
     if (!mats.length) { ui.text('NO MATERIALS', ui.w / 2, y + 6, { font: 'tiny', color: '#8a9ab8', align: 'center' }); return; }
-    ui.clip(px + 4, y, pw - 8, 18);
+    ui.clip(px + 4, y, pw - 8, 22);
     let cx = px + 8;
     for (const [id, n] of mats) {
-      ui.item(id, cx, y + 4, 11, 11);
-      cx += 12 + ui.text(`${n}`, cx + 12, y + 7, { font: 'tiny', color: '#ffffff' }) + 4;
-      if (ui.hover(cx - 30, y, 30, 18)) ui.tooltip(ui.itemTip(id));
+      ui.item(id, cx, y + 3, 16, 16);
+      const tw = ui.text(`${n}`, cx + 17, y + 8, { font: 'small', color: '#ffffff' });
+      if (ui.hover(cx, y, 17 + tw, 22)) ui.tooltip(ui.itemTip(id));
+      cx += 17 + tw + 5;
     }
     ui.unclip();
     void x;

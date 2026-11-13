@@ -54,7 +54,7 @@ export class SurfaceBoat implements Entity, Attacker {
   constructor(public job: BoatJob, kind: BoatKind, public stationX: number, fromSide: number, seed: number, o: { iq?: number; hpMul?: number; crew?: Archetype[]; drops?: number; boss?: boolean } = {}) {
     this.vessel = makeBoat(kind, seed);
     this.dir = fromSide;
-    this.x = stationX + fromSide * 22;
+    this.x = stationX + fromSide * 12;
     this.vessel.setX(this.x);
     this.obj.add(this.vessel.group);
     this.iq = o.iq ?? 0.4;
@@ -98,7 +98,7 @@ export class SurfaceBoat implements Entity, Attacker {
       want = this.dir * 3.5;
       if (Math.abs(this.x - this.stationX) > 26) { this.alive = false; return; }
     }
-    this.vx += (want - this.vx) * (1 - Math.exp(-dt * 0.8));
+    this.vx += (want - this.vx) * (1 - Math.exp(-dt * (this.state === 'arrive' ? 1.6 : 0.8)));
     v.drift(this.vx);
     v.update(dt, w.water);
     this.x = v.x;

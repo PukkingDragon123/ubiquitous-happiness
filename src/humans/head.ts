@@ -29,13 +29,13 @@ const HEAD_ROWS: HeadRow[] = [
   { y: 0.199, zc: -0.004, r: [0.06, 0.059, 0.057, 0.054, 0.053, 0.056, 0.062, 0.064] },
 ];
 const HEAD_ANG_HI = [-180, -155, -125, -95, -70, -45, -22, 0, 22, 45, 70, 95, 125, 155, 180];
-const HEAD_ANG_LO = [-180, -135, -90, -50, -22, 0, 22, 50, 90, 135, 180];
+const HEAD_ANG_LO = [-180, -125, -80, -38, 0, 38, 80, 125, 180];
 const FACE_ROWS_HI = [-0.03, -0.015, 0.0, 0.012, 0.022, 0.032, 0.042, 0.052, 0.062, 0.072, 0.08, 0.087, 0.094, 0.1, 0.106, 0.113, 0.12, 0.128, 0.142, 0.16, 0.18, 0.2];
 const FACE_ANG_HI = [-180, -150, -122, -101, -86, -72, -60, -50, -41, -33, -26, -19, -12, -6, 0, 6, 12, 19, 26, 33, 41, 50, 60, 72, 86, 101, 122, 150, 180];
 // PS1 skull: a coarse cage with rows through the brow, the eye line, the cheekbones, the mouth and the chin so
 // the faceted silhouette still reads as a face; the painted page does the rest
-const FACE_ROWS_LO = [-0.03, -0.008, 0.012, 0.036, 0.058, 0.08, 0.1, 0.122, 0.15, 0.18, 0.2];
-const FACE_ANG_LO = [-180, -140, -105, -80, -58, -38, -20, 0, 20, 38, 58, 80, 105, 140, 180];
+const FACE_ROWS_LO = [-0.03, 0.006, 0.045, 0.085, 0.125, 0.165, 0.2];
+const FACE_ANG_LO = [-180, -130, -85, -40, 0, 40, 85, 130, 180];
 /** ring angles of hair shells / hats (degrees from the face) */
 export let HEAD_ANG = HEAD_ANG_HI;
 let FACE_ROWS = FACE_ROWS_HI, FACE_ANG = FACE_ANG_HI;
@@ -287,7 +287,7 @@ function buildHair(B: Loft, S: HeadShape) {
     return side + (back - side) * Math.min(1, (a - 105) / 55);
   };
   const thick = st === 'sides' ? 0.008 : st === 'bun' ? 0.008 : st === 'shaggy' ? 0.014 : st === 'messy' ? 0.013 : 0.009;
-  const ys = lp([-0.14, -0.06, 0.0, 0.06, 0.12, 0.17, 0.198], [-0.14, -0.08, -0.03, 0.0, 0.035, 0.07, 0.105, 0.14, 0.17, 0.198]);
+  const ys = lp([-0.14, -0.04, 0.06, 0.14, 0.198], [-0.14, -0.08, -0.03, 0.0, 0.035, 0.07, 0.105, 0.14, 0.17, 0.198]);
   const minY = Math.min(...HEAD_ANG.map((a) => line(a)));
   const rowYs = ys.filter((y) => y >= minY - 0.03);
   const us = HEAD_ANG.map((a) => 0.5 + a / 360);

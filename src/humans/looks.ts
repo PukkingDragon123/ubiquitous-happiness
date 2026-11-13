@@ -271,7 +271,8 @@ export function makeLook(arch: Archetype, seed: number): Look {
       // ---------------- divers: an athletic build in a skin-tight suit, the face framed by a hood and a mask
       const d = arch as DiverArch;
       const heavy = d === 'heavyDiver' || d === 'titan';
-      L.build = baseBuild({ s: d === 'titan' ? 1.55 : heavy ? 1.08 : 1.0 + (r.next() - 0.5) * 0.06, bw: heavy ? 1.18 : 1.02, mass: heavy ? 1.25 : 0.98, belly: heavy ? 0.4 : 0.05, chest: heavy ? 0.8 : 0.55, headS: d === 'titan' ? 1.0 : 1.12, shoulders: heavy ? 1.15 : 1.08, handS: heavy ? 1.3 : 1.15, footS: 1.1, fem: d === 'medic' && r.chance(0.5) ? 1 : 0 });
+      // MGS2-style mass: broad shoulders, a barrel chest, wide hips, big gloved hands
+      L.build = baseBuild({ s: d === 'titan' ? 1.55 : heavy ? 1.08 : 1.0 + (r.next() - 0.5) * 0.06, bw: heavy ? 1.24 : 1.14, mass: heavy ? 1.3 : 1.1, belly: heavy ? 0.4 : 0.1, chest: heavy ? 1 : 0.9, headS: d === 'titan' ? 1.0 : 1.1, shoulders: heavy ? 1.24 : 1.2, handS: heavy ? 1.45 : 1.35, footS: 1.12, neckLen: 0.7, fem: d === 'medic' && r.chance(0.5) ? 1 : 0 });
       L.age = 0.3 + r.next() * 0.4;
       L.hair = { style: 'none', col: hairNat, grey: 0 };
       L.facial = r.chance(0.45) ? 'stubble' : r.chance(0.3) ? 'moustache' : 'none'; L.facialCol = hairNat;

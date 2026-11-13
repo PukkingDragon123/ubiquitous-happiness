@@ -100,10 +100,19 @@ export function floraMaterial(map: THREE.Texture, o: { sss?: [number, number, nu
   return retro(m);
 }
 
+/** pixel-art sprite cards: nearest-filtered alpha cut-outs, smooth (tilted) card normals, sway + glow */
+export function spriteMaterial(map: THREE.Texture) {
+  const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, flatShading: false, side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.92, metalness: 0 });
+  uw(m, { sss: [0.75, 0.8, 0.6], sssK: 0.6, caustics: 0.8, retro: false });
+  addSwayGlow(m, true);
+  return retro(m, { affine: 0 });
+}
+
 /** opaque UV-mapped props (wrecks, crates, buoys, clams) on an atlas; sway optional (sails, flags, chains) */
 export function propMaterial(map: THREE.Texture, o: { sway?: boolean; rough?: number; metal?: number; side?: THREE.Side; alphaTest?: number } = {}) {
   const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, flatShading: true, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide, alphaTest: o.alphaTest ?? 0 });
-  uw(m, { caustics: 1, retro: false });
+  // wrap light keeps the camera-facing shadow sides of hulls and props readable against the sunlit sand
+  uw(m, { caustics: 1, retro: false, sss: [0.62, 0.66, 0.66], sssK: 0.7 });
   addSwayGlow(m, o.sway ?? false);
   return retro(m);
 }
@@ -121,7 +130,7 @@ const TRI_VB = /* glsl */ `
 /** sculpted rock: world-space triplanar pixel tile (32 px/m), vertex colour = tint x cavity x crust */
 export function rockMaterial(tile: THREE.Texture, o: { scale?: number; glow?: boolean } = {}) {
   const m = new THREE.MeshStandardMaterial({ map: tile, vertexColors: true, flatShading: true, roughness: 0.93, metalness: 0 });
-  uw(m, { caustics: 0.9, retro: false });
+  uw(m, { caustics: 0.9, retro: false, sss: [0.5, 0.56, 0.58], sssK: 0.5 });
   const sc = (o.scale ?? 0.5).toFixed(3);
   patch(m, '|rock' + sc, (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V).replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);

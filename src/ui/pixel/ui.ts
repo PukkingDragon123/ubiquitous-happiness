@@ -46,31 +46,41 @@ export interface ButtonOpts {
 const KEY_LABEL: Record<string, string> = { Enter: 'ENTER', Escape: 'ESC', Tab: 'TAB', Delete: 'DEL', Space: 'SPC', Backspace: 'BKSP' };
 function labelForKey(code: string) { if (KEY_LABEL[code]) return KEY_LABEL[code]; if (code.startsWith('Key')) return code.slice(3); if (code.startsWith('Digit')) return code.slice(5); return code; }
 
-/** downsample a pixel-art canvas into an exact box, binarising alpha and averaging colour (keeps silhouettes crisp) */
+/**
+ * fit a pixel-art canvas into an exact box without inventing colours: at exactly 2:1 each 2x2 block takes its
+ * most common colour (outlines win ties); other ratios sample nearest. Alpha is binary.
+ */
 const iconBoxCache = new Map<string, HTMLCanvasElement>();
 export function fitIcon(src: HTMLCanvasElement, w: number, h: number, key?: string): HTMLCanvasElement {
   const k = key ? `${key}|${w}|${h}` : '';
   if (k) { const c = iconBoxCache.get(k); if (c) return c; }
   const sw = src.width, sh = src.height;
-  const s = Math.min(w / sw, h / sh);
+  // integer-friendly scale: prefer exact 1:1, 1:2, 1:4 when they fit
+  let s = Math.min(w / sw, h / sh);
+  for (const q of [1, 0.5, 0.25]) if (s >= q) { s = q; break; }
   const ow = Math.max(1, Math.round(sw * s)), oh = Math.max(1, Math.round(sh * s));
   const out = document.createElement('canvas'); out.width = w; out.height = h;
   const sd = src.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, sw, sh).data;
   const ctx = out.getContext('2d')!;
   const img = ctx.createImageData(w, h);
   const ox = Math.floor((w - ow) / 2), oy = Math.floor((h - oh) / 2);
+  const step = 1 / s;
   for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
-    const x0 = Math.floor(x / s), x1 = Math.max(x0 + 1, Math.floor((x + 1) / s)), y0 = Math.floor(y / s), y1 = Math.max(y0 + 1, Math.floor((y + 1) / s));
-    let r = 0, g = 0, b = 0, n = 0, tot = 0, dark = 0;
-    for (let yy = y0; yy < Math.min(sh, y1); yy++) for (let xx = x0; xx < Math.min(sw, x1); xx++) {
+    const x0 = Math.floor(x * step), y0 = Math.floor(y * step), n = Math.max(1, Math.round(step));
+    // tally the colours in the source block
+    const cnt = new Map<number, number>(); let opaque = 0, tot = 0;
+    for (let yy = y0; yy < Math.min(sh, y0 + n); yy++) for (let xx = x0; xx < Math.min(sw, x0 + n); xx++) {
       const i = (yy * sw + xx) * 4; tot++;
-      if (sd[i + 3] > 100) { r += sd[i]; g += sd[i + 1]; b += sd[i + 2]; n++; if (sd[i] + sd[i + 1] + sd[i + 2] < 90) dark++; }
+      if (sd[i + 3] < 128) continue;
+      opaque++;
+      const key2 = (sd[i] << 16) | (sd[i + 1] << 8) | sd[i + 2];
+      cnt.set(key2, (cnt.get(key2) ?? 0) + 1);
     }
-    if (n * 2 < tot) continue;
+    if (opaque * 2 < tot || !opaque) continue;
+    let best = 0, bn = -1, bl = 1e9;
+    for (const [c, m] of cnt) { const l = ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255); if (m > bn || (m === bn && l < bl)) { best = c; bn = m; bl = l; } }
     const j = ((y + oy) * w + x + ox) * 4;
-    // keep outlines readable: if the block is mostly outline, use the outline colour
-    if (dark * 2 >= n) { r = 20 * n; g = 14 * n; b = 24 * n; }
-    img.data[j] = r / n; img.data[j + 1] = g / n; img.data[j + 2] = b / n; img.data[j + 3] = 255;
+    img.data[j] = (best >> 16) & 255; img.data[j + 1] = (best >> 8) & 255; img.data[j + 2] = best & 255; img.data[j + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
   if (k) { iconBoxCache.set(k, out); if (iconBoxCache.size > 800) iconBoxCache.clear(); }
@@ -432,7 +442,7 @@ export class PixelUI {
 
   /** item icon + count pairs; red count when you have less than needed. Returns the width drawn */
   costRow(cost: Record<string, number>, x: number, y: number, o: { have?: Record<string, number>; size?: number; font?: FontName; dark?: boolean; gap?: number; showHave?: boolean } = {}): number {
-    const size = o.size ?? 12;
+    const size = o.size ?? 16;
     const font = o.font ?? 'small';
     let cx = x;
     for (const [id, n] of Object.entries(cost)) {
@@ -451,7 +461,7 @@ export class PixelUI {
 
   /** width costRow() would take */
   costWidth(cost: Record<string, number>, o: { have?: Record<string, number>; size?: number; font?: FontName; gap?: number; showHave?: boolean } = {}) {
-    const size = o.size ?? 12; let w = 0;
+    const size = o.size ?? 16; let w = 0;
     for (const [id, n] of Object.entries(cost)) { const have = o.have?.[id] ?? 0; w += size + 1 + measure(o.showHave && o.have ? `${Math.min(have, 999)}/${n}` : `${n}`, o.font ?? 'small') + (o.gap ?? 5); }
     return w;
   }

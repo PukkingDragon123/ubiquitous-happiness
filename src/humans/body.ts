@@ -113,6 +113,10 @@ export interface BodyBuild {
 export function buildBody(L: Look, d: Dims): BodyBuild {
   const B = new Loft(true);
   const NA = lp(6, 10);
+  // PS2 body mass: thick padded limbs with muscle bulges (divers full, fishermen a little), off in hi detail
+  const VOL = DETAIL.low ? (L.dive ? 1 : 0.35) : 0;
+  const armVol = (y: number) => 1 + VOL * ((y > -0.29 ? 0.85 : y > -0.47 ? 0.7 : 0.75) + 0.22 * gauss(y, 0.0, 0.04) + 0.18 * gauss(y, -0.14, 0.05) + 0.16 * gauss(y, -0.37, 0.05) - 0.08 * gauss(y, -0.29, 0.025));
+  const legVol = (y: number) => 1 + VOL * ((y > -0.44 ? 0.32 : 0.5) + 0.2 * gauss(y, -0.57, 0.06) + 0.08 * gauss(y, -0.12, 0.08) - 0.06 * gauss(y, -0.445, 0.03));
   const sh = shapeOf(L);
   const s = d.s, b = L.build, fem = b.fem, mass = b.mass, bw = b.bw;
   const Rs = d.rest;
@@ -141,7 +145,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     // barrel chest
     k += gauss(y, 1.27, 0.09) * gauss(Math.abs(th), 0.3, 0.9) * b.chest * 0.07;
     // cloth folds: blousing at a tuck, ripples at a loose hem, folds from the armpits
-    const fold = (a: number) => (Math.sin(th * 7 + a) * 0.6 + Math.sin(th * 11 + a * 2.3) * 0.4) * (DETAIL.low ? 0.25 : 1);
+    const fold = (a: number) => (Math.sin(th * 7 + a) * 0.6 + Math.sin(th * 11 + a * 2.3) * 0.4) * (DETAIL.low ? 0 : 1);
     if (sh.tuck) k += gauss(y, sh.waist + 0.035, 0.022) * (0.018 + 0.012 * fold(1.7));
     else k += gauss(y, sh.topHem + 0.035, 0.03) * 0.012 * fold(0.4);
     k += gauss(y, 1.2, 0.05) * gauss(Math.abs(th), 1.25, 0.3) * 0.016 * fold(2.9);
@@ -171,13 +175,14 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
   {
     const breaks: number[] = [sh.topHem];
     if (sh.legKind !== 'skirt' && (sh.tuck || sh.topHem > sh.waist)) breaks.push(sh.waist);
-    const ys = ringYs(lp(TORSO_ROWS.filter((_, i) => i !== 3 && i !== 5 && i !== 7), TORSO_ROWS), breaks, lp([1.04, 1.2], [0.96, 1.04, 1.12, 1.2, 1.29]));
-    const n = lp(10, 20);
+    // blocky (PS2): 8 rings, 8 sides, a squarer section so the trunk reads as a chamfered box
+    const ys = ringYs(lp(pickRows(TORSO_ROWS, [0, 1, 2, 4, 6, 8, 10, 11]), TORSO_ROWS), lp(breaks.filter((b) => b > 0.84), breaks), lp([], [0.96, 1.04, 1.12, 1.2, 1.29]));
+    const n = lp(8, 20);
     const rings = ys.map(({ y, eps }) => {
       const r = sampleRows(TORSO_ROWS, y);
       const t = thick(y + eps * 0.003);
       const fx = femX(y);
-      const pts = ellRing(ty(y), 0, ((r.cz ?? 0) + hunchZ(y)) * s, (r.rx * bw * fx + t) * s, (r.rf * mass + t) * s, (r.rb * mass + t) * s, n, r.sq ?? 2.2, 1, (th) => bump(th, y));
+      const pts = ellRing(ty(y), 0, ((r.cz ?? 0) + hunchZ(y)) * s, (r.rx * bw * fx + t) * s, (r.rf * mass + t) * s, (r.rb * mass + t) * s, n, DETAIL.low ? Math.max(r.sq ?? 2.2, 2.9) : r.sq ?? 2.2, 1, (th) => bump(th, y));
       return { pts, v: vOf(VMAP.TORSO, y), w: (p: V3, j: number) => wOf(y, -Math.PI + (Math.PI * 2 * j) / n) };
     });
     B.loft(rings, usFor(n), R('TORSO'), 1, { start: [0, ty(0.8), -0.005 * s], end: [0, ty(1.5), -0.006 * s], startW: [BI.hips, 1], endW: [BI.chest, 0.5, BI.neck, 0.5], alt: true });
@@ -188,9 +193,9 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
 
   // ---------------- neck
   {
-    const nr = 0.052 * (0.8 + 0.2 * mass) * (1 - fem * 0.14) * (L.arch === 'captainGaff' ? 1.25 : 1);
-    const ys = lp([1.44, 1.5, 1.58, 1.625], [1.44, 1.48, 1.52, 1.56, 1.6, 1.625]);
-    const n = lp(7, 12);
+    const nr = 0.052 * (0.8 + 0.2 * mass) * (1 - fem * 0.14) * (L.arch === 'captainGaff' ? 1.25 : 1) * (1 + VOL * 0.45);
+    const ys = lp([1.44, 1.53, 1.625], [1.44, 1.48, 1.52, 1.56, 1.6, 1.625]);
+    const n = lp(6, 12);
     const hy = Rs.head[1];
     const rings = ys.map((y) => {
       const yy = Rs.neck[1] + (y - 1.48) * s * b.neckLen;
@@ -217,7 +222,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     const hasGlove = L.hands.kind !== 'bare';
     if (hasGlove) breaks.push(-0.47);
     const harpoon = side === 'L' && !!L.extras.harpoon;
-    let ys = ringYs(lp(ARM_ROWS.filter((_, i) => i !== 2 && i !== 4 && i !== 7 && i !== 10), ARM_ROWS), breaks, lp(sh.sleeveY < -0.3 ? [-0.285, -0.32] : [], sh.sleeveY < -0.3 ? [-0.235, -0.285, -0.32, -0.455, -0.478] : [sh.sleeveY + 0.03]));
+    let ys = ringYs(lp(rowsAt(ARM_ROWS, [0.04, -0.01, -0.14, -0.29, -0.37, -0.48, -0.535]), ARM_ROWS), lp(breaks.filter((b) => b > -0.44), breaks), lp([], sh.sleeveY < -0.3 ? [-0.235, -0.285, -0.32, -0.455, -0.478] : [sh.sleeveY + 0.03]));
     if (harpoon) ys = ys.filter((r) => r.y > -0.44);
     const fm = (1 - fem * 0.12) * (0.66 + 0.34 * mass) * (L.arch === 'captainGaff' ? 1.15 : 1) * 1.2;
     const wOfA = (y: number): Wt => {
@@ -251,7 +256,8 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
       const r = sampleRows(ARM_ROWS, y);
       const yy = y + eps * 0.0005;
       const t = tOf(yy);
-      const pts = ellRing(ua[1] + y * al * s, 0, ua[2], (r.rx * fm + t) * s, (r.rf * fm + t) * s, (r.rb * fm + t) * s, NA, 2, k, (th) => armBump(th, y, t) * (DETAIL.low ? 0.4 : 1));
+      const av = armVol(y);
+      const pts = ellRing(ua[1] + y * al * s, 0, ua[2], (r.rx * fm * av + t) * s, (r.rf * fm * av + t) * s, (r.rb * fm * av + t) * s, NA, 2, k, (th) => armBump(th, y, t) * (DETAIL.low ? 0.4 : 1));
       for (const p of pts) p[0] += ua[0];
       return { pts, v: vOf(VMAP.ARM, y), w: wOfA(y) };
     });
@@ -272,7 +278,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     if (sh.legKind !== 'skirt' && sh.legHem > -0.86) breaks.push(sh.legHem);
     if (sh.bootTop > -0.86) breaks.push(sh.bootTop);
     if (sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') breaks.push(-0.74); // sock top
-    const ys = ringYs(lp(LEG_ROWS.filter((_, i) => i !== 1 && i !== 3 && i !== 6 && i !== 9), LEG_ROWS), breaks, lp([], sh.legKind !== 'shorts' ? [-0.72, -0.795] : []));
+    const ys = ringYs(lp(rowsAt(LEG_ROWS, [0.055, -0.1, -0.3, -0.445, -0.57, -0.72, -0.865]), LEG_ROWS), lp(breaks.filter((b) => b > -0.8 || b === sh.bootTop), breaks), lp([], sh.legKind !== 'shorts' ? [-0.72, -0.795] : []));
     const fm = (0.7 + 0.3 * mass) * (L.arch === 'kid' ? 1.08 : 1) * 1.12;
     const femLeg = (y: number) => 1 + fem * (0.09 * gauss(y, -0.08, 0.12) - 0.05 * gauss(y, -0.6, 0.1));
     const legBump = (thx: number, y: number, cov: boolean) => {
@@ -314,7 +320,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
       if (yy < sh.bootTop) { t += sh.bootThick + (cov ? 0 : 0.004); flare *= 0.3; }
       else if ((sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') && yy < -0.74 && !cov) t += 0.003;
       if (sh.feet === 'sandal' && yy < -0.74) t += 0.002;
-      const fl = femLeg(y);
+      const fl = femLeg(y) * legVol(y);
       const pts = ellRing(thp[1] + y * ll * s, 0, thp[2], (r.rx * fm * fl + t + flare) * s, (r.rf * fm * fl + t + flare) * s, (r.rb * fm * fl + t + flare * 0.6) * s, NA, 2, k, (thx) => legBump(thx, y, cov) * (DETAIL.low ? 0.4 : 1));
       for (const p of pts) p[0] += thp[0];
       return { pts, v: vOf(VMAP.LEG, y), w: wOfL(y) };
@@ -354,7 +360,7 @@ function buildOuter(B: Loft, L: Look, d: Dims, sh: Shape, torsoSurf: (y: number,
   const top = 1.46, hem = Math.max(0.84, Math.min(1.02, sh.outerHem));
   const kind = sh.outer;
   const t0 = sh.outerThick;
-  const n = lp(14, 28);
+  const n = lp(10, 28);
   const ys: number[] = [];
   const nr = Math.max(lp(4, 6), Math.round((top - hem) / lp(0.08, 0.035)));
   for (let i = 0; i <= nr; i++) ys.push(top - ((top - hem) * i) / nr);
@@ -448,7 +454,7 @@ function buildCollar(B: Loft, L: Look, d: Dims, sh: Shape, nr: number) {
 
 function buildTails(B: Loft, L: Look, d: Dims, top: number, bot: number, tk: number, skirt: boolean, open: boolean) {
   const s = d.s, b = L.build;
-  const n = lp(10, 20);
+  const n = lp(8, 20);
   const nr = Math.max(lp(2, 3), Math.round((top - bot) / lp(0.14, 0.08)));
   const splitY = 0.82;
   const ys = Array.from({ length: nr + 1 }, (_, i) => top - ((top - bot) * i) / nr).filter((y, i) => i === 0 || i === nr || Math.abs(y - splitY) > 0.015);
@@ -487,7 +493,7 @@ function buildHand(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number) {
   const hp = d.rest[('hand' + side) as BoneName];
   const reg = R(('HAND_' + side) as RegKey);
   const kind = L.hands.kind;
-  const gl = kind === 'glove' ? 0.004 : kind === 'mitten' ? 0.009 : 0;
+  const gl = (kind === 'glove' ? 0.004 : kind === 'mitten' ? 0.009 : 0) + (DETAIL.low && L.dive ? 0.012 : 0);
   const hs = d.s * L.build.handS * (1 - L.build.fem * 0.08) * (0.9 + 0.1 * L.build.mass);
   const tr = (p: V3): V3 => [hp[0] + p[0], hp[1] + p[1], hp[2] + p[2]];
   const prow = [
@@ -497,20 +503,20 @@ function buildHand(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number) {
     { y: -0.084, rx: 0.02, rf: 0.048, rb: 0.044, v: 0.56, w: [H, 0.65, F1, 0.35] },
   ];
   const knuckle = (th: number) => Math.max(0, Math.sin(th)) * 0.05;
-  const rings = prow.map((r, ri) => ({ pts: ellRing(r.y * hs, 0, 0.002, (r.rx + gl) * hs, (r.rf + gl) * hs, (r.rb + gl) * hs, 6, 2.6, k, ri === 3 ? knuckle : undefined, -Math.PI + Math.PI / 6).map(tr), v: r.v, w: r.w as Wt }));
+  const rings = (DETAIL.low ? [prow[0], prow[2], prow[3]] : prow).map((r, ri) => ({ pts: ellRing(r.y * hs, 0, 0.002, (r.rx + gl) * hs, (r.rf + gl) * hs, (r.rb + gl) * hs, DETAIL.low ? 4 : 6, 2.6, k, ri === 3 && !DETAIL.low ? knuckle : undefined, -Math.PI + Math.PI / (DETAIL.low ? 4 : 6)).map(tr), v: r.v, w: r.w as Wt }));
   const block = kind === 'mitten' || DETAIL.low;
-  B.loft(rings, usFor(6), reg, 40 + (k > 0 ? 0 : 1), { end: block ? null : tr([0, -0.092 * hs, 0.002]), endW: [H, 0.6, F1, 0.4], alt: true });
+  B.loft(rings, usFor(DETAIL.low ? 4 : 6), reg, 40 + (k > 0 ? 0 : 1), { end: block ? null : tr([0, -0.092 * hs, 0.002]), endW: [H, 0.6, F1, 0.4], alt: true });
   if (block) {
     // the mitten paddle: all four fingers in one rounded pouch that still curls
     const z = 0.001 * hs;
-    const ring = (y: number, rx: number, rz: number) => ellRing(y, 0, z, rx, rz, rz, lp(6, 8), 2.4, k, undefined, -Math.PI).map(tr);
+    const ring = (y: number, rx: number, rz: number) => ellRing(y, 0, z, rx, rz, rz, lp(4, 8), 2.4, k, undefined, -Math.PI + (DETAIL.low ? Math.PI / 4 : 0)).map(tr);
     const rr = [
       { pts: ring(-0.084 * hs, (0.02 + gl) * hs, (0.046 + gl) * hs), v: 0.55, w: [H, 0.6, F1, 0.4] as Wt },
       { pts: ring(-0.115 * hs, (0.021 + gl) * hs, (0.047 + gl) * hs), v: 0.35, w: [F1, 0.8, F2, 0.2] as Wt },
       { pts: ring(-0.145 * hs, (0.019 + gl) * hs, (0.042 + gl) * hs), v: 0.18, w: [F2, 1] as Wt },
       { pts: ring(-0.165 * hs, (0.014 + gl) * hs, (0.03 + gl) * hs), v: 0.06, w: [F2, 1] as Wt },
     ];
-    B.loft(lp([rr[0], rr[1], rr[3]], rr), usFor(lp(6, 8)), reg, 42 + (k > 0 ? 0 : 1), { end: tr([0, -0.172 * hs, z]), endW: [F2, 1], endV: 0 });
+    B.loft(lp([rr[0], rr[2]], rr), usFor(lp(4, 8)), reg, 42 + (k > 0 ? 0 : 1), { end: tr([0, -0.172 * hs, z]), endW: [F2, 1], endV: 0 });
   } else {
     const fz = [0.03, 0.0102, -0.0098, -0.0285], fl = [0.077, 0.085, 0.08, 0.064], fr = [0.0108, 0.0114, 0.0107, 0.0094];
     for (let i = 0; i < 4; i++) {
@@ -536,8 +542,9 @@ function buildHand(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number) {
     const ring = (t: number, r: number): V3[] => {
       const c = [base[0] + dir[0] * t, base[1] + dir[1] * t, base[2] + dir[2] * t];
       const out: V3[] = [];
-      for (let i = 0; i <= 5; i++) {
-        const a = -Math.PI + (Math.PI * 2 * i) / 5;
+      const ns = DETAIL.low ? 4 : 5;
+      for (let i = 0; i <= ns; i++) {
+        const a = -Math.PI + (Math.PI * 2 * i) / ns;
         out.push(tr([c[0] + (Math.cos(a) * up[0] + Math.sin(a) * side2[0]) * r, c[1] + (Math.cos(a) * up[1] + Math.sin(a) * side2[1]) * r, c[2] + (Math.cos(a) * up[2] + Math.sin(a) * side2[2]) * r]));
       }
       return out;
@@ -550,7 +557,7 @@ function buildHand(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number) {
       { pts: ring(Lt * 0.92, r * 0.84), v: 0.05, w: [TH, 1] as Wt },
     ];
     const tip = tr([base[0] + dir[0] * Lt, base[1] + dir[1] * Lt, base[2] + dir[2] * Lt]);
-    B.loft(rr, usFor(5), reg, 50 + (k > 0 ? 0 : 1), { end: tip, endW: [TH, 1], endV: 0 });
+    B.loft(DETAIL.low ? [rr[0], rr[2]] : rr, usFor(DETAIL.low ? 4 : 5), reg, 50 + (k > 0 ? 0 : 1), { end: tip, endW: [TH, 1], endV: 0 });
   }
 }
 const nrm = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -598,9 +605,10 @@ function buildFoot(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number, sh: Sh
   const fs = s * L.build.footS * (1 - L.build.fem * 0.08);
   const ground = -d.L.ankle;
   const sole = spec.soleH;
-  const AN = [-180, -125, -91, -89, -45, 0, 45, 89, 91, 125, 180];
+  const AN = DETAIL.low ? [-180, -120, -91, -89, 0, 89, 91, 120, 180] : [-180, -125, -91, -89, -45, 0, 45, 89, 91, 125, 180];
   const us = AN.map((a) => 0.5 + a / 360);
-  const rings = spec.rows.map((r, i) => {
+  const footRows = DETAIL.low ? [spec.rows[0], spec.rows[3], spec.rows[6]] : spec.rows;
+  const rings = footRows.map((r, i) => {
     const toeLift = r.z > 0.15 ? (r.z - 0.15) * 0.3 : 0;
     const yb = ground + toeLift * s;
     const ym = yb + sole * fs;
@@ -616,7 +624,7 @@ function buildFoot(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number, sh: Sh
       return [k * Math.sign(sx) * Math.pow(Math.abs(sx), 0.35) * rl, ym - Math.pow(Math.max(0, cy), 0.3) * (ym - yb), r.z * fs];
     });
     for (const p of pts) { p[0] += fp[0]; p[1] += fp[1]; p[2] += fp[2]; }
-    return { pts, v: 0.04 + 0.66 * (i / (spec.rows.length - 1)), w: [Ft, 1] as Wt };
+    return { pts, v: 0.04 + 0.66 * (i / (footRows.length - 1)), w: [Ft, 1] as Wt };
   });
   const last = spec.rows[spec.rows.length - 1];
   B.loft(rings, us, reg, 60 + (k > 0 ? 0 : 1), {
@@ -624,7 +632,7 @@ function buildFoot(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number, sh: Sh
     end: [fp[0], fp[1] + ground + (sole + 0.012) * fs, fp[2] + (last.z + 0.012) * fs], endV: 0.72, startV: 0.0, alt: true,
   });
   // laces across the instep, the tongue standing proud above them (sneakers and boots)
-  if (sh.feet === 'sneaker' || sh.feet === 'boot') {
+  if ((sh.feet === 'sneaker' || sh.feet === 'boot') && !DETAIL.low) {
     const topAt = (z: number) => {
       const Rw = spec.rows;
       let i = 0; while (i < Rw.length - 2 && Rw[i + 1].z < z) i++;
@@ -652,3 +660,6 @@ function buildFoot(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number, sh: Sh
 }
 
 export { TORSO_ROWS, ARM_ROWS, LEG_ROWS };
+function pickRows(rows: Row[], idx: number[]): Row[] { return idx.map((i) => rows[Math.min(rows.length - 1, i)]); }
+/** profile rows resampled at chosen heights (muscle peaks / joints) */
+function rowsAt(rows: Row[], ys: number[]): Row[] { return ys.map((y) => sampleRows(rows, y)); }

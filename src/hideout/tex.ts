@@ -1,206 +1,193 @@
-// Hideout surface textures, painted per pixel at PS1 texel density (32 px/m for the cave, 64 px/m on furniture):
-// realistic materials (wet basalt, flagstones, grained planks, corduroy, a worn Persian rug, chipped enamel,
-// brass) in banded, dither-stepped ramps so they read as pixel art up close and as real stuff from afar.
+// Hideout surface textures: small, clean, deliberate pixel art (32-64 px tiles, nearest filtering) in 4-6 flat
+// tones per material, with the light baked into the shapes (1 px lit top/left edges, 1 px shadowed bottom/right
+// edges, darker mortar / seams as ambient occlusion). No per-pixel noise, no dither speckle: every pixel is part
+// of a shape (a plank, a stone, a weave cell, a rivet).
 //
-//   TEX.rock() / TEX.floor() / TEX.wood('pine') ...   cached THREE textures (repeat-wrapped, nearest mag)
-//   MAT.wood('pine') ...                              cached retro-patched MeshStandardMaterials
+//   TEX.rock() / TEX.floor() / TEX.wood('pine') ...   cached THREE textures (repeat-wrapped, nearest)
+//   MAT.wood('pine') ...                              cached, flat-shaded, retro-patched MeshStandardMaterials
 import * as THREE from 'three';
-import { Px, ramp, pxNoise, worley, hex, mix, shade, type RGB } from '../gfx/px';
-import { hash2, clamp01, fbm } from '../core/math';
+import { Px, hex, mix, type RGB } from '../gfx/px';
+import { hash2, clamp01 } from '../core/math';
 import { retro } from '../gfx/retro';
 
 const memo = <T>(fn: () => T) => { let v: T | undefined; return () => (v ??= fn()); };
 const memoK = <T>(fn: (k: string) => T) => { const m = new Map<string, T>(); return (k: string) => { let v = m.get(k); if (!v) { v = fn(k); m.set(k, v); } return v; }; };
 
-// ------------------------------------------------------------------ painters
-/** basalt / granite cave rock (2 m tile at 32 px/m); outside=true adds coralline algae + sponge crust */
-function paintRock(outside: boolean, seed: number): Px {
-  const S = 64, p = new Px(S, S);
-  const R = ramp(outside ? ['#1a1c22', '#2c2e36', '#40404a', '#56545c', '#6e6a6c', '#8a8480'] : ['#16110f', '#261d18', '#382b23', '#4a3a2e', '#5e4a3a', '#7a6450'], 7, 0.8);
-  const hf = (x: number, y: number) => {
-    const [f1, f2] = worley(x, y, 13, seed, S);
-    const cell = clamp01((f2 - f1) / 6);
-    return pxNoise(x, y, 18, 4, seed, S) * 0.6 + cell * 0.5 + pxNoise(x, y, 5, 2, seed + 3, S) * 0.25;
-  };
-  p.fill((x, y) => {
-    const h = hf(x, y);
-    const [f1, f2, id] = worley(x, y, 13, seed, S);
-    let t = h * 0.95 - 0.05 + (id - 0.5) * 0.18;
-    if (f2 - f1 < 1.2) t -= 0.45; // fracture lines
-    const c = R(t, x, y);
-    return c;
-  });
-  p.lightFromHeight((x, y) => hf(((x % S) + S) % S, ((y % S) + S) % S) * 6, -0.5, -0.8, 0.55, 1.4);
-  // mineral flecks + wet glints
-  p.map((c, x, y) => {
-    const hv = hash2(x, y, seed + 9);
-    if (hv > 0.985) return shade(c as unknown as RGB, 1.35);
-    if (hv < 0.012) return shade(c as unknown as RGB, 0.6);
-    return null;
-  });
-  if (outside) {
-    // pink coralline crust and green algae in patches, sponge dots
-    p.map((c, x, y) => {
-      const a = pxNoise(x, y, 14, 3, seed + 20, S), g = pxNoise(x, y, 10, 3, seed + 30, S);
-      if (a > 0.62) return mix(c as unknown as RGB, hash2(x, y, 4) > 0.5 ? hex('#c86a8a') : hex('#a84a6e'), 0.75);
-      if (g > 0.64) return mix(c as unknown as RGB, hash2(x, y, 5) > 0.5 ? hex('#4a6a2a') : hex('#36521e'), 0.7);
-      if (hash2(x, y, 6) > 0.993) return hex('#e8a03a');
-      return null;
-    });
-  } else {
-    // soot and damp near the bottom of the tile, a few tool marks
-    p.map((c, x, y) => {
-      const d = pxNoise(x, y, 20, 3, seed + 40, S);
-      if (d > 0.6) return shade(c as unknown as RGB, 0.8);
-      return null;
-    });
+/** n flat tones from dark to light around a base colour (shadows cool, lights warm) */
+function tones(base: string, n = 5, spread = 0.55): RGB[] {
+  const c = hex(base);
+  const out: RGB[] = [];
+  for (let i = 0; i < n; i++) {
+    const k = (i / (n - 1)) * 2 - 1; // -1..1
+    if (k < 0) out.push(mix(c, [c[0] * 0.35 + 6, c[1] * 0.38 + 8, c[2] * 0.5 + 18], -k * spread * 1.3));
+    else out.push(mix(c, [Math.min(255, c[0] * 1.25 + 40), Math.min(255, c[1] * 1.2 + 34), Math.min(255, c[2] * 1.1 + 20)], k * spread));
   }
-  return p;
+  return out;
 }
+const H = (a: number, b: number, s: number) => hash2(a, b, s);
 
-/** flagstone floor, 4 m tile at 32 px/m: irregular slabs, sandy grout, wear and cracks */
-function paintFloor(): Px {
-  const S = 128, p = new Px(S, S);
-  const stones = [['#5c5248', '#6e6458', '#827666', '#968a76', '#ab9e88'], ['#4e4a46', '#5e5a54', '#706a62', '#847c72', '#988e82'], ['#5e4c3c', '#705c48', '#846c56', '#987e64', '#ac9274']].map((c) => ramp(c, 6, 0.7));
-  const grout = ramp(['#2a2218', '#3a3024', '#4e4232'], 3);
-  p.fill((x, y) => {
-    const [f1, f2, id] = worley(x, y, 22, 7, S);
-    const edge = f2 - f1;
-    if (edge < 2.2) return grout(pxNoise(x, y, 4, 2, 3, S), x, y);
-    const R = stones[Math.floor(id * 3) % 3];
-    const n = pxNoise(x, y, 12, 3, 11 + Math.floor(id * 50), S);
-    let t = 0.35 + n * 0.55 + (id - 0.5) * 0.3;
-    if (edge < 3.4) t += 0.18; // worn bevel catches light
-    if (edge > 3.4 && edge < 4.4) t -= 0.08;
-    // wear polish in the middle of slabs
-    t += clamp01((edge - 6) / 10) * 0.08;
-    return R(t, x, y);
+// ------------------------------------------------------------------ painters
+/** cave rock (2 m tile): layered strata bands with a few clean fractures, lit lips and shadowed undersides */
+function paintRock(outside: boolean): Px {
+  const S = 64, p = new Px(S, S);
+  const T = tones(outside ? '#4a4c56' : '#5a4636', 5, 0.6);
+  // band boundaries (rows) with per-band tone, a gentle deterministic wave
+  const bands: { y: number; t: number }[] = [];
+  let y = 0, i = 0;
+  while (y < S) { const h = 6 + Math.floor(H(i, 1, 7) * 9); bands.push({ y, t: 1 + Math.floor(H(i, 2, 7) * 3) }); y += h; i++; }
+  const bandAt = (x: number, yy: number) => {
+    const w = Math.round(Math.sin((x / S) * Math.PI * 2 + 0.7) * 1.5);
+    let k = 0; for (let j = 0; j < bands.length; j++) if (((yy - w) % S + S) % S >= bands[j].y) k = j;
+    return k;
+  };
+  p.fill((x, yy) => {
+    const k = bandAt(x, yy), kUp = bandAt(x, yy - 1), kDn = bandAt(x, yy + 1);
+    if (k !== kUp) return T[0];          // the seam: deep shadow
+    if (k !== bandAt(x, yy - 2)) return T[4]; // lit lip just under the seam
+    if (k !== kDn) return T[Math.max(0, bands[k].t - 1)]; // underside in shadow
+    return T[bands[k].t];
   });
-  // hairline cracks
-  for (let k = 0; k < 14; k++) {
-    let x = hash2(k, 1, 5) * S, y = hash2(k, 2, 5) * S, a = hash2(k, 3, 5) * 6.28;
-    for (let i = 0; i < 10 + hash2(k, 4, 5) * 14; i++) {
-      const xx = ((Math.round(x) % S) + S) % S, yy = ((Math.round(y) % S) + S) % S;
-      const c = p.get(xx, yy);
-      p.set(xx, yy, shade([c[0], c[1], c[2]], 0.55));
-      a += (hash2(k, i, 6) - 0.5) * 0.9; x += Math.cos(a); y += Math.sin(a);
+  // vertical fractures through a band: dark line + lit right edge
+  for (let f = 0; f < 7; f++) {
+    const x0 = Math.floor(H(f, 3, 9) * S), y0 = Math.floor(H(f, 4, 9) * S), len = 4 + Math.floor(H(f, 5, 9) * 8);
+    for (let j = 0; j < len; j++) { const xx = (x0 + (j > len / 2 ? 1 : 0)) % S, yy = (y0 + j) % S; p.set(xx, yy, T[0]); p.set((xx + 1) % S, yy, T[3]); }
+  }
+  if (outside) {
+    // clean coralline crust patches (pink) on a few band tops
+    for (let c = 0; c < 6; c++) {
+      const cx = Math.floor(H(c, 6, 3) * S), cy = Math.floor(H(c, 7, 3) * S), w = 4 + Math.floor(H(c, 8, 3) * 6);
+      for (let j = 0; j < w; j++) { p.set((cx + j) % S, cy, '#b05a7a'); p.set((cx + j) % S, (cy + 1) % S, j % 3 ? '#8a3a5a' : '#b05a7a'); }
     }
   }
-  p.grain(0.05, 3);
   return p;
 }
 
-/** seabed sand with ripples and shell grit (2 m tile) */
-function paintSand(): Px {
+/** stone block floor (2 m tile): running-bond blocks, dark mortar (AO), lit top-left edges, shadowed bottom-right */
+function paintFloor(): Px {
   const S = 64, p = new Px(S, S);
-  const R = ramp(['#4a4a52', '#6a6658', '#8a8268', '#a89c7c', '#c4b692'], 6, 0.8);
-  p.fill((x, y) => {
-    const rip = Math.sin((x * 0.42 + pxNoise(x, y, 16, 2, 4, S) * 9) ) * 0.5 + 0.5;
-    const n = pxNoise(x, y, 9, 3, 8, S);
-    return R(0.25 + n * 0.5 + rip * 0.22, x, y);
-  });
-  p.map((c, x, y) => { const h = hash2(x, y, 31); if (h > 0.985) return hex('#e8e0cc'); if (h < 0.015) return hex('#3a3830'); return null; });
-  return p;
-}
-
-const WOODS: Record<string, string[]> = {
-  pine: ['#5a3418', '#7a4a24', '#9a6432', '#b67e44', '#cc9a5c', '#e0b878'],
-  walnut: ['#1e110a', '#2e1a0e', '#422614', '#56341c', '#6c4426', '#865834'],
-  oak: ['#3a2410', '#563618', '#6e4a22', '#88602e', '#a0783e', '#b8925a'],
-  drift: ['#3e3a36', '#55504a', '#6e6860', '#888076', '#a29a8e', '#bab2a4'],
-  red: ['#2a0c08', '#4a1810', '#6a2618', '#8a3822', '#a24e2e', '#bc6a42'],
-  teak: ['#2a1608', '#44260e', '#5e3816', '#7a4c1e', '#946228', '#ae7c3a'],
-};
-/** planks (1 m tile at 64 px/m): boards with grain, knots, seams and nail heads */
-function paintWood(kind: string): Px {
-  const S = 64, p = new Px(S, S);
-  const R = ramp(WOODS[kind] ?? WOODS.pine, 7, 0.7);
-  const bw = 16;
-  p.fill((x, y) => {
-    const b = Math.floor(x / bw), bx = x - b * bw;
-    const off = hash2(b, 0, 3) * 60;
-    const n = pxNoise(x * 3, y + off, 22, 3, 5 + b, 0);
-    const grain = Math.sin((bx + n * 9 + Math.sin((y + off) * 0.05) * 3) * 1.1) * 0.5 + 0.5;
-    let t = 0.3 + grain * 0.3 + (hash2(b, 1, 3) - 0.5) * 0.25 + (pxNoise(x, y, 8, 2, 9, S) - 0.5) * 0.2;
-    // knot
-    const kx = b * bw + 8, ky = (hash2(b, 2, 3) * 64) | 0;
-    const kd = Math.hypot(x - kx, (y - ky) * 0.6);
-    if (hash2(b, 4, 3) > 0.45 && kd < 3.5) t = 0.05 + kd * 0.06;
-    if (bx === 0) t = 0.0; else if (bx === 1) t += 0.15; else if (bx === bw - 1) t -= 0.15;
-    // board ends
-    const endY = ((hash2(b, 5, 3) * 64) | 0);
-    if (y === endY) t = 0.02; else if (y === (endY + 1) % S) t += 0.12;
-    return R(t, x, y);
-  });
-  // nail heads at board ends
-  for (let b = 0; b < S / bw; b++) {
-    const endY = ((hash2(b, 5, 3) * 64) | 0);
-    for (const nx of [b * bw + 4, b * bw + 11]) { const ny = (endY + 3) % S; p.set(nx, ny, '#2a2624'); p.set(nx + 1, ny, '#6a625a'); p.set(nx, ny + 1, '#141210'); }
+  const sets = [tones('#7a6c5a', 5, 0.5), tones('#6c665e', 5, 0.5), tones('#7c6450', 5, 0.5)];
+  const mortar = hex('#241c14'), mortarL = hex('#3a3024');
+  const rowH = 16;
+  for (let r = 0; r < S / rowH; r++) {
+    const off = r % 2 ? 11 : 0;
+    // block widths in this row (wrap)
+    const cuts: number[] = [];
+    let x = off;
+    let k = 0;
+    while (x < S + off) { cuts.push(x % S); x += 18 + Math.floor(H(r, k, 5) * 3) * 7; k++; }
+    for (let yy = 0; yy < rowH; yy++) for (let xx = 0; xx < S; xx++) {
+      const gy = r * rowH + yy;
+      // which block: last cut <= xx (wrapping)
+      let bi = -1, bx = 0;
+      for (let c = 0; c < cuts.length; c++) { const d = ((xx - cuts[c]) % S + S) % S; if (bi < 0 || d < bx) { bi = c; bx = d; } }
+      const T = sets[Math.floor(H(r, bi, 11) * 3)];
+      const base = 2 + (H(r, bi, 13) > 0.6 ? 1 : 0);
+      const nextCut = cuts[(bi + 1) % cuts.length];
+      const bw = ((nextCut - cuts[bi]) % S + S) % S || S;
+      let c: RGB;
+      if (yy === 0 || bx === 0) c = mortar;
+      else if (yy === rowH - 1 || bx === bw - 1) c = mortarL;
+      else if (yy === 1 || bx === 1) c = T[base + 2 > 4 ? 4 : base + 2];
+      else if (yy === rowH - 2 || bx === bw - 2) c = T[base - 2 < 0 ? 0 : base - 2];
+      else c = T[base];
+      p.set(xx, gy, c);
+    }
+    // a deliberate crack in some blocks
+    if (H(r, 99, 3) > 0.4) { const cx = Math.floor(H(r, 98, 3) * (S - 10)) + 4; for (let j = 0; j < 6; j++) p.set(cx + j, r * rowH + 5 + Math.floor(j / 2), mortarL); }
   }
   return p;
 }
 
-const FAB: Record<string, string[]> = {
-  mustard: ['#4a3208', '#6e4c10', '#946a1a', '#b8862a', '#d0a040', '#e4bc5c'],
-  teal: ['#08262a', '#0e3a3e', '#165256', '#206a6c', '#348484', '#4e9c98'],
-  rust: ['#2e0e06', '#4a1a0c', '#682814', '#86381e', '#a24c2a', '#ba6638'],
-  plum: ['#1e0a1a', '#301228', '#481c3a', '#60284c', '#78365e', '#904a72'],
-  olive: ['#1e2210', '#2e3418', '#424a22', '#56602e', '#6c763c', '#848e50'],
-  navy: ['#080c1e', '#10182e', '#1a2644', '#26365a', '#344872', '#4a5e8a'],
-  cream: ['#5a5040', '#7a6e58', '#9a8e74', '#b6aa8e', '#ccc2a6', '#e0d8c0'],
-};
-/** corduroy upholstery (0.5 m tile at 64 px/m) with wear on the ribs */
-function paintFabric(kind: string): Px {
+/** seabed sand: flat with clean ripple lines */
+function paintSand(): Px {
   const S = 32, p = new Px(S, S);
-  const R = ramp(FAB[kind] ?? FAB.mustard, 6, 0.6);
+  const T = tones('#9a8c70', 4, 0.45);
   p.fill((x, y) => {
-    const rib = (x % 4);
-    let t = rib === 0 ? 0.15 : rib === 1 ? 0.55 : rib === 2 ? 0.72 : 0.45;
-    t += (pxNoise(x, y, 7, 3, 13, S) - 0.5) * 0.35;
-    if (hash2(x, y, 2) > 0.9) t += 0.1;
-    return R(t, x, y);
+    const w = (y + Math.round(Math.sin((x / S) * Math.PI * 4) * 2) + S) % 8;
+    return w === 0 ? T[1] : w === 1 ? T[3] : T[2];
   });
   return p;
 }
 
-/** chunky knit (blanket, beanie): rows of V stitches in stripes */
+const WOODS: Record<string, string> = { pine: '#a8723c', walnut: '#4e3020', oak: '#8a6236', drift: '#8a8478', red: '#7a3020', teak: '#6e4a26' };
+/** planks (1 m tile at 64 px/m): 4 boards with clean grain strokes, lit/shaded edges, gaps and nail heads */
+function paintWood(kind: string): Px {
+  const S = 64, p = new Px(S, S);
+  const T = tones(WOODS[kind] ?? WOODS.pine, 5, 0.5);
+  const bw = 16;
+  for (let b = 0; b < 4; b++) {
+    const base = H(b, 1, 3) > 0.5 ? 2 : 3;
+    const end = Math.floor(H(b, 5, 3) * S);
+    for (let y = 0; y < S; y++) for (let i = 0; i < bw; i++) {
+      const x = b * bw + i;
+      let c = T[base];
+      if (i === 0) c = T[0];
+      else if (i === 1) c = T[4];
+      else if (i === bw - 1) c = T[1];
+      else {
+        // two grain strokes per board, gently wavy (deterministic)
+        for (const g of [5, 10]) { const gx = g + Math.round(Math.sin((y + b * 13 + g * 7) * 0.12) * 1.5); if (i === gx && (y + g * 3) % 23 < 17) c = T[base - 1]; }
+      }
+      if (y === end) c = T[0];
+      else if (y === (end + 1) % S && i > 0) c = T[4];
+      p.set(x, y, c);
+    }
+    // nails at the board end
+    for (const nx of [4, 11]) { const ny = (end + 3) % S; p.set(b * bw + nx, ny, '#1c1a18'); p.set(b * bw + nx + 1, ny, '#7a7470'); p.set(b * bw + nx, ny + 1, '#3a3632'); p.set(b * bw + nx + 1, ny + 1, '#1c1a18'); }
+  }
+  return p;
+}
+
+const FAB: Record<string, string> = { mustard: '#b8862a', teal: '#2a6a6a', rust: '#94402a', plum: '#6a3058', olive: '#5a6430', navy: '#2e3e66', cream: '#c8bc9e' };
+/** upholstery: a clean 2 x 2 basket weave with a stitched seam every 16 px */
+function paintFabric(kind: string): Px {
+  const S = 16, p = new Px(S, S);
+  const T = tones(FAB[kind] ?? FAB.mustard, 4, 0.4);
+  p.fill((x, y) => {
+    if (y === 15) return T[0];
+    if (y === 14 && x % 3 === 0) return T[3];
+    const cell = ((x >> 1) + (y >> 1)) & 1;
+    const inCell = cell ? (x & 1) : (y & 1);
+    return cell ? (inCell ? T[2] : T[1]) : (inCell ? T[1] : T[2]);
+  });
+  return p;
+}
+
+/** chunky knit: rows of V stitches in stripes */
 function paintKnit(a: string, b: string): Px {
-  const S = 32, p = new Px(S, S);
-  const A = ramp([shade(hex(a), 0.55), hex(a), shade(hex(a), 1.25)], 3), B = ramp([shade(hex(b), 0.55), hex(b), shade(hex(b), 1.25)], 3);
+  const S = 16, p = new Px(S, S);
+  const A = tones(a, 3, 0.5), B = tones(b, 3, 0.5);
   p.fill((x, y) => {
     const row = Math.floor(y / 4), sx = x % 4, sy = y % 4;
-    const R = Math.floor(row / 2) % 3 === 2 ? B : A;
-    const v = Math.abs(sx - 1.5) / 1.5;
-    let t = 0.6 + (sy === 0 ? -0.2 : 0) - v * 0.3 + (sy === 3 ? -0.35 : 0);
-    if (sx === 0 || sx === 3) t -= 0.15;
-    return R(t, x, y);
+    const T = row % 4 === 3 ? B : A;
+    if (sy === 3) return T[0];
+    if (sx === 0 || sx === 3) return sy === 0 ? T[1] : T[0];
+    return sy === 0 ? T[2] : T[1];
   });
   return p;
 }
 
-/** a worn Persian rug: border bands, a medallion, a field of small motifs, fringe (non-tiling 64 x 96) */
+/** a Persian rug: border bands, a medallion, a field of motifs, fringe (non-tiling 64 x 96, flat colours) */
 function paintRug(kind: string): Px {
-  const W = 64, H = 96, p = new Px(W, H);
+  const W = 64, Hh = 96, p = new Px(W, Hh);
   const pal = kind === 'blue'
-    ? { field: '#1e2c5a', field2: '#16224a', border: '#7a1e1e', motif: '#d8c8a0', ink: '#0c0e1e', accent: '#c88a2a' }
-    : { field: '#8a1c1c', field2: '#701414', border: '#1e2c5a', motif: '#e0cfa2', ink: '#1a0808', accent: '#d89a2e' };
+    ? { field: '#1e2c5a', field2: '#18244c', border: '#7a1e1e', motif: '#d8c8a0', ink: '#0c0e1e', accent: '#c88a2a' }
+    : { field: '#8a1c1c', field2: '#741616', border: '#1e2c5a', motif: '#e0cfa2', ink: '#1a0808', accent: '#d89a2e' };
   const F = hex(pal.field), F2 = hex(pal.field2), BO = hex(pal.border), M = hex(pal.motif), K = hex(pal.ink), A = hex(pal.accent);
   p.fill((x, y) => {
-    const dx = Math.min(x, W - 1 - x), dy = Math.min(y, H - 1 - y);
+    const dx = Math.min(x, W - 1 - x), dy = Math.min(y, Hh - 1 - y);
     const d = Math.min(dx, dy - 3);
     if (dy < 3) return (x % 2 === 0) ? hex('#d8ccb0') : null; // fringe
     if (d < 0) return null;
     if (d === 0) return K;
     if (d <= 2) return d === 1 ? A : K;
     if (d <= 8) {
-      // border band with a running zig-zag
       const u = dx < dy - 3 ? y : x;
       const z = Math.abs(((u + (d - 3)) % 8) - 4);
       return (d === 3 || d === 8) ? K : z === (d - 4) % 4 ? M : BO;
     }
     if (d === 9) return M;
-    // field: diamond medallion + scattered motifs
-    const cx = x - W / 2 + 0.5, cy = y - H / 2 + 0.5;
+    const cx = x - W / 2 + 0.5, cy = y - Hh / 2 + 0.5;
     const md = Math.abs(cx) / 18 + Math.abs(cy) / 26;
     if (md < 1) {
       if (md > 0.9) return K;
@@ -213,69 +200,59 @@ function paintRug(kind: string): Px {
     if ((mx === 4 && my >= 3 && my <= 7) || (my === 5 && mx >= 2 && mx <= 6)) return M;
     return (Math.floor(y / 2) + Math.floor(x / 3)) % 7 === 0 ? F2 : F;
   });
-  // wear: thin patches showing the cream warp threads, and dirt
-  p.map((c, x, y) => {
-    const w = pxNoise(x, y, 10, 3, 77, 0);
-    if (w > 0.66 && hash2(x, y, 3) > 0.35) return mix(c as unknown as RGB, hex('#c8b898'), 0.45);
-    if (w < 0.3) return shade(c as unknown as RGB, 0.85);
-    return null;
-  });
-  p.grain(0.08, 9);
   return p;
 }
 
-/** painted steel with chipped enamel and rust runs (1 m tile at 64 px/m) */
+const PAINT: Record<string, string> = { green: '#3a6a58', red: '#9a3226', yellow: '#b88e22', grey: '#5a6266' };
+/** a painted steel panel (0.5 m tile): bevelled edges, corner rivets, one clean rust run */
 function paintMetal(kind: string): Px {
-  const S = 64, p = new Px(S, S);
-  const paint = kind === 'red' ? ['#3a0c0a', '#5e1612', '#82221a', '#a03224', '#b84a34'] : kind === 'yellow' ? ['#4a3606', '#6e520c', '#967214', '#b8901e', '#d0aa34'] : kind === 'grey' ? ['#262a2e', '#3a4044', '#50585c', '#687074', '#848c8e'] : ['#16302a', '#1e443a', '#2a5a4a', '#3a7060', '#4e8674'];
-  const P = ramp(paint, 5, 0.6), RU = ramp(['#2a1206', '#4a2008', '#6e3410', '#8e4a1a', '#a8642a'], 5);
+  const S = 32, p = new Px(S, S);
+  const T = tones(PAINT[kind] ?? PAINT.green, 5, 0.45);
+  const R = tones('#8a4a1e', 3, 0.5);
   p.fill((x, y) => {
-    const chip = pxNoise(x, y, 9, 3, 5, S);
-    const run = pxNoise(x * 4, y * 0.5, 12, 2, 9, S);
-    if (chip > 0.68) return RU(0.4 + pxNoise(x, y, 3, 2, 3, S) * 0.5, x, y);
-    if (chip > 0.64) return hex('#aaa49a');
-    let t = 0.55 + (pxNoise(x, y, 20, 2, 7, S) - 0.5) * 0.4;
-    if (run > 0.6) return mix(P(t, x, y), RU(0.5, x, y), clamp01((run - 0.6) * 4));
-    t += (hash2(x, y, 3) - 0.5) * 0.1;
-    return P(t, x, y);
+    if (x === 0 || y === 0) return T[4];
+    if (x === S - 1 || y === S - 1) return T[0];
+    if (x === 1 || y === 1) return T[3];
+    if (x === S - 2 || y === S - 2) return T[1];
+    // a rust run from the top rivet
+    if (x >= 6 && x <= 7 && y > 4 && y < 12 + (x - 6) * 4) return x === 6 ? R[1] : R[0];
+    return T[2];
   });
+  for (const [rx, ry] of [[3, 3], [S - 4, 3], [3, S - 4], [S - 4, S - 4]]) { p.set(rx, ry, T[4]); p.set(rx + 1, ry, T[2]); p.set(rx, ry + 1, T[1]); p.set(rx + 1, ry + 1, T[0]); }
   return p;
 }
 
-/** polished brass with verdigris in the crevices */
+/** polished brass: clean horizontal bands with a hot highlight line */
 function paintBrass(): Px {
-  const S = 32, p = new Px(S, S);
-  const R = ramp(['#3a2408', '#6a4610', '#9a6e1e', '#c8982e', '#e8c45a', '#fff0a0'], 7, 0.7);
-  p.fill((x, y) => {
-    let t = 0.5 + (pxNoise(x, y, 8, 3, 3, S) - 0.5) * 0.7 + Math.sin(y * 0.4) * 0.12;
-    const v = pxNoise(x, y, 6, 2, 9, S);
-    if (v > 0.68) return mix(R(t, x, y), hex('#4aa08a'), 0.6);
-    return R(t, x, y);
-  });
+  const S = 16, p = new Px(S, S);
+  const T = tones('#b88a2e', 5, 0.55);
+  const band = [1, 2, 2, 3, 4, 4, 3, 2, 2, 1, 1, 2, 3, 3, 2, 0];
+  p.fill((_x, y) => T[band[y]]);
   return p;
 }
 
-/** worn leather (armchair, belts) */
+/** tufted leather: diamond tufting with buttons and creases (Chesterfield) */
 function paintLeather(kind: string): Px {
-  const S = 32, p = new Px(S, S);
-  const R = ramp(kind === 'black' ? ['#0a0808', '#1a1414', '#2a2020', '#3e3030', '#584646'] : ['#2a1208', '#46200e', '#643016', '#824422', '#a05e34', '#c08050'], 6, 0.7);
+  const S = 16, p = new Px(S, S);
+  const T = tones(kind === 'black' ? '#2e2626' : '#7a3a22', 5, 0.45);
   p.fill((x, y) => {
-    const [f1, f2] = worley(x, y, 5, 3, S);
-    let t = 0.45 + (pxNoise(x, y, 10, 3, 4, S) - 0.5) * 0.6;
-    if (f2 - f1 < 0.8) t -= 0.25;
-    return R(t, x, y);
+    const u = (x + y) % 16, v = (x - y + 32) % 16;
+    if (u === 0 || v === 0) return T[0];
+    if (u === 1 || v === 1) return T[3];
+    const du = Math.min(u, 16 - u), dv = Math.min(v, 16 - v);
+    return du + dv > 9 ? T[3] : T[2];
   });
+  for (const [bx, by] of [[0, 0], [8, 8]]) { p.set(bx, by, T[4]); p.set((bx + 1) % S, by, T[1]); }
   return p;
 }
 
-/** CRT TV cabinet: 70s walnut veneer */
+/** CRT TV cabinet: walnut veneer with clean flowing grain strokes */
 const paintVeneer = () => {
-  const S = 64, p = new Px(S, S);
-  const R = ramp(['#1a0c06', '#2e170a', '#4a2610', '#643618', '#7e4a22', '#9a6232'], 7, 0.7);
+  const S = 32, p = new Px(S, S);
+  const T = tones('#5a3418', 5, 0.45);
   p.fill((x, y) => {
-    const n = pxNoise(x * 0.3, y * 2, 6, 3, 21, 0);
-    const fig = Math.sin(x * 0.35 + n * 12 + Math.sin(y * 0.15) * 2) * 0.5 + 0.5;
-    return R(0.25 + fig * 0.45 + (pxNoise(x, y, 4, 2, 2, S) - 0.5) * 0.15, x, y);
+    const g = (y + Math.round(Math.sin(x * 0.2) * 2 + Math.sin(x * 0.05) * 3) + S) % 8;
+    return g === 0 ? T[1] : g === 4 ? T[3] : T[2];
   });
   return p;
 };
@@ -284,101 +261,92 @@ const paintVeneer = () => {
 function paintBooks(): Px {
   const p = new Px(64, 32);
   const cols = ['#7a1e1e', '#1e3a6a', '#2a5a2a', '#6a4a1a', '#4a1e5a', '#1e5a5a', '#8a6a2a', '#3a3a3a', '#a04a20'];
+  p.fill(() => hex('#1a120c'));
   let x = 0, k = 0;
   while (x < 64) {
-    const w = 3 + Math.floor(hash2(k, 1, 4) * 4), h = 20 + Math.floor(hash2(k, 2, 4) * 11);
-    const c = hex(cols[Math.floor(hash2(k, 3, 4) * cols.length)]);
-    const lean = hash2(k, 5, 4) > 0.9;
+    const w = 3 + Math.floor(H(k, 1, 4) * 4), h = 20 + Math.floor(H(k, 2, 4) * 11);
+    const c = hex(cols[Math.floor(H(k, 3, 4) * cols.length)]);
     for (let i = 0; i < w && x + i < 64; i++) for (let j = 32 - h; j < 32; j++) {
-      const edge = i === 0 || i === w - 1;
-      let cc: RGB = edge ? shade(c, 0.6) : i === 1 ? shade(c, 1.2) : c;
-      if (j === 32 - h + 3 || j === 32 - h + 4 || j === 29) cc = hex('#d8b04a');
-      if (j === 32 - h + 8 && i > 0 && i < w - 1 && hash2(k, 6, 4) > 0.4) cc = hex('#e8dcc0');
-      p.set(x + i + (lean && j < 16 ? 1 : 0), j, cc);
+      let cc: RGB = i === 0 ? mix(c, [0, 0, 0], 0.45) : i === 1 ? mix(c, [255, 240, 220], 0.25) : c;
+      if (j === 32 - h + 3 || j === 29) cc = hex('#d8b04a');
+      if (j === 32 - h) cc = hex('#e8dcc0');
+      p.set(x + i, j, cc);
     }
     x += w; k++;
   }
   return p;
 }
 
-/** pegboard (workshop wall): brown board with a grid of holes */
+/** pegboard: brown board with a grid of holes (each hole lit on the lower lip) */
 function paintPegboard(): Px {
-  const S = 32, p = new Px(S, S);
-  const R = ramp(['#4a3018', '#5e3e20', '#72502a', '#866034'], 4);
-  p.fill((x, y) => (x % 8 === 3 && y % 8 === 3 ? hex('#140c06') : x % 8 === 4 && y % 8 === 4 ? hex('#3a2410') : R(0.5 + (pxNoise(x, y, 6, 2, 3, S) - 0.5) * 0.6, x, y)));
+  const S = 16, p = new Px(S, S);
+  const T = tones('#7a5a34', 4, 0.4);
+  p.fill((x, y) => (x % 8 === 3 && y % 8 === 3 ? T[0] : x % 8 === 3 && y % 8 === 4 ? T[3] : T[2]));
   return p;
 }
 
-/** generic flat colour with grain (plastic, ceramic) */
-function paintPlain(col: string, grain = 0.1): Px {
-  const S = 16, p = new Px(S, S);
-  const c = hex(col);
-  const R = ramp([shade(c, 0.8), c, shade(c, 1.12)], 3, 0.7);
-  p.fill((x, y) => R(0.5 + (pxNoise(x, y, 4, 2, 7, S) - 0.5) * grain * 6, x, y));
-  return p;
-}
+/** one flat colour */
+function paintPlain(col: string): Px { const p = new Px(4, 4); const c = hex(col); p.fill(() => c); return p; }
 
 /** a kelp blade (alpha cut-out): ruffled edge, midrib, gas bladder at the base */
 function paintKelp(): Px {
-  const W = 16, H = 64, p = new Px(W, H);
-  const R = ramp(['#1a2a08', '#2e4410', '#4a6218', '#6a8222', '#8aa034', '#a8b84a'], 6, 0.7);
-  for (let y = 0; y < H; y++) {
-    const half = 3.2 + Math.sin(y * 0.5) * 1.2 + (y > H - 8 ? (H - y) * -0.3 : 0) + 2.2 * Math.min(1, y / 10);
+  const W = 16, Hh = 64, p = new Px(W, Hh);
+  const T = tones('#5a7a20', 5, 0.5);
+  for (let y = 0; y < Hh; y++) {
+    const half = Math.round(3 + Math.abs(Math.sin(y * 0.4)) * 1.5 + 2 * Math.min(1, y / 10));
     for (let x = 0; x < W; x++) {
       const dx = Math.abs(x + 0.5 - W / 2);
       if (dx > half) continue;
-      let t = 0.55 - dx / half * 0.25 + (pxNoise(x, y, 5, 2, 4, 0) - 0.5) * 0.3 + Math.sin(y * 0.9 + dx) * 0.08;
-      if (dx < 0.8) t += 0.25;
-      if (dx > half - 1) t -= 0.25;
-      p.set(x, y, R(t, x, y));
+      p.set(x, y, dx < 1 ? T[4] : dx > half - 1 ? T[0] : (y % 6 === 0 && dx > 1) ? T[1] : T[2]);
     }
   }
-  p.ellipse(W / 2, H - 4, 3, 3.5, (nx, ny) => mix(hex('#c8b048'), hex('#6a7018'), clamp01((nx + ny) * 0.5 + 0.5)));
+  p.ellipse(W / 2, Hh - 4, 3, 3.5, (nx, ny) => (nx + ny < -0.4 ? hex('#d8c060') : hex('#9a8a28')));
   return p;
 }
 
-/** soft vertical streak for god-ray cards (white, alpha in luminance) */
+/** soft vertical streak for god-ray cards (white, banded alpha) */
 function paintRay(): Px {
-  const W = 32, H = 64, p = new Px(W, H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const u = (x + 0.5) / W, v = y / H;
-    const s = Math.pow(Math.sin(u * Math.PI), 2.5) * (0.65 + 0.35 * fbm(x / 3, 0, 2, 5));
+  const W = 32, Hh = 64, p = new Px(W, Hh);
+  for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+    const u = (x + 0.5) / W, v = y / Hh;
+    const s = Math.pow(Math.sin(u * Math.PI), 2.5) * (0.8 + 0.2 * Math.sin(x * 0.9));
     const fade = Math.pow(1 - v, 0.6) * Math.min(1, v * 6 + 0.3);
-    const a = clamp01(s * fade);
-    const q = Math.round(a * 6) / 6; // banded
-    p.set(x, y, [255, 255, 255], q * 255);
+    p.set(x, y, [255, 255, 255], Math.round(clamp01(s * fade) * 4) / 4 * 255);
   }
   return p;
 }
 
-/** a small framed pixel painting (a heroic blobfish portrait / a sunset / a whale) */
+/** a small framed painting (a blobfish portrait / a sunset / a whale) */
 function paintPainting(kind: string): Px {
-  const W = 32, H = 24, p = new Px(W, H);
+  const W = 32, Hh = 24, p = new Px(W, Hh);
   if (kind === 'whale') {
-    p.fill((x, y) => mix(hex('#1a3a6a'), hex('#4aa0c8'), 1 - y / H));
+    p.fill((_x, y) => (y < 8 ? hex('#4aa0c8') : y < 16 ? hex('#2a6a9a') : hex('#1a3a6a')));
     p.ellipse(15, 13, 10, 4, '#2a3a52'); p.poly([[24, 12], [30, 8], [29, 15]], '#2a3a52'); p.ellipse(13, 15, 7, 2, '#c8ccd0');
     p.set(9, 12, '#ffffff');
   } else if (kind === 'sunset') {
-    p.fill((x, y) => y < 14 ? mix(hex('#ffcc6a'), hex('#c8487a'), y / 14) : mix(hex('#2a4a8a'), hex('#0e1a3a'), (y - 14) / 10));
+    p.fill((_x, y) => (y < 5 ? hex('#ffcc6a') : y < 10 ? hex('#f08a5a') : y < 14 ? hex('#c8487a') : y < 19 ? hex('#2a4a8a') : hex('#0e1a3a')));
     p.circle(16, 14, 5, '#fff2b0');
     for (let y = 15; y < 24; y += 2) p.rect(12 + (y % 3), y, 8 - (y - 15) / 2, 1, '#ffdc8a');
   } else {
-    // blobfish portrait
-    p.fill((x, y) => mix(hex('#2a1a3a'), hex('#5a3a5a'), y / H));
-    p.ellipse(16, 14, 9, 8, (nx, ny) => mix(hex('#f8b8c8'), hex('#c86a88'), clamp01(ny * 0.5 + 0.5 + nx * 0.2)));
+    p.fill((_x, y) => (y < 12 ? hex('#3a2a4a') : hex('#2a1a3a')));
+    p.ellipse(16, 14, 9, 8, (nx, ny) => (ny < -0.3 ? hex('#ffc8d4') : nx + ny > 0.6 ? hex('#c86a88') : hex('#f4a0b4')));
     p.ellipse(18, 18, 4, 3, '#e090a8');
     p.set(13, 11, '#1a0a10'); p.set(19, 11, '#1a0a10'); p.set(13, 10, '#ffffff');
     p.rect(14, 21, 5, 1, '#6a2a3a');
   }
+  p.outline('#1a0c06');
   return p;
 }
 
 // ------------------------------------------------------------------ textures
-function tx(p: Px, repeat = true) { const t = p.texture({ repeat }); return t; }
+function tx(p: Px, repeat = true) {
+  const t = p.texture({ repeat, mip: false });
+  return t;
+}
 
 export const TEX = {
-  rock: memo(() => tx(paintRock(false, 3))),
-  rockOut: memo(() => tx(paintRock(true, 5))),
+  rock: memo(() => tx(paintRock(false))),
+  rockOut: memo(() => tx(paintRock(true))),
   floor: memo(() => tx(paintFloor())),
   sand: memo(() => tx(paintSand())),
   wood: memoK((k) => tx(paintWood(k))),
@@ -397,28 +365,30 @@ export const TEX = {
   painting: memoK((k) => tx(paintPainting(k), false)),
 };
 
-// ------------------------------------------------------------------ materials
-type MatOpts = { rough?: number; metal?: number; emissive?: string; emissiveI?: number; side?: THREE.Side; color?: string; alphaTest?: number; flat?: boolean; snap?: number };
+// ------------------------------------------------------------------ materials (all flat shaded: hard PS2 facets)
+type MatOpts = { tileM?: number; rough?: number; metal?: number; emissive?: string; emissiveI?: number; side?: THREE.Side; color?: string; alphaTest?: number; flat?: boolean; snap?: number };
 function std(map: THREE.Texture | null, o: MatOpts = {}) {
-  const m = new THREE.MeshStandardMaterial({ map, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide, color: o.color ?? '#ffffff', alphaTest: o.alphaTest ?? 0, flatShading: o.flat ?? false });
+  const m = new THREE.MeshStandardMaterial({ map, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide, color: o.color ?? '#ffffff', alphaTest: o.alphaTest ?? 0, flatShading: o.flat ?? true });
   if (o.emissive) { m.emissive = new THREE.Color(o.emissive); m.emissiveIntensity = o.emissiveI ?? 1; }
+  // metres covered by one texture tile (the prop kit maps uvs to keep a constant texel density)
+  m.userData.tileM = o.tileM ?? 1;
   return retro(m, { snap: o.snap ?? 1 });
 }
 export const MAT = {
-  rock: memo(() => std(TEX.rock(), { rough: 0.9, flat: true })),
-  rockOut: memo(() => std(TEX.rockOut(), { rough: 0.92, flat: true })),
-  floor: memo(() => std(TEX.floor(), { rough: 0.82 })),
-  sand: memo(() => std(TEX.sand(), { rough: 1 })),
-  wood: memoK((k) => std(TEX.wood(k), { rough: 0.75 })),
-  fabric: memoK((k) => std(TEX.fabric(k), { rough: 0.95 })),
-  knit: memoK((k) => std(TEX.knit(k), { rough: 1 })),
+  rock: memo(() => std(TEX.rock(), { rough: 0.95, tileM: 2 })),
+  rockOut: memo(() => std(TEX.rockOut(), { rough: 0.95, tileM: 2 })),
+  floor: memo(() => std(TEX.floor(), { rough: 0.85, tileM: 2 })),
+  sand: memo(() => std(TEX.sand(), { rough: 1, tileM: 1 })),
+  wood: memoK((k) => std(TEX.wood(k), { rough: 0.8 })),
+  fabric: memoK((k) => std(TEX.fabric(k), { rough: 0.95, tileM: 0.25 })),
+  knit: memoK((k) => std(TEX.knit(k), { rough: 1, tileM: 0.25 })),
   rug: memoK((k) => std(TEX.rug(k), { rough: 1, alphaTest: 0.5, side: THREE.DoubleSide })),
-  metal: memoK((k) => std(TEX.metal(k), { rough: 0.55, metal: 0.3 })),
-  brass: memo(() => std(TEX.brass(), { rough: 0.32, metal: 0.85 })),
-  leather: memoK((k) => std(TEX.leather(k), { rough: 0.6 })),
-  veneer: memo(() => std(TEX.veneer(), { rough: 0.45 })),
-  books: memo(() => std(TEX.books(), { rough: 0.8 })),
-  pegboard: memo(() => std(TEX.pegboard(), { rough: 0.9 })),
+  metal: memoK((k) => std(TEX.metal(k), { rough: 0.6, metal: 0.25, tileM: 0.5 })),
+  brass: memo(() => std(TEX.brass(), { rough: 0.4, metal: 0.7, tileM: 0.25 })),
+  leather: memoK((k) => std(TEX.leather(k), { rough: 0.65, tileM: 0.25 })),
+  veneer: memo(() => std(TEX.veneer(), { rough: 0.55, tileM: 0.5 })),
+  books: memo(() => std(TEX.books(), { rough: 0.85 })),
+  pegboard: memo(() => std(TEX.pegboard(), { rough: 0.9, tileM: 0.25 })),
   plain: memoK((k) => { const [col, r, m] = k.split('/'); return std(TEX.plain(col), { rough: r ? +r : 0.6, metal: m ? +m : 0 }); }),
   glow: memoK((k) => { const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(k).multiplyScalar(2.2), toneMapped: true }); return retro(m); }),
   painting: memoK((k) => std(TEX.painting(k), { rough: 0.7 })),
