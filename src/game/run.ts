@@ -21,11 +21,24 @@ export interface Stats {
   armor: number;        // flat damage reduction chance 0..1
   biteHeal: number;     // half-hearts restored by eating bait
   abilities: AbilityId[];
+  // ---- builds (src/skills, src/game/items.ts set bonuses)
+  maxMana: number;      // mana pool: mage skills spend it
+  manaRegen: number;    // mana per second
+  spellPower: number;   // multiplier on spell damage (1 = base)
+  summonPower: number;  // multiplier on summon damage / lifetime
+  gadgetPower: number;  // multiplier on trap / turret damage
+  crit: number;         // 0..1 chance of a critical hit (x2)
+  cdr: number;          // 0..0.6 cooldown reduction on skills
+  poison: number;       // poison damage per second applied by hits
+  skills: string[];     // active skill ids granted by placed items (SKILLS registry in src/skills)
+  /** active set-bonus tier per build/element tag (0, 2, 4 or 6), filled by the item system */
+  sets: Record<string, number>;
 }
 
 export const BASE_STATS: Stats = {
   maxHp: 6, speed: 5.2, accel: 22, dashPower: 9, swordDmg: 1, swordReach: 0.9, swordRate: 2.6,
   lineCut: 1, struggle: 1, reelResist: 0, pressureResist: 0, luck: 0, magnet: 1.2, armor: 0, biteHeal: 0, abilities: [],
+  maxMana: 20, manaRegen: 2.5, spellPower: 1, summonPower: 1, gadgetPower: 1, crit: 0.05, cdr: 0, poison: 0, skills: [], sets: {},
 };
 
 /** an item instance placed (or loose) in the backpack */
@@ -68,7 +81,7 @@ export class Run {
   }
 
   stats(): Stats {
-    const base: Stats = { ...BASE_STATS, abilities: [...BASE_STATS.abilities] };
+    const base: Stats = { ...BASE_STATS, abilities: [...BASE_STATS.abilities], skills: [...BASE_STATS.skills], sets: { ...BASE_STATS.sets } };
     return this.statFn ? this.statFn(base, this) : base;
   }
 

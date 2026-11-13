@@ -18,7 +18,7 @@ import { R, mouthReg, MOUTHS, MOUTH_FW, MOUTH_FH, LAYOUT } from './page';
 import type { MouthFrame } from './page';
 import { skinPx } from './paint';
 import { band } from './fabric';
-import { clamp01 } from './rig';
+import { clamp01, lp } from './rig';
 
 export type ExprName = 'neutral' | 'happy' | 'grin' | 'laugh' | 'angry' | 'furious' | 'sad' | 'surprised' | 'scared' | 'strain' | 'focus'
   | 'bored' | 'smug' | 'dazed' | 'worried' | 'sleepy' | 'concentrate' | 'yell' | 'ooh' | 'pout';
@@ -87,7 +87,7 @@ function eyeMaterial(iris: RGB, kid: boolean): THREE.MeshStandardMaterial {
 
 /** a sphere with its pole on +z and planar front uvs (iris in the centre of the texture) */
 function eyeballGeo(r: number): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(r, 22, 16);
+  const g = new THREE.SphereGeometry(r, lp(8, 22), lp(6, 16));
   g.rotateX(Math.PI / 2);
   const pos = g.attributes.position as THREE.BufferAttribute, uv = g.attributes.uv as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import type { V3, Wt } from '../gfx/loft';
 import { Loft, usFor } from '../gfx/loft';
 import type { Dims, Row, BoneName } from './rig';
-import { BI, ellRing, superPt, sampleRows, ringYs, gauss, angd, vOf, clamp01 } from './rig';
+import { BI, ellRing, superPt, sampleRows, ringYs, gauss, angd, vOf, clamp01, lp, DETAIL } from './rig';
 import type { Look, FeetKind, OuterKind, LegKind } from './looks';
 import { R, VMAP, subR } from './page';
 import type { RegKey } from './page';
@@ -78,6 +78,18 @@ export function shapeOf(L: Look): Shape {
   const sleeveY = sleeve === 'long' ? -0.515 : sleeve === 'rolled' ? -0.33 : -0.15;
   const legThick = G.kind === 'snowpants' ? 0.02 : G.kind === 'shorts' ? 0.012 : G.kind === 'skirt' ? 0.0015 : G.kind === 'overalls' ? 0.013 : 0.011;
   const f = L.feet.kind;
+  const dv = L.dive;
+  if (dv) {
+    const canvasSuit = dv.suit === 'canvas';
+    const th = canvasSuit ? 0.016 : 0.004;
+    return {
+      waist: 1.0, topHem: 0.8, topThick: th, tuck: false,
+      sleeveY: -0.5, armThick: th, outerSleeve: false,
+      outer: 'none', outerHem: 0.9, outerThick: 0, open: false,
+      legKind: 'pants', legHem: -0.83, legThick: th, flare: canvasSuit ? 0.01 : 0,
+      bootTop: f === 'lead' ? -0.62 : -0.72, bootThick: f === 'lead' ? 0.02 : 0.004, feet: f, collar: canvasSuit ? 'roll' : 'none',
+    };
+  }
   return {
     waist: 1.0, topHem: T.hem, topThick, tuck: T.kind === 'sunshirt' || T.kind === 'flannel' || T.kind === 'henley' || T.kind === 'thermal',
     sleeveY, armThick: topThick + (outerSleeve ? O.thick * (O.kind === 'parka' ? 0.75 : 1) : 0), outerSleeve,
@@ -100,6 +112,7 @@ export interface BodyBuild {
 // ------------------------------------------------------------------ main build
 export function buildBody(L: Look, d: Dims): BodyBuild {
   const B = new Loft(true);
+  const NA = lp(6, 10);
   const sh = shapeOf(L);
   const s = d.s, b = L.build, fem = b.fem, mass = b.mass, bw = b.bw;
   const Rs = d.rest;
@@ -128,7 +141,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     // barrel chest
     k += gauss(y, 1.27, 0.09) * gauss(Math.abs(th), 0.3, 0.9) * b.chest * 0.07;
     // cloth folds: blousing at a tuck, ripples at a loose hem, folds from the armpits
-    const fold = (a: number) => Math.sin(th * 7 + a) * 0.6 + Math.sin(th * 11 + a * 2.3) * 0.4;
+    const fold = (a: number) => (Math.sin(th * 7 + a) * 0.6 + Math.sin(th * 11 + a * 2.3) * 0.4) * (DETAIL.low ? 0.25 : 1);
     if (sh.tuck) k += gauss(y, sh.waist + 0.035, 0.022) * (0.018 + 0.012 * fold(1.7));
     else k += gauss(y, sh.topHem + 0.035, 0.03) * 0.012 * fold(0.4);
     k += gauss(y, 1.2, 0.05) * gauss(Math.abs(th), 1.25, 0.3) * 0.016 * fold(2.9);
@@ -158,8 +171,8 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
   {
     const breaks: number[] = [sh.topHem];
     if (sh.legKind !== 'skirt' && (sh.tuck || sh.topHem > sh.waist)) breaks.push(sh.waist);
-    const ys = ringYs(TORSO_ROWS, breaks, [0.96, 1.04, 1.12, 1.2, 1.29]);
-    const n = 20;
+    const ys = ringYs(lp(TORSO_ROWS.filter((_, i) => i !== 3 && i !== 5 && i !== 7), TORSO_ROWS), breaks, lp([1.04, 1.2], [0.96, 1.04, 1.12, 1.2, 1.29]));
+    const n = lp(10, 20);
     const rings = ys.map(({ y, eps }) => {
       const r = sampleRows(TORSO_ROWS, y);
       const t = thick(y + eps * 0.003);
@@ -176,8 +189,8 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
   // ---------------- neck
   {
     const nr = 0.052 * (0.8 + 0.2 * mass) * (1 - fem * 0.14) * (L.arch === 'captainGaff' ? 1.25 : 1);
-    const ys = [1.44, 1.48, 1.52, 1.56, 1.6, 1.625];
-    const n = 12;
+    const ys = lp([1.44, 1.5, 1.58, 1.625], [1.44, 1.48, 1.52, 1.56, 1.6, 1.625]);
+    const n = lp(7, 12);
     const hy = Rs.head[1];
     const rings = ys.map((y) => {
       const yy = Rs.neck[1] + (y - 1.48) * s * b.neckLen;
@@ -204,7 +217,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     const hasGlove = L.hands.kind !== 'bare';
     if (hasGlove) breaks.push(-0.47);
     const harpoon = side === 'L' && !!L.extras.harpoon;
-    let ys = ringYs(ARM_ROWS, breaks, sh.sleeveY < -0.3 ? [-0.235, -0.285, -0.32, -0.455, -0.478] : [sh.sleeveY + 0.03]);
+    let ys = ringYs(lp(ARM_ROWS.filter((_, i) => i !== 2 && i !== 4 && i !== 7 && i !== 10), ARM_ROWS), breaks, lp(sh.sleeveY < -0.3 ? [-0.285, -0.32] : [], sh.sleeveY < -0.3 ? [-0.235, -0.285, -0.32, -0.455, -0.478] : [sh.sleeveY + 0.03]));
     if (harpoon) ys = ys.filter((r) => r.y > -0.44);
     const fm = (1 - fem * 0.12) * (0.66 + 0.34 * mass) * (L.arch === 'captainGaff' ? 1.15 : 1) * 1.2;
     const wOfA = (y: number): Wt => {
@@ -238,11 +251,11 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
       const r = sampleRows(ARM_ROWS, y);
       const yy = y + eps * 0.0005;
       const t = tOf(yy);
-      const pts = ellRing(ua[1] + y * al * s, 0, ua[2], (r.rx * fm + t) * s, (r.rf * fm + t) * s, (r.rb * fm + t) * s, 10, 2, k, (th) => armBump(th, y, t));
+      const pts = ellRing(ua[1] + y * al * s, 0, ua[2], (r.rx * fm + t) * s, (r.rf * fm + t) * s, (r.rb * fm + t) * s, NA, 2, k, (th) => armBump(th, y, t) * (DETAIL.low ? 0.4 : 1));
       for (const p of pts) p[0] += ua[0];
       return { pts, v: vOf(VMAP.ARM, y), w: wOfA(y) };
     });
-    B.loft(rings, usFor(10), R(('ARM_' + side) as RegKey), 10 + (k > 0 ? 0 : 1), {
+    B.loft(rings, usFor(NA), R(('ARM_' + side) as RegKey), 10 + (k > 0 ? 0 : 1), {
       start: [ua[0] - k * 0.022 * s, ua[1] + 0.046 * s, ua[2]], startW: [U, 0.6, BI.chest, 0.4], alt: true,
       ...(harpoon ? { end: [ua[0], ua[1] - 0.45 * al * s, ua[2]], endW: [Fm, 1] as Wt } : {}),
     });
@@ -259,7 +272,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     if (sh.legKind !== 'skirt' && sh.legHem > -0.86) breaks.push(sh.legHem);
     if (sh.bootTop > -0.86) breaks.push(sh.bootTop);
     if (sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') breaks.push(-0.74); // sock top
-    const ys = ringYs(LEG_ROWS, breaks, sh.legKind !== 'shorts' ? [-0.72, -0.795] : []);
+    const ys = ringYs(lp(LEG_ROWS.filter((_, i) => i !== 1 && i !== 3 && i !== 6 && i !== 9), LEG_ROWS), breaks, lp([], sh.legKind !== 'shorts' ? [-0.72, -0.795] : []));
     const fm = (0.7 + 0.3 * mass) * (L.arch === 'kid' ? 1.08 : 1) * 1.12;
     const femLeg = (y: number) => 1 + fem * (0.09 * gauss(y, -0.08, 0.12) - 0.05 * gauss(y, -0.6, 0.1));
     const legBump = (thx: number, y: number, cov: boolean) => {
@@ -302,11 +315,11 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
       else if ((sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') && yy < -0.74 && !cov) t += 0.003;
       if (sh.feet === 'sandal' && yy < -0.74) t += 0.002;
       const fl = femLeg(y);
-      const pts = ellRing(thp[1] + y * ll * s, 0, thp[2], (r.rx * fm * fl + t + flare) * s, (r.rf * fm * fl + t + flare) * s, (r.rb * fm * fl + t + flare * 0.6) * s, 10, 2, k, (thx) => legBump(thx, y, cov));
+      const pts = ellRing(thp[1] + y * ll * s, 0, thp[2], (r.rx * fm * fl + t + flare) * s, (r.rf * fm * fl + t + flare) * s, (r.rb * fm * fl + t + flare * 0.6) * s, NA, 2, k, (thx) => legBump(thx, y, cov) * (DETAIL.low ? 0.4 : 1));
       for (const p of pts) p[0] += thp[0];
       return { pts, v: vOf(VMAP.LEG, y), w: wOfL(y) };
     });
-    B.loft(rings, usFor(10), R(('LEG_' + side) as RegKey), 20 + (k > 0 ? 0 : 1),
+    B.loft(rings, usFor(NA), R(('LEG_' + side) as RegKey), 20 + (k > 0 ? 0 : 1),
       { start: [thp[0], thp[1] + 0.07 * s, thp[2]], end: [thp[0], thp[1] - 0.875 * ll * s, thp[2] + 0.004], startW: [BI.hips, 0.6, T, 0.4], endW: [Ft, 1], alt: true });
     buildFoot(B, L, d, side, k, sh);
   }
@@ -332,7 +345,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     geometry.setAttribute('aFlush', new THREE.BufferAttribute(fl, 1));
   }
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, d.hipY, 0), 1.6 * s);
-  const sole = sh.feet === 'rubber' || sh.feet === 'boot' ? 0.03 : sh.feet === 'snow' ? 0.04 : sh.feet === 'sandal' ? 0.02 : 0.022;
+  const sole = sh.feet === 'lead' ? 0.05 : sh.feet === 'rubber' || sh.feet === 'boot' ? 0.03 : sh.feet === 'snow' ? 0.04 : sh.feet === 'sandal' ? 0.02 : sh.feet === 'bootie' ? 0.014 : 0.022;
   return { geometry, head, shape: sh, sole: sole * s };
 }
 
@@ -341,9 +354,9 @@ function buildOuter(B: Loft, L: Look, d: Dims, sh: Shape, torsoSurf: (y: number,
   const top = 1.46, hem = Math.max(0.84, Math.min(1.02, sh.outerHem));
   const kind = sh.outer;
   const t0 = sh.outerThick;
-  const n = 28;
+  const n = lp(14, 28);
   const ys: number[] = [];
-  const nr = Math.max(6, Math.round((top - hem) / 0.035));
+  const nr = Math.max(lp(4, 6), Math.round((top - hem) / lp(0.08, 0.035)));
   for (let i = 0; i <= nr; i++) ys.push(top - ((top - hem) * i) / nr);
   // the open front: a gap at deg ~0 (V-neck for cardigans, a narrow slot for slickers)
   const gap = (y: number) => {
@@ -435,8 +448,8 @@ function buildCollar(B: Loft, L: Look, d: Dims, sh: Shape, nr: number) {
 
 function buildTails(B: Loft, L: Look, d: Dims, top: number, bot: number, tk: number, skirt: boolean, open: boolean) {
   const s = d.s, b = L.build;
-  const n = 20;
-  const nr = Math.max(3, Math.round((top - bot) / 0.08));
+  const n = lp(10, 20);
+  const nr = Math.max(lp(2, 3), Math.round((top - bot) / lp(0.14, 0.08)));
   const splitY = 0.82;
   const ys = Array.from({ length: nr + 1 }, (_, i) => top - ((top - bot) * i) / nr).filter((y, i) => i === 0 || i === nr || Math.abs(y - splitY) > 0.015);
   if (splitY < top - 0.015 && splitY > bot + 0.015) { ys.push(splitY); ys.sort((p, q) => q - p); }
@@ -485,18 +498,19 @@ function buildHand(B: Loft, L: Look, d: Dims, side: 'L' | 'R', k: number) {
   ];
   const knuckle = (th: number) => Math.max(0, Math.sin(th)) * 0.05;
   const rings = prow.map((r, ri) => ({ pts: ellRing(r.y * hs, 0, 0.002, (r.rx + gl) * hs, (r.rf + gl) * hs, (r.rb + gl) * hs, 6, 2.6, k, ri === 3 ? knuckle : undefined, -Math.PI + Math.PI / 6).map(tr), v: r.v, w: r.w as Wt }));
-  B.loft(rings, usFor(6), reg, 40 + (k > 0 ? 0 : 1), { end: kind === 'mitten' ? null : tr([0, -0.092 * hs, 0.002]), endW: [H, 0.6, F1, 0.4], alt: true });
-  if (kind === 'mitten') {
+  const block = kind === 'mitten' || DETAIL.low;
+  B.loft(rings, usFor(6), reg, 40 + (k > 0 ? 0 : 1), { end: block ? null : tr([0, -0.092 * hs, 0.002]), endW: [H, 0.6, F1, 0.4], alt: true });
+  if (block) {
     // the mitten paddle: all four fingers in one rounded pouch that still curls
     const z = 0.001 * hs;
-    const ring = (y: number, rx: number, rz: number) => ellRing(y, 0, z, rx, rz, rz, 8, 2.4, k, undefined, -Math.PI).map(tr);
+    const ring = (y: number, rx: number, rz: number) => ellRing(y, 0, z, rx, rz, rz, lp(6, 8), 2.4, k, undefined, -Math.PI).map(tr);
     const rr = [
       { pts: ring(-0.084 * hs, (0.02 + gl) * hs, (0.046 + gl) * hs), v: 0.55, w: [H, 0.6, F1, 0.4] as Wt },
       { pts: ring(-0.115 * hs, (0.021 + gl) * hs, (0.047 + gl) * hs), v: 0.35, w: [F1, 0.8, F2, 0.2] as Wt },
       { pts: ring(-0.145 * hs, (0.019 + gl) * hs, (0.042 + gl) * hs), v: 0.18, w: [F2, 1] as Wt },
       { pts: ring(-0.165 * hs, (0.014 + gl) * hs, (0.03 + gl) * hs), v: 0.06, w: [F2, 1] as Wt },
     ];
-    B.loft(rr, usFor(8), reg, 42 + (k > 0 ? 0 : 1), { end: tr([0, -0.172 * hs, z]), endW: [F2, 1], endV: 0 });
+    B.loft(lp([rr[0], rr[1], rr[3]], rr), usFor(lp(6, 8)), reg, 42 + (k > 0 ? 0 : 1), { end: tr([0, -0.172 * hs, z]), endW: [F2, 1], endV: 0 });
   } else {
     const fz = [0.03, 0.0102, -0.0098, -0.0285], fl = [0.077, 0.085, 0.08, 0.064], fr = [0.0108, 0.0114, 0.0107, 0.0094];
     for (let i = 0; i < 4; i++) {
@@ -566,6 +580,12 @@ function shoeRows(kind: FeetKind): { rows: FootRow[]; soleH: number; lip: number
       { z: -0.068, rx: 0.028, top: -0.015 }, { z: -0.054, rx: 0.034, top: 0.008 }, { z: -0.018, rx: 0.038, top: 0.02 },
       { z: 0.085, rx: 0.046, top: -0.024 }, { z: 0.135, rx: 0.046, top: -0.04 }, { z: 0.172, rx: 0.038, top: -0.048 }, { z: 0.192, rx: 0.024, top: -0.053 }] };
     case 'sandal': return { soleH: 0.022, lip: 0.007, rows: FOOT_BARE.map((r) => ({ ...r, rx: r.rx + 0.004, top: r.top + 0.004 })) };
+    // neoprene dive booties: a snug sock with a thin moulded sole
+    case 'bootie': return { soleH: 0.014, lip: 0.002, rows: FOOT_BARE.map((r) => ({ ...r, rx: r.rx + 0.005, top: r.top + 0.007 })) };
+    // the hard-hat diver's lead-soled boots: a brass toe cap, a sole like a paving slab
+    case 'lead': return { soleH: 0.05, lip: 0.012, rows: [
+      { z: -0.085, rx: 0.05, top: 0.06 }, { z: -0.07, rx: 0.058, top: 0.07 }, { z: -0.02, rx: 0.062, top: 0.07 },
+      { z: 0.085, rx: 0.066, top: 0.02 }, { z: 0.14, rx: 0.068, top: 0.0 }, { z: 0.18, rx: 0.064, top: -0.01 }, { z: 0.21, rx: 0.05, top: -0.02 }] };
   }
 }
 

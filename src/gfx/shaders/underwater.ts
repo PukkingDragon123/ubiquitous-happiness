@@ -9,9 +9,11 @@
 //   - depth light falloff: lit (not emissive) light is attenuated per channel with depth below the surface,
 //     reds first, so deeper things go cool and dim like real water while glowing things stay bright;
 //   - optional soft "subsurface" wrap light + a wet rim sheen (for fleshy creatures like the blobfish);
-//   - above the surface (y > 0) nothing changes.
+//   - above the surface (y > 0) nothing changes;
+//   - the PS1 retro patch (vertex snapping to the low-res grid, optional affine texture swim: src/gfx/retro.ts).
 // Distance fog / absorption along the view ray is applied later in post (src/gfx/post.ts) from the depth buffer.
 import * as THREE from 'three';
+import { retro, chainKey, type RetroOpts } from '../retro';
 
 export const UW = {
   uTime: { value: 0 },
@@ -26,7 +28,11 @@ export const UW = {
   uCausticScale: { value: 0.55 },
 };
 
-export interface UwOpts { caustics?: number; depth?: number; sss?: [number, number, number] | null; sssK?: number; rim?: number; rimCol?: [number, number, number] }
+export interface UwOpts {
+  caustics?: number; depth?: number; sss?: [number, number, number] | null; sssK?: number; rim?: number; rimCol?: [number, number, number];
+  /** PS1 vertex snap / affine patch options (src/gfx/retro.ts); false skips it. Applied by default. */
+  retro?: RetroOpts | false;
+}
 
 const CAUSTIC_GLSL = /* glsl */ `
 uniform float uTime; uniform float uWaterY; uniform vec3 uSunDir; uniform vec3 uCausticCol; uniform float uCaustic;
@@ -115,7 +121,7 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
       }`);
   };
   const key = `uw${o.caustics ?? 1}|${o.depth ?? 1}|${o.sss ? 1 : 0}|${o.rim ? 1 : 0}`;
-  const prevKey = m.customProgramCacheKey?.bind(m);
-  m.customProgramCacheKey = () => (prevKey ? prevKey() : '') + key;
+  m.customProgramCacheKey = chainKey(m, prev, key);
+  if (o.retro !== false) retro(mat, o.retro ?? {});
   return mat;
 }

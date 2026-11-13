@@ -95,7 +95,7 @@ export function buildGear(L: Look, body: BodyBuild, d: Dims, mat: THREE.Material
     return mesh;
   };
   // ---------------- hats (head-bone space)
-  if (L.hat !== 'none') {
+  if (L.hat !== 'none' && L.hat !== 'hood' && L.hat !== 'brass') {
     const B = new Loft(false);
     buildHat(B, L, S);
     const hat = new THREE.Group();

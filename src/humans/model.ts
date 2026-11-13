@@ -5,13 +5,16 @@ import * as THREE from 'three';
 import type { Archetype, Look } from './looks';
 import { makeLook } from './looks';
 import type { Dims, BoneName } from './rig';
-import { rigDims, makeSkeleton, BI } from './rig';
+import { rigDims, makeSkeleton, BI, DETAIL } from './rig';
 import { buildBody } from './body';
 import type { BodyBuild } from './body';
 import { paintPage } from './paint';
 import { paintMouths, FaceRig } from './face';
 import { buildGear } from './gear';
 import type { Gear } from './gear';
+import { paintDive, paintScars } from './divePaint';
+import { buildDiveGear } from './diveGear';
+import type { DiveGear } from './diveGear';
 
 export interface ModelParts {
   look: Look; dims: Dims; body: BodyBuild; tex: THREE.Texture;
@@ -19,12 +22,17 @@ export interface ModelParts {
 const cache = new Map<string, ModelParts>();
 const PROF = typeof location !== 'undefined' && location.search.includes('prof');
 
-export function modelParts(arch: Archetype, seed: number): ModelParts {
-  const key = arch + ':' + seed;
+export function modelParts(arch: Archetype, seed: number, scars: readonly string[] = []): ModelParts {
+  const key = arch + ':' + seed + (DETAIL.low ? ':lo' : ':hi') + (scars.length ? ':' + [...scars].sort().join(',') : '');
   const hit = cache.get(key);
   if (hit) return hit;
   const t0 = performance.now();
   const look = makeLook(arch, seed);
+  if (scars.length) {
+    look.scars = [...scars];
+    if (scars.includes('eyepatch')) look.face.eyepatch = 'L';
+    if (scars.includes('scar')) look.face.scar = 1;
+  }
   const dims = rigDims(look.build);
   const body = buildBody(look, dims);
   const t1 = performance.now();
@@ -36,6 +44,8 @@ export function modelParts(arch: Archetype, seed: number): ModelParts {
   parts.tex.dispose();
   const P = page;
   buildGear.paint(P, look, body.shape);
+  paintDive(P, look, body.shape);
+  paintScars(P, look);
   parts.tex = P.texture();
   cache.set(key, parts);
   return parts;
@@ -47,7 +57,7 @@ export const FILL = { value: new THREE.Vector2(0.16, 0.32) };
 
 /** per-instance material: page texture + a face flush (angry red / strain) driven by uFlush */
 export function bodyMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial & { userData: { flush: { value: THREE.Vector3 } } } {
-  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.78, metalness: 0, alphaTest: 0.5, vertexColors: true });
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.78, metalness: 0, alphaTest: 0.5, vertexColors: true, flatShading: DETAIL.low });
   const flush = { value: new THREE.Vector3(0, 0, 0) };
   m.userData.flush = flush;
   m.onBeforeCompile = (sh) => {
@@ -60,7 +70,7 @@ export function bodyMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial & {
       .replace('#include <common>', '#include <common>\nuniform vec3 uFlush; uniform vec2 uFill; varying float vFlush;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uFlush * vFlush * diffuseColor.rgb + diffuseColor.rgb * (uFill.x + uFill.y * vFlush);\ndiffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.0, 0.78, 0.74), clamp(length(uFlush) * 2.0, 0.0, 1.0) * vFlush);');
   };
-  m.customProgramCacheKey = () => 'fisherBody';
+  m.customProgramCacheKey = () => 'fisherBody' + (DETAIL.low ? 'Flat' : '');
   return m as THREE.MeshStandardMaterial & { userData: { flush: { value: THREE.Vector3 } } };
 }
 
@@ -72,10 +82,11 @@ export interface Model {
   face: FaceRig;
   mat: ReturnType<typeof bodyMaterial>;
   gear: Gear;
+  dive: DiveGear;
 }
 
-export function buildModel(arch: Archetype, seed: number): Model {
-  const parts = modelParts(arch, seed);
+export function buildModel(arch: Archetype, seed: number, scars: readonly string[] = []): Model {
+  const parts = modelParts(arch, seed, scars);
   const { look, dims, body } = parts;
   const mat = bodyMaterial(parts.tex);
   const { bones, byName, skeleton } = makeSkeleton(dims);
@@ -91,5 +102,6 @@ export function buildModel(arch: Archetype, seed: number): Model {
   const head = byName.head;
   head.add(face.group);
   const gear = buildGear(look, body, dims, mat, byName);
-  return { parts, root, mesh, bones: byName, face, mat, gear };
+  const dive = buildDiveGear(look, body, dims, byName);
+  return { parts, root, mesh, bones: byName, face, mat, gear, dive };
 }

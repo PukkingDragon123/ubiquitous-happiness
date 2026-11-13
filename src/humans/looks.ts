@@ -6,23 +6,52 @@ import { hex, mix } from '../gfx/px';
 import { Rng } from '../core/rng';
 import type { Build } from './rig';
 
-export type Archetype = 'oldSalt' | 'weekendDad' | 'kid' | 'grandma' | 'proAngler' | 'iceFisher' | 'dockWorker' | 'captainGaff';
+export type FisherArch = 'oldSalt' | 'weekendDad' | 'kid' | 'grandma' | 'proAngler' | 'iceFisher' | 'dockWorker' | 'captainGaff';
+/** v2 wave enemies: scuba harpooners, camo free divers, net divers, black-suited knife commandos, medics,
+ * brass-helmet heavy divers and the titan */
+export type DiverArch = 'scuba' | 'freediver' | 'netDiver' | 'commando' | 'medic' | 'heavyDiver' | 'titan';
+export type Archetype = FisherArch | DiverArch;
 export const ARCHETYPES: Archetype[] = ['oldSalt', 'weekendDad', 'kid', 'grandma', 'proAngler', 'iceFisher', 'dockWorker', 'captainGaff'];
+export const DIVER_ARCHETYPES: DiverArch[] = ['scuba', 'freediver', 'netDiver', 'commando', 'medic', 'heavyDiver', 'titan'];
+export const isDiverArch = (a: string): a is DiverArch => (DIVER_ARCHETYPES as string[]).includes(a);
 
 export type HairStyle = 'none' | 'short' | 'messy' | 'bun' | 'sides' | 'shaggy' | 'long';
 export type Facial = 'none' | 'stubble' | 'beard' | 'bigBeard' | 'moustache' | 'walrus' | 'goatee';
-export type HatKind = 'none' | 'captain' | 'bucket' | 'cap' | 'capBack' | 'sunhat' | 'ushanka' | 'beanie' | 'captainBlack';
+export type HatKind = 'none' | 'captain' | 'bucket' | 'cap' | 'capBack' | 'sunhat' | 'ushanka' | 'beanie' | 'captainBlack' | 'hood' | 'brass';
 export type Glasses = 'none' | 'sun' | 'wrap' | 'round';
 export type TopKind = 'sweater' | 'hawaiian' | 'tee' | 'blouse' | 'sunshirt' | 'thermal' | 'flannel' | 'henley';
 export type OuterKind = 'none' | 'cardigan' | 'vest' | 'parka' | 'slicker' | 'raincoat';
 export type LegKind = 'pants' | 'shorts' | 'skirt' | 'overalls' | 'snowpants';
-export type FeetKind = 'boot' | 'rubber' | 'sneaker' | 'sandal' | 'shoe' | 'snow';
+export type FeetKind = 'boot' | 'rubber' | 'sneaker' | 'sandal' | 'shoe' | 'snow' | 'bootie' | 'lead';
 export type HandKind = 'bare' | 'mitten' | 'glove';
 export type RodKind = 'boat' | 'spin' | 'kid' | 'cane' | 'pro' | 'ice' | 'pier' | 'heavy';
 export type ReelKind = 'spin' | 'conventional' | 'spincast' | 'baitcast' | 'inline' | 'vintage';
 
+/** dive kit (divers only): suit paint, mask, tank, fins and belt; painted by divePaint.ts, built by diveGear.ts */
+export interface DiveKit {
+  suit: 'wetsuit' | 'canvas';
+  col: RGB; col2: RGB; col3: RGB;
+  pattern: 'panels' | 'camo' | 'plain';
+  hood: boolean;
+  mask: 'none' | 'scuba' | 'free' | 'brass' | 'commando';
+  lens: RGB;
+  tank: 'none' | 'single' | 'twin' | 'rebreather';
+  tankCol: RGB;
+  bcd: boolean;
+  fins: 'none' | 'short' | 'long';
+  finCol: RGB;
+  belt: boolean;
+  knife: boolean;
+  snorkel: boolean;
+  cross: boolean;
+  num: number;
+}
+
 export interface Look {
   arch: Archetype; seed: number;
+  /** nemesis scars painted / built onto the model: eyepatch, hookHand, burns, bandage, bite, scar */
+  scars?: string[];
+  dive?: DiveKit;
   build: Build;
   skin: RGB; skinDark: number; age: number;
   hair: { style: HairStyle; col: RGB; grey: number };
@@ -73,7 +102,8 @@ function baseFace(r: Rng, o: Partial<Look['face']> = {}): Look['face'] {
 
 /** resolve an archetype + seed into a full look */
 export function makeLook(arch: Archetype, seed: number): Look {
-  const r = new Rng((seed * 2654435761 + ARCHETYPES.indexOf(arch) * 97) >>> 0);
+  const ai = (ARCHETYPES as string[]).indexOf(arch);
+  const r = new Rng((seed * 2654435761 + (ai >= 0 ? ai : 20 + DIVER_ARCHETYPES.indexOf(arch as DiverArch)) * 97) >>> 0);
   const skinI = Math.min(SKINS.length - 1, Math.floor(r.next() * SKINS.length));
   let skin = C(SKINS[skinI]);
   const dark = skinI / (SKINS.length - 1);
@@ -237,10 +267,73 @@ export function makeLook(arch: Archetype, seed: number): Look {
       L.anim = { speed: 0.78, energy: 1.2, bounce: 0.4, heavy: 1 };
       break;
     }
+    default: {
+      // ---------------- divers: an athletic build in a skin-tight suit, the face framed by a hood and a mask
+      const d = arch as DiverArch;
+      const heavy = d === 'heavyDiver' || d === 'titan';
+      L.build = baseBuild({ s: d === 'titan' ? 1.55 : heavy ? 1.08 : 1.0 + (r.next() - 0.5) * 0.06, bw: heavy ? 1.18 : 1.02, mass: heavy ? 1.25 : 0.98, belly: heavy ? 0.4 : 0.05, chest: heavy ? 0.8 : 0.55, headS: d === 'titan' ? 1.0 : 1.12, shoulders: heavy ? 1.15 : 1.08, handS: heavy ? 1.3 : 1.15, footS: 1.1, fem: d === 'medic' && r.chance(0.5) ? 1 : 0 });
+      L.age = 0.3 + r.next() * 0.4;
+      L.hair = { style: 'none', col: hairNat, grey: 0 };
+      L.facial = r.chance(0.45) ? 'stubble' : r.chance(0.3) ? 'moustache' : 'none'; L.facialCol = hairNat;
+      if (L.build.fem > 0.5) L.facial = 'none';
+      F.browCol = mix(hairNat, [20, 16, 12], 0.3); F.brow = 1.15; F.jaw = 1.05;
+      L.hat = heavy ? 'brass' : 'hood'; L.hatCol = [20, 20, 22]; L.hatCol2 = [20, 20, 22];
+      const neo = (h: string) => C(h);
+      const kit: DiveKit = {
+        suit: heavy ? 'canvas' : 'wetsuit', col: neo('#16181c'), col2: neo('#2a6ab0'), col3: neo('#e8c020'), pattern: 'panels', hood: !heavy,
+        mask: heavy ? 'brass' : 'scuba', lens: [40, 70, 80], tank: heavy ? 'none' : 'single', tankCol: C(pick(r, ['#e8c018', '#d8dade', '#c83a24', '#2a4a8a'])),
+        bcd: !heavy, fins: heavy ? 'none' : 'short', finCol: C(pick(r, ['#16181c', '#e8c018', '#2a6ab0'])), belt: true, knife: !heavy, snorkel: false, cross: false,
+        num: 1 + Math.floor(r.next() * 9),
+      };
+      switch (d) {
+        case 'scuba': {
+          kit.col2 = C(pick(r, ['#2a5aa8', '#c8401c', '#e8b818', '#3a7a5a', '#6a6e78']));
+          kit.col3 = C(pick(r, ['#e8e8e0', '#e8c020', '#18a8c8']));
+          break;
+        }
+        case 'freediver': {
+          // reef camo: blotches of olive, sand and kelp brown, a long-bladed carbon fin, a snorkel and no tank
+          kit.pattern = 'camo'; kit.col = C(pick(r, ['#3a4232', '#2e3a36', '#4a4436'])); kit.col2 = C(pick(r, ['#6a6a48', '#58704e', '#7a6a4a'])); kit.col3 = C('#22261e');
+          kit.mask = 'free'; kit.tank = 'none'; kit.bcd = false; kit.fins = 'long'; kit.finCol = C(pick(r, ['#202224', '#3a4a3a', '#6a5a3a'])); kit.snorkel = true; kit.lens = [60, 60, 50];
+          L.build.s *= 0.98; L.build.mass *= 0.94; L.build.chest = 0.4;
+          break;
+        }
+        case 'netDiver': {
+          kit.col = C('#24272c'); kit.col2 = C(pick(r, ['#e8701c', '#d8a018'])); kit.col3 = C('#e8e8e0'); kit.tankCol = C('#d8dade');
+          L.build.bw *= 1.06; L.build.mass *= 1.06; L.build.belly = 0.25;
+          break;
+        }
+        case 'commando': {
+          kit.pattern = 'plain'; kit.col = C('#101114'); kit.col2 = C('#1c1e22'); kit.col3 = C('#3a3e44');
+          kit.mask = 'commando'; kit.tank = 'rebreather'; kit.tankCol = C('#2a2e2a'); kit.fins = 'short'; kit.finCol = C('#101114'); kit.lens = [20, 30, 34];
+          F.brow = 1.4; F.jaw = 1.12; L.facial = 'stubble';
+          break;
+        }
+        case 'medic': {
+          kit.col = C('#1e2024'); kit.col2 = C('#e8e6e0'); kit.col3 = C('#c82020'); kit.cross = true; kit.tankCol = C('#e8e6e0');
+          break;
+        }
+        case 'heavyDiver': case 'titan': {
+          // the Mark V: rubberised canvas, a copper-and-brass helmet bolted to its corselet, lead boots
+          kit.col = C(pick(r, ['#8a7a58', '#7a6e52', '#94845e'])); kit.col2 = C('#5a4e3a'); kit.col3 = C('#b88a3a'); kit.pattern = 'plain';
+          kit.tankCol = C(d === 'titan' ? '#4a4c50' : '#b8862e');
+          L.feet = { kind: 'lead', col: [70, 72, 74], col2: [150, 110, 50] };
+          L.hands = { kind: 'glove', col: [60, 54, 46] };
+          break;
+        }
+      }
+      L.dive = kit;
+      L.top = { kind: 'thermal', col: kit.col, col2: kit.col2, col3: kit.col3, sleeve: 'long', hem: 0.86 };
+      L.legs = { kind: 'pants', col: kit.col, col2: kit.col2, hem: -0.83 };
+      if (!heavy) { L.feet = { kind: 'bootie', col: [24, 24, 26], col2: [60, 60, 64] }; L.hands = { kind: 'glove', col: d === 'freediver' ? kit.col : [26, 26, 28] }; }
+      L.rod = { kind: 'spin', len: 2.0, col: [40, 40, 44], wrap: [40, 40, 44], reel: 'spin', reelCol: [60, 60, 66], thick: 1 };
+      L.anim = { speed: 1, energy: 1, bounce: 0.6, heavy: heavy ? 0.9 : 0.3 };
+      break;
+    }
   }
   if (L.hands.kind === 'bare') L.hands.col = L.skin;
   // small seeded proportion variation (the boss and the kid stay on model)
-  if (arch !== 'captainGaff' && arch !== 'kid') {
+  if (arch !== 'captainGaff' && arch !== 'kid' && arch !== 'titan') {
     L.build.s *= 1 + (r.next() - 0.5) * 0.06;
     L.build.bw *= 1 + (r.next() - 0.5) * 0.06;
     L.build.mass *= 1 + (r.next() - 0.5) * 0.08;

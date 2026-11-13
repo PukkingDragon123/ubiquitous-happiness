@@ -8,6 +8,15 @@
 import * as THREE from 'three';
 import type { V3, Wt } from '../gfx/loft';
 
+/**
+ * Mesh detail. v2 is PS1/PS2 low-poly: about half the ring segments and rows, mitten-block hands, coarse
+ * skulls, flat (faceted) shading. Previews can flip it (`DETAIL.low = false`) for the smooth v1 people;
+ * model caches key on it.
+ */
+export const DETAIL = { low: true };
+/** pick the low-poly or smooth value */
+export const lp = <T>(low: T, hi: T): T => (DETAIL.low ? low : hi);
+
 export const BONES = [
   'hips', 'spine', 'chest', 'neck', 'head', 'belly',
   'uarmL', 'farmL', 'handL', 'fing1L', 'fing2L', 'thumbL',

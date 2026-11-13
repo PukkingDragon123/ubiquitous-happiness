@@ -8,7 +8,7 @@
 import type { V3, Wt } from '../gfx/loft';
 import { Loft, usFor } from '../gfx/loft';
 import type { Dims } from './rig';
-import { BI, ellRing, vOf, clamp01 } from './rig';
+import { BI, ellRing, vOf, clamp01, lp } from './rig';
 import type { Look } from './looks';
 import { R, VMAP, subR } from './page';
 
@@ -28,9 +28,18 @@ const HEAD_ROWS: HeadRow[] = [
   { y: 0.173, zc: 0.0, r: [0.086, 0.084, 0.079, 0.074, 0.072, 0.078, 0.088, 0.092] },
   { y: 0.199, zc: -0.004, r: [0.06, 0.059, 0.057, 0.054, 0.053, 0.056, 0.062, 0.064] },
 ];
-export const HEAD_ANG = [-180, -155, -125, -95, -70, -45, -22, 0, 22, 45, 70, 95, 125, 155, 180];
-const FACE_ROWS = [-0.03, -0.015, 0.0, 0.012, 0.022, 0.032, 0.042, 0.052, 0.062, 0.072, 0.08, 0.087, 0.094, 0.1, 0.106, 0.113, 0.12, 0.128, 0.142, 0.16, 0.18, 0.2];
-const FACE_ANG = [-180, -150, -122, -101, -86, -72, -60, -50, -41, -33, -26, -19, -12, -6, 0, 6, 12, 19, 26, 33, 41, 50, 60, 72, 86, 101, 122, 150, 180];
+const HEAD_ANG_HI = [-180, -155, -125, -95, -70, -45, -22, 0, 22, 45, 70, 95, 125, 155, 180];
+const HEAD_ANG_LO = [-180, -135, -90, -50, -22, 0, 22, 50, 90, 135, 180];
+const FACE_ROWS_HI = [-0.03, -0.015, 0.0, 0.012, 0.022, 0.032, 0.042, 0.052, 0.062, 0.072, 0.08, 0.087, 0.094, 0.1, 0.106, 0.113, 0.12, 0.128, 0.142, 0.16, 0.18, 0.2];
+const FACE_ANG_HI = [-180, -150, -122, -101, -86, -72, -60, -50, -41, -33, -26, -19, -12, -6, 0, 6, 12, 19, 26, 33, 41, 50, 60, 72, 86, 101, 122, 150, 180];
+// PS1 skull: a coarse cage with rows through the brow, the eye line, the cheekbones, the mouth and the chin so
+// the faceted silhouette still reads as a face; the painted page does the rest
+const FACE_ROWS_LO = [-0.03, -0.008, 0.012, 0.036, 0.058, 0.08, 0.1, 0.122, 0.15, 0.18, 0.2];
+const FACE_ANG_LO = [-180, -140, -105, -80, -58, -38, -20, 0, 20, 38, 58, 80, 105, 140, 180];
+/** ring angles of hair shells / hats (degrees from the face) */
+export let HEAD_ANG = HEAD_ANG_HI;
+let FACE_ROWS = FACE_ROWS_HI, FACE_ANG = FACE_ANG_HI;
+function pickDetail() { HEAD_ANG = lp(HEAD_ANG_LO, HEAD_ANG_HI); FACE_ROWS = lp(FACE_ROWS_LO, FACE_ROWS_HI); FACE_ANG = lp(FACE_ANG_LO, FACE_ANG_HI); }
 
 function headR(row: HeadRow, deg: number): number {
   const a = Math.abs(deg);
@@ -101,6 +110,9 @@ function faceRelief(y: number, deg: number, L: Look, F: FaceLayout): number {
   return r;
 }
 
+/** < 1 inside the face opening of a dive hood (head-local y, degrees from the face) */
+export const hoodOval = (y: number, deg: number) => Math.hypot(deg / 50, (y - 0.072) / 0.072);
+
 export interface HeadShape {
   L: Look; d: Dims; F: FaceLayout; hs: number; hp: V3;
   /** point on the skin (head-local reference units), off = metres (reference) out from the skin */
@@ -133,10 +145,13 @@ export function headShape(L: Look, d: Dims): HeadShape {
     return r;
   };
   const longY = (y: number) => (Fc.long !== 1 && y < 0.07 ? 0.07 + (y - 0.07) * Fc.long : y);
+  const hood = L.hat === 'hood';
   const skull = (y: number, deg: number, off = 0, relief = true): V3 => {
     const row = sampleHead(y);
     const t = (deg * Math.PI) / 180;
-    const r = tweak(row, deg) + off + (relief ? faceRelief(y, deg, L, F) : 0);
+    // a neoprene hood: 5 mm of rubber over everything but the face oval
+    const hk = hood ? 0.007 * clamp01((hoodOval(y, deg) - 1) * 4) : 0;
+    const r = tweak(row, deg) + off + hk + (relief ? faceRelief(y, deg, L, F) : 0);
     return [Math.sin(t) * r, y, row.zc + Math.cos(t) * r];
   };
   const normal = (y: number, deg: number): V3 => {
@@ -166,6 +181,7 @@ export function headUV(S: HeadShape, p: V3): [number, number] {
 
 // ------------------------------------------------------------------ head build
 export function buildHead(B: Loft, S: HeadShape) {
+  pickDetail();
   const { L, tr, skull } = S;
   const H = BI.head;
   const us = FACE_ANG.map((a) => 0.5 + a / 360);
@@ -207,7 +223,7 @@ export function buildHead(B: Loft, S: HeadShape) {
     T(AL, NL, CO); T(AR, CO, NR); T(BL, AL, SL); T(BR, SR, AR); T(BL, NL, AL); T(BR, AR, NR);
   }
   // ears: a rim (helix) curling back from the side of the head, the bowl, a lobe; both faces drawn
-  for (const k of [1, -1]) {
+  for (const k of L.hat === 'hood' || L.hat === 'brass' ? [] : [1, -1]) {
     const a = k * 95;
     const es = L.face.ears * (L.arch === 'kid' ? 1.22 : 1.12), ym = 0.082;
     const Y = (y: number) => ym + (y - ym) * es;
@@ -271,7 +287,7 @@ function buildHair(B: Loft, S: HeadShape) {
     return side + (back - side) * Math.min(1, (a - 105) / 55);
   };
   const thick = st === 'sides' ? 0.008 : st === 'bun' ? 0.008 : st === 'shaggy' ? 0.014 : st === 'messy' ? 0.013 : 0.009;
-  const ys = [-0.14, -0.08, -0.03, 0.0, 0.035, 0.07, 0.105, 0.14, 0.17, 0.198];
+  const ys = lp([-0.14, -0.06, 0.0, 0.06, 0.12, 0.17, 0.198], [-0.14, -0.08, -0.03, 0.0, 0.035, 0.07, 0.105, 0.14, 0.17, 0.198]);
   const minY = Math.min(...HEAD_ANG.map((a) => line(a)));
   const rowYs = ys.filter((y) => y >= minY - 0.03);
   const us = HEAD_ANG.map((a) => 0.5 + a / 360);

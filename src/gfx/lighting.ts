@@ -1,6 +1,14 @@
-// Lighting rig for the ocean scenes: the sun (refracted through the surface, so underwater light comes in
-// steeper than the sun in the sky), a soft shadow map that follows the camera, sky/seabed hemisphere fill and
-// a warm bounce. Biome palettes tweak colours + water optics in one place (applyLook).
+// Lighting rig for the ocean scenes, tuned for a cinematic PS2 mood (Silent Hill 2 / MGS2 / Shadow of the
+// Colossus): a strong key (the sun, refracted through the surface so underwater light comes in steeper than
+// the sun in the sky) with real shadows that follow the camera, a low hemisphere fill so shadows stay dark
+// but readable, a cool back/rim light that separates silhouettes from the murk, and a small pool of point
+// lights for lamps and transient flashes (muzzle flashes, explosions, magic).
+//
+//   const rig = new Lighting();              scene.add(rig.group); rig.applyLook(LOOKS.reef)
+//   const lamp = rig.lamp(x, y, z, '#ffb060', 3, 6);   lamp.set(x, y, z) / lamp.intensity = .. / lamp.release()
+//   rig.flash(x, y, '#ffd890', 8, 0.08)                  // auto-decaying point light (also done by fx.muzzle...)
+//
+// Biome palettes tweak colours + water optics + the cinematic grade in one place (applyLook).
 import * as THREE from 'three';
 import { UW } from './shaders/underwater';
 import { SKY } from './sky';
@@ -15,73 +23,130 @@ export interface Look {
   depthExt: [number, number, number]; depthMin: [number, number, number];
   caustic: number; causticCol: string;
   saturation: number; contrast: number; lift: [number, number, number]; gain: [number, number, number]; exposure: number;
+  // ---- cinematic extras (optional; defaults applied when absent)
+  /** split tone: shadow colour, highlight colour, amount */
+  split?: [string, string, number];
+  /** film grain, black crush, bloom, vignette */
+  grain?: number; black?: number; bloom?: number; vignette?: number;
+  /** cool back light that separates silhouettes: colour, intensity */
+  rim?: [string, number];
+  /** key shadow darkness 0..1 */
+  shadow?: number;
+  /** distance fog for dry scenes: colour, density per metre */
+  fog?: [string, number];
 }
 
 export const LOOKS: Record<string, Look> = {
   reef: {
-    sky: ['#3f86d8', '#c7ecf7'], seaFar: '#1d6f96', sun: '#fff2d6', cloudCover: 0.5,
-    scatterTop: '#1a92ad', scatterDeep: '#041a33', ext: [0.12, 0.05, 0.038], clear: 7, rays: 0.8, rayCol: '#e6fff4',
+    sky: ['#3f7fc4', '#c7e2ea'], seaFar: '#1a6386', sun: '#fff0d4', cloudCover: 0.5,
+    scatterTop: '#17859e', scatterDeep: '#031428', ext: [0.13, 0.055, 0.04], clear: 6.5, rays: 0.95, rayCol: '#e6fff0',
     tir: '#2a8fb0', shallow: '#22b3c9', deep: '#0b5a80',
-    hemiSky: '#8fd8f0', hemiGround: '#2a4048', hemi: 0.75, sunI: 1.8,
-    depthExt: [0.06, 0.026, 0.016], depthMin: [0.08, 0.13, 0.2], caustic: 0.7, causticCol: '#fff6dc',
-    saturation: 1.18, contrast: 1.1, lift: [0, 0.008, 0.025], gain: [1.03, 1.0, 0.97], exposure: 0.95,
+    hemiSky: '#7cc4dc', hemiGround: '#24343a', hemi: 0.55, sunI: 2.4,
+    depthExt: [0.065, 0.028, 0.017], depthMin: [0.07, 0.11, 0.17], caustic: 0.8, causticCol: '#fff4d8',
+    saturation: 1.02, contrast: 1.1, lift: [0, 0.006, 0.02], gain: [1.03, 1.0, 0.96], exposure: 1.0,
+    split: ['#1a5866', '#ffbe7a', 0.28], rim: ['#7fd6ff', 0.55], shadow: 0.9,
   },
   kelp: {
-    sky: ['#4a8ccc', '#d6efe8'], seaFar: '#1f6a70', sun: '#fff0cc', cloudCover: 0.62,
-    scatterTop: '#3fb7a6', scatterDeep: '#05282e', ext: [0.14, 0.05, 0.05], clear: 6, rays: 1.2, rayCol: '#f6ffd8',
+    sky: ['#4a86c0', '#d0e6de'], seaFar: '#1c5f62', sun: '#fff0cc', cloudCover: 0.62,
+    scatterTop: '#2e9a8c', scatterDeep: '#031c20', ext: [0.15, 0.055, 0.055], clear: 5.5, rays: 1.35, rayCol: '#f2ffd2',
     tir: '#3a9f94', shallow: '#2aa898', deep: '#0d4f52',
-    hemiSky: '#bff0d8', hemiGround: '#3a4a2a', hemi: 1.0, sunI: 2.4,
-    depthExt: [0.06, 0.024, 0.02], depthMin: [0.09, 0.15, 0.15], caustic: 1.1, causticCol: '#fffbd0',
-    saturation: 1.1, contrast: 1.08, lift: [0.0, 0.02, 0.015], gain: [1.03, 1.02, 0.95], exposure: 1.0,
+    hemiSky: '#a6dcc0', hemiGround: '#2a3420', hemi: 0.6, sunI: 2.6,
+    depthExt: [0.065, 0.026, 0.022], depthMin: [0.07, 0.12, 0.12], caustic: 1.1, causticCol: '#fffbd0',
+    saturation: 0.98, contrast: 1.12, lift: [0.0, 0.016, 0.01], gain: [1.03, 1.02, 0.94], exposure: 1.0,
+    split: ['#1e5a48', '#ffd08a', 0.3], rim: ['#b8ffd8', 0.45], shadow: 0.92,
+  },
+  graveyard: {
+    sky: ['#56677a', '#b4b8b2'], seaFar: '#24403f', sun: '#e8e2d0', cloudCover: 0.85,
+    scatterTop: '#3c6e68', scatterDeep: '#040e10', ext: [0.17, 0.08, 0.075], clear: 4.5, rays: 0.7, rayCol: '#e0eadc',
+    tir: '#3a6a64', shallow: '#3a7a70', deep: '#123634',
+    hemiSky: '#8ea8a0', hemiGround: '#20201a', hemi: 0.45, sunI: 1.8,
+    depthExt: [0.075, 0.034, 0.03], depthMin: [0.06, 0.08, 0.08], caustic: 0.45, causticCol: '#e8f0dc',
+    saturation: 0.82, contrast: 1.14, lift: [0.004, 0.012, 0.012], gain: [1.02, 1.0, 0.95], exposure: 0.98,
+    split: ['#244a44', '#d8b080', 0.34], rim: ['#a0c8c0', 0.5], shadow: 0.94, grain: 0.07, black: 0.04,
   },
   harbor: {
     sky: ['#6f9fd0', '#e6e0d0'], seaFar: '#3a6a70', sun: '#ffe6c0', cloudCover: 0.7,
-    scatterTop: '#5aa8a0', scatterDeep: '#0a2228', ext: [0.16, 0.07, 0.07], clear: 5, rays: 0.8, rayCol: '#fff4dc',
+    scatterTop: '#4e9890', scatterDeep: '#081c20', ext: [0.17, 0.075, 0.075], clear: 5, rays: 0.8, rayCol: '#fff4dc',
     tir: '#4a8f88', shallow: '#3f9890', deep: '#164a50',
-    hemiSky: '#d0e8e0', hemiGround: '#4a4436', hemi: 1.0, sunI: 2.2,
-    depthExt: [0.07, 0.03, 0.028], depthMin: [0.1, 0.13, 0.13], caustic: 0.8, causticCol: '#fff0d0',
-    saturation: 1.02, contrast: 1.08, lift: [0.02, 0.015, 0.0], gain: [1.05, 1.0, 0.94], exposure: 1.0,
+    hemiSky: '#c0d8d0', hemiGround: '#3a3428', hemi: 0.65, sunI: 2.3,
+    depthExt: [0.07, 0.03, 0.028], depthMin: [0.09, 0.11, 0.11], caustic: 0.8, causticCol: '#fff0d0',
+    saturation: 0.96, contrast: 1.1, lift: [0.015, 0.012, 0.0], gain: [1.05, 1.0, 0.94], exposure: 1.0,
+    split: ['#2a5a5a', '#ffc080', 0.3],
   },
   arctic: {
-    sky: ['#7fb2e6', '#f0f8ff'], seaFar: '#2a5f8a', sun: '#f4fbff', cloudCover: 0.55,
-    scatterTop: '#7ad0e8', scatterDeep: '#071f3a', ext: [0.1, 0.04, 0.025], clear: 8, rays: 1.1, rayCol: '#f4fcff',
+    sky: ['#7fa8d6', '#eef4f8'], seaFar: '#2a5a80', sun: '#f4fbff', cloudCover: 0.6,
+    scatterTop: '#68bcd6', scatterDeep: '#051830', ext: [0.11, 0.045, 0.028], clear: 7.5, rays: 1.2, rayCol: '#f4fcff',
     tir: '#6ab8d8', shallow: '#4cb4d8', deep: '#164a7a',
-    hemiSky: '#d8f4ff', hemiGround: '#4a6070', hemi: 1.25, sunI: 2.4,
-    depthExt: [0.05, 0.02, 0.012], depthMin: [0.12, 0.17, 0.26], caustic: 0.9, causticCol: '#f0fbff',
-    saturation: 1.0, contrast: 1.05, lift: [0.01, 0.02, 0.04], gain: [0.98, 1.0, 1.04], exposure: 1.02,
+    hemiSky: '#c4e4f4', hemiGround: '#3a4a58', hemi: 0.8, sunI: 2.5,
+    depthExt: [0.055, 0.022, 0.013], depthMin: [0.1, 0.14, 0.22], caustic: 0.9, causticCol: '#f0fbff',
+    saturation: 0.9, contrast: 1.08, lift: [0.01, 0.018, 0.035], gain: [0.98, 1.0, 1.04], exposure: 1.02,
+    split: ['#2a4a70', '#ffe4c0', 0.24], rim: ['#d8f4ff', 0.6], shadow: 0.85,
   },
   abyss: {
     sky: ['#1a2a5a', '#5a6a9a'], seaFar: '#0a1a3a', sun: '#c0d0ff', cloudCover: 0.8,
-    scatterTop: '#1a4a7a', scatterDeep: '#010612', ext: [0.2, 0.08, 0.05], clear: 5, rays: 0.4, rayCol: '#a0d8ff',
+    scatterTop: '#163e66', scatterDeep: '#01040c', ext: [0.21, 0.085, 0.055], clear: 4.5, rays: 0.45, rayCol: '#a0d8ff',
     tir: '#16406a', shallow: '#164a7a', deep: '#04142a',
-    hemiSky: '#4a6aaa', hemiGround: '#0a1020', hemi: 0.7, sunI: 1.0,
-    depthExt: [0.08, 0.04, 0.02], depthMin: [0.04, 0.06, 0.12], caustic: 0.4, causticCol: '#a0c8ff',
-    saturation: 1.15, contrast: 1.12, lift: [0.0, 0.01, 0.04], gain: [0.95, 1.0, 1.08], exposure: 1.05,
+    hemiSky: '#3a5a96', hemiGround: '#060a14', hemi: 0.5, sunI: 0.9,
+    depthExt: [0.085, 0.042, 0.022], depthMin: [0.03, 0.05, 0.1], caustic: 0.35, causticCol: '#a0c8ff',
+    saturation: 1.05, contrast: 1.16, lift: [0.0, 0.008, 0.03], gain: [0.95, 1.0, 1.08], exposure: 1.05,
+    split: ['#0e2a50', '#a8d8ff', 0.3], rim: ['#5aa8ff', 0.7], shadow: 0.95, grain: 0.07, black: 0.035, bloom: 0.7,
   },
   sunset: {
     sky: ['#4a5aa8', '#ffb98a'], seaFar: '#3a4a7a', sun: '#ffcf96', cloudCover: 0.55,
-    scatterTop: '#4aa8b8', scatterDeep: '#0a1a3a', ext: [0.11, 0.05, 0.04], clear: 7, rays: 1.3, rayCol: '#ffe0b8',
+    scatterTop: '#3e98a8', scatterDeep: '#08142e', ext: [0.12, 0.055, 0.045], clear: 6.5, rays: 1.4, rayCol: '#ffe0b8',
     tir: '#5a8aa8', shallow: '#3a8ab0', deep: '#14325a',
-    hemiSky: '#ffd0b0', hemiGround: '#3a2a3a', hemi: 1.0, sunI: 2.3,
-    depthExt: [0.045, 0.026, 0.018], depthMin: [0.12, 0.1, 0.18], caustic: 1.0, causticCol: '#ffe0b0',
-    saturation: 1.12, contrast: 1.08, lift: [0.03, 0.0, 0.03], gain: [1.06, 0.99, 0.95], exposure: 1.0,
+    hemiSky: '#e8b8a0', hemiGround: '#2a2030', hemi: 0.6, sunI: 2.5,
+    depthExt: [0.05, 0.028, 0.02], depthMin: [0.1, 0.08, 0.15], caustic: 1.0, causticCol: '#ffe0b0',
+    saturation: 1.04, contrast: 1.1, lift: [0.02, 0.0, 0.025], gain: [1.06, 0.99, 0.94], exposure: 1.0,
+    split: ['#2a3a6a', '#ffb070', 0.36], rim: ['#ffb890', 0.5],
+  },
+  /** dry interior (hideout cave): warm lamp pools against cold rock, distance fog, no water optics */
+  hideout: {
+    sky: ['#1a1e26', '#30343a'], seaFar: '#101418', sun: '#a8c0d8', cloudCover: 0.9,
+    scatterTop: '#2a4a52', scatterDeep: '#05080a', ext: [0.2, 0.1, 0.08], clear: 5, rays: 0, rayCol: '#ffffff',
+    tir: '#2a4a52', shallow: '#2a4a52', deep: '#0a1418',
+    hemiSky: '#5a6a80', hemiGround: '#2a2018', hemi: 0.35, sunI: 0.6,
+    depthExt: [0.06, 0.03, 0.02], depthMin: [0.1, 0.1, 0.1], caustic: 0, causticCol: '#ffffff',
+    saturation: 0.92, contrast: 1.12, lift: [0.006, 0.008, 0.016], gain: [1.05, 1.0, 0.93], exposure: 1.05,
+    split: ['#1c3a48', '#ffb060', 0.38], rim: ['#6a8aa8', 0.35], shadow: 0.95, fog: ['#0b0d12', 0.035], grain: 0.065,
   },
 };
 
+/** a point light slot handed out by Lighting.lamp() */
+export interface LampHandle {
+  light: THREE.PointLight;
+  set(x: number, y: number, z?: number): void;
+  release(): void;
+}
+
+interface Slot { light: THREE.PointLight; kind: 'free' | 'lamp' | 'flash'; t0: number; dur: number; peak: number }
+
 export class Lighting {
   sun = new THREE.DirectionalLight('#fff2d6', 2.6);
-  hemi = new THREE.HemisphereLight('#9fe8ff', '#3a5a4a', 1.1);
+  hemi = new THREE.HemisphereLight('#9fe8ff', '#3a5a4a', 0.8);
+  /** cool back light from behind the play plane (no shadows) */
+  rim = new THREE.DirectionalLight('#7fd6ff', 0.5);
   group = new THREE.Group();
-  constructor(shadowSize = 2048) {
+  private slots: Slot[] = [];
+
+  constructor(shadowSize = 2048, points = 4) {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     const c = this.sun.shadow.camera as THREE.OrthographicCamera;
     c.left = -22; c.right = 22; c.top = 16; c.bottom = -16; c.near = 1; c.far = 80;
-    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.03;
-    this.sun.shadow.radius = 4;
-    this.sun.shadow.intensity = 0.75;
-    this.group.add(this.sun, this.sun.target, this.hemi);
+    this.sun.shadow.radius = 2;
+    this.sun.shadow.intensity = 0.9;
+    this.group.name = 'lighting';
+    this.group.userData.rig = this;
+    this.group.add(this.sun, this.sun.target, this.hemi, this.rim, this.rim.target);
+    for (let i = 0; i < points; i++) {
+      const l = new THREE.PointLight('#ffffff', 0, 8, 2);
+      l.position.set(0, -1e4, 0);
+      this.group.add(l);
+      this.slots.push({ light: l, kind: 'free', t0: 0, dur: 0, peak: 0 });
+    }
     this.setSun(SKY.uSunAir.value);
   }
   /** set the sky sun and derive the refracted underwater light direction (Snell, n = 1.333) */
@@ -100,7 +165,50 @@ export class Lighting {
     this.sun.position.set(x + d.x * 40, y + d.y * 40, d.z * 40);
     this.sun.target.position.set(x, y, 0);
     this.sun.target.updateMatrixWorld();
+    this.rim.position.set(x - d.x * 10, y + 14, -30);
+    this.rim.target.position.set(x, y, 0);
+    this.rim.target.updateMatrixWorld();
+    this.tick();
   }
+  /** a persistent point light (lantern, glowing crystal, sub headlamp). Returns null when the pool is full. */
+  lamp(x: number, y: number, z: number, color: string, intensity = 3, distance = 7): LampHandle | null {
+    const s = this.slots.find((q) => q.kind === 'free') ?? this.slots.find((q) => q.kind === 'flash');
+    if (!s) return null;
+    s.kind = 'lamp';
+    s.light.color.set(color); s.light.intensity = intensity; s.light.distance = distance;
+    s.light.position.set(x, y, z);
+    return {
+      light: s.light,
+      set: (px, py, pz = s.light.position.z) => s.light.position.set(px, py, pz),
+      release: () => { s.kind = 'free'; s.light.intensity = 0; s.light.position.set(0, -1e4, 0); },
+    };
+  }
+  /** a transient flash that decays on its own (muzzle flash, explosion, spell) */
+  flash(x: number, y: number, color: string, intensity = 8, dur = 0.12, distance = 7, z = 0.8) {
+    let s = this.slots.find((q) => q.kind === 'free');
+    if (!s) {
+      // steal the oldest flash
+      let best: Slot | null = null;
+      for (const q of this.slots) if (q.kind === 'flash' && (!best || q.t0 < best.t0)) best = q;
+      s = best ?? undefined;
+    }
+    if (!s) return;
+    s.kind = 'flash'; s.t0 = performance.now(); s.dur = Math.max(0.02, dur); s.peak = intensity;
+    s.light.color.set(color); s.light.distance = distance; s.light.intensity = intensity;
+    s.light.position.set(x, y, z);
+  }
+  /** decay flashes (time based; safe to call several times per frame) */
+  tick() {
+    const now = performance.now();
+    for (const s of this.slots) {
+      if (s.kind !== 'flash') continue;
+      const t = (now - s.t0) / 1000 / s.dur;
+      if (t >= 1) { s.kind = 'free'; s.light.intensity = 0; s.light.position.set(0, -1e4, 0); continue; }
+      s.light.intensity = s.peak * (1 - t) * (1 - t);
+    }
+  }
+  update(_dt: number) { this.tick(); }
+
   applyLook(L: Look) {
     SKY.uSkyTop.value.set(L.sky[0]); SKY.uSkyHorizon.value.set(L.sky[1]); SKY.uSeaFar.value.set(L.seaFar); SKY.uSunCol.value.set(L.sun); SKY.uCloudCover.value = L.cloudCover;
     POST.uScatterTop.value.set(L.scatterTop); POST.uScatterDeep.value.set(L.scatterDeep); POST.uExt.value.set(...L.ext); POST.uClear.value = L.clear;
@@ -110,5 +218,25 @@ export class Lighting {
     this.hemi.color.set(L.hemiSky); this.hemi.groundColor.set(L.hemiGround); this.hemi.intensity = L.hemi;
     this.sun.color.set(L.sun); this.sun.intensity = L.sunI;
     UW.uDepthExt.value.set(...L.depthExt); UW.uDepthMin.value.set(...L.depthMin); UW.uCaustic.value = L.caustic; UW.uCausticCol.value.set(L.causticCol);
+    // cinematic extras
+    const sp = L.split ?? ['#1d5a66', '#ffb46a', 0.3];
+    POST.uSplitLo.value.set(sp[0]); POST.uSplitHi.value.set(sp[1]); POST.uSplit.value = sp[2];
+    POST.uGrain.value = L.grain ?? 0.055;
+    POST.uBlack.value = L.black ?? 0.03;
+    POST.uBloom.value = L.bloom ?? 0.5;
+    POST.uVignette.value = L.vignette ?? 0.5;
+    const rim = L.rim ?? ['#8fcfff', 0.45];
+    this.rim.color.set(rim[0]); this.rim.intensity = rim[1];
+    this.sun.shadow.intensity = L.shadow ?? 0.9;
+    const fog = L.fog ?? ['#0d0f14', 0];
+    POST.uDryFogCol.value.set(fog[0]); POST.uDryFog.value = fog[1];
   }
+}
+
+/** find the Lighting rig living in an object's scene (Particles uses this to fire flashes) */
+export function rigOf(o: THREE.Object3D): Lighting | null {
+  let root: THREE.Object3D = o;
+  while (root.parent) root = root.parent;
+  for (const c of root.children) if (c.userData.rig instanceof Lighting) return c.userData.rig as Lighting;
+  return null;
 }
