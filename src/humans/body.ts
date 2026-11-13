@@ -207,7 +207,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     const harpoon = side === 'L' && !!L.extras.harpoon;
     let ys = ringYs(ARM_ROWS, breaks, sh.sleeveY < -0.3 ? [-0.235, -0.285, -0.32, -0.455, -0.478] : [sh.sleeveY + 0.03]);
     if (harpoon) ys = ys.filter((r) => r.y > -0.44);
-    const fm = (1 - fem * 0.12) * (0.66 + 0.34 * mass) * (L.arch === 'captainGaff' ? 1.15 : 1);
+    const fm = (1 - fem * 0.12) * (0.66 + 0.34 * mass) * (L.arch === 'captainGaff' ? 1.15 : 1) * 1.2;
     const wOfA = (y: number): Wt => {
       if (y > 0.025) return [U, 0.65, BI.chest, 0.35];
       if (y > -0.25) return [U, 1];
@@ -261,7 +261,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
     if (sh.bootTop > -0.86) breaks.push(sh.bootTop);
     if (sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') breaks.push(-0.74); // sock top
     const ys = ringYs(LEG_ROWS, breaks, sh.legKind !== 'shorts' ? [-0.72, -0.795] : []);
-    const fm = (0.7 + 0.3 * mass) * (L.arch === 'kid' ? 1.05 : 1);
+    const fm = (0.7 + 0.3 * mass) * (L.arch === 'kid' ? 1.08 : 1) * 1.12;
     const femLeg = (y: number) => 1 + fem * (0.09 * gauss(y, -0.08, 0.12) - 0.05 * gauss(y, -0.6, 0.1));
     const legBump = (thx: number, y: number, cov: boolean) => {
       let bb = gauss(y, -0.445, 0.025) * gauss(thx, 0, 0.5) * (cov ? 0.04 : 0.12);
@@ -293,7 +293,12 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
       const yy = y + eps * 0.0005;
       let t = 0, flare = 0;
       const cov = covered(yy);
-      if (cov) { t += sh.legThick; if (sh.legKind !== 'shorts') flare = Math.max(0, (-0.43 - y) / 0.42) * (0.012 + sh.flare); }
+      if (cov) {
+        t += sh.legThick;
+        if (sh.legKind !== 'shorts') flare = Math.max(0, (-0.43 - y) / 0.42) * (0.012 + sh.flare);
+        // trousers stuffed into boots bunch over the rim (the step faces down, into shadow)
+        if (yy > sh.bootTop && yy < sh.bootTop + 0.06) t += 0.012 * (1 - (yy - sh.bootTop) / 0.06);
+      }
       if (yy < sh.bootTop) { t += sh.bootThick + (cov ? 0 : 0.004); flare *= 0.3; }
       else if ((sh.feet === 'sandal' || sh.feet === 'sneaker' || sh.feet === 'shoe') && yy < -0.74 && !cov) t += 0.003;
       if (sh.feet === 'sandal' && yy < -0.74) t += 0.002;

@@ -18,10 +18,10 @@ export interface Vignette { node: MapNode | null; kind: VKind; x: number; z: num
 export interface Curve { a: number; b: number; key: string; pts: [number, number][]; cum: number[]; len: number }
 
 export const SLAB = { bevel: 0.45, cornerR: 3.2 };
-export const ZONE_DEPTH: Record<ZoneId, number> = { reef: -1.45, kelp: -2.35, sunset: -1.75, harbor: -2.0, arctic: -2.5, abyss: -3.2, trench: -4.0 };
+export const ZONE_DEPTH: Record<ZoneId, number> = { reef: -2.0, kelp: -2.6, sunset: -2.1, harbor: -2.3, arctic: -2.7, abyss: -3.3, trench: -4.0 };
 const KINDS: Record<ZoneId, [IslandKind, number][]> = {
-  reef: [['tropical', 6], ['sandbar', 2], ['rocky', 1.5]],
-  kelp: [['rocky', 5], ['tropical', 3.5], ['sandbar', 1.5]],
+  reef: [['tropical', 8], ['sandbar', 0.7], ['rocky', 2]],
+  kelp: [['rocky', 5], ['tropical', 4], ['sandbar', 0.6]],
   sunset: [['tropical', 5], ['dune', 3], ['rocky', 2]],
   harbor: [['harbor', 6], ['rocky', 4]],
   arctic: [['snow', 5], ['ice', 3], ['rocky', 2]],
@@ -41,6 +41,7 @@ export class Layout {
   shelves: Shelf[] = [];
   vignettes: Vignette[] = [];
   dock: { x: number; z: number };
+  frontWreck: { x: number; z: number; ang: number } | null = null;
   zoneIds: ZoneId[];
   // baked grid
   step = 0.125;
@@ -189,7 +190,8 @@ export class Layout {
       else kind = ({ pier: 'pier', rowboatCove: 'rowboat', kelpForest: 'canoeKelp', harbor: 'harborDock', reef: 'reefDinghy', iceHole: 'iceHole', trawlerLane: 'trawler', sunsetBay: 'beach' } as const)[n.spot];
       if (kind === 'mystery') { this.vignettes.push({ node: n, kind, x: n.x, z: n.z, ang: 0, r: 0, seed: n.seed }); continue; }
       if (kind === 'boss') {
-        const v: Vignette = { node: n, kind, x: n.x + 0.4, z: n.z - 3.4, ang: -Math.PI / 2, r: 2.4, seed: n.seed };
+        const side = rng.chance(0.5) ? -1 : 1;
+        const v: Vignette = { node: n, kind, x: n.x + side * 3.1, z: n.z - 2.2, ang: -Math.PI / 2, r: 2.4, seed: n.seed };
         add(v);
         continue;
       }
@@ -226,11 +228,15 @@ export class Layout {
     // the home dock in front of the start node
     this.vignettes.push({ node: null, kind: 'startDock', x: this.dock.x, z: this.dock.z + 0.6, ang: Math.PI / 2, r: 0.8, seed: this.map.seed });
     this.reserve(this.dock.x, this.dock.z + 0.8, 1.0);
-    // a sunken wreck near the front edge so the cutaway always has one in cross-section
-    const wx = (rng.chance(0.5) ? -1 : 1) * rng.range(2.5, this.W / 2 - 3), wz = this.zFront - rng.range(2.0, 3.2);
-    if (this.clearance(wx, wz, 0.3, 0.2) > 0.3) {
-      this.vignettes.push({ node: null, kind: 'wreck', x: wx, z: wz, ang: rng.range(-0.4, 0.4), r: 0, seed: this.map.seed + 5 });
-      this.shelves.push({ x: wx, z: wz, r: 1.8, depth: 1.9 });
+    // a sunken wreck lying across the front edge, so the opening cutaway slices right through it
+    for (let k = 0; k < 12; k++) {
+      const wx = (k % 2 ? -1 : 1) * rng.range(2.2, this.W / 2 - 2.2), wz = this.zFront - rng.range(0.1, 0.5);
+      if (this.clearance(wx, wz, 0.2, 0.2) < 0.9) continue;
+      this.frontWreck = { x: wx, z: wz, ang: Math.PI / 2 + rng.range(-0.25, 0.25) };
+      this.vignettes.push({ node: null, kind: 'wreck', x: wx, z: wz, ang: this.frontWreck.ang, r: 1.4, seed: this.map.seed + 5 });
+      this.reserve(wx, wz, 1.5);
+      this.shelves.push({ x: wx, z: wz, r: 2.2, depth: 1.8 });
+      break;
     }
   }
 
@@ -261,8 +267,10 @@ export class Layout {
       let d = cl;
       for (const i of this.islands) d = Math.min(d, Math.hypot(x - i.x, z - i.z) - i.r * 1.05 - gap);
       if (d < minR) return false;
-      const rr = Math.min(r, d);
-      const isl = this.makeIsland(x, z, rr, kindAt(z), rng.int(0, 1 << 30));
+      let rr = Math.min(r, d);
+      const kind = kindAt(z);
+      if (kind === 'sandbar' || kind === 'ice') rr = Math.min(rr, 0.75);
+      const isl = this.makeIsland(x, z, rr, kind, rng.int(0, 1 << 30));
       this.islands.push(isl);
       return true;
     };
@@ -302,7 +310,7 @@ export class Layout {
         this.rocks.push({ x, z, s: rng.range(0.16, 0.38), rot: rng.range(0, 6.28), h: rng.range(0.05, 0.3), seed: rng.int(0, 1 << 30), zone: this.zoneAt(z) });
       }
     }
-    for (let i = 0; i < 60 && this.rocks.length < 140; i++) {
+    for (let i = 0; i < 26 && this.rocks.length < 90; i++) {
       const x = rng.range(-hw + 1, hw - 1), z = rng.range(this.zBack + 2, this.zFront - 1);
       const cl = this.clearance(x, z, 1.0, 0.6);
       if (cl < 0.4 || this.sd(x, z) < 0.8) continue;
@@ -356,6 +364,8 @@ export class Layout {
     let b = 0;
     for (let i = 0; i < 3; i++) if (w[i] > 0) b += w[i] * ZONE_DEPTH[this.zoneIds[Math.min(i, this.zoneIds.length - 1)]];
     b += (fbm(x * 0.16 + 3.1, z * 0.16, 4) - 0.5) * 1.1 + (vnoise(x * 0.75, z * 0.75 + 9.3) - 0.5) * 0.3;
+    // broad deep-blue channels winding between the shallows
+    b -= Math.pow(clamp01((fbm(x * 0.07 + 11, z * 0.06 - 4, 3) - 0.42) * 3.2), 1.5) * 1.4;
     // deep trenches in the abyss
     if (this.map.act === 3) b -= Math.pow(clamp01(1 - Math.abs(fbm(x * 0.09, z * 0.05 + 2, 3) - 0.5) * 7), 2) * 1.6;
     return Math.min(-0.9, b);

@@ -6,7 +6,7 @@ import { Loft, V3 } from '../gfx/loft';
 import { Rng } from '../core/rng';
 import { A } from './tex';
 import { Layout, Vignette } from './layout';
-import { angler, barrel, beachSet, blob, box, bunting, cleaner, crab, crabShop, crate, fan, lathe, membrane, pier, place, rod, stiltHut, tent, trophyBuoy, turtle, wreck, bottle } from './build';
+import { wreckPitch, angler, barrel, beachSet, blob, box, bunting, cleaner, crab, crabShop, crate, fan, lathe, membrane, pier, place, rod, stiltHut, tent, trophyBuoy, turtle, wreck, bottle } from './build';
 import { ship, ShipKind, ShipOut } from './ships';
 
 export interface Floater { obj: THREE.Object3D; x: number; z: number; y0: number; amp: number; roll: number; ph: number; spin: number; yaw: number }
@@ -22,6 +22,8 @@ export class SpotCtx {
   schools: { x: number; z: number; r: number }[] = [];
   beams: Beam[] = [];
   halos: V3[] = [];
+  /** sunken hulls, so the cutaway can draw their cross-section: centre, heading, keel height, bow-up pitch */
+  wrecks: { x: number; z: number; rot: number; keel: number; pitch: number }[] = [];
   group = new THREE.Group();
   constructor(public lay: Layout, public mat: THREE.Material, public beamMat: (k: number) => THREE.Material, public halo: (s: number) => THREE.Object3D) {}
 
@@ -345,7 +347,9 @@ export function buildSpot(v: Vignette, ctx: SpotCtx) {
       const f = L.count;
       const top = wreck(L, v.seed, Math.max(0.4, mast));
       const rot = n ? toNode + Math.PI / 2 : v.ang;
+      if (!n) { ctx.schools.push({ x: v.x, z: v.z - 1.2, r: 0.8 }); }
       place(L, f, [v.x, g - 0.12, v.z], rot);
+      ctx.wrecks.push({ x: v.x, z: v.z, rot, keel: g - 0.12, pitch: wreckPitch(v.seed) });
       if (n) {
         // tattered black flag on the mast top
         const c = Math.cos(rot), s = Math.sin(rot);

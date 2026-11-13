@@ -14,16 +14,24 @@ import { ellRing } from './rig';
 
 export interface PxRect { x: number; y: number; w: number; h: number }
 
-/** shelf-packed regions on one painted page */
+/** regions packed onto one painted page (guillotine packing: best-fitting free rect, split the leftovers) */
 export class Atlas {
   P: Px;
-  private cx = 0; private cy = 0; private rowH = 0;
-  constructor(public W: number, public H: number) { this.P = new Px(W, H); }
+  private free: PxRect[];
+  constructor(public W: number, public H: number) { this.P = new Px(W, H); this.free = [{ x: 0, y: 0, w: W, h: H }]; }
   alloc(w: number, h: number): PxRect {
-    if (this.cx + w > this.W) { this.cx = 0; this.cy += this.rowH; this.rowH = 0; }
-    if (this.cy + h > this.H) throw new Error('atlas full');
-    const r = { x: this.cx, y: this.cy, w, h };
-    this.cx += w; this.rowH = Math.max(this.rowH, h);
+    let best = -1, bestA = Infinity;
+    for (let i = 0; i < this.free.length; i++) {
+      const f = this.free[i];
+      if (f.w >= w && f.h >= h && f.w * f.h < bestA) { best = i; bestA = f.w * f.h; }
+    }
+    if (best < 0) throw new Error('atlas full');
+    const f = this.free.splice(best, 1)[0];
+    const r = { x: f.x, y: f.y, w, h };
+    // split along the shorter leftover axis
+    if (f.w - w > f.h - h) { this.free.push({ x: f.x + w, y: f.y, w: f.w - w, h: f.h }, { x: f.x, y: f.y + h, w, h: f.h - h }); }
+    else { this.free.push({ x: f.x, y: f.y + h, w: f.w, h: f.h - h }, { x: f.x + w, y: f.y, w: f.w - w, h }); }
+    this.free = this.free.filter((q) => q.w > 0 && q.h > 0);
     return r;
   }
   reg(r: PxRect, u0 = 0, v0 = 0, u1 = 1, v1 = 1): Reg {
@@ -47,9 +55,11 @@ export function planks(c: RGB, u: number, v: number, x: number, y: number, n: nu
   const seed = i * 13 + 5;
   let col = wood(mix(c, shade(c, 0.85 + hh(i, 3, 2) * 0.3), 0.6), x + i * 37, y * 0.5, 1, seed, 1.6);
   if (paint) {
-    const chip = nz(x, y, 7, seed) + (hh(x, y, seed) - 0.5) * 0.15;
-    if (chip > wear * 0.8 + 0.25) col = band(paint, 0.94 + (nz(x, y * 3, 12, seed + 1) - 0.5) * 0.1, x, y);
-    else if (chip > wear * 0.8 + 0.18) col = band(mix(paint, c, 0.5), 0.8, x, y);
+    // paint everywhere except where it has flaked off (more wear = more and bigger chips)
+    const chip = nz(x * 1.3, y * 0.7, 7, seed) + (hh(x, y, seed) - 0.5) * 0.12;
+    const cut = 1 - wear * 0.45;
+    if (chip < cut - 0.04) col = band(paint, 0.94 + (nz(x, y * 3, 12, seed + 1) - 0.5) * 0.1 - (chip > cut - 0.08 ? 0.12 : 0), x, y);
+    else if (chip < cut) col = band(mix(paint, [240, 236, 220], 0.4), 0.85, x, y);
   }
   if (f < 0.06 || f > 0.96) col = shade(col, 0.55);
   // butt joints and nails

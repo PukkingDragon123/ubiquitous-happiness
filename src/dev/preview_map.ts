@@ -18,6 +18,7 @@ export default function make(game: Game): Screen {
     for (let i = 0; i < pre; i++) { visitNode(run, n); if (!n.next.length) break; n = map.nodes[n.next[Math.min(n.next.length - 1, i % 2)]]; }
   }
   const screen: MapScreen = new MapScreen(game, {
+    intro: !q.has('nointro'),
     onChoose(node, map) {
       console.log('[map] chose', node.id, node.type, node.spot, node.title, '-', node.blurb, 'difficulty', node.difficulty);
       visitNode(run, node, map.act);

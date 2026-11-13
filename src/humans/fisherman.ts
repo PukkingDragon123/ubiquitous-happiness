@@ -84,7 +84,7 @@ export class Fisherman {
     this.ctx = {
       s: d.s, hipY: d.hipY, time: Math.random() * 10, energy: L.anim.energy, bounce: L.anim.bounce, heavy: L.anim.heavy, tension: 0,
       seated: 0, kayak: false, rodLen: this.rod.len, grip: this.rod.grip, arm: d.L.uarm + d.L.farm, hunch: L.build.hunch,
-      rnd: (seed * 0.618) % 1 * 6.28, fidget: 0, fidgetT: 99,
+      rnd: (seed * 0.618) % 1 * 6.28, fidget: 0, fidgetT: -2 - (seed % 3),
     };
     this.setFacing(-1);
     this.evalPose(0);
@@ -105,7 +105,7 @@ export class Fisherman {
   /** where the line pulls the rod tip toward (world point, usually the hook); null = straight down */
   pullToward(x: number | null, y = 0) { if (x === null) this.pullTarget = null; else (this.pullTarget ??= new THREE.Vector3()).set(x, y, 0); }
   /** look at a world point on the gameplay plane (null to stop) */
-  lookAt(x: number | null, y = 0) { if (x === null) this.lookTarget = null; else (this.lookTarget ??= new THREE.Vector3()).set(x, y, 0); }
+  lookAt(x: number | null, y = 0, z = 0) { if (x === null) this.lookTarget = null; else (this.lookTarget ??= new THREE.Vector3()).set(x, y, z); }
   /** -1 grumpy .. 1 cheerful: idle expressions and posture */
   setMood(k: number) { this.mood = Math.max(-1, Math.min(1, k)); }
   /** force an expression until the next play() (null = back to the state's own) */
@@ -142,7 +142,7 @@ export class Fisherman {
     c.seated = this.seatK;
     // fidgets for idle / wait
     c.fidgetT += dt;
-    if (c.fidgetT > 3 + ((c.rnd * 7) % 3)) { c.fidgetT = 0; c.fidget = Math.random() < 0.45 ? 0 : 1 + Math.floor(Math.random() * 4); }
+    if (c.fidgetT > 3 + ((c.rnd * 7) % 3)) { c.fidgetT = -1.5 - Math.random() * 3; c.fidget = Math.random() < 0.45 ? 0 : 1 + Math.floor(Math.random() * 4); }
     const out = this.evalPose(this.stateT);
     // events
     if (!this.released) {
@@ -228,7 +228,8 @@ export class Fisherman {
     _x.crossVectors(dir, _z).normalize();
     _m.makeBasis(_x, dir, _z);
     const qPose = new THREE.Quaternion().setFromRotationMatrix(_m);
-    const gripP = _v2.set(a[CH.RODP], a[CH.RODP + 1], a[CH.RODP + 2]);
+    // the posed grip rides along with the hips (crouches, lurches, sitting down)
+    const gripP = _v2.set(a[CH.RODP] + (B.hips.position.x - r[0]) * 0.8, a[CH.RODP + 1] + (B.hips.position.y - r[1]) * 0.85, a[CH.RODP + 2] + (B.hips.position.z - r[2]) * 0.8);
     const pPose = gripP.clone().sub(_v4.set(0, rod.grip, 0).applyQuaternion(qPose));
     rod.obj.position.copy(pHand).lerp(pPose, rodW);
     rod.obj.quaternion.copy(qHand).slerp(qPose, rodW);
@@ -372,8 +373,9 @@ function makeNet(s: number): THREE.Object3D {
   NB.loft(rings, usFor(16), { x: 0, y: 0, w: 1, h: 1 }, 1, { end: [0, -L - R, 0.4 * s] });
   const bag = new THREE.Mesh(NB.build(), netMats[1]);
   g.add(pole, bag);
+  // held by the end of the pole, the hoop out ahead of the fist
   g.position.set(0.01 * s, -0.08 * s, 0);
-  g.rotation.x = Math.PI / 2 - 0.3;
+  g.rotation.set(Math.PI / 2 - 0.15, 0, -0.35);
   return g;
 }
 

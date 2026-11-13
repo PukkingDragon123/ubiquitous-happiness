@@ -17,16 +17,20 @@ export interface ModelParts {
   look: Look; dims: Dims; body: BodyBuild; tex: THREE.Texture;
 }
 const cache = new Map<string, ModelParts>();
+const PROF = typeof location !== 'undefined' && location.search.includes('prof');
 
 export function modelParts(arch: Archetype, seed: number): ModelParts {
   const key = arch + ':' + seed;
   const hit = cache.get(key);
   if (hit) return hit;
+  const t0 = performance.now();
   const look = makeLook(arch, seed);
   const dims = rigDims(look.build);
   const body = buildBody(look, dims);
+  const t1 = performance.now();
   const page = paintPage(look, body.shape);
   paintMouths(page, look);
+  if (PROF) console.info(`[humans] ${arch}: geometry ${Math.round(t1 - t0)} ms, paint ${Math.round(performance.now() - t1)} ms`);
   const parts: ModelParts = { look, dims, body, tex: page.texture() };
   // gear painters add to the page before upload
   parts.tex.dispose();

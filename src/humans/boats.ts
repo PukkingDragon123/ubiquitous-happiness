@@ -509,11 +509,11 @@ function trawler(r: Rng): Vessel {
   // net boom: a derrick from the mast foot out over the stern with a hanging net and block
   cyl(B, [mx - 0.2, cy + 2.4, 0], [-4.6, cy + 3.6, 0.1], 0.06, 0.04, A.reg(metR), 5, 8);
   B.tube([[mx, cy + 5.1, 0], [-1.5, cy + 4.3, 0.05], [-4.6, cy + 3.6, 0.1]], () => 0.012, 4, A.reg(ropeR), 6);
-  B.tube([[-4.6, cy + 3.6, 0.1], [-4.6, cy + 1.6, 0.1]], () => 0.014, 4, A.reg(ropeR), 7);
+  B.tube([[-4.6, cy + 3.6, 0.1], [-4.75, cy + 2.6, 0.1]], () => 0.014, 4, A.reg(ropeR), 7);
   {
     // the net: a bulging bag hanging from the block, dripping toward the deck
-    const rings = Array.from({ length: 7 }, (_, i) => { const t = i / 6, rr = 0.15 + Math.sin(t * Math.PI) * 0.45; return { pts: ellRing(cy + 1.6 - t * 1.6, -4.6 + Math.sin(t * 2) * 0.1, 0.1, rr, rr * 0.8, rr * 0.8, 12, 2, 1, (th) => Math.sin(th * 5 + i) * 0.08), v: t }; });
-    B.loft(rings, usFor(12), A.reg(netR), 8, { end: [-4.55, cy - 0.05, 0.1] });
+    const rings = Array.from({ length: 7 }, (_, i) => { const t = i / 6, rr = 0.05 + Math.sin(t * Math.PI * 0.9) * 0.24; return { pts: ellRing(cy + 2.6 - t * 1.25, -4.75 + Math.sin(t * 2) * 0.06, 0.1, rr, rr * 0.8, rr * 0.8, 12, 2, 1, (th) => Math.sin(th * 5 + i) * 0.12), v: t }; });
+    B.loft(rings, usFor(12), A.reg(netR), 8, { end: [-4.72, cy + 1.25, 0.1] });
   }
   // stern gantry (an A-frame) and bow rail
   for (const z of [-1.4, 1.4]) cyl(B, [-5.0, H.sheer(0.05) - 0.3, z], [-4.8, H.sheer(0.05) + 2.3, z * 0.4], 0.07, 0.06, A.reg(metR), 9, 8);
@@ -550,7 +550,7 @@ function trawler(r: Rng): Vessel {
     const RB = new Loft(false); RB.box([-L / 2 - 0.35, -1.25, 0], [0.5, 0.9, 0.06], A.reg(rustR)); b.mesh(RB, mat);
   }
   b.hullColliders(H, 0.6);
-  b.seat(-3.4, H.sheer(0.5) - 0.31, 0.4, 'stand', -1);
+  b.seat(-2.5, H.sheer(0.5) - 0.31, 0.5, 'stand', -1);
   b.seat(4.0, H.sheer(0.85) - 0.31, 0.2, 'stand', 1);
   b.seat(-1.2, H.sheer(0.5) - 0.31, 0.6, 'stand', -1);
   void quilted; void canvasFab;

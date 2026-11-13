@@ -181,11 +181,11 @@ export function waterMaterial(U: WaterUniforms): THREE.MeshStandardMaterial {
       float dShore = dF.g * 2.5;
       vec2 dPix = floor(vDW.xz * 20.0);
       float dB = dBayer(dPix);
-      float dK = 1.0 - exp(-dDepth * 0.8);
-      float dKq = floor(dK * 7.0 + dB * 0.95) / 7.0;
+      float dK = 1.0 - exp(-dDepth * 0.62);
+      float dKq = floor(dK * 8.0 + dB * 0.95) / 8.0;
       vec3 dWc = mix(dZ3(uShallow, dZw), dZ3(uDeep, dZw), dKq);
       dWc *= 0.95 + 0.1 * dNoise(vDW.xz * 1.3 + vec2(uDTime * 0.15, -uDTime * 0.1));
-      float dA = mix(0.22, 0.96, smoothstep(0.0, 3.2, dDepth));
+      float dA = mix(0.42, 0.97, smoothstep(0.0, 2.6, dDepth));
       // lacy foam hugging every shore and rock, plus rings breathing outward
       float dN1 = dNoise(dPix * 0.3 + vec2(uDTime * 0.7, uDTime * 0.2));
       float dN2 = dNoise(vDW.xz * 3.2 - uDTime * 0.3);
@@ -303,7 +303,7 @@ export function groundMaterial(U: GroundUniforms): THREE.MeshStandardMaterial {
           float t = floor((dDet.a * 0.75 + dDet2.a * 0.25) * dQ + dB) / dQ;
           dC = DRAMP(uBed, dZw, t);
           // darker silt in the deep, rubble + rocks on slopes
-          dC *= mix(1.0, 0.72, smoothstep(-0.6, -3.5, vDW.y));
+          dC *= mix(1.0, 0.72, 1.0 - smoothstep(-3.5, -0.6, vDW.y));
           if (dRockT > 0.75) dC = mix(dC, DRAMP(uRock, dZw, t * 0.8), 0.7);
         }
         dC *= mix(0.62, 1.0, vAO);
@@ -323,6 +323,8 @@ export interface CapUniforms {
   uSand: THREE.IUniform<THREE.Color>; uSandD: THREE.IUniform<THREE.Color>; uGrass: THREE.IUniform<THREE.Color>; uSoil: THREE.IUniform<THREE.Color>; uRockC: THREE.IUniform<THREE.Color>;
   uBedrock: THREE.IUniform<THREE.Color>; uOre0: THREE.IUniform<THREE.Color>; uOre1: THREE.IUniform<THREE.Color>; uOre2: THREE.IUniform<THREE.Color>;
   uLight: THREE.IUniform<THREE.Color>; uPlankC: THREE.IUniform<THREE.Color>; uFoamC: THREE.IUniform<THREE.Color>;
+  uKelp: THREE.IUniform<number>; uKelpC: THREE.IUniform<THREE.Color>; uFishC: THREE.IUniform<THREE.Color>;
+  uWr: THREE.IUniform<THREE.Vector4[]>; uWrN: THREE.IUniform<number>;
 }
 export function capUniforms(): CapUniforms {
   const c = () => ({ value: new THREE.Color() });
@@ -330,6 +332,8 @@ export function capUniforms(): CapUniforms {
     uProf: { value: null }, uProfX: { value: new THREE.Vector2() }, uBottom: { value: -6 }, uHalfW: { value: 10 }, uBevel: { value: 0.45 }, uCapZ: { value: 0 },
     uW0: c(), uW1: c(), uW2: c(), uS0: c(), uS1: c(), uS2: c(), uS3: c(), uSand: c(), uSandD: c(), uGrass: c(), uSoil: c(), uRockC: c(),
     uBedrock: c(), uOre0: c(), uOre1: c(), uOre2: c(), uLight: c(), uPlankC: c(), uFoamC: c(),
+    uKelp: { value: 0 }, uKelpC: c(), uFishC: c(),
+    uWr: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uWrN: { value: 0 },
   };
 }
 
@@ -342,7 +346,73 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
       ${DIO_GLSL}
       uniform sampler2D uProf; uniform vec2 uProfX; uniform float uBottom; uniform float uHalfW; uniform float uBevel; uniform float uCapZ;
       uniform vec3 uW0, uW1, uW2, uS0, uS1, uS2, uS3, uSand, uSandD, uGrass, uSoil, uRockC, uBedrock, uOre0, uOre1, uOre2, uLight, uPlankC, uFoamC;
+      uniform float uKelp; uniform vec3 uKelpC; uniform vec3 uFishC;
+      uniform vec4 uWr[4]; uniform float uWrN;
       varying vec3 vW;
+      // sliced hull of a sunken wreck: x = 1 planking, 2 inside; y = height 0..1 above the keel
+      vec2 wreckAt(float x, float y) {
+        for (int i = 0; i < 4; i++) {
+          if (float(i) >= uWrN) break;
+          vec4 w = uWr[i];
+          float lx = (x - w.x) / w.z, ly = (y - w.y) / w.w;
+          if (ly < 0.0 || ly > 1.0 || abs(lx) > 1.0) continue;
+          float hw = pow(ly, 0.42);
+          float ax = abs(lx);
+          if (ax > hw) continue;
+          bool plank = ax > hw - 0.075 / w.z || ly < 0.07 / w.w;
+          // a broken gunwale on one side
+          if (lx > 0.0 && ly > 0.72 + 0.2 * dHash(vec2(floor(y * 12.0), float(i)))) continue;
+          return vec2(plank ? 1.0 : 2.0, ly);
+        }
+        return vec2(0.0);
+      }
+      // kelp stalks just behind the glass: each one fades in and out as the cut slides through its patch
+      float kelpAt(float x, float y, float g, float wt) {
+        float cw = 0.55, m = 0.0;
+        float cx = floor(x / cw);
+        for (int i = -1; i <= 1; i++) {
+          float c = cx + float(i);
+          float zc = uCapZ / 1.4 + dHash(vec2(c, 5.3));
+          float layer = floor(zc);
+          float fade = 1.0 - abs(fract(zc) - 0.5) * 2.0;
+          float h = dHash(vec2(c, layer * 7.13));
+          if (h > uKelp || fade < 0.05) continue;
+          float hgt = (wt - g) * (0.75 + 0.25 * dHash(vec2(c, layer + 1.7)));
+          float yy = y - g;
+          if (yy < 0.0 || yy > hgt) continue;
+          float sx = (c + 0.5 + (dHash(vec2(c, layer + 3.1)) - 0.5) * 0.5) * cw + sin(yy * 2.0 + uDTime * 0.8 + h * 6.28) * 0.06 * yy;
+          float d = abs(x - sx);
+          float lp = yy * 3.2 + h * 4.0;
+          float side = mod(floor(lp), 2.0) * 2.0 - 1.0;
+          float lf = fract(lp);
+          vec2 q = vec2((x - sx - side * 0.07) / 0.075, (lf - 0.5) / 0.42);
+          float leaf = step(dot(q, q), 1.0);
+          m = max(m, max(step(d, 0.022), leaf) * smoothstep(0.05, 0.35, fade));
+        }
+        return m;
+      }
+      // a few fish drifting across the water band
+      float fishAt(float x, float y, float wt, float g) {
+        float m = 0.0;
+        for (int k = 0; k < 3; k++) {
+          float fk = float(k);
+          float sp = 0.25 + fk * 0.12;
+          float dirn = mod(fk, 2.0) * 2.0 - 1.0;
+          float span = uHalfW * 2.0 + 2.0;
+          float fx = mod(uDTime * sp * dirn + fk * 7.3 + uCapZ * 0.37, span) - span * 0.5;
+          float fy = mix(wt - 0.35, g + 0.3, fract(0.3 + fk * 0.37 + floor(uCapZ / 3.0) * 0.21)) + sin(uDTime * 1.3 + fk) * 0.05;
+          for (int j = 0; j < 4; j++) {
+            float ox = fx + float(j) * 0.32 * -dirn + sin(float(j) * 2.3) * 0.1;
+            float oy = fy + sin(float(j) * 1.7 + fk) * 0.12;
+            vec2 q = vec2((x - ox) / 0.11, (y - oy) / 0.045);
+            float body = step(dot(q, q), 1.0);
+            vec2 tq = vec2((x - ox) * dirn + 0.1, y - oy);
+            float tail = step(0.0, -tq.x) * step(-0.07, tq.x) * step(abs(tq.y), (-tq.x) * 0.9);
+            m = max(m, max(body, tail));
+          }
+        }
+        return m;
+      }
       void main() {
         vec2 PX = vec2(16.0, 8.0);
         vec2 cell = floor(vW.xy * PX);
@@ -374,10 +444,15 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
           float mt = dHash(cell + vec2(0.0, floor(uDTime * 3.0 - cell.x * 0.37)));
           col = mix(col, uW0 * 1.5 + 0.2, step(0.994, mt) * (1.0 - k * 0.6));
           if (uDNight > 0.01) col += uPlankC * step(0.993, dHash(cell * 1.7 + 3.0)) * (0.5 + 0.5 * sin(uDTime * 2.0 + cell.x)) * uDNight * 1.5;
+          float kp = kelpAt(x, y, g, wt);
+          col = mix(col, uKelpC * (0.75 + 0.35 * k), kp * 0.85);
+          float fs = fishAt(x, y, wt, g);
+          col = mix(col, uFishC, fs * 0.8 * (1.0 - kp));
           if (d < 1.2 / PX.y) col = mix(col, uFoamC, 0.8);
           else if (d < 2.2 / PX.y) col = mix(col, uW2, 0.25);
           col *= mix(0.78, 1.0, smoothstep(0.0, 0.5, y - g));
-          alpha = mix(0.66, 0.93, k);
+          alpha = mix(0.5, 0.92, k * k);
+          alpha = max(alpha, max(kp, fs) * 0.9);
         } else {
           // ---- ground: seabed sand / island soil on top, wavy sediment strata, ore voxels, bedrock
           float dd = g - y;
@@ -415,6 +490,22 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
           }
           if (y < uBottom + 0.45 + n * 0.3) col = uBedrock * (0.9 + 0.2 * gr);
         }
+        // a wreck caught in the cut
+        if (uWrN > 0.5) {
+          vec2 wk = wreckAt(x, y);
+          if (wk.x > 0.5) {
+            alpha = 1.0;
+            if (wk.x < 1.5) {
+              float seam = step(0.8, fract(y * 12.0));
+              col = mix(vec3(0.36, 0.25, 0.17), vec3(0.22, 0.15, 0.11), seam) * (0.85 + 0.25 * dHash(cell));
+              if (dHash(cell * 1.31) > 0.93) col = mix(col, vec3(0.55, 0.62, 0.5), 0.6);
+            } else {
+              col = uW2 * 0.42 + vec3(0.01, 0.015, 0.02);
+              if (wk.y < 0.22 && dHash(floor(cell / 2.0) + 7.7) > 0.7) col = mix(uOre0, vec3(1.0, 0.95, 0.6), step(0.8, dHash(cell)));
+              if (dHash(cell + floor(uDTime * 2.0)) > 0.995) col += 0.35;
+            }
+          }
+        }
         // crafted outline around the slab face
         if (y < uBottom + 1.0 / PX.y || edgeD < 1.0 / PX.x) col *= 0.42;
         gl_FragColor = vec4(col * uLight, alpha);
@@ -444,7 +535,7 @@ export const RIBBON = { uHover: { value: -1 }, uRide: { value: -1 }, uRideT: { v
 export function ribbonMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: { ...DIO, ...RIBBON },
-    transparent: true, depthWrite: false,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: /* glsl */ `${DIO_GLSL}
       attribute float aState; attribute float aLen; attribute float aId;
       uniform float uHover;
@@ -464,27 +555,34 @@ export function ribbonMaterial(): THREE.ShaderMaterial {
         if (vW.z > uDCutZ) discard;
         float u = vUv.x, v = vUv.y;
         // pixel grid in ribbon space
-        float cu = (floor(u * 9.0) + 0.5) / 9.0;
-        float cv = (floor(v * 18.0) + 0.5) / 18.0;
+        float cu = (floor(u * 10.0) + 0.5) / 10.0;
+        float cv = (floor(v * 20.0) + 0.5) / 20.0;
         float across = abs(cu - 0.5) * 2.0;
-        float endA = smoothstep(0.0, 0.45, cv) * smoothstep(vLen, vLen - 0.45, cv);
-        vec3 base; float speed; float a0; float glow;
-        if (vState < 0.5) { base = vec3(0.78, 0.93, 1.0); speed = 0.35; a0 = 0.2; glow = 0.0; }
-        else if (vState < 1.5) { base = vec3(0.62, 1.0, 0.93); speed = 1.0; a0 = 0.72; glow = 0.55; }
-        else if (vState < 2.5) { base = vec3(1.0, 0.82, 0.48); speed = 0.55; a0 = 0.5; glow = 0.15; }
-        else { base = vec3(0.7, 0.95, 1.0); speed = 0.6; a0 = 0.4; glow = 0.2; }
-        if (vHi > 0.5) { a0 = min(1.0, a0 + 0.25); glow += 0.9; speed *= 1.6; }
-        float flow = cv * 1.15 - uDTime * speed - across * 0.42;
-        float chev = step(fract(flow), 0.2) * step(across, 0.8);
-        float streak = step(0.74, dNoise(vec2(floor(u * 9.0) * 1.9 + vId * 7.0, cv * 2.2 - uDTime * speed * 3.0)));
-        float body = 0.5 + 0.5 * (1.0 - across * across);
-        float rim = step(0.72, across) * step(across, 0.9);
-        vec3 col = base * (0.55 + 0.75 * chev + 0.35 * streak);
-        col = mix(col, base * 0.45, rim * 0.6);
-        float a = (a0 * body + chev * 0.35 * a0 + streak * 0.18 * a0) * step(across, 0.96) * endA;
+        float endA = smoothstep(0.0, 0.4, cv) * (1.0 - smoothstep(vLen - 0.4, vLen, cv));
+        vec3 band, chc; float bandA, chA, speed, glow;
+        bool dots = false;
+        if (vState < 0.5) { band = vec3(0.02, 0.16, 0.3); bandA = 0.16; chc = vec3(0.9, 0.98, 1.0); chA = 0.75; speed = 0.25; glow = 0.0; dots = true; }
+        else if (vState < 1.5) { band = vec3(0.05, 0.42, 0.6); bandA = 0.5; chc = vec3(0.8, 1.0, 0.96); chA = 1.0; speed = 0.85; glow = 0.9; }
+        else if (vState < 2.5) { band = vec3(0.3, 0.17, 0.04); bandA = 0.22; chc = vec3(1.0, 0.86, 0.45); chA = 0.95; speed = 0.3; glow = 0.35; dots = true; }
+        else { band = vec3(0.04, 0.2, 0.3); bandA = 0.2; chc = vec3(0.8, 0.95, 1.0); chA = 0.35; speed = 0.3; glow = 0.0; }
+        if (vHi > 0.5) { bandA += 0.15; glow += 1.1; speed *= 1.7; chA = 1.0; dots = false; }
+        float flow = cv * 1.25 - uDTime * speed - across * 0.5;
+        float chev = step(fract(flow), 0.24) * step(across, 0.8);
+        float streak = step(0.8, dNoise(vec2(floor(u * 10.0) * 1.9 + vId * 7.0, cv * 2.4 - uDTime * speed * 3.0))) * step(across, 0.7);
+        float rimFoam = step(0.8, across) * step(across, 0.98) * step(0.45, dNoise(vec2(cv * 6.0 - uDTime * speed * 2.0, u * 3.0 + vId)));
+        if (dots) {
+          // a quiet dotted trail, like an ink route on a sea chart
+          float fd = fract(cv * 2.4 - uDTime * speed);
+          chev = step(fd, 0.26) * step(across, 0.22);
+          streak = 0.0; rimFoam = 0.0;
+        }
+        float bodyA = bandA * (1.0 - across * across * 0.6) * step(across, 0.98);
+        float fA = max(chev * chA, max(streak * chA * 0.55, rimFoam * 0.55));
+        vec3 col = mix(band, chc, clamp(fA / max(fA + bodyA, 0.001) * 1.4, 0.0, 1.0));
+        float a = (bodyA + fA * (1.0 - bodyA)) * endA;
         // the stretch the token has already ridden fades to a soft trail
-        if (abs(vId - uRide) < 0.5) { float past = step(cv, uRideT * vLen); a *= mix(1.0, 0.35, past); glow += (1.0 - past) * 0.8; }
-        gl_FragColor = vec4(col * (1.0 + glow), clamp(a, 0.0, 1.0));
+        if (abs(vId - uRide) < 0.5) { float past = step(cv, uRideT * vLen); a *= mix(1.0, 0.4, past); glow += (1.0 - past) * 0.9; }
+        gl_FragColor = vec4(col * (1.0 + glow * fA), clamp(a, 0.0, 1.0));
       }`,
   });
 }
@@ -493,7 +591,7 @@ export function ribbonMaterial(): THREE.ShaderMaterial {
 export function wakeMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: { ...DIO },
-    transparent: true, depthWrite: false,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: /* glsl */ `${DIO_GLSL}
       attribute vec2 aWake; // age 0..1, side -1..1
       varying vec2 vWk; varying vec3 vW;
@@ -530,7 +628,7 @@ export function glowRingMaterial(color: THREE.Color): THREE.ShaderMaterial {
         float t = fract(uDTime * 0.55 + uPh);
         float ring = step(abs(r - (0.35 + t * 0.6)), 0.035) * (1.0 - t);
         float ring2 = step(abs(r - (0.35 + fract(t + 0.5) * 0.6)), 0.03) * (1.0 - fract(t + 0.5));
-        float halo = smoothstep(0.75, 0.25, r) * 0.18;
+        float halo = (1.0 - smoothstep(0.25, 0.75, r)) * 0.18;
         float a = (ring + ring2) * 0.85 + halo;
         gl_FragColor = vec4(uCol * a * uK, 1.0);
       }`,

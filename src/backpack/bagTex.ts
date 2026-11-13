@@ -138,7 +138,7 @@ export function canvasTex(w = 96, h = 96): TexPair {
   const p = new Px(w, h), H = new Float32Array(w * h);
   const r = ramp(['#1c1e10', '#2e3218', '#454a24', '#5e6330', '#7a7c40', '#969654'], 5, 0.5);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const weave = ((x >> 1) + (y >> 1)) & 1 ? 0.05 : -0.05;
+    const weave = (x + y) & 1 ? 0.03 : -0.03;
     const mott = pxNoise(x, y, 20, 3, 21);
     const ed = Math.min(x, y, w - 1 - x, h - 1 - y);
     const t = 0.55 + weave + (mott - 0.5) * 0.5 - Math.max(0, 1 - ed / 6) * 0.3 + (hash2(x, y, 5) - 0.5) * 0.06;
@@ -199,8 +199,8 @@ export function liningGrid(floorW: number, floorH: number, cell: number, gcx: nu
   // double quilting stitches either side of each seam + an outer border seam
   for (let k = 0; k <= 5; k++) {
     for (const off of k === 0 ? [3] : k === 5 ? [-3] : [-3, 3]) {
-      stitch(p, H2, (t) => [gx0 + k * 32 + off, gy0 + t * 159], 160, { dash: 3, gap: 2, col: '#9a9070', hole: '#04090c' });
-      stitch(p, H2, (t) => [gx0 + t * 159, gy0 + k * 32 + off], 160, { dash: 3, gap: 2, col: '#9a9070', hole: '#04090c' });
+      stitch(p, H2, (t) => [gx0 + k * 32 + off, gy0 + t * 159], 160, { dash: 3, gap: 2, col: '#767a66', hole: '#04090c' });
+      stitch(p, H2, (t) => [gx0 + t * 159, gy0 + k * 32 + off], 160, { dash: 3, gap: 2, col: '#767a66', hole: '#04090c' });
     }
   }
   // outer piping around the grid
@@ -240,7 +240,7 @@ export function cellGlowTex(): THREE.Texture {
 /** brass: warm metal with a painted sheen */
 export function brassTex(): THREE.Texture {
   const p = new Px(32, 32);
-  const r = ramp(['#3a2008', '#6e4414', '#a8742a', '#d8a848', '#f6dc8a', '#fff6d0'], 5, 0.5);
+  const r = ramp(['#2a1806', '#5a3810', '#8a6024', '#b88a3c', '#d8b268', '#ecd090'], 5, 0.5);
   p.fill((x, y) => r(0.35 + (1 - y / 31) * 0.45 + (pxNoise(x, y, 6, 2, 3) - 0.5) * 0.3, x, y));
   return p.texture();
 }
@@ -248,19 +248,19 @@ export function brassTex(): THREE.Texture {
 /** bleached driftwood plank with grain, knots and nail holes */
 export function driftwoodTex(w = 160, h = 112): TexPair {
   const p = new Px(w, h), H = new Float32Array(w * h);
-  const r = ramp(['#2a2018', '#4a3a2c', '#6e5a46', '#927a62', '#b29c80', '#cdbaa0', '#e6d8c0'], 6, 0.6);
+  const r = ramp(['#3a3026', '#5a4a3a', '#7e6a54', '#a08a70', '#bea88a', '#d6c4a6', '#ece0c8'], 6, 0.6);
   const knots = [[40, 30, 6], [118, 74, 5], [84, 18, 3.5]];
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     let warp = 0;
     for (const [kx, ky, kr] of knots) { const d = Math.hypot(x - kx, (y - ky) * 2.2); warp += (kr * 3) / (d + 2) * Math.sign(y - ky); }
     const g = Math.sin((y + warp * 1.6 + pxNoise(x, y, 40, 3, 7) * 14) * 0.9);
-    const ring = g > 0.7 ? -0.22 : g < -0.85 ? 0.08 : 0;
-    const crack = Math.abs(pxNoise(x * 0.15, y * 2.4, 6, 2, 31) - 0.5) < 0.012 ? -0.35 : 0;
-    let t = 0.58 + ring + crack + (pxNoise(x, y, 26, 3, 9) - 0.5) * 0.35 + (hash2(x, y, 2) - 0.5) * 0.05;
+    const ring = g > 0.88 ? -0.1 : g < -0.85 ? 0.05 : 0;
+    const crack = Math.abs(pxNoise(x * 0.15, y * 2.4, 6, 2, 31) - 0.5) < 0.006 ? -0.3 : 0;
+    let t = 0.6 + ring + crack + (pxNoise(x, y, 26, 3, 9) - 0.5) * 0.3 + (pxNoise(x, y * 6, 3, 2, 5) - 0.5) * 0.12;
     for (const [kx, ky, kr] of knots) { const d = Math.hypot(x - kx, (y - ky) * 1.6); if (d < kr) t -= 0.35 * (1 - d / kr) + (Math.sin(d * 2.5) > 0.3 ? 0.1 : 0); }
     const ed = Math.min(x, y, w - 1 - x, h - 1 - y);
     t -= Math.max(0, 1 - ed / 5) * 0.2;
-    H[y * w + x] = ring * 3 + crack * 4;
+    H[y * w + x] = ring * 2 + crack * 2;
     p.set(x, y, r(t, x, y));
   }
   for (const [nx, ny] of [[8, 10], [8, h - 11], [w - 9, 12], [w - 9, h - 12]]) {
@@ -276,7 +276,7 @@ export function sandTex(n = 128): TexPair {
   const p = new Px(n, n), H = new Float32Array(n * n);
   const r = ramp(['#3a3022', '#5a4a34', '#7a6648', '#9a845e', '#b8a078', '#d2bc92'], 5, 0.7);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const rip = Math.sin((y + pxNoise(x, y, 30, 3, 4, n) * 18) * (Math.PI * 2 / 10.667)) * 0.5 + 0.5;
+    const rip = Math.sin((y + pxNoise(x, y, 30, 3, 4, n) * 26) * (Math.PI * 2 / 16)) * 0.5 + 0.5;
     const grain = hash2(x, y, 3);
     H[y * n + x] = rip * 2;
     p.set(x, y, r(0.55 + (rip - 0.5) * 0.12 + (pxNoise(x, y, 20, 3, 6, n) - 0.5) * 0.35 + (grain > 0.93 ? 0.2 : grain < 0.05 ? -0.15 : 0), x, y));
@@ -318,16 +318,12 @@ export function shaftTex(): THREE.Texture {
   return t;
 }
 
-/** the little leather name tag with BLOB stamped on it */
+/** the little leather name tag with BLOB stamped on it (portrait, hole at the top) */
 export function nameTagTex(text = 'BLOB'): THREE.Texture {
-  const w = 48, h = 30;
+  const w = 32, h = 44;
   const p = new Px(w, h), H = new Float32Array(w * h);
   const r = ramp(['#3a1c0c', '#5a2e14', '#7e4422', '#a05c30', '#c07a44', '#d89a62'], 5, 0.6);
-  const shape = (x: number, y: number) => {
-    // luggage tag: clipped corners on the left (where the hole is)
-    if (x < 7 && (y < 7 - x || y > h - 8 + x)) return false;
-    return true;
-  };
+  const shape = (x: number, y: number) => !(y < 8 && (x < 8 - y || x > w - 9 + y));
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (!shape(x, y)) continue;
     const ed = Math.min(x, y, w - 1 - x, h - 1 - y);
@@ -338,11 +334,12 @@ export function nameTagTex(text = 'BLOB'): THREE.Texture {
   // brass eyelet
   for (let y = -3; y <= 3; y++) for (let x = -3; x <= 3; x++) {
     const d = Math.hypot(x, y);
-    if (d < 1.5) p.set(6 + x, 15 + y, '#120804');
-    else if (d < 3.2) p.set(6 + x, 15 + y, x + y < 0 ? '#f6d880' : x + y > 1 ? '#7a5014' : '#c8963a');
+    if (d < 1.5) p.set(16 + x, 7 + y, '#000000', 0);
+    else if (d < 3.2) p.set(16 + x, 7 + y, x + y < 0 ? '#f6d880' : x + y > 1 ? '#7a5014' : '#c8963a');
   }
-  stitch(p, H, (t) => [12 + t * (w - 15), 2], w, { dash: 2, gap: 2 });
-  stitch(p, H, (t) => [12 + t * (w - 15), h - 3], w, { dash: 2, gap: 2 });
+  stitch(p, H, (t) => [2, 12 + t * (h - 15)], h, { dash: 2, gap: 2 });
+  stitch(p, H, (t) => [w - 3, 12 + t * (h - 15)], h, { dash: 2, gap: 2 });
+  stitch(p, H, (t) => [3 + t * (w - 7), h - 3], w, { dash: 2, gap: 2 });
   // stamped letters (debossed: dark fill, light lower-right lip)
   const st: TextStyle = { font: 'M5x7', px: 16, fill: '#ffffff' };
   const tc = textCanvas(text, st);
@@ -350,18 +347,17 @@ export function nameTagTex(text = 'BLOB'): THREE.Texture {
   const d = ctx.getImageData(0, 0, tc.w, tc.h).data;
   let minX = tc.w, maxX = 0, minY = tc.h, maxY = 0;
   for (let y = 0; y < tc.h; y++) for (let x = 0; x < tc.w; x++) if (d[(y * tc.w + x) * 4 + 3] > 128) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
-  const tw = maxX - minX + 1, th = maxY - minY + 1, ox = 12 + Math.round((w - 14 - tw) / 2), oy = Math.round((h - th) / 2);
+  const tw = maxX - minX + 1, th = maxY - minY + 1, ox = Math.round((w - tw) / 2), oy = 14 + Math.round((h - 17 - th) / 2);
   for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
     if (d[(y * tc.w + x) * 4 + 3] <= 128) continue;
     const px = ox + x - minX, py = oy + y - minY;
     p.set(px, py, '#2a1006');
-    if (p.alpha(px + 1, py + 1) && !(d[((y + 1) * tc.w + x + 1) * 4 + 3] > 128)) p.set(px + 1, py + 1, '#e2aa70');
+    if (!(d[((y + 1) * tc.w + x + 1) * 4 + 3] > 128)) p.set(px + 1, py + 1, '#e2aa70');
   }
   p.outline('#1a0804');
-  const t = p.texture();
-  return t;
+  return p.texture();
 }
 
-export const brassMat = () => new THREE.MeshStandardMaterial({ map: brassTex(), color: '#c8b090', roughness: 0.42, metalness: 0.45, emissive: new THREE.Color('#1a0e02'), emissiveIntensity: 0.4 });
+export const brassMat = () => new THREE.MeshStandardMaterial({ map: brassTex(), color: '#a89878', roughness: 0.45, metalness: 0.4, emissive: new THREE.Color('#1a0e02'), emissiveIntensity: 0.4 });
 
 export function rgbOf(s: string): RGB { return hex(s); }

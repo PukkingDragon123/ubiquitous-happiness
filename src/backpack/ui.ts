@@ -30,7 +30,7 @@ export function paintCard(ci: CardInfo): { canvas: HTMLCanvasElement; w: number;
   const nameSt: TextStyle = { font: 'Jacquard', px: 24, fill: nf, outline: no };
   const body = (fill: string, font = 'M6x11', px = 16): TextStyle => ({ font, px, fill });
   const parts: { c: { canvas: HTMLCanvasElement; w: number; h: number }; gap: number; dx?: number; center?: boolean }[] = [];
-  const maxW = 176;
+  const maxW = 196;
   const name = textCanvas(d.name, nameSt);
   const sub = textCanvas(`${d.kind.toUpperCase()}  ·  ${d.rarity.toUpperCase()}`, body(INK.sub, 'Tiny5', 8));
   parts.push({ c: name, gap: 0, center: true }, { c: sub, gap: -6, center: true });
@@ -122,7 +122,7 @@ export class Tag {
   private str: THREE.Mesh;
   private strGeo: THREE.BufferGeometry;
   key = '';
-  ang = 0; angV = 0; pop = 0; visible = false;
+  ang = 0; angV = 0; pop = 0; visible = false; cw = 200; ch = 120;
   x = 0; y = 0; private lx = 0;
   constructor() {
     this.group.add(this.pivot);
@@ -141,6 +141,7 @@ export class Tag {
     this.key = key;
     if (this.mesh) { this.pivot.remove(this.mesh); (this.mesh.material as THREE.MeshBasicMaterial).map?.dispose(); this.mesh.geometry.dispose(); }
     const c = paintCard(info);
+    this.cw = c.w * S; this.ch = c.h * S;
     const g = new THREE.PlaneGeometry(c.w * S, c.h * S);
     g.translate(c.w * S / 2 - c.hole[0] * S - S / 2, -c.h * S / 2 + c.hole[1] * S + S / 2, 0);
     this.mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: nearest(c.canvas), transparent: true, depthTest: false }));

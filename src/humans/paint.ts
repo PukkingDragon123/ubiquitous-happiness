@@ -41,9 +41,9 @@ const DEG = (u: number) => -180 + 360 * u;
 export function skinPx(L: Look, x: number, y: number, k = 1, red = 0): RGB {
   const sk = L.skin;
   const redC: RGB = [Math.min(255, sk[0] * 1.02 + 22), sk[1] * 0.8, sk[2] * 0.78];
-  const mott = (nz(x, y, 5, 11) - 0.5) * 0.07 + (hh(x, y, 12) - 0.5) * 0.025;
-  const rr = clamp01(red + (nz(x, y, 12, 13) - 0.5) * 0.12 + L.age * 0.04);
-  return band(mix(sk, redC, rr * 0.6), k * (1 + mott), x, y, 0.055);
+  const mott = (nz(x, y, 6, 11) - 0.5) * 0.05 + (hh(x, y, 12) - 0.5) * 0.012;
+  const rr = clamp01(red + (nz(x, y, 12, 13) - 0.5) * 0.1 + L.age * 0.04);
+  return band(mix(sk, redC, rr * 0.6), k * (1 + mott), x, y, 0.06);
 }
 
 function paintHead(P: Px, L: Look, S: Shape) {
@@ -91,7 +91,7 @@ function paintHead(P: Px, L: Look, S: Shape) {
       if (hy < 0.056 && hy > 0.02 && Math.abs(a - fa) < 1.1) c = mix(c, ink, 0.18 + 0.3 * age);
     }
     // freckles over the nose and cheeks
-    if (F.freckles > 0 && hy > 0.045 && hy < 0.095 && a < 52 && hh(x, y, 71) > 1 - 0.07 * F.freckles) c = mix(c, shade(mix(L.skin, [160, 90, 50], 0.5), 0.85), 0.55);
+    if (F.freckles > 0 && hy > 0.05 && hy < 0.088 && a < 46 && hh(x, y, 71) > 1 - 0.035 * F.freckles * gauss(a, 24, 16) * 2) c = mix(c, shade(mix(L.skin, [160, 90, 50], 0.5), 0.85), 0.55);
     // age spots on the scalp / temples
     if (age > 0.85 && (hy > 0.13 || a > 60) && hh(x, y, 73) > 0.992) c = mix(c, [150, 100, 72], 0.3);
     // stubble / beard shadow: stippled dots over the jaw, chin, upper lip, cheeks
@@ -99,7 +99,9 @@ function paintHead(P: Px, L: Look, S: Shape) {
       const top = a < 18 ? 0.054 : a < 40 ? 0.05 - (a - 18) * 0.0006 + 0.012 * gauss(a, 32, 6) : a < 80 ? 0.062 + (a - 40) * 0.0008 : 0.098;
       const z = clamp01((top - hy) / 0.012) * (a < 100 ? 1 : 0) * clamp01((hy + 0.03) / 0.015);
       const lip = Math.abs(hy - Fl.mouthY) < 0.006 && a < 24 ? 0.25 : 1;
-      if (z > 0 && hh(x, y, 77) < (0.35 + 0.35 * stub) * z * lip) c = mix(c, stubCol, 0.42 + 0.25 * hh(y, x, 78));
+      // a soft shadow tint plus fine stipple (not dirt-like blotches)
+      if (z > 0) c = mix(c, stubCol, 0.16 * stub * z * lip);
+      if (z > 0 && hh(x, y, 77) < (0.18 + 0.2 * stub) * z * lip) c = mix(c, stubCol, 0.22 + 0.12 * hh(y, x, 78));
     }
     // the captain's scar: a pale slash across the left cheek and brow
     if (F.scar) {
@@ -153,8 +155,8 @@ function paintBeard(P: Px, L: Look) {
       return hairCol(base, L.hair.grey, su, y * 0.5 + Math.abs(dx) * 20, x, y, 0.85 + 0.2 * (v / 0.3) - Math.abs(dx) * 0.1);
     }
     const vv = (v - 0.3) / 0.7;
-    // locks: soft clumps that wave gently downward; darker in the gaps between them and at the roots
-    const lock = Math.sin((x + Math.sin(y * 0.09 + u * 5) * 3) * 0.55) * 0.5 + 0.5;
+    // locks: irregular clumps (noise stretched along the hair) waving down; darker gaps between them
+    const lock = clamp01((nz(x + Math.sin(y * 0.08 + u * 4) * 3, y * 0.22, 4, 21) - 0.25) * 2);
     const light = 0.9 + 0.12 * lock - 0.1 * clamp01(1 - vv * 4) - 0.08 * Math.abs(u - 0.5) + (nz(x, y, 6, 21) - 0.5) * 0.12;
     const { k } = { k: 0.9 + (hh(x, y >> 2, 22) - 0.5) * 0.18 };
     const hi: RGB = L.hair.grey > 0.5 ? [252, 252, 248] : mix(base, [255, 240, 210], 0.35);
@@ -167,7 +169,8 @@ function paintBeard(P: Px, L: Look) {
 
 function paintBrowLids(P: Px, L: Look) {
   const bc = L.face.browCol;
-  fillReg(P, 'BROW', (u, v, x, y) => hairCol(bc, L.hair.grey, x * 1.6 + y * 1.2, y + x * 0.4, x, y, 0.85 + v * 0.2));
+  // brows: dense, mostly uniform with a few lighter strands (they must read as one solid shape from afar)
+  fillReg(P, 'BROW', (u, v, x, y) => band(bc, 0.82 + (hh(x, y >> 1, 41) > 0.82 ? 0.25 : 0) + v * 0.08, x, y, 0.08));
   // lids: skin, a crease, then the dark lash line along the edge (v = 1 is the lid edge)
   const lash: RGB = L.arch === 'grandma' ? shade(L.skin, 0.45) : [34, 24, 22];
   fillReg(P, 'LIDS', (u, v, x, y) => {
@@ -248,7 +251,7 @@ function topPx(L: Look, S: Shape, deg: number, y: number, x: number, py: number,
   const hemBand = part === 'torso' ? y < S.topHem + 0.025 : false;
   switch (T.kind) {
     case 'sweater': {
-      const heather = hh(x, py, 81) > 0.82 ? T.col2 : T.col;
+      const heather = hh(x, py, 81) > 0.86 ? mix(T.col, T.col2, 0.6) : T.col;
       if ((part === 'torso' && y < S.topHem + 0.06) || (part === 'arm' && ay < -0.45)) return band(heather, k * ribK(x, py) * 0.97, x, py);
       // cable panels down the front and back
       if (part === 'torso') {
@@ -537,8 +540,11 @@ function paintFeet(P: Px, L: Look, S: Shape) {
           return c;
         }
         case 'sandal': {
-          if (sole || aa > 80) return band(F.col, 0.95 + (hh(x, y, 57) - 0.5) * 0.1, x, y);
-          return band(F.col2, knitK(x, y) * 1.02, x, y);
+          if (sole || aa > 82) return band(F.col, 0.95 + (hh(x, y, 57) - 0.5) * 0.1 + (aa > 120 && (x + y) % 3 === 0 ? -0.2 : 0), x, y);
+          // leather straps over the sock: an ankle strap, a buckle, two cross straps over the instep and toes
+          const strap = Math.abs(v - 0.14) < 0.05 || Math.abs(v - 0.42) < 0.045 || Math.abs(v - 0.6) < 0.04;
+          if (strap) return band(shade(F.col, 1.1), 0.9 + (Math.abs(aa - 60) < 6 && Math.abs(v - 0.14) < 0.04 ? 0.5 : 0) + ((x + y) % 4 === 0 ? -0.12 : 0), x, y);
+          return band(F.col2, knitK(x, y) * 1.02 - (v > 0.66 ? 0.05 : 0), x, y);
         }
       }
       return [255, 0, 255];
@@ -555,7 +561,7 @@ function outerPx(L: Look, S: Shape, deg: number, y: number, x: number, py: numbe
   const cuff = part === 'arm' && ay < -0.47;
   switch (O.kind) {
     case 'cardigan': {
-      const heather = hh(x, py, 61) > 0.85 ? O.col2 : O.col;
+      const heather = hh(x, py, 61) > 0.9 ? mix(O.col, O.col2, 0.45) : O.col;
       if (cuff || (part === 'torso' && y < S.outerHem + 0.04)) return band(heather, k * ribK(x, py), x, py);
       if (part === 'torso') {
         const edge = Math.abs(u - 0.5) * 360;   // angle of the opening edge column in uv space

@@ -17,14 +17,14 @@ const HA = [0, 22, 45, 70, 95, 125, 155, 180];
 interface HeadRow { y: number; zc: number; r: number[] }
 const HEAD_ROWS: HeadRow[] = [
   { y: -0.03, zc: -0.004, r: [0.05, 0.05, 0.048, 0.046, 0.045, 0.044, 0.044, 0.044] },
-  { y: -0.013, zc: 0.006, r: [0.083, 0.077, 0.063, 0.057, 0.055, 0.05, 0.047, 0.047] },
-  { y: 0.008, zc: 0.006, r: [0.095, 0.09, 0.076, 0.068, 0.066, 0.062, 0.064, 0.067] },
-  { y: 0.033, zc: 0.006, r: [0.099, 0.094, 0.081, 0.073, 0.07, 0.071, 0.079, 0.083] },
+  { y: -0.013, zc: 0.006, r: [0.08, 0.072, 0.056, 0.048, 0.047, 0.047, 0.047, 0.047] },
+  { y: 0.008, zc: 0.006, r: [0.093, 0.086, 0.07, 0.06, 0.057, 0.058, 0.062, 0.066] },
+  { y: 0.033, zc: 0.006, r: [0.099, 0.094, 0.082, 0.071, 0.067, 0.069, 0.078, 0.083] },
   { y: 0.058, zc: 0.006, r: [0.101, 0.097, 0.086, 0.077, 0.074, 0.079, 0.092, 0.097] },
   { y: 0.078, zc: 0.006, r: [0.1, 0.097, 0.089, 0.08, 0.076, 0.083, 0.099, 0.104] },
   { y: 0.096, zc: 0.006, r: [0.099, 0.096, 0.089, 0.081, 0.077, 0.085, 0.101, 0.107] },
-  { y: 0.114, zc: 0.006, r: [0.101, 0.099, 0.09, 0.08, 0.078, 0.087, 0.102, 0.108] },
-  { y: 0.143, zc: 0.004, r: [0.098, 0.095, 0.088, 0.079, 0.078, 0.086, 0.1, 0.106] },
+  { y: 0.114, zc: 0.006, r: [0.101, 0.099, 0.091, 0.083, 0.081, 0.088, 0.102, 0.108] },
+  { y: 0.143, zc: 0.004, r: [0.098, 0.095, 0.089, 0.082, 0.081, 0.087, 0.1, 0.106] },
   { y: 0.173, zc: 0.0, r: [0.086, 0.084, 0.079, 0.074, 0.072, 0.078, 0.088, 0.092] },
   { y: 0.199, zc: -0.004, r: [0.06, 0.059, 0.057, 0.054, 0.053, 0.056, 0.062, 0.064] },
 ];
@@ -95,7 +95,7 @@ function faceRelief(y: number, deg: number, L: Look, F: FaceLayout): number {
   // under the lower lip, the chin, the corners of the jaw
   r -= 0.0016 * g(y, 0.018, 0.004) * g(a, 0, 14);
   r += (0.0034 + 0.0024 * masc) * L.face.chin * g(y, 0.004, 0.009) * g(a, 0, 14);
-  r += 0.0034 * masc * L.face.jaw * g(y, 0.006, 0.011) * g(a, 72, 10);
+  r += 0.0018 * masc * L.face.jaw * g(y, 0.008, 0.011) * g(a, 70, 10);
   // temples
   r -= 0.0024 * g(y, 0.128, 0.014) * g(a, 76, 12);
   return r;
@@ -209,9 +209,9 @@ export function buildHead(B: Loft, S: HeadShape) {
   // ears: a rim (helix) curling back from the side of the head, the bowl, a lobe; both faces drawn
   for (const k of [1, -1]) {
     const a = k * 95;
-    const es = L.face.ears * (L.arch === 'kid' ? 1.1 : 1), ym = 0.082;
+    const es = L.face.ears * (L.arch === 'kid' ? 1.22 : 1.12), ym = 0.082;
     const Y = (y: number) => ym + (y - ym) * es;
-    const out = 0.015 * es;
+    const out = 0.022 * es;
     const base = (y: number, back: number) => skull(Y(y), a - k * back, -0.002, false);
     const rim = (y: number, o: number, back: number): V3 => { const p = skull(Y(y), a - k * back, 0, false); return [p[0] + k * o, p[1], p[2]]; };
     const pts: V3[] = [
@@ -362,7 +362,7 @@ function buildFacialHair(B: Loft, S: HeadShape) {
           // below the chin the beard hangs forward of the neck and throat
           const base = sk(-0.025, a, big ? 0.016 : 0.008);
           const drop = -0.025 - yy;
-          const narrow = 1 - clamp01(drop / (big ? 0.15 : 0.04)) * (big ? 0.55 : 0.7);
+          const narrow = 1 - clamp01(drop / (big ? 0.15 : 0.04)) * (big ? 0.38 : 0.7);
           p = [base[0] * narrow, yy, base[2] * (0.75 + 0.25 * narrow) + drop * (big ? 0.35 : 0.25) * Math.cos((a * Math.PI) / 180)];
         }
         // ragged tips

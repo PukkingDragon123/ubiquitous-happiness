@@ -102,7 +102,7 @@ export class Token {
     this.sword.position.set(0.02, -0.02, 0.19);
     this.sword.rotation.set(0.2, -0.5, 0.55);
     this.body.add(this.sword);
-    this.body.scale.setScalar(1.25);
+    this.body.scale.setScalar(1.6);
     this.root.add(this.body);
     void place; void clamp01;
   }
@@ -114,7 +114,7 @@ export class Token {
     this.yaw = dampAngle(this.yaw, this.targetYaw, moving ? 9 : 4, dt);
     this.root.rotation.y = this.yaw;
     const sq = Math.sin(t * 3.1) * 0.045 * (1 - this.surf) + Math.sin(t * 14) * 0.03 * this.surf;
-    this.body.scale.set(1.25 * (1 + sq * 0.6), 1.25 * (1 - sq), 1.25 * (1 + sq * 0.4));
+    this.body.scale.set(1.6 * (1 + sq * 0.6), 1.6 * (1 - sq), 1.6 * (1 + sq * 0.4));
     const hop = this.surf * Math.abs(Math.sin(t * 7.5)) * 0.07 * Math.min(1, speed);
     this.body.position.y = -0.04 + Math.sin(t * 2.2) * 0.018 * (1 - this.surf) + hop + this.surf * 0.03;
     this.body.rotation.z = -this.surf * 0.12 + Math.sin(t * 1.7) * 0.04;

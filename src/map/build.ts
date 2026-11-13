@@ -402,7 +402,8 @@ export function wreck(L: Loft, seed: number, mast = 2.2): V3 {
   const r = new Rng(seed);
   const from = L.count;
   hull(L, { len: 2.4, beam: 0.8, depth: 0.5, paint: A.hull[5], open: true, inner: A.darkWood, deck: A.darkWood, bowRise: 0.12 });
-  place(L, from, [0, 0.5, 0], 0, 1, 0, r.range(0.25, 0.4));
+  place(L, from, [0, 0.5, 0], 0, 1, 0, wreckPitch(seed));
+  r.next();
   // broken ribs sticking out
   for (let k = 0; k < 5; k++) { const x = -0.8 + k * 0.32; rod(L, [x, 0.25, 0.38], [x + r.range(-0.05, 0.05), 0.55 + r.range(0, 0.2), 0.5], 0.018, 0.012, 4, A.darkWood); }
   const base: V3 = [0.15, 0.5, 0.05];
@@ -413,6 +414,9 @@ export function wreck(L: Loft, seed: number, mast = 2.2): V3 {
   box(L, [0.9, 0.06, -0.45], [0.18, 0.12, 0.14], A.chest, 0.6);
   return top;
 }
+
+/** the bow-up tilt a wreck(seed) is built with */
+export const wreckPitch = (seed: number) => new Rng(seed).range(0.12, 0.22);
 
 /** a message bottle (lying along +x) */
 export function bottle(L: Loft, s = 1) {

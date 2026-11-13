@@ -134,8 +134,8 @@ function build(d: ItemDef, level: number, icon: HTMLCanvasElement): Built {
   const look = d.look;
   const mat = new THREE.MeshStandardMaterial({
     map: tex, vertexColors: true,
-    roughness: look === 'gem' ? 0.28 : look === 'metal' ? 0.38 : look === 'glass' ? 0.18 : look === 'wood' ? 0.92 : look === 'soft' ? 0.75 : 0.62,
-    metalness: look === 'metal' ? 0.25 : 0,
+    roughness: look === 'gem' ? 0.38 : look === 'metal' ? 0.5 : look === 'glass' ? 0.3 : look === 'wood' ? 0.92 : look === 'soft' ? 0.78 : 0.68,
+    metalness: look === 'metal' ? 0.12 : 0,
   });
   const em = EMIT_MASK.get(icon);
   if (d.glow && em) {
@@ -146,7 +146,7 @@ function build(d: ItemDef, level: number, icon: HTMLCanvasElement): Built {
     mat.emissive = new THREE.Color(1, 1, 1);
     mat.emissiveIntensity = d.glow;
   } else if (look === 'gem') {
-    mat.emissiveMap = tex; mat.emissive = new THREE.Color(1, 1, 1); mat.emissiveIntensity = 0.12;
+    mat.emissiveMap = tex; mat.emissive = new THREE.Color(1, 1, 1); mat.emissiveIntensity = 0.05;
   }
   uw(mat, { rim: look === 'gem' || look === 'glass' ? 0.3 : 0.12 });
   // twinkle spots: the brightest opaque pixels

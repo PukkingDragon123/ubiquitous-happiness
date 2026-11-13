@@ -19,12 +19,12 @@ export interface ZonePal {
 
 export const PAL: Record<ZoneId, ZonePal> = {
   reef: {
-    shallow: '#63e6d4', deep: '#0b4f8c', foam: '#f2fffb', sky: '#bfe9ff',
+    shallow: '#38d8d0', deep: '#0a4a92', foam: '#f2fffb', sky: '#bfe9ff',
     sand: ['#b0865a', '#d8b47a', '#ecd29a', '#fff1c8'], grass: ['#2c6a34', '#4c9a38', '#7cc646', '#bce66e'],
     rock: ['#4c4250', '#706668', '#988c80', '#c6baa4'], bed: ['#8a8466', '#b0a87a', '#d4c692', '#efe0b4'],
     capWater: ['#44d4d0', '#1a8eb6', '#0a3f78'], strata: ['#dcc28a', '#b88e5c', '#8c6a4a', '#664c48'], bedrock: '#3a2e3e', ore: ['#ffd84a', '#5af0d8', '#ff6a86'],
     sun: '#fff0d4', sunI: 2.7, hemiSky: '#bfe8ff', hemiGround: '#6a5a44', hemiI: 0.95, night: 0,
-    exposure: 1.0, saturation: 1.12, contrast: 1.05, bloom: 0.45, table: '#7a4a2e', coral: 1, kelp: 0.1, palms: 1, snow: 0, plankton: '#9ff6ff',
+    exposure: 1.0, saturation: 1.12, contrast: 1.05, bloom: 0.45, table: '#6a4a34', coral: 1, kelp: 0, palms: 1, snow: 0, plankton: '#9ff6ff',
   },
   kelp: {
     shallow: '#52cdb0', deep: '#0b4a5a', foam: '#eefff4', sky: '#cdeee4',
@@ -32,7 +32,7 @@ export const PAL: Record<ZoneId, ZonePal> = {
     rock: ['#383a42', '#58585a', '#7e7a72', '#a8a294'], bed: ['#4e5a3e', '#6c7a4c', '#8c9660', '#b0b47e'],
     capWater: ['#3cbca4', '#16786e', '#0a3842'], strata: ['#8e7c5a', '#6c5c48', '#4e4640', '#3a3a3e'], bedrock: '#262630', ore: ['#8affc8', '#e8c450', '#ff8a5a'],
     sun: '#fff2d8', sunI: 2.5, hemiSky: '#c6f0dc', hemiGround: '#4a5034', hemiI: 1.0, night: 0,
-    exposure: 1.0, saturation: 1.1, contrast: 1.06, bloom: 0.45, table: '#6e4a30', coral: 0.25, kelp: 1, palms: 0.6, snow: 0, plankton: '#b0ffd8',
+    exposure: 1.0, saturation: 1.1, contrast: 1.06, bloom: 0.45, table: '#664834', coral: 0.25, kelp: 1, palms: 0.6, snow: 0, plankton: '#b0ffd8',
   },
   sunset: {
     shallow: '#6ccfc6', deep: '#22407a', foam: '#fff4ea', sky: '#ffc49a',
@@ -40,7 +40,7 @@ export const PAL: Record<ZoneId, ZonePal> = {
     rock: ['#4e3a48', '#7a5a5c', '#a27a6c', '#cca28a'], bed: ['#8c6c5c', '#b08a70', '#cea884', '#ecc8a2'],
     capWater: ['#5ec4c4', '#2c72a8', '#1a3268'], strata: ['#e2aa7a', '#c27a5a', '#905448', '#6a3e46'], bedrock: '#3a2436', ore: ['#ffcc4a', '#ff7ab4', '#7af0ff'],
     sun: '#ffc88e', sunI: 2.6, hemiSky: '#ffd2b4', hemiGround: '#5a3a44', hemiI: 0.95, night: 0.15,
-    exposure: 1.02, saturation: 1.14, contrast: 1.06, bloom: 0.55, table: '#7e4630', coral: 0.6, kelp: 0.1, palms: 1, snow: 0, plankton: '#ffd8a8',
+    exposure: 1.02, saturation: 1.14, contrast: 1.06, bloom: 0.55, table: '#6e4834', coral: 0.6, kelp: 0, palms: 1, snow: 0, plankton: '#ffd8a8',
   },
   harbor: {
     shallow: '#5eae9c', deep: '#173f52', foam: '#eef6f0', sky: '#d6e2e4',

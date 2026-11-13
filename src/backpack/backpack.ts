@@ -28,14 +28,14 @@ export interface BackpackEnter { run: Run; onClose?: () => void }
 const SCALE = (CELL / ITEM_CELL_M) * 0.94;
 const BAG_POS = new THREE.Vector3(-0.55, 0, 0.1);
 const BAG_TILT = -0.62; // leaning back against the boulder
-const OPEN_ANG = -3.32;
+const OPEN_ANG = -3.78;
 
 interface Vis {
   inst: ItemInst;
   root: THREE.Group;     // spring-driven world transform
   spin: THREE.Group;     // turn about the item's normal
   model: THREE.Object3D;
-  outline: THREE.Mesh;
+  halo: THREE.Mesh;
   pos: THREE.Vector3; vel: THREE.Vector3;
   q: THREE.Quaternion;
   ang: number; angV: number; angT: number;
@@ -73,7 +73,8 @@ export class BackpackScreen implements Screen {
   private state: 'closed' | 'opening' | 'open' | 'closing' = 'closed';
   private st = 0;
   private t = 0;
-  private S = 2;
+  private S = 2;   // overlay pixel scale (cursor, floating words)
+  private CS = 1;  // tag card pixel scale
   private w = 1280; private h = 720;
   // bag motion
   private drop = 0; private dropV = 0; private landed = false;
@@ -95,6 +96,7 @@ export class BackpackScreen implements Screen {
   private floaters = new Floaters();
   private cursor = new Cursor();
   private mergeLabel: THREE.Mesh | null = null; private mergeKey = '';
+  private blob: THREE.Mesh;
   // dangly bits (world space verlet)
   private chain = { p1: new THREE.Vector3(), o1: new THREE.Vector3(), p2: new THREE.Vector3(), o2: new THREE.Vector3(), init: false };
   private tagp = { p: new THREE.Vector3(), o: new THREE.Vector3(), yaw: 0, yawV: 0, init: false };
@@ -112,14 +114,15 @@ export class BackpackScreen implements Screen {
     this.scene.add(this.fx.object);
     this.fx.waterAt = () => 100; this.fx.floorAt = () => 0;
     // light rig: warm lantern key (in the scenery), cool sea fill, a soft rim from behind
-    this.scene.add(new THREE.HemisphereLight('#6ab8c8', '#3a2c1c', 1.0));
+    this.scene.add(new THREE.HemisphereLight('#7ac4d0', '#3a2c1c', 1.35));
     const rim = new THREE.DirectionalLight('#7ad0e8', 1.1); rim.position.set(3, 4, -4); this.scene.add(rim);
     const fill = new THREE.DirectionalLight('#ffe2b8', 0.55); fill.position.set(1, 3, 6); this.scene.add(fill);
     this.scene.add(new THREE.AmbientLight('#20343c', 0.6));
-    this.env.lampLight.target.position.set(-0.2, 0.6, 0);
+    this.env.lampLight.target.position.set(-0.3, 0.9, 0);
     this.overlay.add(this.tag.group, this.floaters.group, this.cursor.mesh);
-    // a pinned note on the board: the only "instructions"
-    this.addNote();
+    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, color: '#000000', opacity: 0 }));
+    this.blob.renderOrder = 6;
+    this.scene.add(this.blob);
     this.placeBag(0);
     this.layoutCamera();
   }
@@ -158,7 +161,8 @@ export class BackpackScreen implements Screen {
     this.w = w; this.h = h;
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     this.ocam.right = w; this.ocam.bottom = -h; this.ocam.updateProjectionMatrix();
-    this.S = Math.max(1, Math.round(h / 360));
+    this.S = Math.max(1, Math.round(h / 400));
+    this.CS = Math.max(1, Math.round(h / 800));
     this.fx.setPixelScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
     this.layoutCamera();
   }
@@ -175,11 +179,15 @@ export class BackpackScreen implements Screen {
   private layoutCamera() {
     const a = this.camera.aspect;
     // keep bag + board framed on any aspect
-    const dist = 5.4 * Math.max(1, 1.62 / a);
-    const look = new THREE.Vector3(0.3, 1.05, 0.1);
+    const dist = 5.35 * Math.max(1, 1.62 / a);
+    const look = new THREE.Vector3(0.32, 1.2, 0.1);
     const dir = new THREE.Vector3(0.16, 0.56, 0.81).normalize();
     this.camLook.copy(look);
     this.camBase.copy(look).addScaledVector(dir, dist);
+    // hang the lantern in the top-left corner of the view, its rope running out of frame
+    this.camera.position.copy(this.camBase); this.camera.lookAt(look); this.camera.updateMatrixWorld();
+    const lp = new THREE.Vector3(-0.84, 0.66, 0.5).unproject(this.camera).sub(this.camBase).normalize().multiplyScalar(4.3).add(this.camBase);
+    this.env.lamp.position.copy(lp);
   }
   private placeBag(dt: number) {
     const r = this.bag.root;
@@ -199,15 +207,13 @@ export class BackpackScreen implements Screen {
     spin.add(model);
     const root = new THREE.Group();
     root.add(spin);
-    const mesh = model.userData.mesh as THREE.Mesh;
-    const outline = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color: '#ffe9a8', side: THREE.BackSide, transparent: true, opacity: 0, depthWrite: false }));
-    outline.scale.set(1.07, 1.07, 1.6);
-    outline.renderOrder = -1;
-    model.add(outline);
+    const halo = new THREE.Mesh(HALO_GEO, new THREE.MeshBasicMaterial({ map: haloTex(), color: '#ffe0a0', transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    halo.renderOrder = 4;
+    root.add(halo);
     model.scale.setScalar(SCALE);
     this.items.add(root);
     const v: Vis = {
-      inst: it, root, spin, model, outline,
+      inst: it, root, spin, model, halo,
       pos: new THREE.Vector3(), vel: new THREE.Vector3(), q: new THREE.Quaternion(),
       ang: -it.rot * Math.PI / 2, angV: 0, angT: -it.rot * Math.PI / 2, sq: 0, sqV: 0,
       pop: 0, popV: 0, popDelay, popT: 0, lift: 0, glow: 0, tray: null, depth: (model.userData.depth as number) * SCALE, wob: 0,
@@ -272,10 +278,10 @@ export class BackpackScreen implements Screen {
     const bagPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, p0);
     const hitB = r.intersectPlane(bagPlane, new THREE.Vector3());
     const local = hitB ? this.bag.root.worldToLocal(hitB.clone()) : null;
-    const trayY = this.env.tray.position.y;
-    const hitT = r.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -trayY), new THREE.Vector3());
+    const tn = new THREE.Vector3(0, 1, 0).applyQuaternion(this.env.tray.getWorldQuaternion(new THREE.Quaternion()));
+    const hitT = r.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(tn, this.env.tray.getWorldPosition(new THREE.Vector3())), new THREE.Vector3());
     const tl = hitT ? this.env.tray.worldToLocal(hitT.clone()) : null;
-    return { hitB, local, hitT, tl, n };
+    return { hitB, local, hitT, tl, n, tn };
   }
 
   private screenOf(p: THREE.Vector3): [number, number] {
@@ -301,6 +307,7 @@ export class BackpackScreen implements Screen {
     if (this.merging) this.updateMerge(dt);
     this.updateItems(dt);
     this.updateGlows(dt);
+    this.updateBlob(dt);
     this.updateDangly(dt);
     this.ambient(dt);
     this.fx.update(dt);
@@ -404,7 +411,7 @@ export class BackpackScreen implements Screen {
       v.inst.rot = (v.inst.rot + 1) % 4; v.angT -= Math.PI / 2; v.angV -= 3;
       sfx(['swish_a', 'sw_swish2'], { vol: 0.4, rate: 1.2 });
     }
-    const { local, hitB, tl, hitT } = this.planes();
+    const { local, hitB, tl, hitT, tn } = this.planes();
     const d = getItem(v.inst.id);
     const { w, h } = shapeSize(rotCells(d.shape, v.inst.rot));
     let region: Region = 'none';
@@ -424,7 +431,7 @@ export class BackpackScreen implements Screen {
         const other = this.vis.get(under);
         if (other && mergeResult(v.inst, other.inst)) merge = other;
       }
-      point.copy(hitB!).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.quaternion), 0.32);
+      point.copy(hitB!).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.quaternion), 0.42);
     } else if (tl && Math.abs(tl.x) < this.env.trayHalf.x + 0.25 && Math.abs(tl.z) < this.env.trayHalf.z + 0.3) {
       region = 'tray';
       trayP = new THREE.Vector2(clamp(tl.x, -this.env.trayHalf.x + 0.1, this.env.trayHalf.x - 0.1), clamp(tl.z, -this.env.trayHalf.z + 0.1, this.env.trayHalf.z - 0.1));
@@ -433,10 +440,10 @@ export class BackpackScreen implements Screen {
         if (o === v || o.inst.gx >= 0 || !o.tray || o.dead) continue;
         if (o.tray.distanceTo(new THREE.Vector2(tl.x, tl.z)) < this.radius(o) * 0.9 && mergeResult(v.inst, o.inst)) merge = o;
       }
-      point.copy(hitT!).add(new THREE.Vector3(0, 0.3, 0));
+      point.copy(hitT!).addScaledVector(tn, 0.3);
     } else if (hitB && local && Math.abs(local.x) < 1.6 && Math.abs(local.y) < 1.6) {
       point.copy(hitB).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.quaternion), 0.32);
-    } else if (hitT) point.copy(hitT).add(new THREE.Vector3(0, 0.3, 0));
+    } else if (hitT) point.copy(hitT).addScaledVector(tn, 0.3);
     else point.copy(v.root.position);
     this.plan = { region, gx, gy, ok, merge, point, tray: trayP };
     if (inp.released.has('Mouse0') || (!inp.down.has('Mouse0') && !inp.pressed.has('Mouse0'))) this.dropHeld(false);
@@ -537,9 +544,13 @@ export class BackpackScreen implements Screen {
       const hov = v === this.hover && !this.held ? 1 : 0;
       v.lift = damp(v.lift, hov ? 0.07 : this.merging?.b === v ? 0.12 : 0, 14, dt);
       v.glow = damp(v.glow, hov ? 1 : this.isPartner(v) ? 0.55 + Math.sin(this.t * 6) * 0.25 : 0, 10, dt);
-      (v.outline.material as THREE.MeshBasicMaterial).opacity = v.glow * 0.65;
-      (v.outline.material as THREE.MeshBasicMaterial).color.set(this.isPartner(v) && !hov ? '#ffcf5a' : '#fff4c8');
-      v.outline.visible = v.glow > 0.02;
+      const hm = v.halo.material as THREE.MeshBasicMaterial;
+      hm.opacity = v.glow * 0.55 * v.pop;
+      hm.color.set(this.isPartner(v) && !hov ? '#ffb840' : '#ffe8b0');
+      v.halo.visible = v.glow > 0.02;
+      const hr = this.radius(v) * 2.6;
+      v.halo.scale.set(hr, hr, 1);
+      v.halo.position.set(0, 0, -v.depth - v.lift - 0.004);
       // target
       if (v === this.held && this.plan) {
         tp.copy(this.plan.point);
@@ -574,7 +585,7 @@ export class BackpackScreen implements Screen {
       const wob = v.wob ? Math.sin(this.t * 34) * 0.08 * v.wob : 0;
       if (!this.merging || (v !== this.merging.a && v !== this.merging.b)) v.wob = Math.max(0, v.wob - dt * 2.5);
       v.spin.rotation.z = v.ang + wob * 0.6;
-      const s = v.pop * (v === this.held ? 1.08 : 1);
+      const s = v.pop * (v === this.held ? 1.14 : 1);
       v.spin.scale.set(s * (1 + v.sq * 0.5 + wob), s * (1 + v.sq * 0.5 - wob), s * (1 - v.sq));
     }
   }
@@ -582,6 +593,21 @@ export class BackpackScreen implements Screen {
     const src = this.held ?? (this.hover && this.hoverT > 0.25 ? this.hover : null);
     if (!src || src === v) return false;
     return !!mergeResult(src.inst, v.inst);
+  }
+
+  private updateBlob(dt: number) {
+    const v = this.held, mat = this.blob.material as THREE.MeshBasicMaterial;
+    if (!v || !this.plan) { mat.opacity = damp(mat.opacity, 0, 12, dt); return; }
+    const onTray = this.plan.region === 'tray';
+    const q = onTray ? this.env.tray.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)) : this.bag.root.getWorldQuaternion(new THREE.Quaternion());
+    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    const o = onTray ? this.env.tray.getWorldPosition(new THREE.Vector3()) : this.bag.root.localToWorld(new THREE.Vector3(0, 0, 0.03));
+    const d = v.pos.clone().sub(o).dot(n);
+    this.blob.position.copy(v.pos).addScaledVector(n, -d + 0.012);
+    this.blob.quaternion.copy(q);
+    const r = this.radius(v) * 2.2 * (1 + d * 0.6);
+    this.blob.scale.set(r, r, 1);
+    mat.opacity = damp(mat.opacity, clamp(0.55 - d * 0.4, 0.15, 0.55), 12, dt);
   }
 
   private updateGlows(dt: number) {
@@ -594,13 +620,22 @@ export class BackpackScreen implements Screen {
         for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) if (occ[y][x] === p.merge.inst.uid) cells.set(y * GRID + x, 'merge');
       } else for (const [x, y] of cs) { const gx = p.gx + x, gy = p.gy + y; if (gx >= 0 && gy >= 0 && gx < GRID && gy < GRID) cells.set(gy * GRID + gx, p.ok ? 'ok' : 'bad'); }
     }
+    if (!this.held) {
+      const occ = this.run ? occupancy(this.run.items) : null;
+      if (occ) for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
+        const u = occ[y][x]; if (!u) continue;
+        const v = this.vis.get(u);
+        if (v && v === this.hover) cells.set(y * GRID + x, 'hover');
+        else if (v && this.isPartner(v)) cells.set(y * GRID + x, 'partner');
+      }
+    }
     this.bag.cellGlows.forEach((m, i) => {
       const mat = m.material as THREE.MeshBasicMaterial;
       const st = cells.get(i);
       const base = this.held ? 0.16 : 0;
-      const target = st === 'ok' ? 0.95 : st === 'bad' ? 0.8 : st === 'merge' ? 0.75 + Math.sin(this.t * 10) * 0.25 : base;
+      const target = st === 'ok' ? 0.95 : st === 'bad' ? 0.8 : st === 'merge' ? 0.75 + Math.sin(this.t * 10) * 0.25 : st === 'hover' ? 0.45 : st === 'partner' ? 0.3 + Math.sin(this.t * 6) * 0.15 : base;
       mat.opacity = damp(mat.opacity, target, 18, dt);
-      if (st) mat.color.set(st === 'ok' ? '#8fffd8' : st === 'bad' ? '#ff4a3a' : '#ffd060');
+      if (st) mat.color.set(st === 'ok' ? '#8fffd8' : st === 'bad' ? '#ff4a3a' : st === 'hover' ? '#ffe8c0' : '#ffd060');
       else mat.color.lerp(new THREE.Color('#9fd8e0'), 1 - Math.exp(-dt * 8));
     });
   }
@@ -635,7 +670,7 @@ export class BackpackScreen implements Screen {
       // don't swing through the bag's side
       for (const p of [ch.p1, ch.p2]) {
         const lp = this.bag.root.worldToLocal(p.clone());
-        if (Math.abs(lp.x) < 1.12 && lp.z < 0.3) { lp.z = 0.3; p.copy(this.bag.root.localToWorld(lp)); }
+        if (lp.x < 1.2 && lp.z < 0.25) { lp.x = 1.2; p.copy(this.bag.root.localToWorld(lp)); }
       }
     }
     const { links, lure } = this.bag.keychain;
@@ -671,7 +706,7 @@ export class BackpackScreen implements Screen {
     const td = tg.p.clone().sub(T).normalize();
     const hq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), td);
     const tc = this.camera.position.clone().sub(tg.p); tc.y = 0;
-    hq.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(tc.x, tc.z) * 0.7 + 0.35 + tg.yaw));
+    hq.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(tc.x, tc.z) + tg.yaw));
     const holder = this.bag.tag.obj;
     holder.position.copy(this.bag.root.worldToLocal(tg.p.clone()));
     holder.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(hq));
@@ -707,16 +742,23 @@ export class BackpackScreen implements Screen {
     this.floaters.update(dt);
     // hover tag
     const hv = !this.held && this.hover && this.hoverT > 0.12 && this.state === 'open' ? this.hover : null;
-    if (hv) this.tag.set({ id: hv.inst.id, level: hv.inst.level || 1, hints: this.hints(hv) }, S);
+    const CS = this.CS;
+    if (hv) this.tag.set({ id: hv.inst.id, level: hv.inst.level || 1, hints: this.hints(hv) }, CS);
     const anchor = hv ?? null;
     let ix = 0, iy = 0, cx = 0, cy = 0;
     if (anchor) {
       [ix, iy] = this.screenOf(anchor.root.position);
-      const right = ix < this.w * 0.62;
-      cx = ix + (right ? 120 : -120) * S * 0.75; cy = iy - 70 * S * 0.5;
-      cx = clamp(cx, 110 * S, this.w - 110 * S); cy = clamp(cy, 12 * S, this.h - 160 * S);
+      const cw = this.tag.cw, chh = this.tag.ch;
+      if (anchor.inst.gx >= 0) {
+        // beside the bag, never over the pockets
+        const [bx] = this.screenOf(this.bag.root.localToWorld(new THREE.Vector3(1.3, 0, 0.2)));
+        const [lx] = this.screenOf(this.bag.root.localToWorld(new THREE.Vector3(-1.3, 0, 0.2)));
+        cx = bx + 18 * CS + cw / 2 < this.w - 8 ? bx + 18 * CS + cw / 2 : lx - 18 * CS - cw / 2;
+        cy = iy - chh * 0.35;
+      } else { cx = ix; cy = iy - chh - 46 * CS; if (cy < 8) cy = iy + 40 * CS; }
+      cx = clamp(cx, cw / 2 + 6, this.w - cw / 2 - 6); cy = clamp(cy, 10 * CS, this.h - chh - 6);
     } else { cx = this.tag.x; cy = this.tag.y; ix = cx; iy = cy + 20; }
-    this.tag.update(dt, !!anchor, cx, cy, ix, iy, S);
+    this.tag.update(dt, !!anchor, cx, cy, ix, iy, CS);
     // merge preview label next to the fin
     const mp = this.held && this.plan?.merge ? mergeResult(this.held.inst, this.plan.merge.inst) : null;
     const key = mp ? mp.id + '|' + mp.level : '';
@@ -758,27 +800,20 @@ export class BackpackScreen implements Screen {
     return out;
   }
 
-  private addNote() {
-    // a scrap of paper pinned to the board with a rusty nail: the controls, handwritten
-    const st: TextStyle = { font: 'M5x7', px: 16, fill: '#3a2414' };
-    const lines = ['drag to pack', 'R  turn', 'drop on twin: fuse', 'Tab  close'];
-    const cs = lines.map((l) => textCanvas(l, st));
-    const W = Math.max(...cs.map((c) => c.w)) + 6, H = cs.reduce((a, c) => a + c.h - 8, 0) + 14;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    const ctx = cv.getContext('2d')!;
-    ctx.fillStyle = '#e6d8b4'; ctx.fillRect(0, 0, W, H);
-    for (let k = 0; k < 200; k++) { ctx.fillStyle = Math.random() < 0.5 ? '#d6c6a0' : '#efe4c6'; ctx.fillRect((Math.random() * W) | 0, (Math.random() * H) | 0, 1, 1); }
-    ctx.fillStyle = '#8a7050'; ctx.fillRect(0, 0, W, 1); ctx.fillRect(0, H - 1, W, 1); ctx.fillRect(0, 0, 1, H); ctx.fillRect(W - 1, 0, 1, H);
-    let y = 4; for (const c of cs) { ctx.drawImage(c.canvas, 3, y - 4); y += c.h - 8; }
-    ctx.fillStyle = '#5a2a10'; ctx.fillRect((W / 2) | 0, 2, 2, 2);
-    const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.colorSpace = THREE.SRGBColorSpace;
-    const k = 0.0042;
-    const note = new THREE.Mesh(new THREE.PlaneGeometry(W * k, H * k), new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }));
-    note.rotation.set(-Math.PI / 2, 0, 0.12);
-    note.position.set(this.env.trayHalf.x - W * k / 2 - 0.02, 0.004, this.env.trayHalf.z - H * k / 2 + 0.06);
-    note.receiveShadow = true;
-    this.env.tray.add(note);
-  }
+}
+
+const HALO_GEO = new THREE.PlaneGeometry(1, 1);
+let haloT: THREE.Texture | null = null;
+function haloTex(): THREE.Texture { return (haloT ??= blobTex()); }
+
+function blobTex(): THREE.Texture {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 function nameStyle(d: ItemDef): TextStyle {

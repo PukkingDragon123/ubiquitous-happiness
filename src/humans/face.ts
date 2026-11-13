@@ -102,7 +102,7 @@ export function paintMouths(P: Px, L: Look) {
   const sk = L.skin;
   const lip: RGB = mix(mix(sk, [196, 92, 88], 0.42 * L.face.lipK + 0.08), [120, 60, 60], 0.12);
   const lipD = shade(lip, 0.72), lipL = shade(lip, 1.18);
-  const line: RGB = mix(shade(sk, 0.32), [50, 18, 20], 0.5);
+  const line: RGB = mix(shade(sk, 0.25), [44, 14, 16], 0.6);
   const inside: RGB = [58, 20, 24], tongue: RGB = [208, 98, 104], tooth: RGB = [246, 240, 228], toothS: RGB = [200, 194, 186];
   const kidGap = L.face.teethGap;
   const [mx, my] = LAYOUT.MOUTH;
@@ -110,7 +110,7 @@ export function paintMouths(P: Px, L: Look) {
     const ox = mx + (i % 4) * MOUTH_FW, oy = my + Math.floor(i / 4) * MOUTH_FH;
     const q = new Px(MOUTH_FW, MOUTH_FH);
     const cx = MOUTH_FW / 2, cy = MOUTH_FH / 2;
-    const W = L.arch === 'kid' ? 9 : 10;
+    const W = L.arch === 'kid' ? 11 : 13;
     // helpers: a curved mouth line y(x) = cy + curve * (x / w)^2, with lips around it
     const curveLine = (w: number, curve: number, thick = 1, cyy = cy) => {
       for (let x = -w; x <= w; x++) {
@@ -124,7 +124,7 @@ export function paintMouths(P: Px, L: Look) {
       for (let x = -w; x <= w; x++) {
         const t = x / w, yy = cyy + curve * t * t - curve * 0.35;
         const taper = 1 - t * t;
-        const up = Math.round(1 + taper * 1.4 * full), lo = Math.round(1 + taper * 2.2 * full);
+        const up = Math.round(1 + taper * 1.8 * full), lo = Math.round(1 + taper * 2.8 * full);
         for (let k = 1; k <= up; k++) q.set(cx + x, Math.round(yy) - k, k === up ? lipD : lip);
         for (let k = 1; k <= lo; k++) q.set(cx + x, Math.round(yy) + k, k === 1 ? lipD : k === lo ? shade(lip, 0.9) : (k === 2 && Math.abs(x) < w * 0.4 ? lipL : lip));
       }
@@ -247,14 +247,14 @@ export class FaceRig {
       const B = new Loft(false);
       const a0 = side * (F.eyeA - 13), a1 = side * (F.eyeA + 15);
       const n = 9;
-      const thick = 0.0042 * L.face.brow * (L.arch === 'kid' ? 0.9 : 1);
+      const thick = 0.0052 * L.face.brow * (L.arch === 'kid' ? 0.9 : 1);
       const mid = S.skull(F.browY, side * F.eyeA, 0, true);
       const midL = S.loc(mid);
       const path: V3[] = [];
       for (let i = 0; i < n; i++) {
         const t = i / (n - 1), a = a0 + (a1 - a0) * t;
         const arch = Math.sin(t * Math.PI * 0.9 + 0.15) * 0.005 - t * 0.002;
-        const p = S.loc(S.skull(F.browY + arch, a, 0.0028, true));
+        const p = S.loc(S.skull(F.browY + arch, a, 0.0052, true));
         path.push([p[0] - midL[0], p[1] - midL[1], p[2] - midL[2]]);
       }
       B.tube(path, (t) => thick * S.hs * (1.15 - t * 0.7) * (t < 0.08 ? 0.75 : 1), 6, R('BROW'), 1, { capStart: true, capEnd: true });
@@ -369,6 +369,8 @@ export class FaceRig {
       b.obj.position.copy(b.base);
       b.obj.position.y += s.browY * 0.011 * hs - s.knit * 0.002 * hs;
       b.obj.position.x -= b.side * s.knit * 0.004 * hs;
+      // lowered / knitted brows ride out over the brow ridge instead of sinking into it
+      b.obj.position.z += (Math.max(0, -s.browY) * 0.004 + s.knit * 0.002 + Math.abs(s.browT) * 0.002) * hs;
       b.obj.rotation.set(0, 0, b.side * (s.browT * 0.38), 'XYZ');
     }
     void this.browSpan;

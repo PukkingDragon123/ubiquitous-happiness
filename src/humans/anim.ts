@@ -306,8 +306,9 @@ export function pose(st: State, t: number, p: P, c: Ctx): PoseOut {
       p.set(CH.OFFW, 0).set(CH.NET, 1);
       const reach = track(u, [[0, 0], [0.35, 1], [0.6, 1], [0.8, 0.4], [1, 0]]);
       const scoop = track(u, [[0, 0], [0.35, 0], [0.62, 1], [1, 1]]);
-      p.j('uarmL', -0.8 - reach * 0.6 - scoop * 0.5 * (1 - reach * 0.4), 0.2, 0.25 + reach * 0.15).j('farmL', -0.5 + reach * 0.3 - scoop * 0.5);
-      p.add('spine', reach * 0.35).add('chest', reach * 0.3, reach * 0.25).add('head', reach * 0.2, -0.1);
+      // the free (left) arm reaches across the body toward the water on his right, the torso twisting into it
+      p.j('uarmL', -1.0 - reach * 0.45 - scoop * 0.55 * (1 - reach * 0.4), -0.55 - reach * 0.25, -0.1).j('farmL', -0.55 + reach * 0.35 - scoop * 0.45).j('handL', 0, -0.4, 0);
+      p.add('spine', reach * 0.3, -reach * 0.2).add('chest', reach * 0.3, -0.25 - reach * 0.3).add('head', reach * 0.25, -0.35);
       p.add('thighL', -reach * 0.35).add('shinL', reach * 0.6).add('thighR', -reach * 0.3).add('shinR', reach * 0.6);
       p.addRoot(0, -reach * 0.1 * s, reach * 0.06 * s);
       p.set(CH.GRIPL, 1);
@@ -322,6 +323,7 @@ export function pose(st: State, t: number, p: P, c: Ctx): PoseOut {
 /** idle / wait fidgets: scratch the head, check the watch, stretch, yawn */
 function fidget(p: P, c: Ctx, idle: boolean) {
   const f = c.fidget, t = c.fidgetT;
+  if (t < 0) return;
   const env = track(t, [[0, 0], [0.4, 1], [2.2, 1], [2.8, 0]]);
   if (env <= 0) return;
   switch (f) {

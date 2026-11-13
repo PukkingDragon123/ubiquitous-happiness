@@ -28,6 +28,8 @@ export interface MapScreenOpts {
   onChoose(node: MapNode, map: ActMap): void;
   /** play act music on enter (default true) */
   music?: boolean;
+  /** the establishing shot when an act is first shown (default true) */
+  intro?: boolean;
 }
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
@@ -74,6 +76,7 @@ export class MapScreen implements Screen {
   private nextGull = 4; private nextWave = 3;
   private savedPost: Record<string, number | THREE.Vector3> = {};
   private savedClip = false;
+  private precompile = false;
   private ray = new THREE.Raycaster();
   private v = new THREE.Vector3(); private v2 = new THREE.Vector3();
 
@@ -110,6 +113,7 @@ export class MapScreen implements Screen {
       this.scene.add(this.token.root);
       for (const l of this.labels.values()) this.disposeLabel(l);
       this.labels.clear();
+      this.precompile = true;
     }
     const r = this.game.renderer;
     this.savedClip = r.localClippingEnabled;
@@ -129,7 +133,7 @@ export class MapScreen implements Screen {
     this.zMin = map.nodes[map.bossId].z + 2.2;
     const home = this.homeFocus();
     const key = map.seed + ':' + map.act;
-    if (!this.shown.has(key)) {
+    if (!this.shown.has(key) && this.opts.intro !== false) {
       this.shown.add(key);
       this.mode = 'intro'; this.introT = 0;
       this.focusZ = this.focusT = this.zMin - 0.5;
@@ -138,6 +142,7 @@ export class MapScreen implements Screen {
     } else {
       this.mode = 'idle';
       this.focusZ = clamp(home - 3.5, this.zMin, this.zMax); this.focusT = home;
+      if (this.opts.intro === false && !this.shown.has(key)) { this.shown.add(key); this.focusZ = home; }
     }
     this.travel = null;
     this.hovered = null;
@@ -149,6 +154,11 @@ export class MapScreen implements Screen {
     if (this.opts.music !== false) { const mu = map.act === 1 ? 'mu_shallows' : map.act === 2 ? 'mu_fjord' : 'mu_abyss'; if (audio.has(mu)) audio.music(mu); }
     audio.setUnderwater(0);
     this.update(0);
+    if (this.precompile) {
+      // compile every program up front (incl. the clipped variants) so nothing hitches as it scrolls into view
+      this.precompile = false;
+      try { r.compile(this.scene, this.camera); } catch { /* compile is best-effort */ }
+    }
   }
 
   exit() {
@@ -182,6 +192,16 @@ export class MapScreen implements Screen {
       d.setRibbon(r.key, open ? 1 : travelled ? 2 : 0);
     }
   }
+
+  /** screen pixel position of a node's medallion (tests / tutorials) */
+  nodeScreen(id: number): { x: number; y: number; avail: boolean } | null {
+    const m = this.dio?.markers[id];
+    if (!m) return null;
+    const p = m.root.localToWorld(new THREE.Vector3(0, m.float.position.y + m.medalY * m.float.scale.y, 0)).project(this.camera);
+    return { x: Math.round((p.x * 0.5 + 0.5) * this.w), y: Math.round((1 - (p.y * 0.5 + 0.5)) * this.h), avail: this.avail.has(id) };
+  }
+  /** ids currently available */
+  availableNow(): number[] { return [...this.avail]; }
 
   // ------------------------------------------------------------------ helpers
   private tokenSpot(id: number): THREE.Vector3 {
@@ -231,7 +251,7 @@ export class MapScreen implements Screen {
     const n = m.node;
     const titleSt: TextStyle = n.type === 'boss' ? STYLES.title : n.type === 'elite' ? STYLES.danger : n.type === 'treasure' || n.type === 'shop' ? STYLES.gold : n.type === 'mystery' ? STYLES.magic : n.type === 'rest' ? STYLES.heal : STYLES.item;
     const st = this.visited.has(n.id) ? (n.id === this.at ? 'you are here' : 'visited') : this.avail.has(n.id) ? 'click to ride the current' : 'out of reach';
-    const lines = [{ text: n.title, style: titleSt }, { text: n.blurb, style: STYLES.body, gap: -2 }, { text: st, style: { ...STYLES.small, fill: this.avail.has(n.id) ? '#9ff6ff' : '#b8c4d4' }, gap: 0 }];
+    const lines = [{ text: n.title, style: titleSt }, { text: n.blurb, style: STYLES.body, gap: -2 }, { text: st, style: { ...STYLES.hint, fill: this.avail.has(n.id) ? ['#e8fdff', '#9ff0ff'] : ['#d8dee8', '#a8b4c4'] }, gap: -3 }];
     l = this.makeLabel(lines, n.id);
     this.labels.set(n.id, l);
     return l;
@@ -328,7 +348,7 @@ export class MapScreen implements Screen {
       for (const m of d.markers) {
         if (m.root.position.z > d.cutZ - 0.2) continue;
         m.root.updateMatrixWorld();
-        const a = m.root.localToWorld(this.v.set(0, m.float.position.y + m.medalY, 0)).project(cam);
+        const a = m.root.localToWorld(this.v.set(0, m.float.position.y + m.medalY * m.float.scale.y, 0)).project(cam);
         const b = m.root.localToWorld(this.v2.set(0, 0, 0)).project(cam);
         const ax = (a.x * 0.5 + 0.5) * this.w, ay = (1 - (a.y * 0.5 + 0.5)) * this.h;
         const bx = (b.x * 0.5 + 0.5) * this.w, by = (1 - (b.y * 0.5 + 0.5)) * this.h;
@@ -337,7 +357,7 @@ export class MapScreen implements Screen {
         const tt = clamp(((mx - ax) * vx + (my - ay) * vy) / l2, 0, 1);
         const dd = Math.hypot(mx - (ax + vx * tt), my - (ay + vy * tt));
         const depth = cam.position.distanceTo(m.root.position);
-        const rad = Math.max(22, (m.medalR * 1.5 * ppu) / depth);
+        const rad = Math.max(22, (m.medalR * m.float.scale.x * 1.5 * ppu) / depth);
         if (dd < rad && dd < best) { best = dd; hov = m; }
       }
     }

@@ -91,7 +91,8 @@ export function groundDetail(): THREE.DataTexture {
     // G grass: tufts (worley), bright tips, dark roots
     const [f1, f2] = worley(x, y, 6, 3, S);
     let grass = clamp01(1 - f1 / 4.2) * 0.6 + (pxNoise(x, y, 5, 3, 8, S) - 0.5) * 0.5 + 0.25;
-    if (f2 - f1 < 0.7) grass -= 0.25;
+    if (f2 - f1 < 0.7) grass -= 0.1;
+    grass = 0.22 + grass * 0.78;
     grass += (hash2(x, y, 31) - 0.5) * 0.15;
     // B rock: faceted plates with dark cracks
     const [r1, r2, rh] = worley(x, y, 9, 11, S);
@@ -340,7 +341,11 @@ export function foliage(): THREE.Texture {
     const vein = Math.abs(Math.atan2(ny, nx) * 4) % 1 < 0.08;
     return R(['#1e4a1e', '#2e6a2a', '#4a9038', '#7ab84e'], 5)(0.6 - ny * 0.3 - Math.hypot(nx, ny) * 0.25 + (vein ? 0.25 : 0), x, y);
   });
-  p.outline('#0e2410', 255);
+  // soft outline on the fronds only (thin grass blades would turn into dark scribbles from above)
+  const fr = new Px(256, 64);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 256; x++) { const c = p.get(x, y); if (c[3]) fr.set(x, y, [c[0], c[1], c[2]]); }
+  fr.outline('#1e4a26', 255);
+  p.draw(fr, 0, 0);
   const t = p.texture();
   return t;
 }

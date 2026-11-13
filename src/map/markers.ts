@@ -7,8 +7,11 @@ import { Loft, V3 } from '../gfx/loft';
 import { clamp01, damp } from '../core/math';
 import { A } from './tex';
 import { barrel, blob, bottle, box, lathe, membrane, rod, weightsToAttr } from './build';
-import { dio, glowRingMaterial } from './shaders';
+import { DIO, dio, glowRingMaterial } from './shaders';
 import type { MapNode, NodeType } from './gen';
+
+/** markers read a little larger than life so the icons stay legible */
+export const MARKER_SCALE = 1.3;
 
 export type MarkerState = 'locked' | 'available' | 'visited' | 'current';
 
@@ -77,7 +80,7 @@ export class Marker {
   pennant: THREE.Mesh;
   state: MarkerState = 'locked';
   hover = 0;
-  private lift = 0; private liftV = 0; private sc = 1; private scV = 0;
+  private lift = 0; private liftV = 0; private sc = MARKER_SCALE; private scV = 0;
   private flagK = 0;
   private ph = Math.random() * 6.28;
   topY: number;
@@ -100,16 +103,13 @@ export class Marker {
     }
     const L = new Loft();
     const top = body(L, node.type);
-    const bm = new THREE.Mesh(L.build(), atlasMat);
-    bm.castShadow = true; bm.receiveShadow = true;
-    this.float.add(bm);
     // medallion on its post
     this.medalR = this.big ? 0.58 : 0.3;
     this.medalY = top + this.medalR * 0.95;
-    const post = new Loft();
-    rod(post, [0, top - 0.02, 0], [0, this.medalY, 0], this.big ? 0.03 : 0.013, this.big ? 0.025 : 0.011, 5, A.darkWood);
-    const pm = new THREE.Mesh(post.build(), atlasMat); pm.castShadow = true;
-    this.float.add(pm);
+    rod(L, [0, top - 0.02, 0], [0, this.medalY, 0], this.big ? 0.03 : 0.013, this.big ? 0.025 : 0.011, 5, A.darkWood);
+    const bm = new THREE.Mesh(L.build(), atlasMat);
+    bm.castShadow = true; bm.receiveShadow = true;
+    this.float.add(bm);
     const R = this.medalR, th = R * 0.16;
     const front = new THREE.CircleGeometry(R, 32);
     const uv = front.getAttribute('uv') as THREE.BufferAttribute;
@@ -149,6 +149,7 @@ export class Marker {
     this.glow = new THREE.Mesh(new THREE.PlaneGeometry(gs, gs, 1, 1).rotateX(-Math.PI / 2), this.glowMat);
     this.glow.renderOrder = 4;
     this.glow.frustumCulled = false;
+    this.float.scale.setScalar(MARKER_SCALE);
     this.root.add(this.float, this.glow);
     this.root.position.set(node.x, 0, node.z);
     this.float.rotation.y = (node.seed % 628) / 100;
@@ -163,7 +164,7 @@ export class Marker {
     const tl = this.hover * (this.big ? 0.4 : 0.26) + this.focus * 0.15;
     this.liftV += ((tl - this.lift) * 160 - this.liftV * 13) * dt;
     this.lift += this.liftV * dt;
-    const ts = 1 + this.hover * 0.16 + (avail ? 0.04 : 0) + this.focus * 0.08;
+    const ts = MARKER_SCALE * (1 + this.hover * 0.16 + (avail ? 0.04 : 0) + this.focus * 0.08);
     this.scV += ((ts - this.sc) * 220 - this.scV * 12) * dt;
     this.sc += this.scV * dt;
     const amp = avail ? 0.045 : visited ? 0.012 : 0.022;
@@ -185,7 +186,8 @@ export class Marker {
     this.medalMat.color.setScalar(dimC);
     if (visited) this.medalMat.color.setRGB(0.52, 0.54, 0.6);
     const pulse = avail ? 0.22 + Math.sin(t * 3.2 + this.ph) * 0.1 : 0;
-    this.medalMat.emissiveIntensity = damp(this.medalMat.emissiveIntensity, pulse + this.hover * 0.55 + this.focus * 0.4 + (this.big && !visited ? 0.12 : 0), 10, dt);
+    const nightLift = DIO.uDNight.value * (visited ? 0.12 : 0.3);
+    this.medalMat.emissiveIntensity = damp(this.medalMat.emissiveIntensity, nightLift + pulse + this.hover * 0.55 + this.focus * 0.4 + (this.big && !visited ? 0.12 : 0), 10, dt);
     this.glow.visible = avail || this.big || this.focus > 0.01;
     this.glowMat.uniforms.uK.value = damp(this.glowMat.uniforms.uK.value, (avail ? 1.1 : this.big ? 0.55 : 0) + this.hover * 0.9 + this.focus, 6, dt);
     this.pennant.visible = !visited;

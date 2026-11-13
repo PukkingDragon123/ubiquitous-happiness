@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import type { V3, Reg } from '../gfx/loft';
 import { Loft, usFor } from '../gfx/loft';
+import { Px as PxC } from '../gfx/px';
 import type { Px, RGB } from '../gfx/px';
 import { mix, shade } from '../gfx/px';
 import type { Look } from './looks';
@@ -28,12 +29,25 @@ export interface Gear {
 }
 
 const lensMats = new Map<string, THREE.Material>();
+/** lenses: clear (round reading glasses) or tinted / mirrored with a painted gradient and a glint streak */
 function lensMat(c: RGB, kind: string): THREE.Material {
   const key = kind + c.join(',');
   let m = lensMats.get(key);
   if (!m) {
     if (kind === 'round') m = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace), roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false });
-    else m = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace), roughness: 0.08, metalness: kind === 'wrap' ? 0.85 : 0.5, envMapIntensity: 1, emissive: new THREE.Color().setRGB(c[0] / 600, c[1] / 600, c[2] / 600) });
+    else {
+      const P = new PxC(32, 16);
+      const mirror = kind === 'wrap';
+      P.fill((x, y) => {
+        const v = y / 15;
+        // mirror coating: bright colour on top fading to near-black; a dark smoked gradient for plain shades
+        let col: RGB = mirror ? mix(mix(c, [255, 255, 255], 0.25), shade(c, 0.25), v) : mix(mix(c, [20, 20, 24], 0.55), [8, 8, 10], v * 0.8);
+        const streak = Math.abs((x - y * 1.3) - 8) < 1.6 || Math.abs((x - y * 1.3) - 13) < 0.8;
+        if (streak) col = mix(col, [255, 255, 255], mirror ? 0.55 : 0.4);
+        return band(col, 1, x, y, 0.08);
+      });
+      m = new THREE.MeshStandardMaterial({ map: P.texture(), roughness: 0.1, metalness: mirror ? 0.6 : 0.3, emissive: new THREE.Color(0xffffff), emissiveMap: P.texture(), emissiveIntensity: 0.25 });
+    }
     lensMats.set(key, m);
   }
   return m;
@@ -101,7 +115,15 @@ export function buildGear(L: Look, body: BodyBuild, d: Dims, mat: THREE.Material
     const B = new Loft(false), BL = new Loft(false);
     buildGlasses(B, BL, L, S);
     g.add(mk(B, g, frameMat(L.glassCol)));
-    if (BL.count) g.add(mk(BL, g, lensMat(L.lensCol, L.glasses), false));
+    if (BL.count) {
+      const lm = mk(BL, g, lensMat(L.lensCol, L.glasses), false);
+      // planar uvs from the lens bounds: the tint gradient runs top to bottom across both lenses
+      const geo = lm.geometry, pos = geo.attributes.position as THREE.BufferAttribute, uv = geo.attributes.uv as THREE.BufferAttribute;
+      geo.computeBoundingBox();
+      const bb = geo.boundingBox!;
+      for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) - bb.min.x) / (bb.max.x - bb.min.x || 1), (pos.getY(i) - bb.min.y) / (bb.max.y - bb.min.y || 1));
+      uv.needsUpdate = true;
+    }
     bones.head.add(g);
     gear.glasses = g;
   }
@@ -350,7 +372,8 @@ function buildHat(B: Loft, L: Look, S: HeadShape) {
       // the bill
       const fa = back ? 180 : 0;
       const bc = Array.from({ length: 11 }, (_, i) => -66 + i * 13.2);
-      brim((a) => sk(yb(a + fa), a + fa, 0.01), (a) => { const t = ((a + fa) * Math.PI) / 180; const p = sk(yb(a + fa) - 0.004, a + fa, 0.01); const k = Math.cos((a * Math.PI) / 180) ** 0.6 * 0.08; return [p[0] + Math.sin(t) * k * hs, p[1] - 0.012 * hs * Math.cos((a * Math.PI) / 180), p[2] + Math.cos(t) * k * hs]; }, 0.0045 * hs, subR(reg2, 0, 0.5, 0.5, 1), subR(reg2, 0, 0, 0.5, 0.5), 3, bc, 3, (a, f) => -(Math.abs(a / 66) ** 2) * 0.008 * hs * f);
+      // the bill reaches FORWARD (along the cap's facing), a rounded half-oval, its sides tucked to the band
+      brim((a) => sk(yb(a + fa), a + fa, 0.01), (a) => { const p = sk(yb(a + fa) - 0.004, a + fa, 0.01); const ca = Math.cos((a * Math.PI) / 180); const k = Math.pow(Math.max(0, ca - 0.38) / 0.62, 0.55) * 0.088 * hs; const fz = back ? -1 : 1; return [p[0] + Math.sin(((a + fa) * Math.PI) / 180) * 0.008 * hs, p[1] - 0.014 * hs * ca, p[2] + fz * k]; }, 0.0045 * hs, subR(reg2, 0, 0.5, 0.5, 1), subR(reg2, 0, 0, 0.5, 0.5), 3, bc, 3, (a, f) => -(Math.abs(a / 66) ** 2) * 0.008 * hs * f);
       // the button on top
       const bt = S.loc([0, 0.235, -0.006]);
       B.box(bt, [0.014 * hs, 0.008 * hs, 0.014 * hs], subR(reg, 0.45, 0.95, 0.55, 1), undefined);
@@ -406,9 +429,12 @@ function buildGlasses(B: Loft, BL: Loft, L: Look, S: HeadShape) {
   const fr = R('ACC');
   if (L.glasses === 'wrap') {
     // one curved visor lens + a thin top frame + temples
-    const cols = Array.from({ length: 13 }, (_, i) => -66 + i * 11);
-    const grid = [F.eyeY + 0.022, F.eyeY + 0.004, F.eyeY - 0.016].map((y, i) => cols.map((a) => sk(y - Math.abs(a) * 0.00008 * (i === 2 ? 1 : 0), a, 0.017 + (Math.abs(a) < 8 && i === 2 ? 0.004 : 0))));
-    BL.sheet(grid, fr, 1);
+    const cols = Array.from({ length: 17 }, (_, i) => -72 + i * 9);
+    // two lens lobes joined over the nose: the lower edge dips under each eye and notches up at the bridge
+    const lower = (a: number) => F.eyeY - 0.02 + 0.016 * Math.exp(-((a / 8) ** 2)) + Math.max(0, Math.abs(a) - 50) * 0.0004;
+    const upper = (a: number) => F.eyeY + 0.023 - Math.max(0, Math.abs(a) - 45) * 0.0003;
+    const grid = [0, 0.5, 1].map((f) => cols.map((a) => sk(upper(a) + (lower(a) - upper(a)) * f, a, 0.0185 + Math.exp(-((a / 10) ** 2)) * 0.004 + (1 - Math.abs(a) / 72) * 0.002)));
+    BL.sheet(grid, { x: 0, y: 0, w: 1, h: 1 }, 1);
     B.tube(cols.map((a) => sk(F.eyeY + 0.024, a, 0.018)), () => 0.0022 * hs, 4, fr, 2);
     for (const k of [1, -1]) B.tube([sk(F.eyeY + 0.02, k * 66, 0.017), sk(F.eyeY + 0.024, k * 90, 0.01), sk(F.eyeY + 0.018, k * 128, 0.008)], () => 0.0022 * hs, 4, fr, 3);
     return;
@@ -428,6 +454,7 @@ function buildGlasses(B: Loft, BL: Loft, L: Look, S: HeadShape) {
     B.tube(loop, () => (round ? 0.0012 : 0.003) * hs, round ? 4 : 5, fr, 1 + (k > 0 ? 0 : 1));
     // lens: a cupped disc inside the loop
     const grid: V3[][] = [];
+    const lr = round ? fr : { x: 0, y: 0, w: 1, h: 1 };
     for (let i = 0; i < 4; i++) {
       const rr = 1 - i / 3;
       grid.push(loop.slice(0, n).map((_, j) => {
@@ -438,7 +465,7 @@ function buildGlasses(B: Loft, BL: Loft, L: Look, S: HeadShape) {
       }));
     }
     for (const row of grid) row.push(row[0]);
-    BL.sheet(grid, fr, 3);
+    BL.sheet(grid.reverse(), lr, 3);
     // temples back to the ears
     B.tube([sk(cy + rh * 0.6, k * (F.eyeA + rw / 0.00175), 0.0175), sk(cy + 0.008, k * 88, 0.006), sk(cy - 0.006, k * 118, 0.004)], () => (round ? 0.0012 : 0.0026) * hs, 4, fr, 5);
   }

@@ -116,7 +116,7 @@ export class Diorama {
     this.group.add(this.cap);
     const tt = T.table.clone(); tt.needsUpdate = true; tt.wrapS = tt.wrapT = THREE.RepeatWrapping; tt.repeat.set(16, 22);
     const tableMat = new THREE.MeshStandardMaterial({ map: tt, color: pal0.table, roughness: 0.62, metalness: 0.0 });
-    tableMat.color.multiplyScalar(2.2);
+    tableMat.color.multiplyScalar(1.7);
     const table = new THREE.Mesh(new THREE.PlaneGeometry(190, 260).rotateX(-Math.PI / 2), tableMat);
     table.position.set(0, -lay.depth - 0.003, (lay.zFront + lay.zBack) / 2);
     table.receiveShadow = true;
@@ -318,7 +318,7 @@ export class Diorama {
       this.lhBeams.push(piv);
     }
     for (const isl of lay.islands) {
-      if (isl === lhIsl || isl.tag) { if (isl.tag) this.dressSmall(isl, landPts); continue; }
+      if (isl === lhIsl || isl.tag) { if (isl.tag) this.dressSmall(isl, landPts); if (isl.tag && isl.kind === 'sandbar') this.beachJunk(L, isl, rng); continue; }
       const zone = lay.zoneId(isl.z);
       const pal = PAL[zone];
       const kind = isl.kind;
@@ -353,6 +353,7 @@ export class Diorama {
       if (kind === 'snow' || kind === 'harbor' || (kind === 'rocky' && zone !== 'reef' && zone !== 'sunset')) {
         for (const [x, g, z] of landPts(isl, Math.round(big * (kind === 'snow' ? 3 : 1.5)), 0.12, 0.9)) this.pine(L, x, g, z, rng.range(0.6, 1.1), kind === 'snow' || zone === 'arctic');
       }
+      if (kind === 'sandbar' || kind === 'dune') this.beachJunk(L, isl, rng);
       if (kind === 'volcanic') {
         const g = lay.sampleG(isl.x, isl.z);
         const glow = new THREE.Mesh(new THREE.CircleGeometry(isl.r * 0.18, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff6a2a').multiplyScalar(3) }));
@@ -362,6 +363,21 @@ export class Diorama {
         this.group.add(h);
       }
     }
+  }
+  /** driftwood, shells, starfish, a beached dinghy: sandbars shouldn't be bare */
+  private beachJunk(L: Loft, isl: Island, rng: Rng) {
+    const lay = this.lay;
+    const pt = (rmax: number) => { for (let k = 0; k < 12; k++) { const a = rng.range(0, 6.28), d = Math.sqrt(rng.next()) * isl.r * rmax; const x = isl.x + Math.cos(a) * d, z = isl.z + Math.sin(a) * d; const g = lay.sampleG(x, z); if (g > 0.015) return [x, g, z] as const; } return null; };
+    const log = pt(0.6);
+    if (log) { const a = rng.range(0, 3.14), l = rng.range(0.25, 0.45); rod(L, [log[0] - Math.cos(a) * l / 2, log[1] + 0.02, log[2] - Math.sin(a) * l / 2], [log[0] + Math.cos(a) * l / 2, log[1] + 0.025, log[2] + Math.sin(a) * l / 2], 0.028, 0.02, 6, A.darkWood); rod(L, [log[0], log[1] + 0.03, log[2]], [log[0] + 0.08, log[1] + 0.1, log[2] + 0.05], 0.01, 0.006, 4, A.darkWood); }
+    for (let k = 0; k < rng.int(2, 5); k++) { const p = pt(0.9); if (p) blob(L, [p[0], p[1] + 0.006, p[2]], 0.025, 0.012, 0.02, rng.chance(0.5) ? A.cream : A.coral, 6); }
+    for (let k = 0; k < rng.int(1, 2); k++) {
+      const p = pt(0.8); if (!p) continue;
+      const a0 = rng.range(0, 6.28);
+      for (let i = 0; i < 5; i++) { const a = a0 + (i / 5) * 6.28; rod(L, [p[0], p[1] + 0.008, p[2]], [p[0] + Math.cos(a) * 0.06, p[1] + 0.006, p[2] + Math.sin(a) * 0.06], 0.012, 0.004, 4, A.crab, false); }
+    }
+    if (rng.chance(0.35)) { const p = pt(0.4); if (p) { box(L, [p[0], p[1] + 0.05, p[2]], [0.12, 0.1, 0.12], A.crate, rng.range(0, 1)); } }
+    if (isl.r > 0.6 && rng.chance(0.4)) { const p = pt(0.3); if (p) { const f = L.count; lathe(L, [[0.09, 0], [0.085, 0.06], [0.05, 0.065], [0.05, 0.12], [0.03, 0.12], [0.03, 0.15], [0.0, 0.16]], 8, A.cream, { capBot: true }); place(L, f, [p[0], p[1] - 0.01, p[2]]); } }
   }
   private dressSmall(isl: Island, landPts: (isl: Island, n: number, minG: number, maxSlope?: number) => [number, number, number][]) {
     const zone = this.lay.zoneId(isl.z);
@@ -410,7 +426,7 @@ export class Diorama {
     const rv = [0, 1, 2, 3].map((k) => rockGeometry(this.map.seed + k * 17));
     const rocks: { x: number; y: number; z: number; ry: number; s: number; c: THREE.Color }[][] = [[], [], [], []];
     for (const r of lay.rocks) {
-      const c = new THREE.Color(PAL[lay.zoneIds[Math.min(r.zone, lay.zoneIds.length - 1)]].rock[2]).multiplyScalar(1.5);
+      const c = new THREE.Color(PAL[lay.zoneIds[Math.min(r.zone, lay.zoneIds.length - 1)]].rock[3]).multiplyScalar(1.45);
       rocks[r.seed % 4].push({ x: r.x, y: r.h - r.s * 0.55, z: r.z, ry: r.rot, s: r.s, c });
     }
     rocks.forEach((items, k) => mk(rv[k], rockMat, items));
@@ -450,15 +466,21 @@ export class Diorama {
     const kelpFactor = (z: number) => blendNum(this.pals, lay.zoneW(z), (pp) => pp.kelp);
     const kelps: { x: number; y: number; z: number; ry: number; s: [number, number, number] }[] = [];
     const addKelp = (x: number, z: number) => { const g = lay.sampleG(x, z); if (g > -0.5) return; kelps.push({ x, y: g, z, ry: rng.range(0, 6.28), s: [rng.range(0.8, 1.3), -g + rng.range(-0.05, 0.04), rng.range(0.8, 1.3)] }); };
-    for (let i = 0; i < 1400; i++) {
-      const x = rng.range(-lay.W / 2 + 0.8, lay.W / 2 - 0.8), z = rng.range(lay.zBack + 1, lay.zFront - 0.3);
-      if (rng.next() > kelpFactor(z) * 0.7) continue;
-      if (lay.clearance(x, z, 0.35, 0.18) < 0 || !lay.isWater(x, z, 0.3, 0.8)) continue;
-      const n = rng.int(1, 4);
-      for (let k = 0; k < n; k++) addKelp(x + rng.range(-0.25, 0.25), z + rng.range(-0.25, 0.25));
+    // kelp grows in forests: a few dense patches rather than an even sprinkle
+    for (let i = 0; i < 160; i++) {
+      const cx = rng.range(-lay.W / 2 + 1.2, lay.W / 2 - 1.2), cz = rng.range(lay.zBack + 1.5, lay.zFront - 1);
+      if (rng.next() > kelpFactor(cz) * 0.35) continue;
+      if (!lay.isWater(cx, cz, 0.4, 1.0)) continue;
+      const pr = rng.range(0.5, 1.3), n = Math.round(pr * pr * 14);
+      for (let k = 0; k < n; k++) {
+        const a = rng.range(0, 6.28), d = Math.sqrt(rng.next()) * pr;
+        const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+        if (lay.clearance(x, z, 0.4, 0.2) < 0 || !lay.isWater(x, z, 0.15, 0.8)) continue;
+        addKelp(x, z);
+      }
     }
     for (const k of this.ctx.kelp) addKelp(k.x, k.z);
-    const kelpMat = this.reg(dio(new THREE.MeshStandardMaterial({ map: T.foliage, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7, color: '#d8e0a0' }), { sway: 'kelp', caustics: 0.8 }));
+    const kelpMat = this.reg(dio(new THREE.MeshStandardMaterial({ map: T.foliage, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7, color: '#9aa870' }), { sway: 'kelp', caustics: 0.8 }));
     const kg = kelpGeometry(this.map.seed);
     kg.setAttribute('aW', new THREE.BufferAttribute(new Float32Array(kg.getAttribute('position').count).fill(1), 1));
     mk(kg, kelpMat, kelps, false);
@@ -499,14 +521,14 @@ export class Diorama {
         tufts.push({ x, y: g - 0.01, z, ry: rng.range(0, 6.28), s: rng.range(0.7, 1.3), c: gc.clone().multiplyScalar(rng.range(0.8, 1.1)) });
       }
     }
-    for (let i = 0; i < 2000 && tufts.length < 4200; i++) {
+    for (let i = 0; i < 700 && tufts.length < 3200; i++) {
       const x = rng.range(-lay.W / 2 + 0.6, lay.W / 2 - 0.6), z = rng.range(lay.zBack + 1, lay.zFront - 0.3);
       const zone = lay.zoneId(z);
       if (zone !== 'reef' && zone !== 'kelp' && zone !== 'sunset' && zone !== 'harbor') continue;
       const g = lay.sampleG(x, z);
       if (g > -0.25 || g < -2.2) continue;
-      const c = new THREE.Color(zone === 'kelp' ? '#6a8a3a' : '#7aa848').multiplyScalar(0.9);
-      for (let k = 0; k < 4; k++) tufts.push({ x: x + rng.range(-0.2, 0.2), y: g - 0.01, z: z + rng.range(-0.2, 0.2), ry: rng.range(0, 6.28), s: rng.range(0.9, 1.6), c });
+      const c = new THREE.Color(zone === 'kelp' ? '#8aaa4a' : '#a8d070').multiplyScalar(1.2);
+      for (let k = 0; k < 3; k++) tufts.push({ x: x + rng.range(-0.2, 0.2), y: g - 0.01, z: z + rng.range(-0.2, 0.2), ry: rng.range(0, 6.28), s: rng.range(0.9, 1.6), c });
     }
     mk(tuft, grassMat, tufts, false);
     // bushes
@@ -605,6 +627,26 @@ export class Diorama {
     blendCol(P, w, (p) => p.rock[2], U.uRockC.value);
     blendCol(P, w, (p) => p.bedrock, U.uBedrock.value); blendCol(P, w, (p) => p.ore[0], U.uOre0.value); blendCol(P, w, (p) => p.ore[1], U.uOre1.value); blendCol(P, w, (p) => p.ore[2], U.uOre2.value);
     blendCol(P, w, (p) => p.plankton, U.uPlankC.value); blendCol(P, w, (p) => p.foam, U.uFoamC.value);
+    // wrecks the cut passes through
+    let nw = 0;
+    for (const wr of this.ctx.wrecks) {
+      if (nw >= 4) break;
+      const s = Math.sin(wr.rot), c = Math.cos(wr.rot);
+      if (Math.abs(s) < 0.2) continue;
+      const u = (wr.z - z) / s;           // distance along the hull axis (+ toward the bow)
+      if (Math.abs(u) > 1.15) continue;
+      const t = (u + 1.2) / 2.4;
+      const half = 0.4 * Math.min(Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, (t - 0.42) / 0.58), 1.7)), 0.72), 0.7 + 0.3 * Math.sin(Math.min(1, t / 0.4) * Math.PI / 2));
+      const depth = 0.5 * (1 - 0.55 * Math.pow(t, 4));
+      const keel = wr.keel + 0.5 - depth + u * Math.sin(wr.pitch);
+      if (half < 0.05) continue;
+      U.uWr.value[nw].set(wr.x + u * c, keel, half / Math.abs(s), depth + 0.02);
+      nw++;
+    }
+    U.uWrN.value = nw;
+    U.uKelp.value = 0.12 + blendNum(P, w, (p) => p.kelp) * 0.55;
+    blendCol(P, w, (p) => p.grass[0], U.uKelpC.value); U.uKelpC.value.lerp(blendCol(P, w, (p) => p.capWater[2]), 0.35);
+    blendCol(P, w, (p) => p.capWater[2], U.uFishC.value); U.uFishC.value.multiplyScalar(0.55);
   }
 
   /** light + grade follow the zone under the camera */

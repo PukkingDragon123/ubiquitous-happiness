@@ -58,7 +58,7 @@ const jitter = (r: Rng, c: RGB, k = 0.08): RGB => {
 };
 
 function baseBuild(o: Partial<Build>): Build {
-  return { s: 1, bw: 1, mass: 1, belly: 0, chest: 0.2, fem: 0, headS: 1.18, legLen: 0.96, armLen: 1, handS: 1.2, footS: 1.12, shoulders: 1.04, neckLen: 0.82, hunch: 0, ...o };
+  return { s: 1, bw: 1, mass: 1, belly: 0, chest: 0.2, fem: 0, headS: 1.18, legLen: 0.93, armLen: 0.97, handS: 1.2, footS: 1.12, shoulders: 1.04, neckLen: 0.82, hunch: 0, ...o };
 }
 
 function baseFace(r: Rng, o: Partial<Look['face']> = {}): Look['face'] {
@@ -139,7 +139,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       L.age = 0;
       L.hair = { style: 'messy', col: hairNat, grey: 0 };
       F.freckles = dark < 0.5 ? 0.9 : 0.3; F.eyeR = 1.12; F.blush = 0.6; F.teethGap = true;
-      F.nose = { w: 0.85, len: 0.75, bulb: 0.4, up: 0.45, red: 0.2 }; F.chin = 0.9; F.cheek = 1.06; F.wide = 1.04;
+      F.nose = { w: 0.85, len: 0.75, bulb: 0.4, up: 0.45, red: 0.2 }; F.chin = 0.9; F.cheek = 1.06; F.wide = 1.04; F.long = 0.84;
       L.hat = r.chance(0.5) ? 'capBack' : 'cap'; L.hatCol = C(pick(r, ['#d8343a', '#2a6ad8', '#2aa84a', '#f0a020'])); L.hatCol2 = [250, 250, 250];
       const st = pick(r, [['#f2f2f2', '#2a6ad8'], ['#ffd84a', '#e8463a'], ['#9ad84a', '#2a8a4a'], ['#ff9ac0', '#8a3aa8']]);
       L.top = { kind: 'tee', col: C(st[0]), col2: C(st[1]), col3: [255, 255, 255], sleeve: 'short', hem: 0.9 };
@@ -154,7 +154,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       L.age = 1;
       L.hair = { style: 'bun', col: greyHair(0.95), grey: 0.95 };
       F.browCol = greyHair(0.7); F.brow = 0.75; F.blush = 0.7; F.eyeR = 0.95; F.lipK = 0.8;
-      F.nose = { w: 0.9, len: 0.95, bulb: 0.3, up: -0.1, red: 0.2 }; F.chin = 0.9; F.cheek = 1.05;
+      F.nose = { w: 0.9, len: 0.95, bulb: 0.3, up: -0.1, red: 0.2 }; F.chin = 0.9; F.cheek = 1.05; F.long = 0.94;
       L.glasses = 'round'; L.glassCol = C(pick(r, ['#8a6a3a', '#c0a060', '#a03a5a'])); L.lensCol = [200, 220, 230];
       L.hat = 'sunhat'; L.hatCol = [226, 200, 142]; L.hatCol2 = C(pick(r, ['#c83a5a', '#3a6ab0', '#8a3aa8', '#3a8a5a']));
       const cg = pick(r, ['#b89ad0', '#7ab8b0', '#f0b090', '#d07a8a', '#a8b870']);
@@ -228,7 +228,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       F.nose = { w: 1.3, len: 1.15, bulb: 0.7, up: -0.2, red: 0.45 }; F.eyeR = 0.95;
       L.hat = 'captainBlack'; L.hatCol = [28, 28, 34]; L.hatCol2 = [200, 160, 60];
       L.top = { kind: 'henley', col: [70, 64, 60], col2: [40, 36, 34], col3: [200, 170, 90], sleeve: 'long', hem: 0.86 };
-      L.outer = { kind: 'raincoat', col: C(pick(r, ['#1e2430', '#2a2420', '#1a2a24'])), col2: [190, 150, 60], hem: 0.4, open: false, sleeve: 'long', thick: 0.016 };
+      L.outer = { kind: 'raincoat', col: C(pick(r, ['#2c3646', '#3a3028', '#26382e'])), col2: [190, 150, 60], hem: 0.4, open: false, sleeve: 'long', thick: 0.016 };
       L.legs = { kind: 'pants', col: [40, 38, 40], col2: [30, 30, 30], hem: -0.83 };
       L.feet = { kind: 'rubber', col: [26, 24, 24], col2: [70, 60, 50] };
       L.hands = { kind: 'bare', col: skin };

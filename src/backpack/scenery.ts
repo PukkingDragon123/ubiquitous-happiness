@@ -5,7 +5,10 @@ import * as THREE from 'three';
 import { sandTex, rockTex, glowTex, shaftTex, driftwoodTex } from './bagTex';
 import { Px, ramp, pxNoise } from '../gfx/px';
 import { Loft, FULL, type V3 } from '../gfx/loft';
-import { fbm } from '../core/math';
+import { fbm, hash2 } from '../core/math';
+import { Ic, pal, bez, curve, starPoly } from './iconPaint';
+import { voxelMesh } from './voxel';
+import type { ItemDef } from '../game/items';
 
 export interface Scenery {
   group: THREE.Group;
@@ -115,7 +118,7 @@ export function buildScenery(): Scenery {
   // ---------------------------------------------------------------- light shafts
   const st = shaftTex();
   const shafts: THREE.Mesh[] = [];
-  for (const [x, z, w, rot, a] of [[-1.6, -2.2, 1.2, 0.32, 0.18], [0.8, -3.0, 1.6, 0.28, 0.14], [2.6, -1.6, 0.9, 0.36, 0.12], [-3.2, -3.6, 1.4, 0.3, 0.1]] as number[][]) {
+  for (const [x, z, w, rot, a] of [[-1.9, -2.6, 1.3, 0.32, 0.32], [0.9, -3.4, 1.8, 0.28, 0.26], [2.8, -2.2, 1.0, 0.36, 0.22], [-3.4, -3.8, 1.5, 0.3, 0.2]] as number[][]) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 9), new THREE.MeshBasicMaterial({ map: st, transparent: true, opacity: a, blending: THREE.AdditiveBlending, depthWrite: false, color: '#bff4e8', fog: false }));
     m.position.set(x, 4.2, z); m.rotation.z = rot;
     m.userData.a = a; m.userData.ph = x;
@@ -145,13 +148,13 @@ export function buildScenery(): Scenery {
     lamp.add(new THREE.Mesh(L.build(), new THREE.MeshStandardMaterial({ map: rt, roughness: 1 })));
     lamp.traverse((o) => { if ((o as THREE.Mesh).isMesh && o !== gl && o !== flame) o.castShadow = false; });
   }
-  lamp.position.set(-2.3, 3.1, 1.3);
+  lamp.position.set(-2.75, 2.75, 0.2);
   group.add(lamp);
   const lampGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(64, 2.2), color: '#ffb860', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-  lampGlow.scale.set(1.6, 1.6, 1);
+  lampGlow.scale.set(1.2, 1.2, 1);
   lamp.add(lampGlow);
   lampGlow.position.y = -0.05;
-  const lampLight = new THREE.SpotLight('#ffc27a', 16, 14, 0.7, 0.9, 1.3);
+  const lampLight = new THREE.SpotLight('#ffc27a', 7, 16, 0.6, 1, 0.9);
   lampLight.castShadow = true;
   lampLight.shadow.mapSize.set(1024, 1024);
   lampLight.shadow.camera.near = 0.5; lampLight.shadow.camera.far = 10;
@@ -159,6 +162,29 @@ export function buildScenery(): Scenery {
   lamp.add(lampLight);
   lampLight.position.set(0, -0.06, 0);
   group.add(lampLight.target);
+  // ---------------------------------------------------------------- seabed decor: voxel coral, sponges, an anemone, shells
+  const decor: [HTMLCanvasElement, number, number, number, number, number][] = [
+    [seaFan(), 2.9, 0.0, -1.9, 1.5, -0.4],
+    [tubeSponge(), -2.0, 0.0, -1.3, 1.1, 0.45],
+    [anemone(), -1.85, 0.0, 0.85, 0.8, 0.3],
+    [seaFan('#c84a2a'), -3.3, 0.0, -2.6, 1.5, 0.6],
+    [tubeSponge(true), 3.4, 0.0, -0.6, 0.9, -0.6],
+  ];
+  decor.forEach(([cv, x, y, z, sc, yaw], k) => {
+    const o = voxelMesh(DECOR_DEF(k), 1, cv);
+    const box = new THREE.Box3().setFromObject(o);
+    o.scale.setScalar(sc);
+    o.position.set(x, y - box.min.y * sc - 0.05, z);
+    o.rotation.y = yaw;
+    group.add(o);
+  });
+  for (const [x, z, a, kind] of [[0.55, 1.35, 0.4, 0], [-1.25, 1.45, -0.8, 1], [2.55, 1.2, 1.2, 0], [-0.2, 1.75, 2.1, 1]] as number[][]) {
+    const o = voxelMesh(DECOR_DEF(9 + kind), 1, kind ? scallop() : blueStar());
+    o.scale.setScalar(0.55);
+    o.rotation.set(-Math.PI / 2, 0, a);
+    o.position.set(x, 0.02, z);
+    group.add(o);
+  }
   // ---------------------------------------------------------------- driftwood tray
   const tray = new THREE.Group();
   const halfX = 0.66, halfZ = 0.5;
@@ -181,9 +207,12 @@ export function buildScenery(): Scenery {
       tray.add(b);
     }
   }
-  tray.position.set(1.42, 0.07, 0.62);
-  tray.rotation.y = -0.22;
+  tray.position.set(1.5, 0.2, 0.42);
+  tray.rotation.set(0.32, -0.2, 0, 'YXZ');
   group.add(tray);
+  const prop = new THREE.Mesh(noisyRock(0.22, 9, 2, 0.8), rockMat);
+  prop.position.set(1.45, 0.08, 0.0); prop.castShadow = prop.receiveShadow = true;
+  group.add(prop);
 
   const update = (t: number) => {
     for (const m of kelp) {
@@ -197,7 +226,64 @@ export function buildScenery(): Scenery {
     }
     for (const s of shafts) (s.material as THREE.MeshBasicMaterial).opacity = s.userData.a * (0.7 + 0.3 * Math.sin(t * 0.4 + s.userData.ph));
     lamp.rotation.z = Math.sin(t * 0.8) * 0.035; lamp.rotation.x = Math.sin(t * 0.63 + 1) * 0.025;
-    lampLight.intensity = 16 * (0.94 + Math.sin(t * 13) * 0.02 + Math.sin(t * 7.3) * 0.03);
+    lampLight.intensity = 7 * (0.94 + Math.sin(t * 13) * 0.02 + Math.sin(t * 7.3) * 0.03);
   };
   return { group, tray, trayHalf: { x: halfX, z: halfZ }, lamp, lampLight, lampGlow, shafts, kelp, update };
+}
+
+// ------------------------------------------------------------------ decor painters (voxel props, same pipeline as items)
+const DECOR_DEF = (k: number) => ({ id: 'decor' + k, name: '', kind: 'material', shape: [[0, 0]], rarity: 'common', desc: '', maxLevel: 1, look: 'soft', thick: 0.9 }) as ItemDef;
+function seaFan(col = '#a03ad0'): HTMLCanvasElement {
+  const c = new Ic(64, 64, 3);
+  const base = pal('#140818', '#2e1238', '#4a1e5a', '#6a2a7a', '#8a3a9a', '#b060c0');
+  const tint = pal('#1a0a10', '#3a1420', col, col, '#ff9ab0', '#ffe0e8');
+  const m = c.mat(col === '#a03ad0' ? base : tint, { spec: 0.2, dither: 0.5 });
+  const branch = (x: number, y: number, a: number, len: number, r: number, d: number) => {
+    if (d > 5 || len < 3) return;
+    const x2 = x + Math.cos(a) * len, y2 = y + Math.sin(a) * len;
+    c.tube([[x, y], [x2, y2]], (t) => r * (1 - t * 0.3), m, { group: 1 });
+    branch(x2, y2, a - 0.38 + (hash2(d, len | 0, 3) - 0.5) * 0.3, len * 0.8, r * 0.75, d + 1);
+    branch(x2, y2, a + 0.38 + (hash2(d, len | 0, 4) - 0.5) * 0.3, len * 0.8, r * 0.75, d + 1);
+  };
+  branch(32, 63, -Math.PI / 2, 13, 2.6, 0);
+  c.speckle(0.2, 5, (_x, _y, i) => { c.L[i] += 0.25; });
+  return c.render().canvas();
+}
+function tubeSponge(yellow = false): HTMLCanvasElement {
+  const c = new Ic(48, 64, 4);
+  const m = c.mat(yellow ? pal('#2a1a04', '#6a4a0a', '#b08a18', '#e0c030', '#f8e870', '#fffbd0') : pal('#2a0c04', '#6a240a', '#b04a14', '#e07a28', '#f8b060', '#fff0c8'), { spec: 0.2, dither: 0.5 });
+  const hole = c.mat(pal('#0a0402', '#1a0804', '#2a1008', '#3a1a0c', '#4a2410', '#5a3018'), { spec: 0 });
+  for (const [x, top, r] of [[12, 22, 6], [25, 8, 7.5], [37, 26, 5.5]] as number[][]) {
+    c.tube([[x, 63], [x + (x - 25) * 0.15, top]], (t) => r * (0.85 + t * 0.2), m, { z: x === 25 ? 1 : 0 });
+    c.dome(x + (x - 25) * 0.15, top + 1, r * 0.95, r * 0.42, hole, { z: 6 + (x === 25 ? 1 : 0), h: 0.5 });
+  }
+  c.speckle(0.18, 6, (_x, _y, i) => { c.L[i] -= 0.2; });
+  return c.render().canvas();
+}
+function anemone(): HTMLCanvasElement {
+  const c = new Ic(48, 40, 5);
+  const stalk = c.mat(pal('#0a1a10', '#163a24', '#24603a', '#348a50', '#5ab878', '#a8f0c0'), { spec: 0.3 });
+  const tent = c.mat(pal('#2a0a1a', '#6a1a3a', '#b03a6a', '#e86a9a', '#ffaacc', '#fff0f6'), { spec: 0.4, shin: 10 });
+  c.dome(24, 36, 10, 6, stalk, { h: 5 });
+  for (let k = 0; k < 13; k++) {
+    const a = -Math.PI * (0.08 + 0.84 * (k / 12)), L = 15 + hash2(k, 1, 2) * 6;
+    c.tube(bez([24 + Math.cos(a) * 5, 30], [24 + Math.cos(a) * L * 0.7, 30 + Math.sin(a) * L * 0.5], [24 + Math.cos(a + 0.3) * L, 30 + Math.sin(a + 0.25) * L]), (t) => 2 - t * 1.2, tent, { z: 2 + (k % 3) });
+  }
+  return c.render().canvas();
+}
+function blueStar(): HTMLCanvasElement {
+  const c = new Ic(32, 32, 6);
+  const m = c.mat(pal('#060a24', '#0e1e56', '#1e3c92', '#3264c8', '#64a0ec', '#c0e4ff'), { spec: 0.3, dither: 0.5 });
+  const g = c.slab(starPoly(16, 16, 15, 4.5, 5, -1.2, 0.15, 3), m, { h: 4, bevel: 0.9, round: true });
+  c.speckle(0.15, 2, (_x, _y, i) => { c.L[i] += 0.25; }, g);
+  return c.render().canvas();
+}
+function scallop(): HTMLCanvasElement {
+  const c = new Ic(32, 32, 7);
+  const m = c.mat(pal('#2e1a1c', '#6e4446', '#b07c74', '#e2b4a2', '#f8dccc', '#fff6ee'), { spec: 0.4, dither: 0.4 });
+  const fan = [...curve((t) => { const a = Math.PI * (1.08 + t * 0.84); return [16 + Math.cos(a) * 14, 22 + Math.sin(a) * 16] as [number, number]; }, 20), [20, 27], [12, 27]] as [number, number][];
+  const g = c.slab(fan, m, { h: 4, round: true });
+  c.paint((x, y) => { const a = Math.atan2(y - 27, x - 16); return Math.sin(a * 16) > 0.5 ? -0.25 : null; }, g);
+  c.slab([[10, 26], [22, 26], [20, 30], [12, 30]], m, { h: 2, round: true });
+  return c.render().canvas();
 }

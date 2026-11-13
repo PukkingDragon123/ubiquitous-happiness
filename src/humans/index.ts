@@ -13,3 +13,6 @@ export type { ExprName } from './face';
 export { EXPRS } from './face';
 export type { Archetype, Look } from './looks';
 export { ARCHETYPES, makeLook } from './looks';
+export { makeBoat } from './boats';
+export type { Vessel, BoatKind, Collider } from './boats';
+export { makeDock, makeIceShelf } from './spots';
