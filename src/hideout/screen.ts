@@ -479,7 +479,8 @@ export class HideoutScreen implements Screen {
         const p = this.toUi(tvp.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0)));
         if (p) {
           const bob = Math.round(Math.sin(this.t * 5) * 2);
-          ui.frame('paper', p[0] - 46, p[1] - 22 + bob, 92, 16);
+          const tw = Math.max(92, Math.ceil(ui.measure('click the TV to play', 'small')) + 14);
+          ui.frame('paper', p[0] - Math.round(tw / 2), p[1] - 22 + bob, tw, 16);
           ui.text('click the TV to play', p[0], p[1] - 18 + bob, { font: 'small', color: '#2a1808', align: 'center' });
           ui.icon('down', p[0] - 3, p[1] - 6 + bob);
         }
