@@ -246,11 +246,11 @@ export class Post {
   w = 1; h = 1;
   scale = 1;
 
-  constructor(renderer: THREE.WebGLRenderer) {
+  constructor(renderer: THREE.WebGLRenderer, low = false) {
     this.renderer = renderer;
     const depthTexture = new THREE.DepthTexture(1, 1);
     depthTexture.type = THREE.FloatType;
-    this.sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4, depthTexture, depthBuffer: true });
+    this.sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: low ? 0 : 4, depthTexture, depthBuffer: true });
     this.uwRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
     for (let i = 0; i < 6; i++) {
       this.bloomDown.push(new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }));

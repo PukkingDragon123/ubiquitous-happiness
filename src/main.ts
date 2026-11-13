@@ -2,6 +2,8 @@
 import { Game, Screen } from './game/game';
 import { loadFonts } from './ui/text';
 import { Sandbox } from './dev/sandbox';
+import { DiveScreen } from './game/dive';
+import { Run } from './game/run';
 
 const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> = {
   fish: () => import('./dev/preview_fish'),
@@ -18,7 +20,14 @@ async function boot() {
   (window as unknown as { game: Game }).game = game;
   const q = new URLSearchParams(location.search);
   const pv = q.get('preview');
-  if (pv && PREVIEWS[pv]) {
+  const dv = q.get('dive');
+  if (dv) {
+    const dive = new DiveScreen(game);
+    game.register(dive);
+    const run = new Run(Number(q.get('seed') || 12345));
+    dive.onExit = () => game.go('dive', { run, node: { type: 'fishing', spot: q.get('spot') || 'rowboatCove', biome: dv, difficulty: 1 } });
+    game.go('dive', { run, node: { type: 'fishing', spot: q.get('spot') || 'rowboatCove', biome: dv, difficulty: Number(q.get('diff') || 1) } });
+  } else if (pv && PREVIEWS[pv]) {
     const s = (await PREVIEWS[pv]()).default(game);
     game.register(s);
     game.go(s.name);

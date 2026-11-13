@@ -8,6 +8,7 @@ import { Input } from '../core/input';
 import { Post, POST } from '../gfx/post';
 import { UW } from '../gfx/shaders/underwater';
 import { audio } from '../audio/audio';
+import { Px } from '../gfx/px';
 
 export interface Screen {
   name: string;
@@ -40,19 +41,31 @@ export class Game {
   private last = performance.now();
   private fpsAcc = 0; private fpsN = 0; fps = 60;
   w = 1; h = 1;
+  lowQuality = false;
   shake = { amp: 0, t: 0 };
   private ray = new THREE.Raycaster();
+  /** pixel-art cursor drawn over everything: 'normal' fin pointer, 'point' (hover), 'aim' crosshair (dive), 'grab' */
+  cursor: 'normal' | 'point' | 'aim' | 'grab' | 'none' = 'normal';
+  private curScene = new THREE.Scene();
+  private curCam = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
+  private curSprite: THREE.Sprite;
+  private curTex: Record<string, THREE.Texture> = {};
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
-    this.renderer.shadowMap.enabled = true;
+    const lq = new URLSearchParams(location.search).get('lq') === '1' || localStorage.getItem('blobfish.lq') === '1';
+    this.lowQuality = lq;
+    this.renderer.shadowMap.enabled = !lq;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x000000, 1);
-    this.post = new Post(this.renderer);
+    this.post = new Post(this.renderer, lq);
     this.input = new Input(canvas);
+    this.curTex = makeCursors();
+    this.curSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.curTex.normal, transparent: true, depthTest: false }));
+    this.curScene.add(this.curSprite);
     addEventListener('resize', () => this.resize());
     this.resize();
     const unlock = () => audio.unlock();
@@ -79,10 +92,11 @@ export class Game {
 
   resize() {
     this.w = innerWidth; this.h = innerHeight;
-    const pr = Math.min(devicePixelRatio || 1, 1.5);
+    const pr = this.lowQuality ? 0.5 : Math.min(devicePixelRatio || 1, 1.5);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(this.w, this.h, false);
     this.post.setSize(this.w, this.h, pr);
+    this.curCam.right = this.w; this.curCam.top = this.h; this.curCam.updateProjectionMatrix();
     for (const s of this.screens.values()) s.resize?.(this.w, this.h);
   }
 
@@ -119,7 +133,14 @@ export class Game {
       if (view) {
         POST.uUnderwaterPost.value = view.underwater === false ? 0 : 1;
         // modal screens draw over the live world beneath them (it keeps its last frame frozen)
-        this.post.render(view.scene, view.camera, view.overlays ?? []);
+        const m = this.input.mouse;
+        this.curSprite.visible = this.cursor !== 'none' && m.inside;
+        this.curSprite.material.map = this.curTex[this.cursor] ?? this.curTex.normal;
+        const k = this.cursor === 'aim' ? 0 : 0.5;
+        this.curSprite.scale.set(36, 36, 1);
+        this.curSprite.position.set(m.x + (this.cursor === 'aim' ? 0 : 18 - 6), this.h - m.y - (this.cursor === 'aim' ? 0 : 18 - 6), 0);
+        void k;
+        this.post.render(view.scene, view.camera, [...(view.overlays ?? []), { scene: this.curScene, camera: this.curCam }]);
       }
       this.input.endFrame();
     };
@@ -131,4 +152,21 @@ export class Game {
     const a = this.shake.amp, t = this.shake.t * 40;
     return new THREE.Vector2((Math.sin(t * 1.3) + Math.sin(t * 2.7)) * 0.5 * a, (Math.cos(t * 1.7) + Math.sin(t * 3.1)) * 0.5 * a);
   }
+}
+
+/** hand-painted cursors: a pink fin pointer, a fin with a sparkle (hover), a bubble crosshair (aim), a grab */
+function makeCursors(): Record<string, THREE.Texture> {
+  const fin = (sparkle: boolean, grab: boolean) => {
+    const p = new Px(18, 18);
+    const pts: [number, number][] = grab ? [[2, 4], [12, 3], [15, 8], [13, 14], [5, 15], [2, 10]] : [[1, 1], [12, 8], [8, 9], [11, 15], [8, 16], [5, 10], [1, 13]];
+    p.poly(pts, (x, y) => (y < 6 ? [255, 214, 222] : y < 11 ? [244, 165, 182] : [214, 112, 140]));
+    p.outline('#3a0e1e', 255, true);
+    if (sparkle) { p.set(14, 2, '#ffffff'); p.set(13, 2, '#fff0a0'); p.set(15, 2, '#fff0a0'); p.set(14, 1, '#fff0a0'); p.set(14, 3, '#fff0a0'); }
+    return p.texture({ mip: false });
+  };
+  const aim = new Px(18, 18);
+  aim.ellipse(9, 9, 6.5, 6.5, (nx, ny) => (Math.hypot(nx, ny) > 0.78 ? [220, 250, 255] : null));
+  aim.set(9, 9, '#ffffff'); aim.set(6, 6, '#ffffff'); aim.set(6, 7, '#ffffff');
+  aim.outline('#06303f');
+  return { normal: fin(false, false), point: fin(true, false), grab: fin(false, true), aim: aim.texture({ mip: false }) };
 }
