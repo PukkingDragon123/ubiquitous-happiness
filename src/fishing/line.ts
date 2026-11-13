@@ -46,6 +46,7 @@ export class FishingLine implements Entity {
   contact = new Uint8Array(MAXN);
   restLen = 1;                      // paid-out line length
   tip = new THREE.Vector2();        // rod tip (pinned)
+  tipZ = 0;                         // rod tip depth: the line blends from here to the gameplay plane at the waterline
   end: { x: number; y: number } | null = null; // pinned end (a mouth), or null = free
   endMass = 1;                      // sinker/bait weight on a free end
   tension = 0;                      // raw tension at the rod
@@ -363,8 +364,9 @@ export class FishingLine implements Entity {
         let dx = xs[j] - xs[h], dy = ys[j] - ys[h];
         const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
         if (i > 0) along += Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]);
+        const zz = 0.02 + this.tipZ * Math.min(1, Math.max(0, ys[i] / Math.max(0.2, this.tip.y)));
         for (let s = 0; s < 2; s++) {
-          pos.setXYZ(k * 2 + s, xs[i], ys[i], 0.02);
+          pos.setXYZ(k * 2 + s, xs[i], ys[i], zz);
           al.setX(k * 2 + s, along); we.setX(k * 2 + s, wear ? wear[i] : 0.3 * alpha); di.setXY(k * 2 + s, dx, dy);
         }
         k++;

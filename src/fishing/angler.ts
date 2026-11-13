@@ -127,6 +127,7 @@ export class Angler implements Entity {
   private seed: number;
   sys: FishingSystem;
   leaving = 0;
+  backdrop = false;
 
   constructor(sys: FishingSystem, defId: string, x: number, facing: number, seed: number) {
     this.sys = sys;
@@ -136,6 +137,9 @@ export class Angler implements Entity {
     this.vessel = factory.vessel(this.def.vessel, seed);
     this.rig = factory.rig(this.def.arch, seed);
     if (this.vessel.setX) this.vessel.setX(x); else this.vessel.group.position.set(x, 0, -0.4);
+    // piers and ice stand behind the gameplay plane so their pilings frame the action instead of blocking it
+    this.backdrop = this.def.vessel === 'dock' || this.def.vessel === 'ice';
+    if (this.backdrop) this.vessel.group.position.z = -2.6;
     const seat = this.vessel.seats[Math.floor(seed % Math.max(1, this.vessel.seats.length))] ?? this.vessel.seats[0];
     (seat ?? this.vessel.group).add(this.rig.group);
     if (this.rig.setFacing) { this.rig.setFacing(facing); this.rig.setSeating?.((seat?.userData.seating as 'stand' | 'sit' | 'kayak') ?? 'stand'); }
@@ -164,7 +168,7 @@ export class Angler implements Entity {
     this.rig.rodTip(this.tip);
     this.t -= dt;
     const L = this.line;
-    if (L) { L.tip.set(this.tip.x, this.tip.y); }
+    if (L) { L.tip.set(this.tip.x, this.tip.y); L.tipZ = this.tip.z; }
     const p = w.player as Blobfish;
     switch (this.phase) {
       case 'idle':
@@ -464,7 +468,7 @@ export class Angler implements Entity {
     this.phase = 'retrieve';
   }
 
-  colliders() { return this.vessel.underwaterColliders(); }
+  colliders() { return this.backdrop ? [] : this.vessel.underwaterColliders(); }
   dispose(w: World) { this.removeLine(w); }
 }
 

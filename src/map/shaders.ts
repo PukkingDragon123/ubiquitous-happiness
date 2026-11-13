@@ -564,7 +564,7 @@ export function ribbonMaterial(): THREE.ShaderMaterial {
         vec3 band, chc; float bandA, chA, speed, glow;
         bool dots = false;
         if (vState < 0.5) { band = vec3(0.02, 0.16, 0.3); bandA = 0.16; chc = vec3(0.9, 0.98, 1.0); chA = 0.75; speed = 0.25; glow = 0.0; dots = true; }
-        else if (vState < 1.5) { band = vec3(0.05, 0.42, 0.6); bandA = 0.5; chc = vec3(0.8, 1.0, 0.96); chA = 1.0; speed = 0.85; glow = 0.9; }
+        else if (vState < 1.5) { band = vec3(0.05, 0.42, 0.6); bandA = 0.5; chc = vec3(0.8, 1.0, 0.96); chA = 1.0; speed = 0.85; glow = 0.6; }
         else if (vState < 2.5) { band = vec3(0.3, 0.17, 0.04); bandA = 0.22; chc = vec3(1.0, 0.86, 0.45); chA = 0.95; speed = 0.3; glow = 0.35; dots = true; }
         else { band = vec3(0.04, 0.2, 0.3); bandA = 0.2; chc = vec3(0.8, 0.95, 1.0); chA = 0.35; speed = 0.3; glow = 0.0; }
         if (vHi > 0.5) { bandA += 0.15; glow += 1.1; speed *= 1.7; chA = 1.0; dots = false; }
