@@ -84,6 +84,7 @@ void fishDeform() {
   float bslope = -fSw.z * 0.4 * s;
   float side = aSwim.x * uShape2.z * L * sin(uTime * uShape2.y + aSwim.y)
              + aSwim.z * uShape2.w * L * sin(fSw.x * 1.7 + aSwim.y - fishP.x / L * 10.0);
+  fishP.y += aSwim.x * uShape2.z * L * 0.45 * cos(uTime * uShape2.y * 0.71 + aSwim.y * 1.3);
   #ifdef FISH_VERT
     fishP.y += lat;
     { float a = atan(slope); fishRotZ(fishN, a); }

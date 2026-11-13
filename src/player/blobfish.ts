@@ -16,6 +16,7 @@ import { SlashTrail } from './slashTrail';
 import { clamp, damp, dampAngle, smooth, angDiff, TAU, segDist } from '../core/math';
 import { audio } from '../audio/audio';
 import { POST } from '../gfx/post';
+import { buildHook } from '../fishing/bait';
 
 export interface HookLink {
   /** where the line pulls toward (next line node) */
@@ -75,6 +76,7 @@ export class Blobfish implements PlayerLike {
   private bodyAngle = 0;
   private hurtCount = 0;
   carried: ((dt: number) => void) | null = null;
+  private lipHook = buildHook();
   onDeath?: () => void;
 
   constructor(x = 0, y = -4) {
@@ -108,6 +110,8 @@ export class Blobfish implements PlayerLike {
     }));
     this.shieldMesh.visible = false;
     this.obj.add(this.shieldMesh);
+    this.lipHook.visible = false;
+    this.obj.add(this.lipHook);
   }
 
   setStats(s: Stats) {
@@ -243,6 +247,13 @@ export class Blobfish implements PlayerLike {
     root.updateMatrixWorld(true);
     this.model.facingSign = Math.sign(f || 1);
     this.model.update(w.game.dt, { sb: this.sb, swim: clamp(Math.hypot(this.vx, this.vy) / 5, 0, 1), time: w.time, worldMatrix: root.matrixWorld, vel: new THREE.Vector2(this.vx, this.vy) });
+    // the hook in the lip, pointing along the line
+    this.lipHook.visible = this.hooked;
+    if (this.hooked && this.hook) {
+      const m = this.model.mouthWorld(new THREE.Vector3());
+      this.lipHook.position.set(m.x, m.y, m.z + 0.05);
+      this.lipHook.rotation.set(0, 0, Math.atan2(this.hook.pullY - m.y, this.hook.pullX - m.x) - Math.PI / 2 + Math.PI);
+    }
     this.shieldMesh.position.set(this.x, this.y, 0);
     this.shieldMesh.visible = this.shield > 0;
     this.shieldMesh.scale.setScalar(1 + Math.sin(w.time * 6) * 0.03);

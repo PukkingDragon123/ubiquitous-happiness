@@ -4,7 +4,6 @@
 //
 // Region convention (shared with the mesh builders): a region's param (u, v) in 0..1 maps u -> left..right,
 // v -> top..bottom of the region, sampling texel centres, so painters loop i = 0..w-1 with u = i / (w - 1).
-import * as THREE from 'three';
 import { Px, RGB, hex, mix, shade, ramp, bayer } from '../gfx/px';
 import type { Reg } from '../gfx/loft';
 import { hash2 } from '../core/math';
@@ -108,104 +107,146 @@ export interface FinPaint {
   rough?: number;
   rayBranch?: boolean;
   glowEdge?: string;        // emissive margin (deep-sea fins)
+  /** custom per-pixel overlay (ocelli, stripes): return null to keep */
+  over?: (u: number, v: number, c: RGB, i: number, j: number) => RGB | null;
+}
+
+/** dithered mix: pixel-art blend between two colours (k quantised to 5 levels with ordered dither) */
+export function dmix(a: RGB, b: RGB, k: number, x: number, y: number): RGB {
+  const q = Math.round(Math.max(0, Math.min(4, k * 4 + (bayer(x, y) - 0.5) * 0.9))) / 4;
+  return mix(a, b, q);
+}
+/** smooth multi-stop gradient with fine dithered banding (soft hue-shifted ramps) */
+export function grad(cols: (string | RGB)[], steps = 14) {
+  const r = ramp(cols, steps, 0.55);
+  return (t: number, x: number, y: number) => r(t, x, y);
 }
 
 /** paint a fin membrane into a rect: u runs along the fin base (front -> back), v root -> tip */
 export function paintFin(pg: Page, r: Rect, f: FinPaint) {
-  const memb = ramp(f.col, 5, 0.8);
-  const [a0, a1] = f.alpha ?? [0.85, 0.55];
-  const rays = f.rays ?? 10, spines = f.spines ?? 0;
-  const rayC = C(f.rayCol ?? f.col[Math.max(0, f.col.length - 2)]);
+  const memb = ramp(f.col, 10, 0.9);
+  const [a0, a1] = f.alpha ?? [0.8, 0.5];
+  const rays = Math.max(1, f.rays ?? 10), spines = f.spines ?? 0;
+  const rayC = f.rayCol ? C(f.rayCol) : null;
   const spC = C(f.spineCol ?? f.rayCol ?? '#d8d0c0');
   const edgeC = f.edge ? C(f.edge) : null, baseC = f.base ? C(f.base) : null;
   const bandC = f.bands ? C(f.bands) : null, spotC = f.spots ? C(f.spots) : null;
   const seed = f.seed ?? 3;
   const total = rays + spines;
+  const pitch = r.w / total; // px between rays
   for (let j = 0; j < r.h; j++) for (let i = 0; i < r.w; i++) {
-    const u = i / (r.w - 1), v = j / (r.h - 1);
-    // ray layout: spines first (front), then soft rays
+    const u = (i + 0.5) / r.w, v = j / (r.h - 1);
     const fu = u * total, k = Math.min(total - 1, Math.floor(fu)), fr = fu - k;
     const isSpine = k < spines;
-    let vmax = f.cut ? f.cut(u) : 1;
-    if (isSpine && f.notch) vmax = Math.min(vmax, 1 - f.notch * Math.sin(Math.PI * fr) ** 0.7);
+    const cutV = f.cut ? f.cut(u) : 1;
+    let vmax = cutV;
+    if (f.notch && (isSpine || spines === 0)) vmax = Math.min(vmax, 1 - f.notch * Math.pow(Math.sin(Math.PI * fr), 0.8));
     if (f.fray) vmax -= f.fray * hash2(i >> 1, 7, seed) * (0.5 + 0.5 * hash2(i, 3, seed));
-    const rayCentre = Math.abs(fr - 0.5) * (r.w / total); // px distance to ray line
-    const rayW = isSpine ? 0.9 : 0.6 - v * 0.15;
-    let onRay = rayCentre < rayW;
-    // soft rays branch toward the tip
-    if (!isSpine && (f.rayBranch ?? true) && v > 0.55 && r.w / total > 4) {
-      const off = (v - 0.55) * 0.35;
-      onRay = Math.abs(fr - 0.5 - off) * (r.w / total) < 0.5 || Math.abs(fr - 0.5 + off) * (r.w / total) < 0.5;
+    const dRay = Math.abs(fr - 0.5) * pitch; // px distance to the ray line
+    let onRay = false;
+    if (f.rays !== 0 || isSpine) {
+      if (isSpine) onRay = dRay < 0.75;
+      else if ((f.rayBranch ?? true) && v > 0.5 && pitch > 3.2) {
+        const off = (v - 0.5) * 0.28;
+        onRay = Math.abs(fr - 0.5 - off) * pitch < 0.5 || Math.abs(fr - 0.5 + off) * pitch < 0.5;
+      } else onRay = dRay < 0.5;
     }
-    const spineTip = isSpine && onRay && v <= (f.cut ? f.cut(u) : 1);
-    if (v > vmax && !spineTip) { pg.col.set(r.x + i, r.y + j, [0, 0, 0], 0); continue; }
-    let c = memb(v, i, j);
+    const spineTip = isSpine && onRay && v <= cutV;
+    if (v > vmax && !spineTip) { pg.set(r.x + i, r.y + j, [0, 0, 0], 0, 0.6, 0); continue; }
+    let c = memb(v / Math.max(0.3, vmax), i, j);
     let a = a0 + (a1 - a0) * v;
     let h = 0;
-    if (bandC && f.bandN) { const b = Math.sin((v * f.bandN + hash2(k, 1, seed) * 0.3) * Math.PI * 2); if (b > 0.35) c = mix(c, bandC, 0.75); }
-    if (spotC && hash2(i, j, seed + 11) < (f.spotK ?? 0.06) && !onRay) c = spotC;
-    if (baseC && v < (f.baseW ?? 0.15)) c = mix(c, baseC, 0.8);
-    if (edgeC && v > vmax - (f.edgeW ?? 0.12)) { c = mix(c, edgeC, 0.9); a = Math.max(a, f.edgeA ?? 0.9); }
+    if (bandC && f.bandN) { const b = Math.sin((v * f.bandN + (k % 2) * 0.12) * Math.PI * 2); if (b > 0.4) c = mix(c, bandC, 0.7); }
+    if (spotC && !onRay) {
+      const sx = Math.floor(i / 3), sy = Math.floor(j / 3);
+      if (hash2(sx, sy, seed + 11) < (f.spotK ?? 0.12) && ((i % 3) + (j % 3)) < 3) { c = spotC; a = Math.max(a, 0.9); }
+    }
+    if (baseC && v < (f.baseW ?? 0.15)) c = dmix(c, baseC, 1 - v / (f.baseW ?? 0.15) * 0.5, i, j);
+    if (edgeC && v > vmax - (f.edgeW ?? 0.12)) { c = mix(c, edgeC, 0.9); a = Math.max(a, f.edgeA ?? 0.85); }
     if (onRay) {
-      c = isSpine ? shade(spC, 1.0 + (1 - v) * 0.1) : mix(c, rayC, 0.75);
-      a = isSpine ? 1 : Math.max(a, 0.92);
-      h = isSpine ? 1 : 0.6;
-      // light-side highlight pixel beside the ray
-    } else if (rayCentre < rayW + 1.2) { c = shade(c, 1.08); h = 0.25; }
-    // membrane ripple shading between rays
-    if (!onRay) c = shade(c, 0.94 + 0.08 * Math.cos(fr * Math.PI * 2));
+      if (isSpine) { c = shade(spC, 1.04 - v * 0.1); a = 1; h = 1; }
+      else {
+        // soft ray: darker line, segmented (a lit joint every few px), fading toward the tip
+        const joint = (j + (k & 1) * 2) % 5 === 0;
+        c = rayC ? mix(c, rayC, 0.45 * (1 - v * 0.4)) : shade(c, 0.86 + v * 0.06);
+        if (joint) c = shade(c, 1.12);
+        a = Math.min(1, Math.max(a, a0 * 0.9) + 0.12); h = 0.6;
+      }
+    } else {
+      // membrane: slightly brighter mid-way between rays, a lit pixel line beside each ray
+      c = shade(c, 0.97 + 0.06 * Math.sin(fr * Math.PI));
+      if (dRay < 1.5 && dRay >= 0.5) { c = shade(c, 1.06); h = 0.3; }
+      a *= 0.92 + 0.08 * Math.cos(fr * Math.PI * 2);
+    }
+    if (f.over) { const o = f.over(u, v, c, i, j); if (o) { c = o; a = Math.max(a, 0.9); } }
     if (f.opaque) a = 1;
-    // dithered alpha quantisation keeps the pixel look under alpha-to-coverage
-    a = Math.max(0, Math.min(1, a + (bayer(i, j) - 0.5) * 0.12));
+    // soft tip: last pixel row of membrane fades
+    if (!onRay && v > vmax - 0.03) a *= 0.7;
+    a = Math.max(0, Math.min(1, a));
     if (f.glowEdge && v > vmax - 0.1) pg.setGlow(r.x + i, r.y + j, C(f.glowEdge));
-    pg.set(r.x + i, r.y + j, c, Math.round(a * 255), f.rough ?? 0.55, h);
+    pg.set(r.x + i, r.y + j, c, Math.round(a * 255), f.rough ?? 0.5, h);
   }
 }
 
 // ------------------------------------------------------------------------------------------- eye painter
 export interface EyePaint {
   iris: string[];        // outer -> inner ramp
-  pupil?: number;        // pupil radius fraction
+  pupil?: number;        // pupil radius fraction of the iris
   pupilCol?: string;
-  ring?: string;         // thin ring around the iris (gold, red...)
-  sclera?: string;       // mammals: white/grey around the iris
+  ring?: string;         // thin bright ring around the pupil (gold, red...)
+  sclera?: string;       // a visible eye-white / silver ring outside the iris
   irisR?: number;        // iris radius fraction of the disc (with sclera)
-  slit?: number;         // vertical slit pupil squash (0 round)
+  slit?: number;         // vertical/horizontal slit pupil squash (0 round, >0 vertical, <0 horizontal)
   glint?: boolean;
+  limbus?: string;       // dark rim around the iris
+  fleck?: string;        // iris flecks colour
 }
 export function paintEye(pg: Page, r: Rect, e: EyePaint) {
-  const iris = ramp(e.iris, 5, 0.7);
-  const pr = e.pupil ?? 0.42, ir = e.irisR ?? 1;
-  const pc = C(e.pupilCol ?? '#06070c');
-  const ringC = e.ring ? C(e.ring) : null, scl = e.sclera ? C(e.sclera) : null;
+  const iris = ramp(e.iris, 10, 0.8);
+  const pr = e.pupil ?? 0.48, ir = e.irisR ?? 0.92;
+  const pc = C(e.pupilCol ?? '#05060a');
+  const ringC = e.ring ? C(e.ring) : null, scl = C(e.sclera ?? '#d8e0e4');
+  const limb = C(e.limbus ?? '#0a0a12');
+  const fleck = e.fleck ? C(e.fleck) : null;
+  const sl = e.slit ?? 0;
   for (let j = 0; j < r.h; j++) for (let i = 0; i < r.w; i++) {
     const nx = ((i + 0.5) / r.w) * 2 - 1, ny = ((j + 0.5) / r.h) * 2 - 1;
     const d = Math.hypot(nx, ny);
-    let c: RGB, h = 0;
-    if (scl && d > ir) c = shade(scl, 1 - (d - ir) * 0.8);
-    else {
-      const dd = d / ir;
-      const px = nx / ir, py = ny / ir;
-      const dp = Math.hypot(px / (1 - (e.slit ?? 0) * 0.8), py);
-      if (dp < pr) { c = pc; if (dp > pr - 0.08) c = mix(pc, [40, 40, 60], 0.5); }
-      else {
-        c = iris((dd - pr) / (1 - pr), i, j);
-        // radial iris fibres + darker limbal ring
+    let c: RGB;
+    if (d > ir) {
+      // sclera: shaded darker toward the top (socket shadow) and the rim
+      c = shade(scl, 1.02 - (d - ir) * 0.9 - Math.max(0, -ny) * 0.25);
+    } else {
+      const px = nx / ir, py = ny / ir, dd = d / ir;
+      const dp = Math.hypot(px / (1 - Math.max(0, sl) * 0.75), py / (1 + Math.min(0, sl) * 0.75));
+      if (dp < pr) {
+        // pupil: deep blue-black with a faint lens reflection
+        c = mix(pc, [26, 34, 58], Math.max(0, (dp / pr) - 0.55) * 0.9);
+      } else {
+        const t = (dd - pr) / Math.max(0.05, 1 - pr);
+        c = iris(1 - t, i, j);
         const ang = Math.atan2(py, px);
-        c = shade(c, 0.9 + 0.12 * Math.sin(ang * 14 + hash2(i, j, 4) * 1.5));
-        if (dd > 0.86) c = shade(c, 0.6);
-        if (ringC && dd > pr && dd < pr + 0.12) c = mix(c, ringC, 0.8);
-        // top shadow from the socket
-        if (py < -0.55) c = shade(c, 0.82);
+        c = shade(c, 0.94 + 0.1 * Math.sin(ang * 11 + Math.sin(ang * 3) * 1.3));
+        if (fleck && hash2(i, j, 21) < 0.12) c = mix(c, fleck, 0.6);
+        if (ringC && dp < pr + 0.13) c = mix(c, ringC, 0.85);
+        if (dd > 0.88) c = mix(c, limb, 0.8);
+        // upper iris in the lid shadow
+        c = shade(c, 1 - Math.max(0, -py - 0.2) * 0.35);
       }
     }
-    pg.set(r.x + i, r.y + j, c, 255, 0.08, 0);
+    pg.set(r.x + i, r.y + j, c, 255, 0.04, 0);
   }
   if (e.glint !== false) {
-    // painted highlights: a big glint up-front and a small one down-back
-    const gx = r.x + Math.round(r.w * 0.64), gy = r.y + Math.round(r.h * 0.3), gs = Math.max(1, Math.round(r.w / 10));
-    for (let y = 0; y < gs + 1; y++) for (let x = 0; x < gs + 1; x++) if (x + y <= gs + 0.5) pg.set(gx + x - 1, gy + y - 1, [255, 255, 255], 255, 0.05);
-    pg.set(r.x + Math.round(r.w * 0.34), r.y + Math.round(r.h * 0.68), [200, 230, 255], 255, 0.05);
+    // catchlights: a big soft-cornered window glint up-front, a small one low-back
+    const R = r.w / 2;
+    const gx = r.x + R + R * 0.28, gy = r.y + R - R * 0.38, gs = Math.max(1.6, R * 0.22);
+    for (let y = -Math.ceil(gs); y <= Math.ceil(gs); y++) for (let x = -Math.ceil(gs); x <= Math.ceil(gs); x++) {
+      const q = Math.hypot(x, y * 1.1) / gs;
+      if (q <= 1) pg.set(Math.round(gx + x), Math.round(gy + y), q > 0.75 ? [215, 235, 255] : [255, 255, 255], 255, 0.02);
+    }
+    const g2x = r.x + R - R * 0.34, g2y = r.y + R + R * 0.36;
+    pg.set(Math.round(g2x), Math.round(g2y), [190, 225, 255], 255, 0.02);
+    pg.set(Math.round(g2x) + 1, Math.round(g2y), [150, 200, 240], 255, 0.02);
   }
 }
 
@@ -232,4 +273,3 @@ export function paintLid(pg: Page, r: Rect, skin: string, line: string) {
 
 export { hex, mix, shade, ramp, bayer };
 export type { RGB };
-export const tex2: (t: THREE.Texture) => THREE.Texture = (t) => t;

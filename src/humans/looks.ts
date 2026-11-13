@@ -58,7 +58,7 @@ const jitter = (r: Rng, c: RGB, k = 0.08): RGB => {
 };
 
 function baseBuild(o: Partial<Build>): Build {
-  return { s: 1, bw: 1, mass: 1, belly: 0, chest: 0.2, fem: 0, headS: 1.08, legLen: 1, armLen: 1, handS: 1.16, footS: 1.1, shoulders: 1, neckLen: 1, hunch: 0, ...o };
+  return { s: 1, bw: 1, mass: 1, belly: 0, chest: 0.2, fem: 0, headS: 1.18, legLen: 0.96, armLen: 1, handS: 1.2, footS: 1.12, shoulders: 1.04, neckLen: 0.82, hunch: 0, ...o };
 }
 
 function baseFace(r: Rng, o: Partial<Look['face']> = {}): Look['face'] {
@@ -99,7 +99,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
   switch (arch) {
     case 'oldSalt': {
       skin = mix(skin, [176, 112, 80], 0.25); L.skin = skin;
-      L.build = baseBuild({ s: 0.97, bw: 1.08, mass: 1.14, belly: 0.45, chest: 0.4, hunch: 0.12, headS: 1.1 });
+      L.build = baseBuild({ s: 0.97, bw: 1.08, mass: 1.14, belly: 0.45, chest: 0.4, hunch: 0.12, headS: 1.2 });
       L.age = 0.95;
       L.hair = { style: 'sides', col: greyHair(0.92), grey: 0.92 };
       L.facial = 'bigBeard'; L.facialCol = greyHair(0.88);
@@ -117,7 +117,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'weekendDad': {
-      L.build = baseBuild({ s: 1.0, bw: 1.05, mass: 1.22, belly: 1, chest: 0.2, headS: 1.08 });
+      L.build = baseBuild({ s: 1.0, bw: 1.05, mass: 1.22, belly: 1.2, chest: 0.2, headS: 1.18 });
       L.age = 0.5;
       L.hair = { style: 'short', col: hairNat, grey: 0.15 };
       L.facial = r.chance(0.6) ? 'stubble' : 'moustache'; L.facialCol = hairNat;
@@ -135,7 +135,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'kid': {
-      L.build = baseBuild({ s: 0.64, bw: 0.95, mass: 0.95, belly: 0.25, chest: 0, headS: 1.48, legLen: 0.92, armLen: 0.95, handS: 1.25, footS: 1.25, neckLen: 0.8 });
+      L.build = baseBuild({ s: 0.64, bw: 0.95, mass: 0.95, belly: 0.25, chest: 0, headS: 1.62, legLen: 0.9, armLen: 0.95, handS: 1.3, footS: 1.3, neckLen: 0.7 });
       L.age = 0;
       L.hair = { style: 'messy', col: hairNat, grey: 0 };
       F.freckles = dark < 0.5 ? 0.9 : 0.3; F.eyeR = 1.12; F.blush = 0.6; F.teethGap = true;
@@ -150,7 +150,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'grandma': {
-      L.build = baseBuild({ s: 0.88, fem: 1, bw: 1.0, mass: 1.06, belly: 0.35, chest: 0.3, hunch: 0.4, headS: 1.12, shoulders: 0.92 });
+      L.build = baseBuild({ s: 0.88, fem: 1, bw: 1.0, mass: 1.06, belly: 0.35, chest: 0.3, hunch: 0.4, headS: 1.22, shoulders: 0.92, neckLen: 0.75 });
       L.age = 1;
       L.hair = { style: 'bun', col: greyHair(0.95), grey: 0.95 };
       F.browCol = greyHair(0.7); F.brow = 0.75; F.blush = 0.7; F.eyeR = 0.95; F.lipK = 0.8;
@@ -168,7 +168,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'proAngler': {
-      L.build = baseBuild({ s: 1.01, bw: 1.0, mass: 0.98, belly: 0.1, chest: 0.4, headS: 1.06 });
+      L.build = baseBuild({ s: 1.01, bw: 1.0, mass: 0.98, belly: 0.1, chest: 0.4, headS: 1.16 });
       L.age = 0.4;
       L.hair = { style: 'short', col: hairNat, grey: 0 };
       L.facial = 'goatee'; L.facialCol = hairNat;
@@ -185,7 +185,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'iceFisher': {
-      L.build = baseBuild({ s: 0.98, bw: 1.12, mass: 1.3, belly: 0.5, chest: 0.3, headS: 1.08 });
+      L.build = baseBuild({ s: 0.98, bw: 1.12, mass: 1.3, belly: 0.5, chest: 0.3, headS: 1.18 });
       L.age = 0.6;
       L.hair = { style: 'short', col: hairNat, grey: 0.3 };
       L.facial = 'walrus'; L.facialCol = mix(hairNat, [210, 205, 200], 0.3);
@@ -203,7 +203,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       break;
     }
     case 'dockWorker': {
-      L.build = baseBuild({ s: 1.04, bw: 1.12, mass: 1.1, belly: 0.4, chest: 0.6, headS: 1.06, shoulders: 1.08 });
+      L.build = baseBuild({ s: 1.04, bw: 1.12, mass: 1.1, belly: 0.4, chest: 0.6, headS: 1.16, shoulders: 1.1 });
       L.age = 0.55;
       L.hair = { style: 'short', col: hairNat, grey: 0.2 };
       L.facial = r.chance(0.5) ? 'moustache' : 'beard'; L.facialCol = hairNat;
@@ -220,7 +220,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
     }
     case 'captainGaff': {
       skin = mix(skin, [170, 120, 96], 0.2); L.skin = skin;
-      L.build = baseBuild({ s: 1.24, bw: 1.32, mass: 1.42, belly: 0.75, chest: 1, headS: 1.0, shoulders: 1.18, handS: 1.22, neckLen: 0.75, hunch: 0.1 });
+      L.build = baseBuild({ s: 1.24, bw: 1.32, mass: 1.42, belly: 0.75, chest: 1, headS: 1.08, shoulders: 1.2, handS: 1.3, neckLen: 0.62, hunch: 0.1 });
       L.age = 0.75;
       L.hair = { style: 'shaggy', col: C('#1a1614'), grey: 0.15 };
       L.facial = 'bigBeard'; L.facialCol = C(pick(r, ['#1a1614', '#2a1a12', '#4a2614']));

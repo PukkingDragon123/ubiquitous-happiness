@@ -71,6 +71,8 @@ function hookGeometry() {
   hookGeo = L.build();
   return hookGeo;
 }
+/** a bare hook (used when the blobfish is hooked: it sits in the lip) */
+export function buildHook(): THREE.Mesh { const m = new THREE.Mesh(hookGeometry(), metal()); m.scale.setScalar(1.8); return m; }
 const metal = () => uw(new THREE.MeshStandardMaterial({ color: '#c9d2da', metalness: 0.9, roughness: 0.25 }), { rim: 0.4 });
 
 export function buildBait(kind: BaitKind): { group: THREE.Group; tick: (t: number, speed: number) => void } {

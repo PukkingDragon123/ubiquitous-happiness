@@ -60,9 +60,9 @@ export function faceLayout(L: Look): FaceLayout {
   const kid = L.arch === 'kid';
   return {
     eyeY: kid ? 0.094 : 0.1,
-    eyeA: 20 * L.face.eyeX,
-    eyeR: 0.0172 * L.face.eyeR * (kid ? 1.05 : 1),
-    browY: kid ? 0.123 : 0.127,
+    eyeA: 21.5 * L.face.eyeX,
+    eyeR: 0.0205 * L.face.eyeR * (kid ? 1.06 : 1),
+    browY: kid ? 0.127 : 0.131,
     mouthY: kid ? 0.034 : 0.036,
     noseY: 0.056,
   };
@@ -82,7 +82,7 @@ function faceRelief(y: number, deg: number, L: Look, F: FaceLayout): number {
   const eR = F.eyeR / 0.0172;
   let r = 0;
   // brow ridge over both eyes, heavier on masculine skulls, fading at the temples
-  r += (0.004 + 0.004 * masc) * g(y, F.browY - 0.006, 0.0068) * (a < 46 ? 1 : g(a, 46, 11)) * (0.75 + 0.25 * g(a, 20, 12));
+  r += (0.003 + 0.003 * masc) * g(y, F.browY - 0.006, 0.0068) * (a < 46 ? 1 : g(a, 46, 11)) * (0.75 + 0.25 * g(a, 20, 12));
   r -= 0.0015 * g(y, F.browY - 0.016, 0.006) * g(a, 0, 5);
   // the sockets: wide and deep, the eyeball fills them
   r -= 0.0105 * eR * g(y, F.eyeY, 0.0095 * eR) * g(a, F.eyeA, 10.5 * eR);
@@ -126,6 +126,8 @@ export function headShape(L: Look, d: Dims): HeadShape {
     if (a >= 30 && a <= 110) r *= 1 + (jaw - 1) * lowFace;
     if (a < 30) r *= 1 + (chin - 1) * lowFace;
     if (wide !== 1 && a > 20 && a < 160) r *= 1 + (wide - 1) * Math.sin((a * Math.PI) / 180);
+    // cartoon fullness: rounder cheeks and a slightly wider face than life
+    r *= 1 + 0.06 * Math.sin(Math.min(Math.PI, (a / 80) * Math.PI)) * clamp01(1 - Math.abs(row.y - 0.06) / 0.07) + 0.03 * Math.sin((Math.min(a, 120) / 120) * Math.PI);
     // kids: a rounder, bigger cranium over a small jaw
     if (kidK) r *= 1 + 0.07 * clamp01((row.y - 0.07) / 0.06) - 0.06 * lowFace;
     return r;
@@ -181,8 +183,8 @@ export function buildHead(B: Loft, S: HeadShape) {
     const sf = (y: number, deg = 0) => skull(y, deg)[2];
     const sx = (y: number, deg: number) => skull(y, deg)[0];
     const kid = L.arch === 'kid';
-    const nw = 0.0165 * N.w * (1 - L.build.fem * 0.12) * (1 + N.bulb * 0.25);
-    const Ln = 0.024 * N.len * (1 - L.build.fem * 0.12) * (kid ? 0.8 : 1);
+    const nw = 0.019 * N.w * (1 - L.build.fem * 0.12) * (1 + N.bulb * 0.3);
+    const Ln = 0.029 * N.len * (1 - L.build.fem * 0.12) * (kid ? 0.8 : 1);
     const up = N.up * 0.006, bulb = N.bulb;
     const pt = (x: number, y: number, z: number): V3 => tr([x, y, z]);
     const root = pt(0, 0.108, sf(0.108) + 0.0008);
@@ -232,12 +234,12 @@ export function buildHead(B: Loft, S: HeadShape) {
 export function hatLine(L: Look, deg: number): number {
   const a = Math.abs(deg);
   switch (L.hat) {
-    case 'cap': case 'capBack': return a < 60 ? 0.15 : 0.128 - (a > 120 ? 0.01 : 0);
-    case 'beanie': return a < 50 ? 0.142 : 0.118;
-    case 'bucket': return 0.13 - (a > 100 ? 0.008 : 0);
-    case 'sunhat': return 0.135;
-    case 'ushanka': return a < 60 ? 0.15 : 0.06;
-    case 'captain': case 'captainBlack': return 0.14 - (a > 100 ? 0.006 : 0);
+    case 'cap': case 'capBack': return a < 60 ? 0.158 : 0.134 - (a > 120 ? 0.01 : 0);
+    case 'beanie': return a < 50 ? 0.152 : 0.122;
+    case 'bucket': return 0.142 - (a > 100 ? 0.008 : 0);
+    case 'sunhat': return 0.145;
+    case 'ushanka': return a < 60 ? 0.158 : 0.06;
+    case 'captain': case 'captainBlack': return 0.15 - (a > 100 ? 0.006 : 0);
     default: return 99;
   }
 }
