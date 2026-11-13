@@ -325,13 +325,23 @@ export class Layout {
   // ------------------------------------------------------------------ heightfield
   /** normalised island distance (1 at the coast) */
   islandD(isl: Island, x: number, z: number): number {
+    if (isl.kind === 'ice') {
+      // ice floes are angular plates: a random convex polygon
+      let d = 0;
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + ((isl.seed >> k) % 7) * 0.13;
+        const rk = isl.r * (0.85 + (((isl.seed >> (k + 3)) % 10) / 10) * 0.3);
+        d = Math.max(d, ((x - isl.x) * Math.cos(a) + (z - isl.z) * Math.sin(a)) / rk);
+      }
+      return d * (1 + 0.04 * (vnoise(x * 5, z * 5) - 0.5));
+    }
     let d = 1e9;
     for (const b of isl.blobs) {
       const dx = x - b.x, dz = z - b.z;
       const u = (dx * b.c + dz * b.s) / b.rx, v = (-dx * b.s + dz * b.c) / b.rz;
       d = Math.min(d, Math.sqrt(u * u + v * v));
     }
-    const wob = isl.kind === 'ice' ? 0.06 : isl.kind === 'sandbar' ? 0.1 : 0.2;
+    const wob = isl.kind === 'sandbar' ? 0.1 : 0.2;
     return d * (1 + wob * (vnoise(x * 1.7 + isl.seed % 97, z * 1.7) - 0.5) + 0.07 * (vnoise(x * 4.3, z * 4.3 + isl.seed % 31) - 0.5));
   }
   islandH(isl: Island, d: number, x: number, z: number): number {

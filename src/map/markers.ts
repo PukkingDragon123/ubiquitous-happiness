@@ -66,6 +66,7 @@ function body(L: Loft, t: NodeType): number {
   }
 }
 
+const _pq = new THREE.Quaternion();
 let SHARED: { atlas: THREE.Material; flagMat: THREE.Material; rim: THREE.Material; back: THREE.Material } | null = null;
 
 export class Marker {
@@ -177,8 +178,7 @@ export class Marker {
     this.float.scale.set(this.sc * (1 + sq), this.sc * (1 - sq), this.sc * (1 + sq));
     // medallion faces the camera
     this.medal.updateWorldMatrix(true, false);
-    const pq = new THREE.Quaternion();
-    this.float.getWorldQuaternion(pq);
+    const pq = this.float.getWorldQuaternion(_pq);
     this.medal.quaternion.copy(pq.invert().multiply(cam.quaternion));
     this.medal.rotateY(Math.sin(t * 0.9 + this.ph) * 0.12 * (avail ? 1 : 0.3));
     // look

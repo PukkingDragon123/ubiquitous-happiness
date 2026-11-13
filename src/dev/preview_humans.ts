@@ -44,7 +44,7 @@ class HumansPreview extends MockScreen {
     const ice = makeIceShelf(seed), dock = makeDock(seed);
     const row = makeBoat('rowboat', seed), din = makeBoat('dinghy', seed + 1), sk = makeBoat('skiff', seed + 2), kay = makeBoat('kayak', seed + 3), tr = makeBoat('trawler', seed + 4);
     console.info('vessels built in', Math.round(performance.now() - t0), 'ms');
-    const place: [Vessel, number][] = [[ice, -36], [dock, -22], [row, -12], [din, -5], [sk, 2.5], [kay, 10], [tr, 22]];
+    const place: [Vessel, number][] = [[ice, -44], [dock, -24], [row, -14], [din, -6.5], [sk, 1.5], [kay, 9.5], [tr, 22]];
     for (const [v, x] of place) { v.setX(x); this.scene.add(v.group); this.vessels.push(v); }
     const crew: [Archetype, Vessel, number][] = [
       ['iceFisher', ice, 0], ['grandma', dock, 0], ['dockWorker', dock, 1], ['oldSalt', row, 0], ['weekendDad', din, 0],
@@ -168,7 +168,7 @@ class HumansPreview extends MockScreen {
     // camera: wide shot pans across the lineup; close mode frames the focused fisherman
     const ef = this.es[this.focus];
     if (this.auto && q.get('mode') !== 'close' && !q.get('i') && !q.get('cx')) {
-      this.camX = -36 + ((w.time * 1.6) % 66);
+      this.camX = -44 + ((w.time * 1.6) % 74);
     } else this.camX += ((ef.f.group.getWorldPosition(tip).x) - this.camX) * Math.min(1, dt * 3);
     if (q.get('cx')) this.camX = +q.get('cx')!;
     if (q.get('mode') === 'close' || (q.get('solo') && q.get('mode') !== 'wide')) {

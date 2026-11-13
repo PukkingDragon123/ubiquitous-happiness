@@ -356,10 +356,10 @@ export class Diorama {
       if (kind === 'sandbar' || kind === 'dune') this.beachJunk(L, isl, rng);
       if (kind === 'volcanic') {
         const g = lay.sampleG(isl.x, isl.z);
-        const glow = new THREE.Mesh(new THREE.CircleGeometry(isl.r * 0.18, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff6a2a').multiplyScalar(3) }));
+        const glow = new THREE.Mesh(new THREE.CircleGeometry(isl.r * 0.16, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff6a2a').multiplyScalar(1.8) }));
         glow.position.set(isl.x, g + 0.03, isl.z);
         this.group.add(glow);
-        const h = halo(isl.r * 0.9); h.position.set(isl.x, g + 0.2, isl.z); (h as THREE.Sprite).material = new THREE.SpriteMaterial({ map: textures().halo, color: '#ff7a3a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.8 });
+        const h = halo(isl.r * 0.45); h.position.set(isl.x, g + 0.15, isl.z); (h as THREE.Sprite).material = new THREE.SpriteMaterial({ map: textures().halo, color: '#ff6a2a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.45 });
         this.group.add(h);
       }
     }
@@ -552,6 +552,21 @@ export class Diorama {
       }
     }
     mk(bushGeo, bushMat, bushes);
+    // drifting ice chunks in cold water
+    const chunks: { x: number; y: number; z: number; ry: number; s: [number, number, number] }[] = [];
+    for (let i = 0; i < 400 && chunks.length < 70; i++) {
+      const x = rng.range(-lay.W / 2 + 0.6, lay.W / 2 - 0.6), z = rng.range(lay.zBack + 1, lay.zFront - 0.5);
+      if (lay.zoneId(z) !== 'arctic' && !(this.map.act === 2 && z < this.map.nodes[this.map.bossId].z + 4)) continue;
+      if (!lay.isWater(x, z, 0.2, 0.3) || lay.clearance(x, z, 0.5, 0.25) < 0) continue;
+      const s0 = rng.range(0.06, 0.2);
+      chunks.push({ x, y: 0.0, z, ry: rng.range(0, 6.28), s: [s0 * rng.range(0.8, 1.6), s0 * 0.5, s0] });
+    }
+    if (chunks.length) {
+      const L = new Loft();
+      blob(L, [0, 0, 0], 1, 1, 1, A.ice, 7, 0.35, 11);
+      const ig = L.build(); ig.deleteAttribute('color');
+      mk(ig, this.atlasMat, chunks);
+    }
   }
 
   // ------------------------------------------------------------------ current ribbons
@@ -661,6 +676,8 @@ export class Diorama {
     DIO.uDNight.value = blendNum(P, w, (p) => p.night);
     const sunK = this.sun.intensity / 2.6;
     this.capU.uLight.value.copy(this.sun.color).multiplyScalar(0.55 * sunK).add(this.hemi.color.clone().multiplyScalar(0.42 * this.hemi.intensity));
+    const ml = Math.max(this.capU.uLight.value.r, this.capU.uLight.value.g, this.capU.uLight.value.b);
+    if (ml < 0.8) this.capU.uLight.value.multiplyScalar(0.8 / Math.max(ml, 0.01));
   }
 
   update(dt: number, t: number, cam: THREE.Camera, focus: THREE.Vector3) {

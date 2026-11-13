@@ -117,7 +117,8 @@ export class Token {
     this.body.scale.set(1.6 * (1 + sq * 0.6), 1.6 * (1 - sq), 1.6 * (1 + sq * 0.4));
     const hop = this.surf * Math.abs(Math.sin(t * 7.5)) * 0.07 * Math.min(1, speed);
     this.body.position.y = -0.04 + Math.sin(t * 2.2) * 0.018 * (1 - this.surf) + hop + this.surf * 0.03;
-    this.body.rotation.z = -this.surf * 0.12 + Math.sin(t * 1.7) * 0.04;
+    // idle: nose tilted up so the droopy face shows to the camera above; surfing: leaning into the ride
+    this.body.rotation.z = 0.38 * (1 - this.surf) - this.surf * 0.1 + Math.sin(t * 1.7) * 0.04;
     this.body.rotation.x = Math.sin(t * 1.3) * 0.05 + this.surf * Math.sin(t * 9) * 0.06;
     // the sword wiggles; held up high while surfing like a tiny cavalry charge
     this.sword.rotation.z = 0.55 + Math.sin(t * 2.4) * 0.12 * (1 - this.surf) + this.surf * 0.5;

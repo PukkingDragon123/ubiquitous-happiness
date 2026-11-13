@@ -43,7 +43,7 @@ export function modelParts(arch: Archetype, seed: number): ModelParts {
 
 /** a soft self-lit fill so faces and clothes stay readable against the bright sky / under hat brims
  * (x: whole body, y: extra on the face) — the game is read from the side at a distance */
-export const FILL = { value: new THREE.Vector2(0.16, 0.22) };
+export const FILL = { value: new THREE.Vector2(0.16, 0.32) };
 
 /** per-instance material: page texture + a face flush (angry red / strain) driven by uFlush */
 export function bodyMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial & { userData: { flush: { value: THREE.Vector3 } } } {

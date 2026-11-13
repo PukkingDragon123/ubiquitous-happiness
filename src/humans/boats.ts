@@ -65,7 +65,7 @@ function hullPt(H: HullDef, t: number, sec: Sec): V3 {
   if (sec.inner) {
     const th = Math.min(H.thick, hb * 0.5);
     z = Math.max(0, z - th * Math.sin(phi));
-    y += H.thick * Math.cos(phi);
+    y += th * Math.cos(phi);
   }
   return [-H.L / 2 + t * H.L, y, sec.side * z];
 }
@@ -128,7 +128,8 @@ function paintHull(A: Atlas, r: PxRect, H: HullDef, hp: HullPaint, seed: number)
         c = band(hp.top, 0.88 + (nz(x, y, 12, seed) - 0.5) * 0.25 + (hh(x, y, 3) > 0.9 ? 0.35 : 0), x, y, 0.06);
       } else c = band(hp.top, 0.95 + (nz(x, y, 16, seed) - 0.5) * 0.1, x, y, 0.05);
       // a coloured sheer stripe under the rail
-      if (sec.s > 0.9 && hp.kind !== 'wood') c = band(hp.stripe, 0.95, x, y);
+      const fromRail = H.sheer(t) - wy;
+      if (hp.kind !== 'wood' && fromRail < (hp.kind === 'steel' ? 0.16 : 0.07) && fromRail > (hp.kind === 'steel' ? 0.07 : 0.0)) c = band(hp.stripe, 0.95, x, y);
       // rust streaks running down from fittings
       if (hp.rust > 0) {
         const col = Math.floor(p[0] * 7 + 50), streak = hh(col, 1, seed) > 0.8 ? clamp01(1 - (H.sheer(t) - wy) / (0.6 + hh(col, 2, seed) * 1.2)) : 0;
@@ -372,9 +373,9 @@ function dinghy(r: Rng): Vessel {
   mat.map = A.texture();
   b.mesh(B, mat);
   b.hullColliders(H);
-  b.seat(0.25, 0.2, 0, 'sit', -1);
-  b.seat(-0.95, 0.2, 0, 'sit', 1);
-  b.seat(0.95, 0.11, 0.05, 'sit', -1);
+  b.seat(0.25, 0.2, 0, 'sit', 1);
+  b.seat(-0.95, 0.2, 0, 'sit', -1);
+  b.seat(0.95, 0.11, 0.05, 'sit', 1);
   return b;
 }
 
@@ -413,8 +414,8 @@ function skiff(r: Rng): Vessel {
   mat.map = A.texture();
   b.mesh(B, mat);
   b.hullColliders(H);
-  b.seat(1.6, 0.33, 0, 'stand', -1);
-  b.seat(-1.7, 0.33, 0, 'stand', 1);
+  b.seat(1.6, 0.33, 0, 'stand', 1);
+  b.seat(-1.7, 0.33, 0, 'stand', -1);
   return b;
 }
 

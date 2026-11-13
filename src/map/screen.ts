@@ -215,7 +215,7 @@ export class MapScreen implements Screen {
     if (!this.token) return;
     const p = this.tokenSpot(this.at);
     this.token.root.position.copy(p);
-    this.token.yaw = this.token.targetYaw = Math.PI / 2;
+    this.token.yaw = this.token.targetYaw = -Math.PI / 2 + 0.55;
   }
   private homeFocus(): number {
     const z = this.at < 0 ? this.dio!.lay.dock.z - 1.5 : this.map!.nodes[this.at].z;
@@ -370,7 +370,7 @@ export class MapScreen implements Screen {
     RIBBON.uHover.value = hr ? hr.index : -1;
     this.game.canvas.style.cursor = hov ? (this.avail.has(hov.node.id) ? 'pointer' : 'help') : this.drag?.moved ? 'grabbing' : '';
     if (hov && !busy) token.targetYaw = Math.atan2(-(hov.node.z - token.root.position.z), hov.node.x - token.root.position.x);
-    else if (this.mode === 'idle') token.targetYaw = Math.PI / 2 + Math.sin(t * 0.4) * 0.4;
+    else if (this.mode === 'idle') token.targetYaw = -Math.PI / 2 + 0.55 + Math.sin(t * 0.4) * 0.35;
     // ---- click
     if (click && hov && !busy) {
       if (this.avail.has(hov.node.id)) this.startTravel(hov.node);

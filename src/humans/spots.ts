@@ -161,15 +161,15 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 export function makeIceShelf(seed: number): Vessel {
   const r = new Rng((seed * 104729 + 3) >>> 0);
-  const L = 14, top = 0.14, thick = 0.62, hole = 0.36;
+  const L = 26, top = 0.14, thick = 0.62, hole = 0.36;
   const s = new Spot('ice', L);
   const A = new Atlas(1024, 512);
   const iceTopR = A.alloc(512, 256), iceSideR = A.alloc(512, 128), iceBotR = A.alloc(256, 128), snowR = A.alloc(256, 128), shR = A.alloc(128, 128), metR = A.alloc(64, 64), bucketR = A.alloc(64, 64), lampR = A.alloc(64, 32);
   // snow-dusted ice on top, a clear blue-green cross-section with bubbles and cracks, a darker rough underside
   A.paint(iceTopR, (u, v, x, y) => {
     const sn = nz(x, y, 18, 3);
-    let c = band(C('#e8f2f8'), 0.94 + sn * 0.12, x, y, 0.05);
-    if (sn < 0.42) c = band(C('#9ec8dc'), 0.9 + nz(x, y, 6, 4) * 0.2, x, y);
+    let c = band(C('#f2f8fc'), 0.96 + sn * 0.1, x, y, 0.05);
+    if (sn < 0.36) c = band(C('#b4d8ea'), 0.94 + nz(x, y, 6, 4) * 0.16, x, y);
     if (Math.abs(nz(x * 0.4, y, 9, 7) - 0.5) < 0.012) c = shade(c, 0.7);
     return c;
   });
@@ -183,7 +183,14 @@ export function makeIceShelf(seed: number): Vessel {
   A.paint(iceBotR, (u, v, x, y) => band(C('#3a7a94'), 0.8 + nz(x, y, 6, 9) * 0.35, x, y));
   A.paint(snowR, (u, v, x, y) => band(C('#f4f8fc'), 0.9 + nz(x, y, 8, 10) * 0.15 + (hh(x, y, 2) > 0.97 ? 0.15 : 0), x, y, 0.04));
   const tent = C(r.pick(['#d83a2a', '#2a5ab0', '#e8a020']));
-  A.paint(shR, (u, v, x, y) => band(tent, 0.88 + (Math.abs(((u * 6) % 1) - 0.5) < 0.04 ? -0.2 : 0) + (nz(x, y, 10, 3) - 0.5) * 0.1, x, y));
+  // the shanty: quilted canvas panels with seams, a zipped door flap, reflective guy-tape corners
+  A.paint(shR, (u, v, x, y) => {
+    const panel = (u * 4) % 1;
+    let c = band(tent, 0.9 + (Math.abs(panel - 0.5) > 0.47 ? -0.25 : 0) + ((y % 10) === 0 ? -0.1 : 0) + (nz(x, y, 10, 3) - 0.5) * 0.12 - v * 0.1, x, y);
+    if (u > 0.55 && u < 0.7 && v < 0.75) c = Math.abs(u - 0.625) < 0.01 ? metal([60, 60, 64], x, y) : band(shade(tent, 0.8), 0.95, x, y);
+    if (v < 0.06) c = band([240, 240, 236], 0.9, x, y);
+    return c;
+  });
   A.paint(metR, (u, v, x, y) => metal([170, 176, 184], x, y, 0.8 + v * 0.3));
   A.paint(bucketR, (u, v, x, y) => (v > 0.85 ? metal([180, 180, 186], x, y) : band(C('#f2f0e8'), 0.9 + (hh(x, y, 3) - 0.5) * 0.1, x, y)));
   A.paint(lampR, (u, v, x, y) => metal([60, 40, 30], x, y));
@@ -221,8 +228,8 @@ export function makeIceShelf(seed: number): Vessel {
     for (let x = x0 + 0.3; x < x1 - 0.1; x += 0.5) s.colliders.push({ x, y: bottom(x) + 0.18, r: 0.26 });
   }
   // snow drifts, slush and chips round the hole, an auger, a bucket seat, a little shanty tent, a lantern
-  for (let i = 0; i < 6; i++) {
-    const x = -6 + i * 2.3 + (hh(i, 1, 5) - 0.5), w = 0.8 + hh(i, 2, 5) * 1.2;
+  for (let i = 0; i < 10; i++) {
+    const x = -11 + i * 2.4 + (hh(i, 1, 5) - 0.5), w = 0.8 + hh(i, 2, 5) * 1.2;
     const rings = [0, 0.5, 1].map((t, k) => ({ pts: ellRing(top + 0.001 + Math.sin(t * Math.PI) * (0.06 + hh(i, 3, 5) * 0.08), x, -1 - hh(i, 4, 5) * 3, w * (1 - t * 0.5), 0.5 * (1 - t * 0.4), 0.6 * (1 - t * 0.4), 10, 2, 1), v: k / 2 }));
     B.loft(rings, usFor(10), A.reg(snowR), 11, { end: [x, top + 0.1, -1 - hh(i, 4, 5) * 3] });
   }

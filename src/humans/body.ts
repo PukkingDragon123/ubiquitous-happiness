@@ -339,7 +339,7 @@ export function buildBody(L: Look, d: Dims): BodyBuild {
 
 // ------------------------------------------------------------------ outer garments
 function buildOuter(B: Loft, L: Look, d: Dims, sh: Shape, torsoSurf: (y: number, deg: number, off: number) => V3, wOf: (y: number, th?: number) => Wt) {
-  const top = 1.46, hem = Math.max(0.84, sh.outerHem);
+  const top = 1.46, hem = Math.max(0.84, Math.min(1.02, sh.outerHem));
   const kind = sh.outer;
   const t0 = sh.outerThick;
   const n = 28;

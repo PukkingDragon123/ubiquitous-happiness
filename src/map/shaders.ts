@@ -235,7 +235,7 @@ export function waterMaterial(U: WaterUniforms): THREE.MeshStandardMaterial {
           float dH = dHash(dC);
           float dP = step(0.986, dH) * (0.5 + 0.5 * sin(uDTime * (1.5 + dH * 3.0) + dH * 40.0));
           totalEmissiveRadiance += dZ3(uPlank, dZw) * dP * uDNight * 1.6 * (1.0 - dFoamOut);
-          totalEmissiveRadiance += dZ3(uPlank, dZw) * dFoamOut * uDNight * 0.35;
+          totalEmissiveRadiance += dZ3(uPlank, dZw) * dFoamOut * uDNight * 0.16;
         }
       }`);
   };
@@ -451,7 +451,7 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
           if (d < 1.2 / PX.y) col = mix(col, uFoamC, 0.8);
           else if (d < 2.2 / PX.y) col = mix(col, uW2, 0.25);
           col *= mix(0.78, 1.0, smoothstep(0.0, 0.5, y - g));
-          alpha = mix(0.5, 0.92, k * k);
+          alpha = mix(0.66, 0.95, k);
           alpha = max(alpha, max(kp, fs) * 0.9);
         } else {
           // ---- ground: seabed sand / island soil on top, wavy sediment strata, ore voxels, bedrock
@@ -481,7 +481,8 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
           // ore voxels (2x2 cells) with a lit corner + a dark corner
           vec2 oc = floor(cell / 2.0);
           float oh = dHash(oc + 17.31);
-          if (dd > sandT + 0.25 && oh > 0.972) {
+          float vein = smoothstep(0.55, 0.8, dNoise(vec2(x * 0.45, y * 1.6) + 5.0));
+          if (dd > sandT + 0.35 && oh > 0.992 - vein * 0.05) {
             float which = dHash(oc + 3.7);
             vec3 ore = which < 0.4 ? uOre0 : which < 0.75 ? uOre1 : uOre2;
             vec2 sub = cell - oc * 2.0;
@@ -582,6 +583,7 @@ export function ribbonMaterial(): THREE.ShaderMaterial {
         float a = (bodyA + fA * (1.0 - bodyA)) * endA;
         // the stretch the token has already ridden fades to a soft trail
         if (abs(vId - uRide) < 0.5) { float past = step(cv, uRideT * vLen); a *= mix(1.0, 0.4, past); glow += (1.0 - past) * 0.9; }
+        glow *= 1.0 - uDNight * 0.65;
         gl_FragColor = vec4(col * (1.0 + glow * fA), clamp(a, 0.0, 1.0));
       }`,
   });

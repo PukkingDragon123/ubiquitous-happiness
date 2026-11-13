@@ -184,7 +184,7 @@ export function buildSpot(v: Vignette, ctx: SpotCtx) {
         const f = L.count;
         stiltHut(L, v.seed + 3, 0.05);
         place(L, f, [isl.x - ux * 0.25, g0, isl.z - uz * 0.25], rot, 0.8);
-        ctx.palms.push({ x: isl.x + uz * 0.5, z: isl.z - ux * 0.5, s: 0.9, rot: r.range(0, 6) });
+        if (zoneId === 'reef' || zoneId === 'kelp' || zoneId === 'sunset') ctx.palms.push({ x: isl.x + uz * 0.5, z: isl.z - ux * 0.5, s: 0.9, rot: r.range(0, 6) });
       }
       break;
     }

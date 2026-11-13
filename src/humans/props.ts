@@ -79,7 +79,9 @@ export function growth(base: RGB, depth: number, x: number, y: number, seed = 1)
     if (alg > 0.6) c = mix(c, band([96, 132, 60], 0.9 + hh(x, y, seed) * 0.2, x, y), 0.6);
     // barnacles: little pale rings with dark holes
     const cell = 5, gx = Math.floor(x / cell), gy = Math.floor(y / cell);
-    if (hh(gx, gy, seed + 9) < 0.18 + Math.min(0.2, depth * 0.06)) {
+    // barnacles grow in colonies: clustered by noise, sparse elsewhere
+    const colony = nz(x, y, 18, seed + 11);
+    if (hh(gx, gy, seed + 9) < (colony > 0.55 ? 0.3 : 0.03) * Math.min(1, 0.4 + depth * 0.3)) {
       const px = (gx + 0.5) * cell, py = (gy + 0.5) * cell, d = Math.hypot(x + 0.5 - px, y + 0.5 - py), r = 1.6 + hh(gx, gy, seed + 2) * 1.2;
       if (d < r) c = d < r * 0.4 ? [40, 36, 34] : band([206, 200, 184], 0.85 + (1 - d / r) * 0.3, x, y);
     }

@@ -159,7 +159,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       L.hat = 'sunhat'; L.hatCol = [226, 200, 142]; L.hatCol2 = C(pick(r, ['#c83a5a', '#3a6ab0', '#8a3aa8', '#3a8a5a']));
       const cg = pick(r, ['#b89ad0', '#7ab8b0', '#f0b090', '#d07a8a', '#a8b870']);
       L.top = { kind: 'blouse', col: [248, 244, 236], col2: C(pick(r, ['#e86a8a', '#6a8ae8', '#e8a83a'])), col3: [120, 170, 110], sleeve: 'long', hem: 0.88 };
-      L.outer = { kind: 'cardigan', col: C(cg), col2: mix(C(cg), [40, 30, 40], 0.3), hem: 0.84, open: true, sleeve: 'long', thick: 0.007 };
+      L.outer = { kind: 'cardigan', col: C(cg), col2: mix(C(cg), [40, 30, 40], 0.3), hem: 1.0, open: true, sleeve: 'long', thick: 0.007 };
       L.legs = { kind: 'skirt', col: C(pick(r, ['#5a4a6a', '#3a4a5a', '#6a4a3a', '#2a3a4a'])), col2: [40, 30, 40], hem: -0.55 };
       L.feet = { kind: 'shoe', col: C(pick(r, ['#c8b090', '#3a2a24', '#7a5a4a'])), col2: [60, 50, 40] };
       L.extras = { pearls: true };
