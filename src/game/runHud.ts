@@ -16,7 +16,8 @@ export interface HudState {
   hp: number; maxHp: number;
   areaName: string; areaIdx: number; areaCount: number;
   phase: string;
-  wave: number; waves: number; remaining: number; boss: boolean;
+  /** waves cleared in this area / waves in this area; the run-wide number of the current (or next) wave / run total */
+  wave: number; waves: number; gWave: number; gTotal: number; remaining: number; boss: boolean;
   interT: number; interMax: number; holdK: number;
   bag: [string, number][];
   loose: string[];
@@ -155,8 +156,17 @@ export class RunHud {
   private waveBox(s: HudState) {
     const ui = this.ui, cx = Math.round(ui.w / 2);
     let y = 4;
-    const title = s.phase === 'cleared' || s.phase === 'sailing' ? 'AREA CLEAR' : `WAVE ${Math.min(s.waves, s.wave + 1)}/${s.waves}`;
-    ui.text(title, cx, y, { font: 'title', color: s.boss && s.phase === 'wave' ? C.red : C.white, color2: s.boss && s.phase === 'wave' ? '#ff9a7a' : '#ffd860', outline: C.ink, align: 'center' });
+    const clear = s.phase === 'cleared' || s.phase === 'sailing';
+    const title = clear ? 'AREA CLEAR' : `WAVE ${s.gWave}/${s.gTotal}`;
+    const hot = s.boss && s.phase === 'wave';
+    const tw = ui.text(title, cx, y, { font: 'title', color: hot ? C.red : C.white, color2: hot ? '#ff9a7a' : '#ffd860', outline: C.ink, align: 'center' });
+    // this area's waves as pips beside the title
+    for (let i = 0; i < s.waves; i++) {
+      const px = cx + Math.ceil(tw / 2) + 4 + i * 5, py = y + 2;
+      const done = i < s.wave, cur = i === s.wave && s.phase === 'wave';
+      ui.fill(px, py, 4, 4, C.ink);
+      ui.fill(px + 1, py + 1, 2, 2, done ? C.gold : cur ? (Math.floor(this.t * 4) % 2 ? C.red : C.white) : '#3a4252');
+    }
     y += ui.lh('title');
     if (s.phase === 'wave') {
       ui.text(s.boss ? `BOSS WAVE · ${s.remaining} LEFT` : `${s.remaining} LEFT`, cx, y, { font: 'small', color: s.boss ? C.red : C.dim, outline: C.ink, align: 'center' });

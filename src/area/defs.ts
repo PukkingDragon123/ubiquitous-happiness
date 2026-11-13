@@ -95,7 +95,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     },
     flora: [
       { sp: 'giantkelp', zones: ['play', 'fg', 'mid', 'back'], per10: 2.4, cluster: 2 },
-      { sp: 'bullkelp', zones: ['play', 'fg', 'mid', 'back'], per10: 0.8, cluster: 1 },
+      { sp: 'bullkelp', zones: ['play', 'fg'], per10: 0.8, cluster: 1 },
       { sp: 'sealettuce', zones: ['play', 'mid', 'fg'], per10: 2.6, cluster: 3 },
       { sp: 'redweed', zones: ['play', 'mid'], per10: 2, cluster: 3, onRock: true },
       { sp: 'seagrass', zones: ['play', 'fg'], per10: 2, cluster: 5 },

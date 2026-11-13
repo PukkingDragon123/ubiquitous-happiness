@@ -32,7 +32,7 @@ function itemDetail(ui: PixelUI, id: string, level: number, x: number, y: number
     yy += ui.textBox(l.text, x + 2, yy, w - 4, { font: 'small', color: l.good ? TXT.good : TXT.bad, shadow: '#000' });
     if (next?.[i] && next[i].text !== l.text) yy += ui.textBox('→ ' + next[i].text, x + 10, yy, w - 12, { font: 'small', color: TXT.gold, shadow: '#000' });
   });
-  if (d.note) { yy += ui.textBox(d.note(level), x + 2, yy, w - 4, { font: 'small', color: '#a8d8ff', shadow: '#000' }); }
+  if (d.note && !lines.some((l) => l.key === 'note')) { yy += ui.textBox(d.note(level), x + 2, yy, w - 4, { font: 'small', color: '#a8d8ff', shadow: '#000' }); }
   return yy - y;
 }
 

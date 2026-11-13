@@ -253,7 +253,7 @@ export class BuildMode {
     list.slice(this.page * per, this.page * per + per).forEach((bp, i) => this.card(ui, bp, cx0 + i * (cw + gap), y0 + 9, cw, ch));
     // plan sheet for the hovered (or held) blueprint
     const show = this.hoverCard ?? this.sel ?? (this.moving ? this.moving.p.bp : null);
-    if (show) this.sheet(ui, BLUEPRINTS[show], x0 + W - 172, y0 - 112);
+    if (show) this.sheet(ui, BLUEPRINTS[show], x0 + W - 184, y0 - 118);
     // status line
     const id = this.sel ?? this.moving?.p.bp;
     let sx = x0 + 8;
@@ -327,20 +327,28 @@ export class BuildMode {
 
   /** the big plan sheet: art, name, footprint, description, perk, full cost with have/need */
   private sheet(ui: PixelUI, bp: Blueprint, x: number, y: number) {
-    const w = 172, h = 112;
+    const w = 180, h = 134;
     x = Math.max(4, Math.min(ui.w - w - 4, x));
+    y = Math.max(26, y - 22);
+    if (y + h > ui.h - 128) y = Math.max(2, ui.h - 128 - h - 16);
     ui.frame('blueprint', x, y, w, h);
-    ui.text(bp.name.toUpperCase(), x + 8, y + 8, { font: 'body', color: C.line });
-    ui.text(`PLAN NO. ${String(BLUEPRINT_LIST.indexOf(bp) + 1).padStart(3, '0')}`, x + w - 8, y + 9, { font: 'tiny', color: C.ink, align: 'right' });
-    ui.fill(x + 8, y + 19, w - 16, 1, C.ink);
-    ui.img(blueprintArt(bp.id, 64, 50, { yaw: -0.9 }), x + 6, y + 23);
-    let ty = y + 24;
-    ty += ui.textBox(bp.desc, x + 74, ty, w - 82, { font: 'tiny', color: C.line });
-    if (bp.station) { ty += 2; ty += ui.textBox('★ ' + bp.station.perk, x + 74, ty, w - 82, { font: 'tiny', color: C.gold }); }
-    const flags = [bp.wall ? 'WALL' : '', bp.floor ? 'FLOOR LAYER' : '', bp.unique ? 'ONE ONLY' : '', bp.core ? 'CORE' : ''].filter(Boolean).join(' · ');
-    if (flags) ui.text(flags, x + 8, y + 76, { font: 'tiny', color: C.ink });
-    ui.fill(x + 8, y + 84, w - 16, 1, C.ink);
-    ui.costRow(costOf(bp), x + 8, y + 88, { have: META.materials, showHave: true, size: 16, font: 'small' });
+    let title = bp.name.toUpperCase();
+    while (ui.measure(title, 'body') > w - 18 && title.length > 4) title = title.slice(0, -2) + '.';
+    ui.text(title, x + 9, y + 9, { font: 'body', color: C.line });
+    const flags = [`PLAN ${String(BLUEPRINT_LIST.indexOf(bp) + 1).padStart(3, '0')}`, `${bp.size[0]}x${bp.size[1]}`, bp.wall ? 'WALL' : '', bp.floor ? 'FLOOR' : '', bp.unique ? 'ONE ONLY' : '', bp.core ? 'CORE' : ''].filter(Boolean).join(' \u00b7 ');
+    ui.text(flags, x + 9, y + 22, { font: 'small', color: C.ink });
+    ui.fill(x + 8, y + 31, w - 16, 1, C.ink);
+    ui.img(blueprintArt(bp.id, 64, 50, { yaw: -0.9 }), x + 7, y + 35);
+    ui.clip(x + 74, y + 34, w - 82, 54);
+    ui.textBox(bp.desc, x + 76, y + 35, w - 84, { font: 'small', color: C.line });
+    ui.unclip();
+    if (bp.station) {
+      ui.clip(x + 8, y + 89, w - 16, 21);
+      ui.textBox('\u2605 ' + bp.station.perk, x + 9, y + 90, w - 18, { font: 'small', color: C.gold });
+      ui.unclip();
+    }
+    ui.fill(x + 8, y + 111, w - 16, 1, C.ink);
+    ui.costRow(costOf(bp), x + 9, y + 114, { have: META.materials, showHave: true, size: 16, font: 'small' });
   }
 
   private materialsStrip(ui: PixelUI, x: number, y: number, w: number) {

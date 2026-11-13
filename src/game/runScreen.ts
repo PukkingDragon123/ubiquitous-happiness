@@ -44,6 +44,7 @@ const globalWave = (i: number, k: number) => { let n = k; for (let j = 0; j < i;
 const FINAL_WAVE = globalWave(RUN_AREAS - 1, areaWaves(RUN_AREAS - 1));
 const INTERMISSION = 30;
 const ARCH = ['mage', 'warrior', 'summoner', 'tinkerer', 'rogue'];
+const BOSS_NAME: Record<string, string> = { captain: "CAPTAIN GAFF'S SUB", trawler: 'THE HARPOON TRAWLER', titan: 'THE BRASS TITAN' };
 
 /** the three areas of a run starting at `start` */
 export function runAreas(start: string): string[] {
@@ -311,7 +312,12 @@ export class RunScreen implements Screen {
     w.on('waveStart', (d) => {
       this.setPhase('wave');
       this.bossWave = !!d.boss;
-      if (d.boss) { this.hud.banner('BOSS WAVE', String(d.bossKind ?? '').toUpperCase(), '#ff6a5a', 3.5); audio.play('boss_growl', { vol: 0.6 }); }
+      if (d.boss) {
+        // after the director's own "WAVE n: BOSS" call-out has faded
+        const name = BOSS_NAME[String(d.bossKind)] ?? 'THE BOSS';
+        this.after(2.6, () => this.hud.banner(name, 'BOSS WAVE', '#ff6a5a', 3.5));
+        audio.play('boss_growl', { vol: 0.6 });
+      }
     });
     w.on('waveCleared', () => this.waveCleared());
     w.on('kill', () => { this.tally.kills++; this.run.kills++; });
@@ -353,8 +359,7 @@ export class RunScreen implements Screen {
     this.bossWave = false;
     if (this.wavesCleared >= areaWaves(this.areaIdx)) {
       this.setPhase('cleared');
-      const wk = this.area.shipwreck;
-      this.hud.banner('AREA CLEAR', wk.ready ? 'SET SAIL AT THE WRECK [E]' : 'REPAIR THE WRECK TO SAIL ON', '#ffe7a0', 3.5);
+      this.after(2.4, () => this.hud.banner('AREA CLEAR', this.area.shipwreck.ready ? 'SET SAIL AT THE WRECK [E]' : 'REPAIR THE WRECK TO SAIL ON', '#ffe7a0', 3.5));
     } else {
       this.setPhase('intermission');
       this.interT = this.interMax;
@@ -699,6 +704,7 @@ export class RunScreen implements Screen {
       hp: p.hp, maxHp: p.maxHp,
       areaName: a.name, areaIdx: this.areaIdx, areaCount: RUN_AREAS,
       phase: this.phase, wave: this.wavesCleared, waves: areaWaves(this.areaIdx),
+      gWave: globalWave(this.areaIdx, Math.min(areaWaves(this.areaIdx), this.wavesCleared + 1)), gTotal: FINAL_WAVE,
       remaining: d.remaining, boss: this.bossWave,
       interT: this.interT, interMax: this.interMax, holdK: Math.min(1, this.holdT),
       bag: Object.entries(counts).sort((x, y) => y[1] - x[1]),

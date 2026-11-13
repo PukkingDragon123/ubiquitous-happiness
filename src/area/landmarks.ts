@@ -106,7 +106,7 @@ function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
       const zz = z + r.range(-0.8, 0.8), y = scen.heightAt(x, zz);
       const reach = -y - r.range(0.3, 1.2);
       if (reach < 3) continue;
-      const far = zz < -9, sp = r.chance(0.15) ? 'bullkelp' : 'giantkelp';
+      const far = zz < -9, sp = 'giantkelp';
       const v = r.pick(scen.flora.get(sp, far ? 2 : 3, far ? 1 : 0));
       const t = r.range(0.8, 1.1), ch = scen.chunk(x);
       const sy = sp === 'giantkelp' ? reach / 10 : (reach * 0.65) / 10;
