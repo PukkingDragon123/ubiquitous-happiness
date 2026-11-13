@@ -49,7 +49,7 @@ export const POST = {
   uGradeLift: { value: new THREE.Vector3(0.0, 0.008, 0.02) },
   uGain: { value: new THREE.Vector3(1.03, 1.0, 0.97) },
   uVignette: { value: 0.5 },
-  uChroma: { value: 0.0009 },
+  uChroma: { value: 0.0006 },
   uBloom: { value: 0.5 },
   uBloomThreshold: { value: 0.9 },
   uFlash: { value: new THREE.Vector4(1, 1, 1, 0) }, // rgb + amount (hit flashes, ability flashes)
@@ -58,11 +58,11 @@ export const POST = {
   uUnderwaterPost: { value: 1 }, // 0 disables the water optics (map / backpack / hideout scenes)
   // ---- retro cinematic additions
   /** camera motion blur shutter: 0 off, 1 = a frame's worth of motion, 2+ = heavy */
-  uMotionBlur: { value: 1.6 },
+  uMotionBlur: { value: 2.0 },
   /** max blur length as a fraction of the screen */
   uMotionMax: { value: 0.07 },
   /** reprojected frame feedback (motion trails on anything moving), 0..0.9, at 60 fps */
-  uMotionTrail: { value: 0.42 },
+  uMotionTrail: { value: 0.45 },
   /** cinematic bars 0..1 (1 = 2.39:1 scope) */
   uLetterbox: { value: 0 },
   /** fade to uFadeCol 0..1 (applied before the dither, so fades are dithered like a PS1 fade) */
@@ -72,7 +72,7 @@ export const POST = {
   uDither: { value: 1 },
   uColorBits: { value: 5 },
   /** film grain amount */
-  uGrain: { value: 0.055 },
+  uGrain: { value: 0.04 },
   /** split tone: shadows toward uSplitLo (teal), highlights toward uSplitHi (amber) */
   uSplit: { value: 0.32 },
   uSplitLo: { value: new THREE.Color('#1d5a66') },
@@ -312,7 +312,8 @@ void main() {
   vec2 uv = vUv;
   vec2 cc = uv - 0.5;
   float r2 = dot(cc, cc);
-  vec2 off = cc * r2 * uChroma * 18.0;
+  // chromatic aberration in whole low-res pixels (stays crisp)
+  vec2 off = floor(cc * r2 * uChroma * 18.0 * uRes + 0.5) / uRes;
   vec3 col;
   col.r = texture(tSrc, uv + off).r;
   col.g = texture(tSrc, uv).g;
@@ -413,7 +414,8 @@ export class Post {
     void low;
     const depthTexture = new THREE.DepthTexture(1, 1);
     depthTexture.type = THREE.FloatType;
-    this.sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: POST_CFG.msaa, depthTexture, depthBuffer: true });
+    // nearest: refraction wobble shifts whole low-res pixels (crisp, PS2-style) instead of bilinear smearing
+    this.sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: POST_CFG.msaa, depthTexture, depthBuffer: true, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
     this.uwRT = hdrRT();
     this.mbRT = [hdrRT(), hdrRT()];
     this.outRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
@@ -482,6 +484,21 @@ export class Post {
   /** drop motion history (call on hard cuts so the previous shot doesn't ghost into the new one) */
   cut() { this.histValid = false; }
 
+  private anims: { u: { value: number }; from: number; to: number; t: number; dur: number }[] = [];
+  private animate(u: { value: number }, to: number, sec: number) {
+    this.anims = this.anims.filter((a) => a.u !== u);
+    if (sec <= 0) { u.value = to; return; }
+    this.anims.push({ u, from: u.value, to, t: 0, dur: sec });
+  }
+  /** slide the cinematic bars in (1) / out (0) over sec seconds */
+  letterboxTo(v: number, sec = 0.6) { this.animate(POST.uLetterbox, v, sec); }
+  /** fade to colour (1) / back in (0) over sec seconds; dithered like a PS1 fade */
+  fadeTo(v: number, sec = 0.8, color?: THREE.ColorRepresentation) { if (color !== undefined) POST.uFadeCol.value.set(color); this.animate(POST.uFade, v, sec); }
+  private stepAnims(dt: number) {
+    for (const a of this.anims) { a.t = Math.min(a.dur, a.t + dt); const k = a.t / a.dur; a.u.value = a.from + (a.to - a.from) * k * k * (3 - 2 * k); }
+    this.anims = this.anims.filter((a) => a.t < a.dur);
+  }
+
   /** render the world scene through the full chain, then overlays (no post) on top */
   render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, overlays: { scene: THREE.Scene; camera: THREE.Camera }[] = []) {
     const r = this.renderer;
@@ -489,6 +506,7 @@ export class Post {
     const dt = this.lastT ? Math.min(0.25, Math.max(1 / 240, (now - this.lastT) / 1000)) : 1 / 60;
     this.lastT = now;
     if (scene !== this.lastScene || camera !== this.lastCam) { this.histValid = false; this.lastScene = scene; this.lastCam = camera; }
+    if (this.anims.length) this.stepAnims(dt);
     r.setRenderTarget(this.sceneRT);
     r.clear();
     r.render(scene, camera);

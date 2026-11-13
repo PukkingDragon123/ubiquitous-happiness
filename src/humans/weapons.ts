@@ -52,7 +52,7 @@ export function makeWeapon(kind: WeaponKind, scale = 1): Weapon {
   switch (kind) {
     case 'speargun': case 'bandgun': case 'cannon': {
       const band_ = kind === 'bandgun', can = kind === 'cannon';
-      const L0 = (can ? 1.0 : band_ ? 1.15 : 0.85) * s, r = (can ? 0.06 : band_ ? 0.025 : 0.024) * s;
+      const L0 = (can ? 0.95 : band_ ? 1.15 : 0.85) * s, r = (can ? 0.045 : band_ ? 0.025 : 0.024) * s;
       const B = new Loft(false);
       // barrel / stock from just behind the grip to the muzzle (6 sides)
       B.tube([[0, 0.03 * s, -0.12 * s], [0, 0.03 * s, L0]], (t) => r * (can ? (t < 0.2 ? 1.25 : 1) : 1), 6, FULL, 1, { capStart: true, capEnd: true });

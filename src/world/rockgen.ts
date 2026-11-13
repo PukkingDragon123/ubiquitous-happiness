@@ -69,11 +69,11 @@ export function spire(seed: number, o: { sides?: number; rings?: number; waist?:
   const rings: V3[][] = [];
   for (let j = 0; j <= NR; j++) {
     const t = j / NR, bed = Math.floor(t * beds), fr = t * beds - bed;
-    const prof = (1 - t * 0.55) * (1 - (o.waist ?? 0.2) * Math.sin(Math.PI * t)) + (o.cap ?? 0) * Math.max(0, t - 0.8) * 4;
+    const prof = (1 - t * 0.62) * (1 - (o.waist ?? 0.2) * Math.sin(Math.PI * t)) + (o.cap ?? 0) * Math.max(0, t - 0.8) * 4 + (fbm3(ox, t * 2.5, 0, 2, seed + 5)) * 0.25;
     const ring: V3[] = [];
     for (let k = 0; k < NS; k++) {
       const a = (k / NS) * Math.PI * 2 + (j % 2) * (Math.PI / NS);
-      let rr = prof * (1 + fbm3(Math.cos(a) + ox, t * 3, Math.sin(a), 2, seed) * 0.35);
+      let rr = prof * (1 + fbm3(Math.cos(a) * 1.3 + ox, t * 4, Math.sin(a) * 1.3, 3, seed) * 0.55);
       rr *= 1 - 0.12 * hash2(bed, 5, seed) * Math.sqrt(Math.sin(Math.PI * fr));
       const lean = (o.lean ?? 0) * t * t;
       ring.push([Math.cos(a) * rr + lean, t, Math.sin(a) * rr]);

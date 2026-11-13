@@ -48,12 +48,12 @@ export interface AreaDef {
   glow?: boolean;
 }
 
-const look = (base: string, o: Partial<Look>): Look => ({ ...LOOKS[base], ...o } as Look);
+const look = (base: string, o: Partial<Look>): Look => ({ ...(LOOKS[base] ?? LOOKS.reef), ...o } as Look);
 
 export const AREAS: Record<AreaId, AreaDef> = {
   reef: {
     id: 'reef', name: 'Sunlit Reef', music: 'mu_shallows', ambience: 'uw_amb1', swell: 'calm',
-    look: look('reef', { rays: 1.0, caustic: 0.9, clear: 9, ext: [0.1, 0.042, 0.032] }), lookId: 'reef',
+    look: look('reef', {}), lookId: 'reef',
     width: 150, floor: -12.5, amp: 2.2, sand: 1.0, backRise: 7,
     rock: 'limestone', ground: 'coralSand',
     pal: {
@@ -65,13 +65,13 @@ export const AREAS: Record<AreaId, AreaDef> = {
     },
     flora: [
       { sp: 'seagrass', zones: ['play', 'mid', 'fg'], per10: 7, cluster: 6 },
-      { sp: 'brain', zones: ['play', 'mid', 'fg'], per10: 2.2, cluster: 2 },
-      { sp: 'staghorn', zones: ['play', 'mid', 'fg', 'back'], per10: 2.6, cluster: 3 },
-      { sp: 'table', zones: ['mid', 'back'], per10: 1.2, cluster: 2 },
-      { sp: 'seafan', zones: ['play', 'mid', 'back'], per10: 1.8, cluster: 2 },
-      { sp: 'tubesponge', zones: ['play', 'mid', 'fg'], per10: 1.6, cluster: 2 },
+      { sp: 'brain', zones: ['play', 'mid', 'fg'], per10: 2.6, cluster: 2, onRock: true },
+      { sp: 'staghorn', zones: ['play', 'mid', 'fg', 'back'], per10: 3.2, cluster: 4, onRock: true },
+      { sp: 'table', zones: ['mid'], per10: 0.8, cluster: 2, onRock: true },
+      { sp: 'seafan', zones: ['play', 'mid', 'back'], per10: 1.8, cluster: 2, onRock: true },
+      { sp: 'tubesponge', zones: ['play', 'mid', 'fg'], per10: 1.8, cluster: 2, onRock: true },
       { sp: 'anemone', zones: ['play', 'mid', 'fg'], per10: 1.4, cluster: 1 },
-      { sp: 'softcoral', zones: ['play', 'mid'], per10: 2, cluster: 3 },
+      { sp: 'softcoral', zones: ['play', 'mid', 'fg'], per10: 2.4, cluster: 3, onRock: true },
       { sp: 'barrelsponge', zones: ['mid', 'back'], per10: 0.8, cluster: 1 },
       { sp: 'clamDeco', zones: ['mid'], per10: 0.5, cluster: 1 },
     ],
@@ -82,7 +82,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   kelp: {
     id: 'kelp', name: 'Kelp Cathedral', music: 'mu_fjord', ambience: 'uw_amb1', swell: 'breeze',
-    look: look('kelp', { rays: 1.7, rayCol: '#fff4c8', clear: 8, scatterTop: '#4aa890', scatterDeep: '#062a26', saturation: 1.05 }), lookId: 'kelp',
+    look: look('kelp', { rays: 1.6 }), lookId: 'kelp',
     width: 150, floor: -14, amp: 2.8, sand: 0.6, backRise: 9,
     rock: 'volcanic', ground: 'kelpSand',
     pal: {
@@ -109,10 +109,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   graveyard: {
     id: 'graveyard', name: 'Shipwreck Graveyard', music: 'mu_junkyard', ambience: 'uw_amb1', swell: 'breeze',
-    look: look('harbor', {
-      scatterTop: '#4a7a6a', scatterDeep: '#0a1a18', ext: [0.17, 0.075, 0.08], clear: 6, rays: 0.6, rayCol: '#e8f0d0',
-      hemiSky: '#a8c8b0', hemiGround: '#3a3a2a', saturation: 0.82, contrast: 1.12, gain: [1.0, 1.02, 0.94], depthMin: [0.08, 0.11, 0.1],
-    }), lookId: 'harbor',
+    look: look('graveyard', {}), lookId: 'graveyard',
     width: 160, floor: -15, amp: 2.4, sand: 1.4, backRise: 6,
     rock: 'mudstone', ground: 'silt',
     pal: {
@@ -137,7 +134,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   arctic: {
     id: 'arctic', name: 'Frost Shelf', music: 'mu_fjord', ambience: 'uw_amb1', swell: 'calm',
-    look: look('arctic', { rays: 1.3, clear: 10, caustic: 0.6 }), lookId: 'arctic',
+    look: look('arctic', {}), lookId: 'arctic',
     width: 150, floor: -14, amp: 2.6, sand: 0.5, backRise: 8,
     rock: 'granite', ground: 'gravel',
     pal: {
@@ -162,7 +159,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   abyss: {
     id: 'abyss', name: 'The Abyss', music: 'mu_abyss', ambience: 'uw_amb1', swell: 'calm',
-    look: look('abyss', { rays: 0.15, clear: 7, exposure: 1.15, depthMin: [0.05, 0.07, 0.13] }), lookId: 'abyss',
+    look: look('abyss', { rays: 0.2 }), lookId: 'abyss',
     width: 150, floor: -24, amp: 3.2, sand: 0.7, backRise: 10,
     rock: 'pillow', ground: 'ooze',
     pal: {

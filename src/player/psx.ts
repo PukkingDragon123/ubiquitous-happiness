@@ -1,11 +1,9 @@
 // Tiny PS1-style modelling kit shared by the blobfish gear, summons, gadgets and the megalodon: faceted
 // low-poly primitives with box-projected or lofted UVs onto small painted pixel pages (nearest filtering),
-// and a material maker that runs everything through the underwater patch (and agent A's retro patch, if it
-// is there). Hard surfaces are flat shaded (facets catch the light like PS1 models); soft ones Gouraud.
+// and a material maker that runs everything through the underwater patch (which adds the retro patch). Hard surfaces are flat shaded (facets catch the light like PS1 models); soft ones Gouraud.
 import * as THREE from 'three';
 import { Px, ramp, hex, type RGB } from '../gfx/px';
 import { uw } from '../gfx/shaders/underwater';
-import * as GFX from '../gfx/px';
 
 export interface PsxMatOpts {
   flat?: boolean; rough?: number; metal?: number; emissive?: THREE.ColorRepresentation; emissiveK?: number; side?: THREE.Side;
@@ -13,19 +11,14 @@ export interface PsxMatOpts {
   vertexColors?: boolean;
 }
 
-type RetroFn = (m: THREE.Material, o?: unknown) => THREE.Material;
-let retroPatch: RetroFn | null | undefined;
-/** agent A's retro material patch (src/gfx/retro.ts), when it exists; resolved lazily at runtime */
-export function setRetroPatch(fn: RetroFn | null) { retroPatch = fn; }
-
 export function psxMat(map: THREE.Texture | null, o: PsxMatOpts = {}): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({
     map, flatShading: o.flat ?? true, roughness: o.rough ?? 0.75, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide,
     alphaTest: o.alphaTest ?? 0, color: o.color ?? '#ffffff', vertexColors: !!o.vertexColors,
   });
   if (o.emissive !== undefined) { m.emissive = new THREE.Color(o.emissive); m.emissiveIntensity = o.emissiveK ?? 1; if (o.emissiveMap) m.emissiveMap = o.emissiveMap; }
+  // uw() also applies the PS1 retro patch (vertex snap / affine) from src/gfx/retro.ts
   uw(m, { sss: o.sss, sssK: o.sssK, rim: o.rim ?? 0.12 });
-  if (retroPatch) retroPatch(m);
   return m;
 }
 
@@ -101,4 +94,4 @@ export const rampOf = (cs: string[], steps = 5, dither = 0.6) => ramp(cs, steps,
 export function fillRect(p: Px, x0: number, y0: number, w: number, h: number, R: (t: number, x?: number, y?: number) => RGB, fn: (x: number, y: number) => number) {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x0 + x, y0 + y, R(fn(x, y), x0 + x, y0 + y));
 }
-export { hex, GFX };
+export { hex };

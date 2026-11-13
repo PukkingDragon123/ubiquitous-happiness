@@ -280,7 +280,7 @@ export function makeLook(arch: Archetype, seed: number): Look {
       L.hat = heavy ? 'brass' : 'hood'; L.hatCol = [20, 20, 22]; L.hatCol2 = [20, 20, 22];
       const neo = (h: string) => C(h);
       const kit: DiveKit = {
-        suit: heavy ? 'canvas' : 'wetsuit', col: neo('#16181c'), col2: neo('#2a6ab0'), col3: neo('#e8c020'), pattern: 'panels', hood: !heavy,
+        suit: heavy ? 'canvas' : 'wetsuit', col: neo('#24272c'), col2: neo('#2a6ab0'), col3: neo('#e8c020'), pattern: 'panels', hood: !heavy,
         mask: heavy ? 'brass' : 'scuba', lens: [40, 70, 80], tank: heavy ? 'none' : 'single', tankCol: C(pick(r, ['#e8c018', '#d8dade', '#c83a24', '#2a4a8a'])),
         bcd: !heavy, fins: heavy ? 'none' : 'short', finCol: C(pick(r, ['#16181c', '#e8c018', '#2a6ab0'])), belt: true, knife: !heavy, snorkel: false, cross: false,
         num: 1 + Math.floor(r.next() * 9),
@@ -299,12 +299,12 @@ export function makeLook(arch: Archetype, seed: number): Look {
           break;
         }
         case 'netDiver': {
-          kit.col = C('#24272c'); kit.col2 = C(pick(r, ['#e8701c', '#d8a018'])); kit.col3 = C('#e8e8e0'); kit.tankCol = C('#d8dade');
+          kit.col = C('#2c3036'); kit.col2 = C(pick(r, ['#e8701c', '#d8a018'])); kit.col3 = C('#e8e8e0'); kit.tankCol = C('#d8dade');
           L.build.bw *= 1.06; L.build.mass *= 1.06; L.build.belly = 0.25;
           break;
         }
         case 'commando': {
-          kit.pattern = 'plain'; kit.col = C('#101114'); kit.col2 = C('#1c1e22'); kit.col3 = C('#3a3e44');
+          kit.pattern = 'plain'; kit.col = C('#1c1e22'); kit.col2 = C('#2a2d32'); kit.col3 = C('#4a4e56');
           kit.mask = 'commando'; kit.tank = 'rebreather'; kit.tankCol = C('#2a2e2a'); kit.fins = 'short'; kit.finCol = C('#101114'); kit.lens = [20, 30, 34];
           F.brow = 1.4; F.jaw = 1.12; L.facial = 'stubble';
           break;

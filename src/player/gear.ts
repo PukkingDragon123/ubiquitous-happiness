@@ -9,7 +9,7 @@ import { Loft, usFor, type V3 } from '../gfx/loft';
 import { Px, ramp, hex, mix, pxNoise, worley } from '../gfx/px';
 import { hash2, TAU } from '../core/math';
 import { bodyPoint, NS, RINGS, addSB } from './blobShape';
-import { psxMat, mesh, facet, xf, merge, uvTo } from './psx';
+import { psxMat, mesh, facet, xf, uvTo } from './psx';
 
 export type WeaponId = 'toothpick' | 'sword' | 'wand' | 'trident' | 'staff' | 'wrench' | 'dagger';
 export type ArmorId = 'none' | 'shellPlate' | 'chainmail' | 'robe';
@@ -38,7 +38,7 @@ export const WEAPON_LEN: Record<WeaponId, number> = { toothpick: 0.84, sword: 0.
 const cache = new Map<string, THREE.Texture>();
 function tex(key: string, w: number, h: number, fn: (p: Px) => void): THREE.Texture {
   let t = cache.get(key);
-  if (!t) { const p = new Px(w, h); fn(p); t = p.texture(); cache.set(key, t); }
+  if (!t) { const p = new Px(w, h); fn(p); t = p.texture({ repeat: true }); cache.set(key, t); }
   return t;
 }
 const R = (cs: string[], n = 5, d = 0.6) => ramp(cs, n, d);
@@ -201,7 +201,7 @@ export function buildSword() { return buildWeapon('toothpick'); }
  * A shell over part of the body: t from t0..t1 (sampled on the body's own ring stations plus the ends),
  * around-angle u0..u1 (on the body's own side stations), `out(t, u)` metres off the skin.
  */
-export function shellGeo(t0: number, t1: number, u0: number, u1: number, out: (t: number, u: number) => number, reg = { x: 0, y: 0, w: 1, h: 1 }, o: { closed?: boolean; flip?: boolean } = {}): THREE.BufferGeometry {
+export function shellGeo(t0: number, t1: number, u0: number, u1: number, out: (t: number, u: number) => number, reg = { x: 0, y: 0, w: 1, h: 1 }, o: { closed?: boolean; flip?: boolean; uvScale?: [number, number] } = {}): THREE.BufferGeometry {
   const ts = [t0, ...RINGS.filter((t) => t > t0 + 0.02 && t < t1 - 0.02), t1];
   const us: number[] = [];
   if (o.closed) for (let j = 0; j <= NS; j++) us.push(j / NS);
@@ -214,7 +214,9 @@ export function shellGeo(t0: number, t1: number, u0: number, u1: number, out: (t
   const uvU = us.map((u) => (u - us[0]) / (us[us.length - 1] - us[0] || 1));
   const rings = ts.map((t) => ({ pts: us.map((u) => bodyPoint(t, u, out(t, u))), v: (t - t0) / (t1 - t0) }));
   L.loft(rings, uvU, reg, 3, { flip: o.flip });
-  return addSB(L.build());
+  const g = L.build();
+  if (o.uvScale) { const uv = g.attributes.uv as THREE.BufferAttribute; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * o.uvScale[0], uv.getY(i) * o.uvScale[1]); }
+  return addSB(g);
 }
 
 // ------------------------------------------------------------------ pages for cloth / armour
@@ -308,7 +310,7 @@ export function buildArmor(id: ArmorId, patch: (m: THREE.Material, bend: boolean
 }
 
 /** hats: cloth caps are shells (bend), rigid ones hang off the head anchor (returned as root, placed by the caller) */
-export function buildHat(id: HatId, patch: (m: THREE.Material, bend: boolean) => THREE.Material, anchor: THREE.Object3D): GearPart {
+export function buildHat(id: HatId, patch: (m: THREE.Material, bend: boolean) => THREE.Material): GearPart {
   const root = new THREE.Group(); root.name = 'hat:' + id;
   const add = (g: THREE.BufferGeometry, m: THREE.Material, bend: boolean, parent: THREE.Object3D = root) => { const me = mesh(g, patch(m, bend)); parent.add(me); return me; };
   const part: GearPart = { slot: 'hat', root };
@@ -316,9 +318,10 @@ export function buildHat(id: HatId, patch: (m: THREE.Material, bend: boolean) =>
   root.add(rig);
   if (id === 'bandana') {
     const mat = psxMat(BANDANA(), { rough: 0.9, side: THREE.DoubleSide, flat: false });
-    add(shellGeo(0.6, 0.9, 0.18, 0.82, (t) => 0.016 + (t > 0.86 ? 0.01 : 0)), mat, true);
-    const knot = add(facet(xf(new THREE.IcosahedronGeometry(0.05, 0), [0, 0, 0], [0, 0, 0], [1.2, 0.85, 1.1])), psxMat(BANDANA(), { rough: 0.9 }), false, anchor);
+    add(shellGeo(0.52, 0.86, 0.27, 0.73, (t) => 0.016 + (t > 0.83 ? 0.008 : 0), undefined, { uvScale: [3, 1.2] }), mat, true);
+    const knot = add(facet(xf(new THREE.IcosahedronGeometry(0.05, 0), [0, 0, 0], [0, 0, 0], [1.2, 0.85, 1.1])), psxMat(BANDANA(), { rough: 0.9 }), false);
     knot.name = 'knot';
+    knot.position.set(...bodyPoint(0.56, 0.5, 0.035));
     part.ribbons = [0, 1].map((k) => ({ mat: psxMat(BANDANA(), { rough: 0.9, side: THREE.DoubleSide, flat: false }), opts: { n: 7, seg: 0.06, w0: 0.045, w1: 0.03, uv: [0, 0, 1, 1] as [number, number, number, number] }, anchor: knot, k }));
   } else if (id === 'helmet') {
     const st = psxMat(STEEL(), { metal: 0.85, rough: 0.32 });
@@ -423,8 +426,9 @@ export function buildBack(id: BackId, patch: (m: THREE.Material, bend: boolean) 
     addS(shellGeo(0.36, 0.41, 0, 1, () => 0.02, undefined, { closed: true }), psxMat(tex('strap', 16, 16, (p) => { const r = R(['#06080e', '#1a2030', '#2a3448', '#4a5670'], 4); p.fill((x, y) => r(0.5 + (y % 3 === 0 ? -0.2 : 0.1), x, y)); }), { rough: 0.8 }));
   } else if (id === 'cape') {
     const clasp = mesh(facet(xf(new THREE.OctahedronGeometry(0.035, 0), [0, 0, 0], [0, 0, 0], [1, 1, 0.6])), patch(psxMat(GOLD(), { metal: 0.9, rough: 0.3 }), false));
-    rig.add(clasp);
+    root.add(clasp);
     clasp.name = 'clasp';
+    clasp.position.set(...bodyPoint(0.62, 0.5, 0.03));
     part.ribbons = [{ mat: psxMat(CAPE(), { rough: 0.9, side: THREE.DoubleSide, flat: false }), opts: { n: 7, seg: 0.075, w0: 0.2, w1: 0.3, mode: 'axis', gravity: 0.0012, flutter: 0.0024, uv: [0, 0, 1, 1], thick: 0.006 }, anchor: clasp, k: 0, axis: true }];
   }
   return part;
@@ -437,4 +441,3 @@ export const GEAR_NAMES: Record<string, string> = {
   bandana: 'Bandana', helmet: 'Plumed Helm', wizardHat: 'Wizard Hat', crown: 'Tide Crown', goggles: 'Brass Goggles', hood: 'Shadow Hood',
   pack: 'Backpack', tank: 'Scuba Tank', cape: 'Hero Cape',
 };
-void merge;

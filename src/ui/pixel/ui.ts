@@ -125,7 +125,7 @@ export class PixelUI {
 
   constructor(o: { fixed?: [number, number]; targetH?: number } = {}) {
     this.fixed = !!o.fixed;
-    this.targetH = o.targetH ?? 250;
+    this.targetH = o.targetH ?? 260;
     this.cv = document.createElement('canvas');
     if (o.fixed) { this.w = o.fixed[0]; this.h = o.fixed[1]; }
     this.cv.width = this.w; this.cv.height = this.h;
@@ -156,7 +156,8 @@ export class PixelUI {
     this.cam.left = 0; this.cam.right = devW; this.cam.top = devH; this.cam.bottom = 0; this.cam.updateProjectionMatrix();
     if (this.fixed) return;
     const forced = Number(new URLSearchParams(location.search).get('uiscale') || 0);
-    const s = forced || Math.max(1, Math.floor(devH / this.targetH));
+    let s = forced || Math.max(1, Math.round(devH / this.targetH));
+    if (!forced) while (s > 1 && devH / s < this.targetH * 0.88) s--;
     this.scale = s;
     const w = Math.ceil(devW / s), h = Math.ceil(devH / s);
     if (w !== this.w || h !== this.h) {

@@ -30,6 +30,8 @@ export class SoftBody {
   impact = 0;          // strongest impact speed this frame
   impactNx = 0; impactNy = 0;
   private edgeRest: number[] = [];
+  /** mean of the rest offsets: shape-matching targets are centred on it, or the body would drift */
+  private mx = 0; private my = 0;
 
   /** outline(theta) -> radius in body space; n points */
   constructor(outline: (a: number) => { x: number; y: number }, n = 18) {
@@ -43,6 +45,7 @@ export class SoftBody {
       this.pts.push({ x: p.x, y: p.y, vx: 0, vy: 0, rx: p.x, ry: p.y });
     }
     for (let i = 0; i < n; i++) { const a = this.rest[i], b = this.rest[(i + 1) % n]; this.edgeRest.push(Math.hypot(b.x - a.x, b.y - a.y)); }
+    for (const p of this.rest) { this.mx += p.x / n; this.my += p.y / n; }
   }
 
   place(x: number, y: number) {
@@ -52,7 +55,7 @@ export class SoftBody {
 
   /** world-space target for point i given the centroid, angle, flip, stretch */
   target(i: number) {
-    let qx = this.rest[i].x * this.flip, qy = this.rest[i].y;
+    let qx = (this.rest[i].x - this.mx) * this.flip, qy = this.rest[i].y - this.my;
     // squash & stretch in the stretch frame (volume preserving)
     if (this.stretch !== 0) {
       const c = Math.cos(this.stretchDir - this.angle), s = Math.sin(this.stretchDir - this.angle);
@@ -146,8 +149,8 @@ export class SoftBody {
     let span = this.restAng[i1] - this.restAng[i0]; span = Math.abs(Math.atan2(Math.sin(span), Math.cos(span))) || 1e-3;
     const t = Math.min(1, Math.abs(d0) / span);
     const p0 = this.pts[i0], p1 = this.pts[i1];
-    const dx0 = p0.rx - this.rest[i0].x, dy0 = p0.ry - this.rest[i0].y;
-    const dx1 = p1.rx - this.rest[i1].x, dy1 = p1.ry - this.rest[i1].y;
+    const dx0 = p0.rx - (this.rest[i0].x - this.mx), dy0 = p0.ry - (this.rest[i0].y - this.my);
+    const dx1 = p1.rx - (this.rest[i1].x - this.mx), dy1 = p1.ry - (this.rest[i1].y - this.my);
     out.x = dx0 + (dx1 - dx0) * t; out.y = dy0 + (dy1 - dy0) * t;
     return out;
   }

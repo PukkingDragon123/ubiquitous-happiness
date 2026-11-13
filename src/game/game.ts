@@ -61,7 +61,7 @@ export class Game {
     const lq = new URLSearchParams(location.search).get('lq') === '1' || localStorage.getItem('blobfish.lq') === '1';
     this.lowQuality = lq;
     this.renderer.shadowMap.enabled = !lq;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x000000, 1);
     this.post = new Post(this.renderer, lq);
     this.input = new Input(canvas);

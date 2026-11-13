@@ -16,3 +16,11 @@ export { ARCHETYPES, makeLook } from './looks';
 export { makeBoat } from './boats';
 export type { Vessel, BoatKind, Collider } from './boats';
 export { makeDock, makeIceShelf } from './spots';
+
+// v2 divers (wave enemies): PS1 low-poly people in dive kit, procedural swim poses, weapon IK, ragdoll + severing
+export { makeDiver, DiverRig, SEVERABLE } from './diver';
+export type { DiverMode, DiverAct, SeverPart, DiverOpts } from './diver';
+export type { WeaponKind } from './weapons';
+export { DIVER_ARCHETYPES, isDiverArch } from './looks';
+export type { DiverArch, DiveKit } from './looks';
+export { DETAIL } from './rig';

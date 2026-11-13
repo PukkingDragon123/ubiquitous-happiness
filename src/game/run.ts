@@ -33,12 +33,14 @@ export interface Stats {
   skills: string[];     // active skill ids granted by placed items (SKILLS registry in src/skills)
   /** active set-bonus tier per build/element tag (0, 2, 4 or 6), filled by the item system */
   sets: Record<string, number>;
+  /** blobfish outfit from the placed gear items: { weapon?, armor?, hat?, back? } (src/player/gear.ts ids) */
+  gear: Record<string, string>;
 }
 
 export const BASE_STATS: Stats = {
   maxHp: 6, speed: 5.2, accel: 22, dashPower: 9, swordDmg: 1, swordReach: 0.9, swordRate: 2.6,
   lineCut: 1, struggle: 1, reelResist: 0, pressureResist: 0, luck: 0, magnet: 1.2, armor: 0, biteHeal: 0, abilities: [],
-  maxMana: 20, manaRegen: 2.5, spellPower: 1, summonPower: 1, gadgetPower: 1, crit: 0.05, cdr: 0, poison: 0, skills: [], sets: {},
+  maxMana: 20, manaRegen: 2.5, spellPower: 1, summonPower: 1, gadgetPower: 1, crit: 0.05, cdr: 0, poison: 0, skills: [], sets: {}, gear: {},
 };
 
 /** an item instance placed (or loose) in the backpack */
@@ -81,7 +83,7 @@ export class Run {
   }
 
   stats(): Stats {
-    const base: Stats = { ...BASE_STATS, abilities: [...BASE_STATS.abilities], skills: [...BASE_STATS.skills], sets: { ...BASE_STATS.sets } };
+    const base: Stats = { ...BASE_STATS, abilities: [...BASE_STATS.abilities], skills: [...BASE_STATS.skills], sets: { ...BASE_STATS.sets }, gear: { ...BASE_STATS.gear } };
     return this.statFn ? this.statFn(base, this) : base;
   }
 

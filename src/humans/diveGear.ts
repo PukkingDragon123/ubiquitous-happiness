@@ -20,6 +20,7 @@ import { ellRing } from './rig';
 import type { HeadShape } from './head';
 import { band, nz, hh, metal } from './fabric';
 import { faceLayout } from './head';
+import { uw } from '../gfx/shaders/underwater';
 
 export interface DiveGear {
   mask: THREE.Object3D | null;
@@ -44,6 +45,8 @@ export function kitMat(key: string, w: number, h: number, paint: (x: number, y: 
   const mm = new THREE.MeshStandardMaterial({ map: tex, roughness: o.rough ?? 0.7, metalness: o.metal ?? 0, flatShading: true });
   if (o.emissive) { mm.emissive = new THREE.Color(0xffffff); mm.emissiveMap = tex; mm.emissiveIntensity = o.emissive; }
   if (o.transparent !== undefined) { mm.transparent = true; mm.opacity = o.transparent; mm.depthWrite = false; }
+  // underwater lighting + the PS1 vertex snap (does nothing above the surface)
+  if (o.transparent === undefined) uw(mm, { rim: 0.2 });
   mats.set(key, (m = mm));
   return m;
 }
@@ -221,6 +224,8 @@ function buildFins(L: Look, D: DiveKit, d: Dims, bones: Record<BoneName, THREE.B
     B.box([0, -d.L.ankle + 0.045 * s, 0.08 * fs], [0.11 * fs, 0.06 * s, 0.16 * fs], { x: 0, y: 0, w: 1, h: 0.12 });
     const m = new THREE.Mesh(B.build(), finTex(D.finCol, long));
     m.castShadow = true;
+    // twist the blades a little about the leg so the side view shows some of their area
+    m.rotation.z = side === 'L' ? 0.55 : -0.55;
     foot.add(m);
     out.fins.push(m); out.parts.push(m);
   }

@@ -124,6 +124,9 @@ export function makeBlobUniforms(rock: THREE.Texture | null): BlobUniforms {
  */
 export function patchBlob(mat: THREE.Material, U: BlobUniforms, o: { bend?: boolean; rock?: boolean; key?: string } = {}) {
   const bend = !!o.bend, rock = !!o.rock && !!U.uRockMap.value;
+  // idempotent: a material shared by several gear meshes is patched once
+  if (mat.userData.blobPatched) return mat;
+  mat.userData.blobPatched = true;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     prev?.call(mat, sh, r);

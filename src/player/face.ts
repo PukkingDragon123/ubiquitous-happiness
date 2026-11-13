@@ -21,7 +21,7 @@ export interface Face {
 }
 
 export const FACES: Record<string, Face> = {
-  brave: { eye: 'open', lid: 0.22, tilt: 0.55, low: 0.12, brow: 0, browTilt: 0.8, mouth: 'line', curve: -0.55, open: 0, blush: 0.6 },
+  brave: { eye: 'open', lid: 0.16, tilt: 0.35, low: 0.1, brow: 0, browTilt: 0.55, mouth: 'line', curve: -0.45, open: 0, blush: 0.7 },
   cool: { eye: 'open', lid: 0.42, tilt: 0.15, low: 0.18, brow: 0, browTilt: 0.35, mouth: 'smirk', curve: 0.3, open: 0, blush: 0.4 },
   happy: { eye: 'happy', lid: 0, tilt: 0, low: 0, brow: 1, browTilt: -0.3, mouth: 'smile', curve: 1, open: 0.35, blush: 1 },
   cheer: { eye: 'star', lid: 0, tilt: 0, low: 0, brow: 2, browTilt: -0.4, mouth: 'smile', curve: 1, open: 0.8, blush: 1, extra: 'sparkle' },
@@ -70,7 +70,7 @@ export class FacePainter {
     p.d.fill(0);
     // blush first (under everything)
     if (f.blush > 0) for (const s of [-1, 1]) {
-      const cx = 40 + s * 24, cy = 28;
+      const cx = 40 + s * 23, cy = 29;
       for (let y = cy - 3; y <= cy + 3; y++) for (let x = cx - 6; x <= cx + 6; x++) {
         const d = ((x + 0.5 - cx) / 6) ** 2 + ((y + 0.5 - cy) / 3.2) ** 2;
         if (d < 1 && (1 - d) * f.blush * 1.3 > bayer(x, y)) p.set(x, y, mix(BLUSH, SKIN, 0.25 + d * 0.3));
@@ -90,8 +90,8 @@ export class FacePainter {
 
   private eye(f: Face, s: number, kind: EyeKind, gx: number, gy: number, anim: number) {
     const p = this.px;
-    const cx = 40 + s * 17, cy = 18;
-    const rx = kind === 'wide' ? 6 : 5.2, ry = kind === 'wide' ? 7 : 6.3;
+    const cx = 40 + s * 14, cy = 17;
+    const rx = kind === 'wide' ? 7 : 6.2, ry = kind === 'wide' ? 8 : 7.4;
     const inner = -s; // direction toward the face centre
     // brows (drawn for every eye kind)
     {
@@ -130,7 +130,7 @@ export class FacePainter {
       for (let k = 0; k < 26; k++) { const a = k * 0.55 + anim * 1.5, r = k * 0.19; p.set(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r), LASH); }
     } else {
       // iris: dark glossy disc with a lighter lower crescent, a pupil, catchlights
-      const pr = (kind === 'wide' ? 2.4 : 3.6) * (f.pupil ?? 1);
+      const pr = (kind === 'wide' ? 2.8 : 4.3) * (f.pupil ?? 1);
       const ix = cx + gx, iy = cy + gy + 0.5;
       p.ellipse(ix, iy, pr, pr * 1.12, (nx, ny) => (ny > 0.35 ? IRIS2 : ny > -0.2 ? IRIS1 : IRIS0));
       p.ellipse(ix, iy - 0.3, pr * 0.5, pr * 0.55, IRIS0);
@@ -167,7 +167,7 @@ export class FacePainter {
 
   private mouth(f: Face) {
     const p = this.px;
-    const cx = 40, cy = 42, hw = 16;
+    const cx = 40, cy = 44, hw = 15;
     const lipY = (x: number) => { const k = (x - cx) / hw; return cy - f.curve * 4 * (k * k) + f.curve * 1.2; };
     const thick = (x: number) => (Math.abs(x - cx) < hw - 3 ? 2 : 1);
     if (f.mouth === 'o') {
@@ -209,7 +209,7 @@ export class FacePainter {
       p.set(x - 2, y + 2, '#1a4a7a'); p.set(x + 2, y + 2, '#1a4a7a'); p.set(x, y - 1, '#1a4a7a');
     }
     if (f.extra === 'tear') for (const s of [-1, 1]) {
-      const x = 40 + s * 17 + s * 3, y = 26;
+      const x = 40 + s * 14 + s * 4, y = 26;
       p.rect(x, y, 1, 3, '#7fd4ff'); p.set(x, y + 3, '#3a8ac8'); p.set(x, y, '#ffffff');
     }
     if (f.extra === 'anger') {

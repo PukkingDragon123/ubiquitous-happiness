@@ -5,6 +5,7 @@ import { Px, hex, mix, type RGB } from '../gfx/px';
 import { hash2, fbm } from '../core/math';
 import type { ItemDef } from '../game/items';
 import { EMIT_MASK } from './voxel';
+import { BUILD_PAINT } from './iconsBuild';
 
 type V2 = [number, number];
 
@@ -63,13 +64,13 @@ export const P = {
   tea: pal('#1a0a04', '#3a1a08', '#5e2e10', '#8a4a1c', '#b8702e', '#e0a050'),
 };
 
-const SHINY = { spec: 0.85, shin: 22, dither: 0.25, contrast: 1.3 };
-const GEMO = { spec: 1.1, shin: 30, dither: 0.12, contrast: 1.55 };
-const METAL = { metal: 0.65, spec: 0.7, shin: 18, dither: 0.3, contrast: 1.2 };
-const SOFT = { spec: 0.15, shin: 8, dither: 0.6 };
-const MATTE = { spec: 0.06, shin: 6, dither: 0.6 };
+export const SHINY = { spec: 0.85, shin: 22, dither: 0.25, contrast: 1.3 };
+export const GEMO = { spec: 1.1, shin: 30, dither: 0.12, contrast: 1.55 };
+export const METAL = { metal: 0.65, spec: 0.7, shin: 18, dither: 0.3, contrast: 1.2 };
+export const SOFT = { spec: 0.15, shin: 8, dither: 0.6 };
+export const MATTE = { spec: 0.06, shin: 6, dither: 0.6 };
 
-const rustify = (c: Ic, g: number, rustM: number, seed: number, amount = 0.5) => {
+export const rustify = (c: Ic, g: number, rustM: number, seed: number, amount = 0.5) => {
   c.recolor((x, y) => fbm(x / 5 + seed, y / 5, 3, seed) > 1 - amount * 0.9, rustM, g);
   c.speckle(0.08, seed + 1, (_x, _y, i) => { c.L[i] -= 0.2; }, g);
 };
@@ -817,7 +818,7 @@ export function paintIcon(d: ItemDef, level = 1): HTMLCanvasElement {
   const { w, h } = SIZE(d);
   let seed = 0; for (const ch of d.id) seed = (seed * 31 + ch.charCodeAt(0)) | 0;
   const c = new Ic(w, h, Math.abs(seed) % 997);
-  const fn = PAINT[d.id];
+  const fn = PAINT[d.id] ?? BUILD_PAINT[d.id];
   if (fn) fn(c);
   else c.dome(w / 2, h / 2, w / 2 - 3, h / 2 - 3, c.mat(P.stone));
   // keep art inside the item's own cells (L-shapes)

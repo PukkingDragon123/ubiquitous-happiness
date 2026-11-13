@@ -204,11 +204,14 @@ export class Px {
     ctx.putImageData(img, 0, 0);
     return cv;
   }
-  /** a colour texture: nearest magnification (crisp pixels), trilinear minification (no shimmer at distance) */
+  /**
+   * a colour texture: nearest magnification (crisp pixels) and nearest-within-mip minification blended across
+   * mip levels (crisp texels at the ~1:1 density of the low-res retro render, no shimmer at distance)
+   */
   texture(o: { repeat?: boolean; mip?: boolean; srgb?: boolean } = {}): THREE.CanvasTexture {
     const t = new THREE.CanvasTexture(this.canvas());
     t.magFilter = THREE.NearestFilter;
-    t.minFilter = o.mip === false ? THREE.NearestFilter : THREE.LinearMipmapLinearFilter;
+    t.minFilter = o.mip === false ? THREE.NearestFilter : THREE.NearestMipmapLinearFilter;
     t.generateMipmaps = o.mip !== false;
     t.colorSpace = o.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
     t.anisotropy = 4;
@@ -228,7 +231,7 @@ export class Px {
       d[i] = (-dx / l * 0.5 + 0.5) * 255; d[i + 1] = (dy / l * 0.5 + 0.5) * 255; d[i + 2] = (1 / l * 0.5 + 0.5) * 255; d[i + 3] = 255;
     }
     const t = new THREE.DataTexture(d, w, h, THREE.RGBAFormat);
-    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapLinearFilter; t.generateMipmaps = true;
     if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.needsUpdate = true;
     return t;

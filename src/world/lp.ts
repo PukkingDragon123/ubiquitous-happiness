@@ -84,12 +84,13 @@ export class Soup {
         const u0 = U(k), u1 = k2 === 0 ? r.u0 + (r.u1 - r.u0) * Math.min(1, uw) : U(k2);
         const a = rings[j][k], b = rings[j][k2], c = rings[j + 1][k2], d = rings[j + 1][k];
         const alt = (j + k) & 1;
+        // wound so a ring running counter-clockwise (seen from the tip) faces outward
         if (alt) {
-          this.tri(a, b, c, [u0, V(j)], [u1, V(j)], [u1, V(j + 1)], sa, sa, sb, fa, fa, fb);
-          this.tri(a, c, d, [u0, V(j)], [u1, V(j + 1)], [u0, V(j + 1)], sa, sb, sb, fa, fb, fb);
+          this.tri(a, c, b, [u0, V(j)], [u1, V(j + 1)], [u1, V(j)], sa, sb, sa, fa, fb, fa);
+          this.tri(a, d, c, [u0, V(j)], [u0, V(j + 1)], [u1, V(j + 1)], sa, sb, sb, fa, fb, fb);
         } else {
-          this.tri(a, b, d, [u0, V(j)], [u1, V(j)], [u0, V(j + 1)], sa, sa, sb, fa, fa, fb);
-          this.tri(b, c, d, [u1, V(j)], [u1, V(j + 1)], [u0, V(j + 1)], sa, sb, sb, fa, fb, fb);
+          this.tri(a, d, b, [u0, V(j)], [u0, V(j + 1)], [u1, V(j)], sa, sb, sa, fa, fb, fa);
+          this.tri(b, d, c, [u1, V(j)], [u0, V(j + 1)], [u1, V(j + 1)], sa, sb, sb, fa, fb, fb);
         }
       }
     }
@@ -97,14 +98,14 @@ export class Soup {
       const j = R - 1, ft = o.flex?.(R) ?? o.flex?.(j), fa = o.flex?.(j), st = o.shade?.(R) ?? 1, sa = o.shade?.(j) ?? 1;
       for (let k = 0; k < n; k++) {
         const k2 = (k + 1) % n;
-        this.tri(rings[j][k], rings[j][k2], o.tip, [U(k), V(j)], [U(k2) || r.u1, V(j)], [(U(k) + (U(k2) || r.u1)) / 2, r.v1], sa, sa, st, fa, fa, ft);
+        this.tri(rings[j][k2], rings[j][k], o.tip, [U(k2) || r.u1, V(j)], [U(k), V(j)], [(U(k) + (U(k2) || r.u1)) / 2, r.v1], sa, sa, st, fa, fa, ft);
       }
     }
     if (o.base) {
       const fa = o.flex?.(0);
       for (let k = 0; k < n; k++) {
         const k2 = (k + 1) % n;
-        this.tri(rings[0][k2], rings[0][k], o.base, [U(k2), r.v0], [U(k), r.v0], [(U(k) + U(k2)) / 2, r.v0], 0.7, 0.7, 0.6, fa, fa, fa);
+        this.tri(rings[0][k], rings[0][k2], o.base, [U(k), r.v0], [U(k2), r.v0], [(U(k) + U(k2)) / 2, r.v0], 0.7, 0.7, 0.6, fa, fa, fa);
       }
     }
     return this;
@@ -267,22 +268,43 @@ export class Soup {
   /** non-indexed BufferGeometry with flat face normals */
   geometry(o: { sway?: boolean; glow?: boolean } = {}): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
-    const n = this.count;
-    const pos = new Float32Array(this.P), nor = new Float32Array(n * 3);
-    for (let f = 0; f + 2 < n; f += 3) {
-      const ax = pos[f * 3], ay = pos[f * 3 + 1], az = pos[f * 3 + 2];
-      const ux = pos[f * 3 + 3] - ax, uy = pos[f * 3 + 4] - ay, uz = pos[f * 3 + 5] - az;
-      const vx = pos[f * 3 + 6] - ax, vy = pos[f * 3 + 7] - ay, vz = pos[f * 3 + 8] - az;
+    // drop degenerate faces (zero-area triangles make NaN normals, and NaN pixels poison the bloom chain)
+    const keep: number[] = [];
+    const P = this.P;
+    for (let f = 0; f + 2 < this.count; f += 3) {
+      const ax = P[f * 3], ay = P[f * 3 + 1], az = P[f * 3 + 2];
+      const ux = P[f * 3 + 3] - ax, uy = P[f * 3 + 4] - ay, uz = P[f * 3 + 5] - az;
+      const vx = P[f * 3 + 6] - ax, vy = P[f * 3 + 7] - ay, vz = P[f * 3 + 8] - az;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      if (nx * nx + ny * ny + nz * nz > 1e-14 && Number.isFinite(nx + ny + nz)) keep.push(f);
+    }
+    const n = keep.length * 3;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2), col = new Float32Array(n * 3);
+    const sw = new Float32Array(n * 4), gl = new Float32Array(n);
+    let o3 = 0;
+    for (const f of keep) {
+      for (let k = 0; k < 3; k++) {
+        const i = f + k, d = o3 + k;
+        pos[d * 3] = P[i * 3]; pos[d * 3 + 1] = P[i * 3 + 1]; pos[d * 3 + 2] = P[i * 3 + 2];
+        uv[d * 2] = this.UV[i * 2]; uv[d * 2 + 1] = this.UV[i * 2 + 1];
+        col[d * 3] = this.C[i * 3]; col[d * 3 + 1] = this.C[i * 3 + 1]; col[d * 3 + 2] = this.C[i * 3 + 2];
+        sw[d * 4] = this.S[i * 4]; sw[d * 4 + 1] = this.S[i * 4 + 1]; sw[d * 4 + 2] = this.S[i * 4 + 2]; sw[d * 4 + 3] = this.S[i * 4 + 3];
+        gl[d] = this.G[i];
+      }
+      const ax = pos[o3 * 3], ay = pos[o3 * 3 + 1], az = pos[o3 * 3 + 2];
+      const ux = pos[o3 * 3 + 3] - ax, uy = pos[o3 * 3 + 4] - ay, uz = pos[o3 * 3 + 5] - az;
+      const vx = pos[o3 * 3 + 6] - ax, vy = pos[o3 * 3 + 7] - ay, vz = pos[o3 * 3 + 8] - az;
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
       const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l;
-      for (let k = 0; k < 3; k++) { nor[(f + k) * 3] = nx; nor[(f + k) * 3 + 1] = ny; nor[(f + k) * 3 + 2] = nz; }
+      for (let k = 0; k < 3; k++) { nor[(o3 + k) * 3] = nx; nor[(o3 + k) * 3 + 1] = ny; nor[(o3 + k) * 3 + 2] = nz; }
+      o3 += 3;
     }
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.UV, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.C, 3));
-    if (o.sway !== false) g.setAttribute('aSway', new THREE.Float32BufferAttribute(this.S, 4));
-    if (o.glow !== false) g.setAttribute('aGlow', new THREE.Float32BufferAttribute(this.G, 1));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    if (o.sway !== false) g.setAttribute('aSway', new THREE.BufferAttribute(sw, 4));
+    if (o.glow !== false) g.setAttribute('aGlow', new THREE.BufferAttribute(gl, 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;

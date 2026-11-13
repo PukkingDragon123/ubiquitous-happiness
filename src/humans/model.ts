@@ -54,15 +54,17 @@ export function modelParts(arch: Archetype, seed: number, scars: readonly string
 /** a soft self-lit fill so faces and clothes stay readable against the bright sky / under hat brims
  * (x: whole body, y: extra on the face) — the game is read from the side at a distance */
 export const FILL = { value: new THREE.Vector2(0.16, 0.32) };
+/** divers live in dim blue water: a stronger self-lit fill keeps dark neoprene readable */
+export const DIVE_FILL = { value: new THREE.Vector2(0.3, 0.5) };
 
 /** per-instance material: page texture + a face flush (angry red / strain) driven by uFlush */
-export function bodyMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial & { userData: { flush: { value: THREE.Vector3 } } } {
+export function bodyMaterial(tex: THREE.Texture, fill = FILL): THREE.MeshStandardMaterial & { userData: { flush: { value: THREE.Vector3 } } } {
   const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.78, metalness: 0, alphaTest: 0.5, vertexColors: true, flatShading: DETAIL.low });
   const flush = { value: new THREE.Vector3(0, 0, 0) };
   m.userData.flush = flush;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uFlush = flush;
-    sh.uniforms.uFill = FILL;
+    sh.uniforms.uFill = fill;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aFlush; varying float vFlush;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFlush = aFlush;');
@@ -88,7 +90,7 @@ export interface Model {
 export function buildModel(arch: Archetype, seed: number, scars: readonly string[] = []): Model {
   const parts = modelParts(arch, seed, scars);
   const { look, dims, body } = parts;
-  const mat = bodyMaterial(parts.tex);
+  const mat = bodyMaterial(parts.tex, look.dive ? DIVE_FILL : FILL);
   const { bones, byName, skeleton } = makeSkeleton(dims);
   const mesh = new THREE.SkinnedMesh(body.geometry, mat);
   mesh.add(bones[BI.hips]);

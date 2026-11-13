@@ -8,6 +8,7 @@
 //   - section: the cross-section wall, sampled by world x / y.
 import * as THREE from 'three';
 import { uw, UW } from '../gfx/shaders/underwater';
+import { retro } from '../gfx/retro';
 
 export const ENV = {
   /** player push: x, y, radius, strength */
@@ -17,9 +18,24 @@ export const ENV = {
   /** steady current lean (m per m of flex) */
   uCurrent: { value: 0.25 },
   uGlowK: { value: 1 },
+  /** sand height change texture (SandField) + box: x0, dx, n, enabled */
+  uSand: { value: null as THREE.Texture | null },
+  uSandBox: { value: new THREE.Vector4(0, 1, 1, 0) },
 };
 
-const SWAY_V = /* glsl */ `
+const SAND_GLSL = /* glsl */ `
+uniform sampler2D uSand; uniform vec4 uSandBox;
+float sandDY(float x, float z) {
+  if (uSandBox.w < 0.5) return 0.0;
+  float f = clamp((x - uSandBox.x) / uSandBox.y, 0.0, uSandBox.z - 1.001);
+  float i = floor(f), t = f - i;
+  float a = texture2D(uSand, vec2((i + 0.5) / uSandBox.z, 0.5)).r;
+  float b = texture2D(uSand, vec2((i + 1.5) / uSandBox.z, 0.5)).r;
+  return mix(a, b, t) * smoothstep(-2.6, -0.6, z);
+}
+`;
+
+const SWAY_V = SAND_GLSL + /* glsl */ `
 attribute vec4 aSway; attribute float aGlow;
 uniform vec4 uPush; uniform vec4 uBlast; uniform float uCurrent; uniform float uEnvT;
 varying float vGlow; varying float vGlowPh;
@@ -49,6 +65,8 @@ const SWAY_BODY = /* glsl */ `
     off.xy += (bd / max(bl, 0.001)) * ring * 2.5;
     transformed += off * f;
   }
+  // plants rooted near the gameplay plane ride the sand
+  if (dot(aSway.xyz, aSway.xyz) > 0.0) transformed.y += sandDY(aSway.x, aSway.z);
 }
 `;
 const GLOW_F_DECL = /* glsl */ `varying float vGlow; varying float vGlowPh; uniform float uGlowK; uniform float uEnvT;`;
@@ -77,17 +95,17 @@ function addSwayGlow(m: THREE.MeshStandardMaterial, sway: boolean) {
 /** alpha-cut, double-sided, swaying plants on an atlas */
 export function floraMaterial(map: THREE.Texture, o: { sss?: [number, number, number]; rough?: number } = {}) {
   const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, flatShading: true, side: THREE.DoubleSide, alphaTest: 0.5, roughness: o.rough ?? 0.75, metalness: 0 });
-  uw(m, { sss: o.sss ?? [0.7, 0.9, 0.5], sssK: 0.55, caustics: 0.9 });
+  uw(m, { sss: o.sss ?? [0.7, 0.9, 0.5], sssK: 0.55, caustics: 0.9, retro: false });
   addSwayGlow(m, true);
-  return m;
+  return retro(m);
 }
 
 /** opaque UV-mapped props (wrecks, crates, buoys, clams) on an atlas; sway optional (sails, flags, chains) */
 export function propMaterial(map: THREE.Texture, o: { sway?: boolean; rough?: number; metal?: number; side?: THREE.Side; alphaTest?: number } = {}) {
   const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, flatShading: true, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0, side: o.side ?? THREE.FrontSide, alphaTest: o.alphaTest ?? 0 });
-  uw(m, { caustics: 1 });
+  uw(m, { caustics: 1, retro: false });
   addSwayGlow(m, o.sway ?? false);
-  return m;
+  return retro(m);
 }
 
 const TRI_V = /* glsl */ `varying vec3 vTW; varying vec3 vTN;`;
@@ -103,7 +121,7 @@ const TRI_VB = /* glsl */ `
 /** sculpted rock: world-space triplanar pixel tile (32 px/m), vertex colour = tint x cavity x crust */
 export function rockMaterial(tile: THREE.Texture, o: { scale?: number; glow?: boolean } = {}) {
   const m = new THREE.MeshStandardMaterial({ map: tile, vertexColors: true, flatShading: true, roughness: 0.93, metalness: 0 });
-  uw(m, { caustics: 0.9 });
+  uw(m, { caustics: 0.9, retro: false });
   const sc = (o.scale ?? 0.5).toFixed(3);
   patch(m, '|rock' + sc, (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V).replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
@@ -114,18 +132,21 @@ export function rockMaterial(tile: THREE.Texture, o: { scale?: number; glow?: bo
         diffuseColor *= texture2D(map, tuv * ${sc});`);
   });
   if (o.glow) addSwayGlow(m, false);
-  return m;
+  return retro(m);
 }
 
 /** seabed: sand tile from above, rock tile on slopes (world space) */
-export function groundMaterial(sand: THREE.Texture, rock: THREE.Texture, o: { sandScale?: number; rockScale?: number; slope?: [number, number] } = {}) {
+export function groundMaterial(sand: THREE.Texture, rock: THREE.Texture, o: { sandScale?: number; rockScale?: number; slope?: [number, number]; dynamic?: boolean } = {}) {
   const m = new THREE.MeshStandardMaterial({ map: sand, vertexColors: true, flatShading: true, roughness: 0.96, metalness: 0 });
-  uw(m, { caustics: 1 });
+  uw(m, { caustics: 1, retro: false });
   const ss = (o.sandScale ?? 0.36).toFixed(3), rs = (o.rockScale ?? 0.5).toFixed(3);
   const [s0, s1] = o.slope ?? [0.55, 0.75];
-  patch(m, '|ground' + ss + rs, (sh) => {
+  patch(m, '|ground' + ss + rs + (o.dynamic ? 'd' : ''), (sh) => {
     sh.uniforms.uRockMap = { value: rock };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V).replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
+    if (o.dynamic) Object.assign(sh.uniforms, { uSand: ENV.uSand, uSandBox: ENV.uSandBox });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V + (o.dynamic ? SAND_GLSL + 'attribute float aSandW;' : ''))
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + (o.dynamic ? 'transformed.y += sandDY(position.x, position.z) * aSandW;' : ''))
+      .replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uRockMap;\n' + TRI_V)
       .replace('#include <map_fragment>', `
         vec3 gn = normalize(cross(dFdx(vTW), dFdy(vTW)));
@@ -135,19 +156,22 @@ export function groundMaterial(sand: THREE.Texture, rock: THREE.Texture, o: { sa
         float rk = 1.0 - smoothstep(${s0.toFixed(2)}, ${s1.toFixed(2)}, abs(gn.y));
         diffuseColor *= mix(sc, rc, step(0.5, rk));`);
   });
-  return m;
+  return retro(m);
 }
 
 /** the cross-section wall: tile sampled by world (x, y) */
-export function sectionMaterial(tile: THREE.Texture, scale = 0.5) {
-  const m = new THREE.MeshStandardMaterial({ map: tile, vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
-  uw(m, { caustics: 0.4 });
-  patch(m, '|section' + scale, (sh) => {
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V).replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
+export function sectionMaterial(tile: THREE.Texture, scale = 0.5, dynamic = false) {
+  const m = new THREE.MeshStandardMaterial({ map: tile, vertexColors: true, flatShading: false, roughness: 0.95, metalness: 0 });
+  uw(m, { caustics: 0.4, retro: false });
+  patch(m, '|section' + scale + (dynamic ? 'd' : ''), (sh) => {
+    if (dynamic) Object.assign(sh.uniforms, { uSand: ENV.uSand, uSandBox: ENV.uSandBox });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + TRI_V + (dynamic ? SAND_GLSL + 'attribute float aSandW;' : ''))
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + (dynamic ? 'transformed.y += sandDY(position.x, 0.0) * aSandW;' : ''))
+      .replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + TRI_V)
       .replace('#include <map_fragment>', `diffuseColor *= texture2D(map, vec2(vTW.x, vTW.y) * ${scale.toFixed(3)});`);
   });
-  return m;
+  return retro(m);
 }
 
 /** unlit additive sheet (light shafts, glints, beams): depthWrite off, fades with vertex alpha in colour */
