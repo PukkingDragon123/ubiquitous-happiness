@@ -7,8 +7,8 @@
 //   const h = audio.loop('lp_reel'); h.set(vol, rate); h.stop()
 //   audio.music('mu_abyss')                crossfade
 //   audio.setUnderwater(0..1)              muffles everything (0 = dry air)
-const SFX_IDS = import.meta.glob('/src/assets/sfx/*.ogg', { query: '?url', import: 'default', eager: false });
-const MUSIC_IDS = import.meta.glob('/src/assets/music/*.ogg', { query: '?url', import: 'default', eager: false });
+const SFX_IDS = import.meta.glob('/src/assets/sfx/*.ogg', { query: '?url', import: 'default', eager: true });
+const MUSIC_IDS = import.meta.glob('/src/assets/music/*.ogg', { query: '?url', import: 'default', eager: true });
 const idsOf = (g: Record<string, unknown>) => Object.keys(g).map((k) => k.split('/').pop()!.replace('.ogg', ''));
 export const SFX_LIST = idsOf(SFX_IDS);
 export const MUSIC_LIST = idsOf(MUSIC_IDS);
@@ -60,8 +60,8 @@ class AudioEngine {
 
   private url(id: string): Promise<string> | null {
     const k1 = `/src/assets/sfx/${id}.ogg`, k2 = `/src/assets/music/${id}.ogg`;
-    const f = (SFX_IDS[k1] || MUSIC_IDS[k2]) as (() => Promise<string>) | undefined;
-    return f ? f() : null;
+    const u = (SFX_IDS[k1] || MUSIC_IDS[k2]) as string | undefined;
+    return u ? Promise.resolve(u) : null;
   }
 
   load(id: string): Promise<AudioBuffer | null> | AudioBuffer | null {
