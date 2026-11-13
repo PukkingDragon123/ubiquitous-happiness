@@ -504,7 +504,7 @@ export class RunScreen implements Screen {
     if (!this.killer) {
       const b = board(this.world);
       const by = b.lastHurt.by;
-      if (this.ender === 'sunk') this.killer = { name: 'The salvage crews', title: 'sank your wreck' };
+      if (this.ender === 'sunk') this.killer = { name: 'The salvage crews', title: `wave ${globalWave(this.areaIdx, this.wavesCleared + 1)}` };
       else if (by && b.time - b.lastHurt.t < 6) this.killer = { name: by.callsign, title: by.nemesisId ? META.nemeses.find((n) => n.id === by.nemesisId)?.title : undefined, nemesis: !!by.nemesisId };
       else this.killer = { name: 'The deep', title: 'it happens' };
     }

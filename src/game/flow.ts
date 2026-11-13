@@ -93,7 +93,7 @@ class ResultCard implements Screen {
     yy += ui.lh('small') + 4;
     // who did it
     if (!win && r.killer) {
-      ui.text('SLAIN BY', cx, yy, { font: 'small', color: '#ffb0a0', outline: '#140a06', align: 'center' });
+      ui.text(r.outcome === 'sunk' ? 'SUNK BY' : 'SLAIN BY', cx, yy, { font: 'small', color: '#ffb0a0', outline: '#140a06', align: 'center' });
       yy += ui.lh('small');
       ui.text(r.killer.name.toUpperCase(), cx, yy, { font: 'title', color: '#ffffff', color2: '#ffd860', outline: '#000', align: 'center' });
       yy += ui.lh('title');
@@ -111,18 +111,21 @@ class ResultCard implements Screen {
     for (const id of ids) { const c = counts.find((q) => q[0] === id); if (c) c[1]++; else counts.push([id, 1]); }
     ui.text(win ? 'BROUGHT HOME' : ids.length ? 'LOST AT SEA' : 'NOTHING LOST', x + 12, yy, { font: 'small', color: win ? '#ffe07a' : '#ff9a8a', outline: '#140a06' });
     yy += ui.lh('small') + 1;
+    // the items fill the space between here and the tally line (laid out from the bottom up)
+    const tallyY = y + h - 26 - ui.lh('small') - 3;
     const cell = 16, cols = Math.floor((w - 24) / cell);
-    counts.slice(0, cols * 2).forEach(([id, n], i) => {
+    const rows = Math.max(1, Math.min(3, Math.floor((tallyY - 2 - yy) / cell)));
+    const fit = counts.length > cols * rows ? cols * rows - 1 : counts.length;
+    counts.slice(0, fit).forEach(([id, n], i) => {
       const ix = x + 12 + (i % cols) * cell, iy = yy + Math.floor(i / cols) * cell;
       ui.item(id, ix, iy, 14, 14, 1, win ? 1 : 0.75);
       if (n > 1) ui.text(String(n), ix + 15, iy + 8, { font: 'small', color: '#ffffff', outline: '#000', align: 'right' });
     });
-    if (counts.length > cols * 2) ui.text(`+${counts.length - cols * 2} more`, x + w - 12, yy + cell * 2, { font: 'small', color: '#d8ccc0', outline: '#140a06', align: 'right' });
-    yy += Math.min(2, Math.ceil(counts.length / cols)) * cell + 4;
+    if (fit < counts.length) { const i = fit; ui.text(`+${counts.length - fit}`, x + 12 + (i % cols) * cell + 1, yy + Math.floor(i / cols) * cell + 4, { font: 'small', color: '#ffe07a', outline: '#140a06' }); }
     // tally
     const tl = r.tally;
     const line = `${tl.kills} KILLS · ${tl.waves} WAVES · ${tl.extracted} SENT HOME · ${Math.floor(tl.time / 60)}m${String(Math.floor(tl.time % 60)).padStart(2, '0')}`;
-    ui.text(line, cx, Math.min(yy, y + h - 34), { font: 'small', color: '#c8bca8', outline: '#140a06', align: 'center' });
+    ui.text(line, cx, tallyY, { font: 'small', color: '#c8bca8', outline: '#140a06', align: 'center' });
     const ok = this.t > 0.8 && ui.button('res:ok', win ? 'HOME SWEET HOME' : 'BACK TO THE HIDEOUT', x + 20, y + h - 26, w - 40, 18, { style: win ? 'gold' : 'wood', key: 'Enter' });
     return ok || (this.t > 0.8 && (this.game.input.keyHit('Escape') || this.game.input.keyHit('Space')));
   }
