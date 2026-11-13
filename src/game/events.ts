@@ -211,7 +211,7 @@ class Bottle implements Entity {
   update(dt: number) { this.t += dt; this.obj.position.y = this.y + Math.sin(this.t * 1.5) * 0.08; this.obj.rotation.z = 1.2 + Math.sin(this.t) * 0.1; }
   onBite(w: World) {
     this.alive = false;
-    w.sfx('cork', this.x, 0.8); w.sfx('page1', this.x, 0.7);
+    w.sfx('pop_b', this.x, 0.8); w.sfx('page1', this.x, 0.7);
     const notes = ['"Whoever finds this: the old salt keeps his good tackle in the blue box."', '"Day 41. The blobfish took my bait AGAIN."', '"Treasure lies where the current bends twice."'];
     w.text.pop(notes[Math.floor(w.rng.next() * notes.length)], this.x, this.y + 1.2, 'body', { size: 0.24, life: 4, vy: 0.08 });
     w.drop(this.x, this.y, { item: rollItem(w, 'any') });

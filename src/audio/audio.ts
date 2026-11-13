@@ -29,7 +29,8 @@ class AudioEngine {
 
   constructor() {
     for (const id of SFX_LIST) {
-      const m = id.match(/^(.*?)(\d+)$/);
+      // variant groups: bite1..3 -> 'bite', coin_a..d -> 'coin', splash_s1..5 -> 'splash_s'
+      const m = id.match(/^(.*?)(\d+)$/) || id.match(/^(.*?)_([a-d])$/);
       if (m) { const g = this.groups.get(m[1]) || []; g.push(id); this.groups.set(m[1], g); }
     }
   }

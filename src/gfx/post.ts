@@ -77,7 +77,8 @@ float linDepth(float d) { float z = d * 2.0 - 1.0; return (2.0 * uNear * uFar) /
 float shaft(vec3 p) {
   // project onto the plane perpendicular to the (refracted) sun: shafts are lines along uSunDir
   vec2 q = vec2(p.x - p.y * uSunDir.x / uSunDir.y, p.z - p.y * uSunDir.z / uSunDir.y);
-  float n = fbm2(vec2(q.x * 0.33 + uTime * 0.035, q.y * 0.12));
+  vec2 sp = vec2(q.x * 0.33 + uTime * 0.035, q.y * 0.12);
+  float n = vnoise(sp) * 0.57 + vnoise(sp * 2.03 + 1.7) * 0.29 + vnoise(sp * 4.1 + 9.2) * 0.14;
   float n2 = vnoise(vec2(q.x * 1.4 - uTime * 0.11, q.y * 0.5));
   float s = smoothstep(0.5, 0.8, n) * (0.55 + 0.45 * n2);
   // brighter under crests: sample the surface where the shaft entered
@@ -142,15 +143,15 @@ void main() {
       float L = min(path, 70.0);
       float acc = 0.0;
       float jitter = nhash(uv * 731.7 + fract(uTime * 7.0));
-      for (int i = 0; i < 10; i++) {
-        float s = t0 + (float(i) + jitter) / 10.0 * L;
+      for (int i = 0; i < 7; i++) {
+        float s = t0 + (float(i) + jitter) / 7.0 * L;
         vec3 p = C + dir * s;
         float dep = uWaterY - p.y;
         if (dep < 0.0) continue;
         float att = exp(-dep * 0.06) * exp(-max(0.0, s - t0 - uClear) * 0.03);
         acc += shaft(p) * att;
       }
-      col += uRayCol * acc / 10.0 * min(L, 40.0) * 0.045 * uRays * mix(vec3(1.0), uScatterTop * 1.6, 0.35);
+      col += uRayCol * acc / 7.0 * min(L, 40.0) * 0.045 * uRays * mix(vec3(1.0), uScatterTop * 1.6, 0.35);
     }
   }
   fragColor = vec4(col, 1.0);
