@@ -16,7 +16,7 @@ import { Px, ramp, hex, mix, worley, pxNoise } from '../gfx/px';
 import { uw } from '../gfx/shaders/underwater';
 import { clamp01, smooth, hash2, TAU, damp } from '../core/math';
 import { SB_N, NS, RINGS, prof, bodyPoint, FACE_C, addSB, sbAngle, makeBlobUniforms, patchBlob, type BlobUniforms } from './blobShape';
-import { FacePainter, FACES, TH, PT, PB } from './face';
+import { FacePainter, FACES, TH, PT, PB, eyeState } from './face';
 import { Ribbon } from './ribbon';
 import { buildWeapon, buildArmor, buildHat, buildBack, DEFAULT_GEAR, WEAPON_LEN, type BlobGear, type GearPart, type WeaponId } from './gear';
 
@@ -31,81 +31,131 @@ export const BLOB_ANIMS: BlobAnim[] = ['idle', 'swim', 'waddle', 'gearUp', 'chee
 const ONE_SHOT: Partial<Record<BlobAnim, number>> = { hurt: 0.55, gearUp: 2.8 };
 
 // ------------------------------------------------------------------ texture page (128 x 128, PS1 density)
-const PAGE = 128;
+const PAGE = 256;
 const R_BODY = { x: 0, y: 0, w: 1, h: 0.5 };
 const R_NOSE = { x: 0, y: 0.5, w: 0.5, h: 0.25 };
 const R_FIN = { x: 0.5, y: 0.5, w: 0.25, h: 0.25 };
 const R_TAIL = { x: 0.75, y: 0.5, w: 0.25, h: 0.25 };
 
 let pageCache: { map: THREE.Texture; rock: THREE.Texture } | null = null;
+// Real blobfish skin, painted as clean indexed pixel art (no dithering, no noise fill): translucent rose flesh,
+// greyer on the back and paler on the belly, soft mottled blotches and freckles, the neck crease and sagging
+// jowl folds with a lit lip above each crease, gill slits, the lateral line of pores, faint veins on the flanks
+// and sparse wet glints along the back. The flat-shaded facets do the lighting; the page only carries the skin.
+const SKIN = ['#4a2232', '#71364a', '#975062', '#bb6f7e', '#d68e96', '#e7abab', '#f2c6bf', '#fae1d6'].map((c) => hex(c));
+const NOSE_SK = ['#55202f', '#813348', '#a94c60', '#ca6b7a', '#e08b93', '#eda9a9', '#f7c9c1', '#fde4da'].map((c) => hex(c));
+const FIN_SK = ['#5a2436', '#8a4258', '#b8687a', '#d88d98', '#ecaeb0', '#f8d0c8'].map((c) => hex(c));
 function paintPage() {
   if (pageCache) return pageCache;
   const p = new Px(PAGE, PAGE);
-  // soft rose jelly: a hue-shifted ramp (cool plum shadows, warm cream lights), low-contrast mottling,
-  // freckles on the back, a pale belly, sagging jowl folds and a little gill slit
-  const skin = ramp(['#7e2648', '#b44c70', '#de7e98', '#f4a8b8', '#ffcfd6', '#fff0ea'], 9, 0.6);
-  const bh = PAGE * R_BODY.h;
-  for (let y = 0; y < bh; y++) for (let x = 0; x < PAGE; x++) {
-    const u = x / PAGE, t = 1 - (y + 0.5) / bh;
-    const up = -Math.cos(u * TAU);
-    const mott = pxNoise(x, y, 14, 3, 5, PAGE);
-    const [f1, , cid] = worley(x, y, 8, 3, PAGE);
-    const freckle = up > 0.3 && cid > 0.62 && f1 < 1.3 ? 1 : 0;
-    let v = 0.6 - up * 0.08 + (mott - 0.5) * 0.16 - freckle * 0.17;
-    v += smooth(-0.2, -0.85, up) * 0.13;                     // pale belly
-    v -= smooth(0.35, 0.0, t) * 0.12;                         // tail a touch deeper
-    // jowl folds: a couple of soft creases curving under the front cheeks
-    for (const k of [0, 1]) {
-      const ft = 0.8 + k * 0.07, fu = Math.abs(u - 0.5) - 0.38 + k * 0.03;
-      if (Math.abs(t - ft - fu * fu * 2) < 0.012 && up < -0.15) v -= 0.16;
-    }
-    // gill slit: a short dark crescent on each flank
-    for (const s of [0.27, 0.73]) { const dx = (u - s) * PAGE, dy = (t - 0.6) * bh; if (Math.abs(dx * dx * 0.08 + dy) < 0.8 && Math.abs(dx) < 4) v -= 0.3; }
-    p.set(x, y, skin(v, x, y));
+  const bw = PAGE, bh = PAGE * R_BODY.h;
+  const idx = new Int8Array(bw * bh);
+  const I = (x: number, y: number) => ((y * bw) + (((x % bw) + bw) % bw));
+  const add = (x: number, y: number, d: number) => { if (y >= 0 && y < bh) idx[I(Math.round(x), Math.round(y))] += d; };
+  const setI = (x: number, y: number, v: number) => { if (y >= 0 && y < bh) idx[I(Math.round(x), Math.round(y))] = v; };
+  // base tone + blotches
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    const u = x / bw, t = 1 - (y + 0.5) / bh, up = -Math.cos(u * TAU);
+    let v = 4.2 - up * 0.5;                                // greyer back, paler belly
+    if (up < -0.55) v += 0.6;
+    v -= smooth(0.3, 0.02, t) * 1.3;                        // the tail stalk is deeper, more translucent
+    v += smooth(0.9, 1, t) * 0.4;                           // the face is a touch paler
+    // organic blotches on the back and flanks (domain-warped cells, two clean tones)
+    const wx = x + Math.sin(y * 0.13) * 5, wy = y + Math.sin(x * 0.11 + 1.7) * 4;
+    const [f1, , id] = worley(wx, wy, 22, 5, 0);
+    if (up > -0.35 && id < 0.42 && f1 < 6.5 + id * 6) v -= 1;
+    const [g1, , gid] = worley(x, y, 9, 11, 0);
+    if (up > -0.1 && gid < 0.16 && g1 < 1.4) v -= 1.6;       // freckles
+    idx[y * bw + x] = Math.round(v);
   }
-  // nose: warmer, deeper rose with a glossy painted highlight along its top and a few pores
-  const nr = ramp(['#8e3054', '#c4567a', '#e8889e', '#ffb8c6', '#ffe8ec'], 8, 0.6);
+  // neck crease (t = 0.6) and a shorter fold behind it: dark groove with a lit lip on the head side
+  const crease = (t0: number, amp: number, minUp: number, dark: number) => {
+    for (let x = 0; x < bw; x++) {
+      const u = x / bw, up = -Math.cos(u * TAU);
+      if (up < minUp) continue;
+      const y = (1 - t0) * bh + Math.sin(u * TAU * 2) * amp;
+      setI(x, y, dark); add(x, y - 1, 1);
+    }
+  };
+  crease(0.6, 1.5, -0.45, 2);
+  crease(0.645, 1, 0.25, 3);
+  // jowl folds: curved creases round the lower cheeks, dipping toward the sides
+  for (const [t0, dark] of [[0.8, 3], [0.87, 3], [0.925, 4]] as const) for (let x = 0; x < bw; x++) {
+    const u = x / bw, up = -Math.cos(u * TAU);
+    if (up > -0.05) continue;
+    const y = (1 - t0) * bh + Math.pow(Math.sin(u * TAU), 2) * 4;
+    setI(x, y, dark); add(x, y - 1, 1);
+  }
+  // gill slits: a bowed dark slit low on each flank with a pale rim behind it
+  for (const s of [0.23, 0.77]) for (let k = -7; k <= 7; k++) {
+    const x = s * bw + k, y = (1 - 0.665) * bh - (k * k) * 0.05;
+    setI(x, y, 1); setI(x, y + 1, 6);
+  }
+  // lateral line: a dotted row of pores along each flank from the gill to the tail
+  for (const s of [0.29, 0.71]) for (let y = Math.round((1 - 0.62) * bh); y < (1 - 0.12) * bh; y += 3) {
+    const x = s * bw + Math.sin(y * 0.2) * 1.2;
+    setI(x, y, 3);
+  }
+  // faint veins on the lower flanks: short wandering lines
+  for (let i = 0; i < 10; i++) {
+    let x = (i % 2 ? 0.17 : 0.83) * bw + (hash2(i, 1, 3) - 0.5) * 20, y = (0.25 + hash2(i, 2, 3) * 0.4) * bh;
+    let a = (hash2(i, 3, 3) - 0.5) * 2;
+    for (let n = 0; n < 14; n++) { add(x, y, -1); a += (hash2(n, i, 9) - 0.5) * 0.8; x += Math.cos(a); y += Math.sin(a) * 0.6; }
+  }
+  // pores clustered on the face and cheeks
+  for (let y = 0; y < (1 - 0.82) * bh; y += 3) for (let x = 0; x < bw; x += 3) {
+    if (hash2(x, y, 21) < 0.2) add(x + Math.floor(hash2(x, y, 22) * 2), y + 1, -1);
+  }
+  // wet glints along the back (where the key light catches the slime)
+  for (let y = 4; y < bh - 8; y += 7) for (let x = 0; x < bw; x += 9) {
+    const u = x / bw, up = -Math.cos(u * TAU);
+    if (up < 0.55 || hash2(x, y, 31) > 0.3) continue;
+    const gx = x + Math.floor(hash2(x, y, 32) * 5);
+    setI(gx, y, 7); setI(gx + 1, y, 7); setI(gx, y + 1, 6);
+  }
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) p.set(x, y, SKIN[Math.max(0, Math.min(7, idx[y * bw + x]))]);
+
+  // nose: redder toward the tip, a glossy streak along the top, pores
   const nx0 = 0, ny0 = PAGE * 0.5, nw = PAGE * 0.5, nh = PAGE * 0.25;
   for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
     const u = x / nw, t = 1 - (y + 0.5) / nh, top = Math.cos(u * TAU);
-    const m = pxNoise(x, y, 7, 3, 11, 0);
-    const pore = hash2(x, y, 4) > 0.975 && top < 0.6 ? 1 : 0;
-    let v = 0.5 + top * 0.16 + (m - 0.5) * 0.12 - pore * 0.14 + smooth(0.2, 0.9, t) * 0.06;
-    if (top > 0.82 && t > 0.45 && t < 0.85) v += 0.22; // gloss streak
-    p.set(nx0 + x, ny0 + y, nr(v, x, y));
+    let v = 3.9 + top * 0.5 - smooth(0.55, 1, t) * 0.9;
+    const [f1, , id] = worley(x + Math.sin(y * 0.3) * 2, y, 12, 41, 0);
+    if (id < 0.3 && f1 < 4) v -= 1;
+    if (hash2(x >> 1, y >> 1, 43) < 0.07 && top < 0.7) v -= 1;
+    if (top > 0.9 && t > 0.35 && t < 0.7 && hash2(x >> 1, y >> 1, 47) < 0.35) v = 6;
+    p.set(nx0 + x, ny0 + y, NOSE_SK[Math.max(0, Math.min(7, Math.round(v)))]);
   }
-  // pectoral fin: translucent pink membrane with darker rays fanning from the base, scalloped edge
-  const fr = ramp(['#8a3452', '#c86888', '#f0a0b6', '#ffd4de'], 5);
+  // pectoral fin: translucent membrane, rays fanning from the base, a dark scalloped rim (alpha-cut outside)
   const fx0 = PAGE * 0.5, fy0 = PAGE * 0.5, fw = PAGE * 0.25, fh = PAGE * 0.25;
-  for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
-    const u = x / (fw - 1), v = y / (fh - 1);
-    const ray = Math.abs(Math.sin(v * Math.PI * 5 + u * 0.5)) < 0.22 ? 1 : 0;
-    const edge = u + Math.pow(Math.abs(v - 0.5) * 2, 2.5) * 0.45 + Math.abs(Math.sin(v * Math.PI * 5)) * 0.06;
-    if (edge > 1.0) continue;
-    const c = fr(0.78 - u * 0.25 - ray * 0.3, x, y);
-    p.set(fx0 + x, fy0 + y, edge > 0.9 ? mix(c, hex('#6a2040'), 0.55) : c);
-  }
-  // tail fin: same membrane, a deeper rim
-  const tx0 = PAGE * 0.75, ty0 = PAGE * 0.5;
-  for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
-    const u = x / (fw - 1), v = y / (fh - 1);
-    const ray = Math.abs(Math.sin((v - 0.5) * Math.PI * 6 / (0.4 + u))) < 0.25 ? 1 : 0;
-    const notch = Math.abs(v - 0.5) < 0.12 * u ? 0.25 : 0;
-    const edge = u + notch;
-    if (edge > 1.0) continue;
-    const c = fr(0.75 - u * 0.3 - ray * 0.28, x, y);
-    p.set(tx0 + x, ty0 + y, edge > 0.88 ? mix(c, hex('#6a2040'), 0.55) : c);
-  }
+  const fin = (x0: number, y0: number, tail: boolean) => {
+    for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
+      const u = x / (fw - 1), v = y / (fh - 1);
+      const ang = (v - 0.5) * (tail ? 6 : 5) / (0.35 + u);
+      const ray = Math.abs(Math.sin(ang * Math.PI)) < 0.2 && u > 0.08;
+      const scal = Math.abs(Math.sin(v * Math.PI * (tail ? 6 : 5))) * 0.07;
+      const notch = tail ? (Math.abs(v - 0.5) < 0.1 * u ? 0.12 : 0) : 0;
+      const edge = u + Math.pow(Math.abs(v - 0.5) * 2, 2.4) * (tail ? 0.2 : 0.45) + scal + notch;
+      if (edge > 1) continue;
+      let k = 4 - u * 1.4;
+      if (ray) k -= 1.2;
+      if (edge > 0.93) k = 1;
+      else if (u < 0.07) k = 2;
+      p.set(x0 + x, y0 + y, FIN_SK[Math.max(0, Math.min(5, Math.round(k)))]);
+    }
+  };
+  fin(fx0, fy0, false);
+  fin(PAGE * 0.75, PAGE * 0.5, true);
   const map = p.texture({ mip: false });
-  // rock skin for Rock Body: grey granite with flecks + cracks
+  // rock skin for Rock Body: granite blocks with clean cracks
   const rk = new Px(64, 64);
-  const rr = ramp(['#2e2c2a', '#4f4b46', '#77716a', '#a39b90', '#cfc6b8'], 6);
+  const RK = ['#2e2c2a', '#4f4b46', '#77716a', '#a39b90', '#cfc6b8'].map((c) => hex(c));
   rk.fill((x, y) => {
-    const [f1, f2] = worley(x, y, 10, 7, 64);
-    const crack = f2 - f1 < 1.2 ? 1 : 0;
-    const n = pxNoise(x, y, 6, 4, 3, 64);
-    const fleck = hash2(x, y, 3) > 0.93 ? 0.25 : 0;
-    return rr(0.55 + (n - 0.5) * 0.6 + fleck - crack * 0.45, x, y);
+    const [f1, f2, id] = worley(x, y, 12, 7, 64);
+    if (f2 - f1 < 1.1) return RK[0];
+    let k = 2 + Math.round(id * 1.6 - f1 / 14);
+    if (f2 - f1 < 2.2) k -= 1;
+    return RK[Math.max(1, Math.min(4, k))];
   });
   pageCache = { map, rock: rk.texture({ repeat: true }) };
   return pageCache;
@@ -170,7 +220,7 @@ function buildFace(body: THREE.BufferGeometry): { geo: THREE.BufferGeometry; hit
 function buildNose(base: THREE.Vector3): THREE.BufferGeometry {
   // a droopy bulb: from inside the forehead, forward, then hanging down over the mouth
   const L = new Loft();
-  const a = base.clone().add(new THREE.Vector3(-0.1, 0.0, 0)), b = base.clone().add(new THREE.Vector3(0.15, 0.01, 0)), c = base.clone().add(new THREE.Vector3(0.12, -0.16, 0));
+  const a = base.clone().add(new THREE.Vector3(-0.12, 0.03, 0)), b = base.clone().add(new THREE.Vector3(0.16, 0.0, 0)), c = base.clone().add(new THREE.Vector3(0.1, -0.24, 0));
   const path: V3[] = [];
   const N = 7;
   for (let i = 0; i <= N; i++) {
@@ -180,15 +230,15 @@ function buildNose(base: THREE.Vector3): THREE.BufferGeometry {
     path.push([x, y, 0]);
   }
   const r = (s: number) => {
-    const bulb = 0.062 + 0.052 * smooth(0.1, 0.78, s);
+    const bulb = 0.075 + 0.085 * smooth(0.15, 0.8, s);
     const cap = s > 0.72 ? Math.sqrt(Math.max(0, 1 - ((s - 0.72) / 0.28) ** 2)) : 1;
     return Math.max(0.006, bulb * cap);
   };
-  L.tube(path, r, 8, R_NOSE, 1, { capStart: false, capEnd: true });
+  L.tube(path, r, 7, R_NOSE, 1, { capStart: false, capEnd: true });
   const g = L.build();
   // widen the bulb sideways a touch (a blobfish nose is broader than tall)
   const pa = g.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pa.count; i++) pa.setZ(i, pa.getZ(i) * 1.18);
+  for (let i = 0; i < pa.count; i++) pa.setZ(i, pa.getZ(i) * 1.28);
   g.computeVertexNormals();
   return addSB(g);
 }
@@ -210,6 +260,44 @@ function finGeo(len: number, wid: number, cup: number, reg: { x: number; y: numb
   return L.build();
 }
 
+// ------------------------------------------------------------------ eyes
+// Round, simple, real: a glossy black bead (faceted icosahedron) sunk in a fleshy socket rim, a tiny fixed
+// catchlight, and an upper eyelid (a skin dome) that rolls down over the bead to blink or squint.
+interface EyeRig { root: THREE.Group; ball: THREE.Mesh; glint: THREE.Mesh; lid: THREE.Mesh; r: number }
+const EYE_R = 0.066;
+let eyeMatCache: { ball: THREE.Material; skin: THREE.Material; glint: THREE.Material } | null = null;
+function eyeMaterials() {
+  if (eyeMatCache) return eyeMatCache;
+  const ball = uw(new THREE.MeshPhysicalMaterial({ color: '#0c0a10', flatShading: true, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }), { caustics: 0.15, rim: 0.2, rimCol: [0.55, 0.7, 0.9] });
+  const skin = uw(new THREE.MeshPhysicalMaterial({ color: '#d99a9e', flatShading: true, roughness: 0.72, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1, 0.86, 0.86] });
+  const glint = new THREE.MeshBasicMaterial({ color: '#fff8f0' });
+  eyeMatCache = { ball, skin, glint };
+  return eyeMatCache;
+}
+function buildEye(M: { ball: THREE.Material; skin: THREE.Material; glint: THREE.Material }): EyeRig {
+  const r = EYE_R;
+  const root = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), M.ball);
+  ball.position.z = -r * 0.3;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 1.0, r * 0.34, 4, 9), M.skin);
+  rim.position.z = -r * 0.12;
+  const glint = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 0.2, 0), M.glint);
+  glint.position.set(-r * 0.28, r * 0.36, r * 0.58);
+  // upper lid: a skin dome hinged on the eye's horizontal axis
+  const lid = new THREE.Mesh(new THREE.SphereGeometry(r * 1.1, 9, 3, 0, Math.PI * 2, 0, Math.PI / 2), M.skin);
+  lid.position.z = -r * 0.3;
+  for (const m of [ball, rim, lid]) { m.castShadow = true; m.receiveShadow = true; }
+  root.add(ball, rim, glint, lid);
+  return { root, ball, glint, lid, r };
+}
+/** open 0..1 rolls the lid down; scale bulges the bead; gaze nudges the bead (the catchlight stays put) */
+function setEye(e: EyeRig, open: number, scale: number, gx: number, gy: number) {
+  e.lid.rotation.x = -1.32 + (1 - open) * (Math.PI / 2 + 1.32);
+  e.ball.scale.setScalar(scale);
+  e.ball.rotation.set(-gy * 0.25, gx * 0.25, 0);
+  e.glint.visible = open > 0.35;
+}
+
 // ------------------------------------------------------------------ pose (procedural animation)
 interface Pose { y: number; roll: number; pitch: number; yaw: number; sq: number; finR: number; finL: number; finAmp: number; tail: number; wpn: number | null; expr: string | null; bloat: number; flash: number; lift: number }
 const ZERO: Pose = { y: 0, roll: 0, pitch: 0, yaw: 0, sq: 0, finR: 0, finL: 0, finAmp: 1, tail: 0, wpn: null, expr: null, bloat: 0, flash: 0, lift: 0 };
@@ -229,6 +317,8 @@ export class BlobModel {
   finL: THREE.Mesh; finR: THREE.Mesh; tail: THREE.Mesh; nose: THREE.Mesh;
   /** eye markers (body space, follow the soft body) */
   eyes: { g: THREE.Object3D; rest: THREE.Vector3; ang: number }[] = [];
+  private eyeRigs: EyeRig[] = [];
+  private eyeOpen = 1;
   mouthPos = new THREE.Vector3();
   look = new THREE.Vector2(1, 0);
   facingSign = 1;
@@ -274,7 +364,7 @@ export class BlobModel {
   constructor(gear: BlobGear = {}) {
     const pg = paintPage();
     this.U = makeBlobUniforms(pg.rock);
-    this.bodyMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, roughness: 0.42, clearcoat: 0.6, clearcoatRoughness: 0.3, sheen: 0.35, sheenColor: new THREE.Color('#ffd0dc'), sheenRoughness: 0.5 }), { sss: [1.0, 0.35, 0.42], sssK: 0.6, rim: 0.32, rimCol: [1.0, 0.85, 0.9] });
+    this.bodyMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.72, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1.0, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1.0, 0.86, 0.86] });
     patchBlob(this.bodyMat, this.U, { bend: true, rock: true });
     const bodyGeo = buildBody();
     const body = new THREE.Mesh(bodyGeo, this.bodyMat);
@@ -292,28 +382,34 @@ export class BlobModel {
     this.body.add(fm);
     // the nose
     const nose = face.hit(0, 3, -0.02);
-    const noseMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, roughness: 0.32, clearcoat: 0.8, clearcoatRoughness: 0.2 }), { sss: [1.0, 0.4, 0.45], sssK: 0.6, rim: 0.3, rimCol: [1, 0.85, 0.9] });
+    const noseMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.68, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1.0, 0.42, 0.42], sssK: 0.6, rim: 0.14, rimCol: [1, 0.86, 0.86] });
     patchBlob(noseMat, this.U, { bend: true, rock: true, key: 'nose' });
     this.nose = new THREE.Mesh(buildNose(nose), noseMat);
     this.nose.castShadow = true;
     this.body.add(this.nose);
     // eyes + mouth anchor points
-    for (const th of [26, -26]) {
-      const p = face.hit(th, 17, 0.01);
+    const eyeMats = eyeMaterials();
+    for (const th of [30, -30]) {
+      const p = face.hit(th, 19, 0);
       const g = new THREE.Object3D(); g.position.copy(p);
+      const n = p.clone().sub(FACE_C).normalize();
+      const eye = buildEye(eyeMats);
+      eye.root.lookAt(n);
+      g.add(eye.root);
       this.body.add(g);
       this.eyes.push({ g, rest: p.clone(), ang: sbAngle(p) });
+      this.eyeRigs.push(eye);
     }
-    this.mouthPos.copy(face.hit(12, -36, 0.01));
+    this.mouthPos.copy(face.hit(0, -36, 0.01));
     // fins + tail
-    const finMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, roughness: 0.45, clearcoat: 0.4, side: THREE.DoubleSide, alphaTest: 0.5 }), { sss: [1.0, 0.4, 0.5], sssK: 0.8 });
+    const finMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.75, side: THREE.DoubleSide, alphaTest: 0.5 }), { sss: [1.0, 0.45, 0.45], sssK: 0.9 });
     patchBlob(finMat, this.U, { rock: true, key: 'fin' });
-    this.finR = new THREE.Mesh(finGeo(0.27, 0.22, 0.04, R_FIN), finMat);
-    this.finL = new THREE.Mesh(finGeo(0.27, 0.22, 0.04, R_FIN), finMat);
-    this.finR.position.set(...bodyPoint(0.56, 0.19, -0.02)); this.finL.position.set(...bodyPoint(0.56, 0.81, -0.02));
+    this.finR = new THREE.Mesh(finGeo(0.33, 0.3, 0.05, R_FIN), finMat);
+    this.finL = new THREE.Mesh(finGeo(0.33, 0.3, 0.05, R_FIN), finMat);
+    this.finR.position.set(...bodyPoint(0.6, 0.18, -0.03)); this.finL.position.set(...bodyPoint(0.6, 0.82, -0.03));
     this.finR.castShadow = this.finL.castShadow = true;
-    this.tail = new THREE.Mesh(finGeo(0.3, 0.4, 0.0, R_TAIL), finMat);
-    this.tail.position.set(-0.6, 0.03, 0);
+    this.tail = new THREE.Mesh(finGeo(0.26, 0.34, 0.0, R_TAIL), finMat);
+    this.tail.position.set(-0.6, 0.04, 0);
     this.tail.castShadow = true;
     this.body.add(this.finR, this.finL, this.tail);
     this.headAnchor = new THREE.Vector3(...bodyPoint(0.8, 0.5, 0));
@@ -494,6 +590,9 @@ export class BlobModel {
     }
     // the face looks a touch toward the viewer: forward gaze pulls the pupils to the near side of each eye
     this.face.draw(S.expr ?? this.expr, -gx * 0.9 + 0.35, gy, this.blink, o.time);
+    const es = eyeState(S.expr ?? this.expr, this.blink);
+    this.eyeOpen += (es.open - this.eyeOpen) * (1 - Math.exp(-dt * 30));
+    for (const e of this.eyeRigs) setEye(e, this.eyeOpen, es.scale, gx, gy);
     // fins + tail
     const flap = o.time * (6 + o.swim * 10);
     const fa = S.finAmp;

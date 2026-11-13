@@ -20,6 +20,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   waves: () => import('./dev/preview_waves'),
   builds: () => import('./dev/preview_builds'),
   retro: () => import('./dev/preview_retro'),
+  blobstudio: () => import('./dev/preview_blobstudio'),
 };
 
 async function boot() {
