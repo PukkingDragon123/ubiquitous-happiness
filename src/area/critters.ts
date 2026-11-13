@@ -113,8 +113,8 @@ function slugGeo(sk: { u0: number; v0: number; u1: number; v1: number }, v: 'A' 
   // mantle rim / foot skirt
   s.color(...(v === 'B' ? accent : body.map((c) => c * 0.8) as [number, number, number]));
   const rim: V3[] = [];
-  for (let k = 0; k <= 12; k++) { const a = (k / 12) * TAU; rim.push([Math.cos(a) * 0.105, 0.006, Math.sin(a) * 0.04]); }
-  for (let k = 0; k < 12; k++) { const a = rim[k], b = rim[k + 1], ai: V3 = [a[0] * 0.75, 0.014, a[2] * 0.7], bi: V3 = [b[0] * 0.75, 0.014, b[2] * 0.7]; s.quad(a, b, bi, ai, sk); s.quad(a, ai, bi, b, sk); }
+  for (let k = 0; k <= 8; k++) { const a = (k / 8) * TAU; rim.push([Math.cos(a) * 0.105, 0.006, Math.sin(a) * 0.04]); }
+  for (let k = 0; k < 8; k++) { const a = rim[k], b = rim[k + 1], ai: V3 = [a[0] * 0.75, 0.014, a[2] * 0.7], bi: V3 = [b[0] * 0.75, 0.014, b[2] * 0.7]; s.quad(a, b, bi, ai, sk); s.quad(a, ai, bi, b, sk); }
   // rhinophores
   s.color(...(v === 'C' ? body : accent));
   for (const side of [-1, 1]) { const g = s.count; s.lathe([[0.007, 0], [0.005, 0.02], [0, 0.03]], 4, sk); s.transformSince(g, mat4(0.07, 0.025, side * 0.012, 1, 1, 1, 0, 0, -0.35)); }
@@ -123,10 +123,10 @@ function slugGeo(sk: { u0: number; v0: number; u1: number; v1: number }, v: 'A' 
     for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU, g = s.count; s.lathe([[0.005, 0], [0, 0.028]], 3, sk); s.transformSince(g, mat4(-0.065 + Math.cos(a) * 0.008, 0.025, Math.sin(a) * 0.01, 1, 1, 1, a, 0, 0.5)); }
   } else {
     // cerata: two rows of finger-like papillae, body colour at the root, accent at the tip
-    for (let k = 0; k < 7; k++) for (const side of [-1, 1]) {
-      const x = -0.075 + k * 0.022, h = 0.03 + Math.sin((k / 6) * Math.PI) * 0.018, g = s.count;
-      s.color(...(v === 'A' ? body : rgb01('#f0e8f0', 1.2))).lathe([[0.007, 0], [0.006, h * 0.55]], 4, sk);
-      s.color(...accent).lathe([[0.006, h * 0.55], [0.004, h * 0.85], [0, h]], 4, sk);
+    for (let k = 0; k < 5; k++) for (const side of [-1, 1]) {
+      const x = -0.07 + k * 0.03, h = 0.032 + Math.sin((k / 4) * Math.PI) * 0.018, g = s.count;
+      s.color(...(v === 'A' ? body : rgb01('#f0e8f0', 1.2))).lathe([[0.008, 0], [0.007, h * 0.55]], 3, sk);
+      s.color(...accent).lathe([[0.007, h * 0.55], [0, h]], 3, sk);
       s.transformSince(g, mat4(x, 0.02, side * 0.013, 1, 1, 1, 0, side * 0.45, 0));
     }
   }
@@ -141,12 +141,12 @@ interface Bug {
   path?: { p: V3[]; u: number; dir: number };
 }
 
-const MIX: Record<string, { goby: number; crab: number; shrimp: number; slug: [number, number, number]; gobyCol: string[]; crabCol: string[]; shrimpCol: string[]; shrimpGlow?: boolean }> = {
-  reef: { goby: 26, crab: 14, shrimp: 24, slug: [8, 9, 6], gobyCol: ['#f0c830', '#9ad0f0', '#d8b080', '#f08a50'], crabCol: ['#e8703a', '#d84a3a', '#f0a050'], shrimpCol: ['#e8402a', '#f06040'] },
-  kelp: { goby: 16, crab: 20, shrimp: 18, slug: [9, 5, 7], gobyCol: ['#c08048', '#9a9050', '#d0a070'], crabCol: ['#c8402a', '#a83a3a', '#d06a3a'], shrimpCol: ['#c86a4a', '#e0907a'] },
-  graveyard: { goby: 10, crab: 22, shrimp: 18, slug: [4, 0, 6], gobyCol: ['#a8a08a', '#8a8a78'], crabCol: ['#8a6a5a', '#a0704a', '#7a7a6a'], shrimpCol: ['#d8c8b0', '#c8b090'] },
-  arctic: { goby: 8, crab: 16, shrimp: 24, slug: [0, 0, 14], gobyCol: ['#8a7a6a', '#a06a5a'], crabCol: ['#e07a40', '#d86a3a'], shrimpCol: ['#f0a0a0', '#e88a8a'] },
-  abyss: { goby: 0, crab: 14, shrimp: 22, slug: [0, 0, 0], gobyCol: ['#888'], crabCol: ['#e8e4dc', '#d8d0c8'], shrimpCol: ['#d02a2a', '#b81e2a'], shrimpGlow: true },
+const MIX: Record<string, { goby: number; crab: number; shrimp: number; slug: [number, number, number]; gobyCol: string[]; crabCol: string[]; shrimpCol: string[]; shrimpGlow?: boolean; bright?: number }> = {
+  reef: { goby: 44, crab: 26, shrimp: 40, slug: [12, 12, 9], gobyCol: ['#f0c830', '#9ad0f0', '#d8b080', '#f08a50'], crabCol: ['#e8703a', '#d84a3a', '#f0a050'], shrimpCol: ['#e8402a', '#f06040'] },
+  kelp: { goby: 26, crab: 34, shrimp: 30, slug: [13, 7, 10], gobyCol: ['#c08048', '#9a9050', '#d0a070'], crabCol: ['#c8402a', '#a83a3a', '#d06a3a'], shrimpCol: ['#c86a4a', '#e0907a'] },
+  graveyard: { goby: 18, crab: 34, shrimp: 30, slug: [6, 0, 9], gobyCol: ['#a8a08a', '#8a8a78'], crabCol: ['#8a6a5a', '#a0704a', '#7a7a6a'], shrimpCol: ['#d8c8b0', '#c8b090'] },
+  arctic: { goby: 14, crab: 26, shrimp: 38, slug: [0, 0, 20], gobyCol: ['#8a7a6a', '#a06a5a'], crabCol: ['#e07a40', '#d86a3a'], shrimpCol: ['#f0a0a0', '#e88a8a'] },
+  abyss: { goby: 0, crab: 22, shrimp: 34, slug: [0, 0, 0], gobyCol: ['#888'], crabCol: ['#fffaf0', '#f0e8e0'], shrimpCol: ['#ff4a3a', '#e83a4a'], shrimpGlow: true, bright: 1.7 },
 };
 
 export class Critters {
@@ -175,7 +175,7 @@ export class Critters {
     if (mix.crab) {
       const h = herd(crabGeo(sk), mix.crab, 'crabs');
       let i = 0;
-      spread(mix.crab, (x) => { const z = r.range(-2.2, 1.5); this.add(h, i, 'crab', x, z, r.range(0.9, 1.3)); h.color(i, rgb01(r.pick(mix.crabCol))); i++; });
+      spread(mix.crab, (x) => { const z = r.range(-2.2, 1.5); this.add(h, i, 'crab', x, z, r.range(0.9, 1.3)); h.color(i, rgb01(r.pick(mix.crabCol), mix.bright ?? 1)); i++; });
     }
     if (mix.shrimp) {
       const h = herd(shrimpGeo(sk, !!mix.shrimpGlow), mix.shrimp, 'shrimp');
@@ -185,7 +185,7 @@ export class Critters {
       while (i < mix.shrimp) {
         const t = tops.length && r.chance(0.7) ? r.pick(tops) : null;
         const cx = t ? t.x + r.sign() * t.r * 0.9 : r.range(sh.X0 + 6, sh.X1 - 6), cz = t ? t.z + r.range(0.2, 0.8) : r.range(-1.5, 1);
-        for (let k = 0; k < r.int(3, 5) && i < mix.shrimp; k++, i++) { this.add(h, i, 'shrimp', cx + r.range(-0.5, 0.5), cz + r.range(-0.3, 0.3), r.range(1.0, 1.3)); h.color(i, rgb01(r.pick(mix.shrimpCol))); }
+        for (let k = 0; k < r.int(3, 5) && i < mix.shrimp; k++, i++) { this.add(h, i, 'shrimp', cx + r.range(-0.5, 0.5), cz + r.range(-0.3, 0.3), r.range(1.0, 1.3)); h.color(i, rgb01(r.pick(mix.shrimpCol), mix.bright ?? 1)); }
       }
     }
     // nudibranchs creep over the rocks by the plane: paths ray-cast onto the rock surfaces

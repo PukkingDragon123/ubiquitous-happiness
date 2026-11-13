@@ -25,9 +25,10 @@ function fin(s: Soup, a: V3, b: V3, c: V3) { s.tri(a, b, c, [0, 0], [1, 0], [1, 
 function lanternBody(sk: UVRect) {
   const s = new Soup();
   const f = s.count;
-  s.color(0.5, 0.58, 0.72).tube([[-0.14, 0, 0], [-0.08, 0.004, 0], [-0.01, 0.008, 0], [0.06, 0.008, 0], [0.12, 0.004, 0], [0.16, -0.004, 0]], (t) => [0.02, 0.038, 0.052, 0.055, 0.046, 0.024][Math.min(5, Math.round(t * 5))], 6, sk, { base: true, tip: true, shade: (t) => 0.8 + t * 0.3 });
+  s.glow(0.3).color(0.5, 0.58, 0.72).tube([[-0.14, 0, 0], [-0.08, 0.004, 0], [-0.01, 0.008, 0], [0.06, 0.008, 0], [0.12, 0.004, 0], [0.16, -0.004, 0]], (t) => [0.02, 0.038, 0.052, 0.055, 0.046, 0.024][Math.min(5, Math.round(t * 5))], 6, sk, { base: true, tip: true, shade: (t) => 0.8 + t * 0.3 });
   s.transformSince(f, mat4(0, 0, 0, 1, 1, 0.72));
-  s.color(1.1, 1.18, 1.3).tube([[-0.1, -0.022, 0], [0.1, -0.026, 0]], () => 0.02, 4, sk, { shade: () => 1.1 });   // silver belly keel
+  s.glow(0.45).color(1.1, 1.18, 1.3).tube([[-0.1, -0.022, 0], [0.1, -0.026, 0]], () => 0.02, 4, sk, { shade: () => 1.1 });   // silver belly keel
+  s.glow(0);
   s.color(0.04, 0.04, 0.06);
   for (const side of [-1, 1]) s.box([0.105, 0.0, side > 0 ? 0.03 : -0.042], [0.03, 0.03, 0.012], sk);          // big eyes
   s.color(0.25, 0.3, 0.42);
@@ -147,8 +148,8 @@ export class Deep {
     for (let i = 0; i < nP; i++) {
       const x = r.range(sh.X0 + 8, sh.X1 - 8), z = i < 6 ? r.range(-2.4, 0.9) : r.range(-7, -3.5);
       this.pods.push({ i, x, y: scen.heightAt(x, z), z, hx: x, v: r.range(0.08, 0.16), dir: r.sign(), t: r.range(0, 5), ph: r.range(0, 10), hunker: 0, s: r.range(1.0, 1.45), walk: r.chance(0.5) });
-      this.podB.color(i, rgb01(r.pick(['#b8a8c0', '#c8b8b8', '#a89cb8']), 1.15));
-      this.podL.color(i, rgb01('#b0a0b0'));
+      this.podB.color(i, rgb01(r.pick(['#c8b0d0', '#d8c0c0', '#b8a8d0']), 1.7));
+      this.podL.color(i, rgb01('#c0b0c0', 1.5));
     }
     for (const h of [this.body, this.tail, this.podB, this.podL]) this.group.add(h.mesh);
     // ---- vents: tube-worm crowds and heat haze

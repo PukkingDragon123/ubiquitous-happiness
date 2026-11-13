@@ -263,12 +263,12 @@ function iceCave(scen: Scenery, group: THREE.Group) {
   const loftTo = S.count;
   // a frost cornice humped along the top, lumpy ice boulders heaped at the feet
   const lumps = scen.shapes('boulder');
-  for (let j = 3; j <= NA - 3; j += 3) {
+  for (let j = 4; j <= NA - 4; j += 4) {
     const p = path[j], u = j / NA, foot = Math.pow(Math.abs(u - 0.5) * 2, 2.4), rv = 0.75 + foot * 1.3;
     const a = path[Math.max(0, j - 1)], b = path[Math.min(NA, j + 1)], tl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
     const nx = -(b[1] - a[1]) / tl, ny = (b[0] - a[0]) / tl;
     if (ny < 0.3) continue;
-    S.append(r.pick(lumps), mat4(p[0] + nx * rv * 0.5, p[1] + ny * rv * 0.5 - 0.05, r.range(-0.4, 0.4), r.range(0.7, 1.0), r.range(0.3, 0.45), r.range(1.0, 1.3), r.range(0, TAU)));
+    S.append(r.pick(lumps), mat4(p[0] + nx * rv * 0.35, p[1] + ny * rv * 0.35, r.range(-0.3, 0.3), r.range(0.6, 0.8), r.range(0.4, 0.55), r.range(0.9, 1.1), r.range(0, TAU)));
   }
   const corniceTo = S.count;
   for (const side of [-1, 1]) for (let k = 0; k < 4; k++) S.append(r.pick(lumps), mat4(side * (half + r.range(-0.6, 1.8)), -0.3, r.range(-2, 2.2), r.range(0.6, 1.3), r.range(0.5, 1.1), r.range(0.6, 1.3), r.range(0, TAU)));
