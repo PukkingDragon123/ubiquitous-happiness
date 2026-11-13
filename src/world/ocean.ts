@@ -156,8 +156,9 @@ export class Ocean {
       for (let k = 0; k < nk; k++) {
         const x = rng.range(x0, x1), z = rng.chance(0.25) ? rng.range(1, 2.6) : rng.range(-22, -1);
         const y = this.heightAt(x, z);
-        const maxH = Math.max(2, (-y - 0.8) / 10);
-        sv.set(rng.range(0.8, 1.4), Math.min(maxH, rng.range(0.5, 1.4)), 1);
+        // kelp reaches toward the light but never pierces the surface
+        const maxH = Math.max(0.15, (-y - 1.4) / 10);
+        sv.set(rng.range(0.8, 1.4), Math.min(maxH, rng.range(0.45, 1.25)), 1);
         m4.compose(pv.set(x, y - 0.1, z), q.setFromEuler(e.set(0, rng.range(-0.8, 0.8), 0)), sv);
         km.setMatrixAt(k, m4);
       }

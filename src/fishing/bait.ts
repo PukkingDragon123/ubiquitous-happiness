@@ -168,7 +168,7 @@ export function buildBobber(): THREE.Group {
     const shade = 0.75 + (x / 16) * 0.4;
     return mix([0, 0, 0], base, shade) as [number, number, number];
   }));
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.075, 18, 14), uw(new THREE.MeshStandardMaterial({ map: st, roughness: 0.3, clearcoat: 1 } as THREE.MeshStandardMaterialParameters)));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.075, 18, 14), uw(new THREE.MeshPhysicalMaterial({ map: st, roughness: 0.3, clearcoat: 1 })));
   ball.castShadow = true;
   const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 6), new THREE.MeshStandardMaterial({ color: '#f4f2ea' }));
   stick.position.y = 0.1;

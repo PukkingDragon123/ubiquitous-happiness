@@ -326,7 +326,7 @@ export class Angler implements Entity {
     // pull on the fish: along the line, reduced by wraps around rocks and the reel-resist stat
     const k = L.n - 2;
     const dx = L.px[k] - mouth.x, dy = L.py[k] - mouth.y, dl = Math.hypot(dx, dy) || 1;
-    const pull = L.tensionFish * (1 - st.reelResist) * (p.rock > 0.5 ? 0.15 : 1);
+    const pull = Math.min(16, L.tensionFish * 0.55) * (1 - st.reelResist) * (p.rock > 0.5 ? 0.15 : 1);
     p.applyForce(dx / dl * pull, dy / dl * pull);
     if (p.hook) { p.hook.pullX = L.px[k]; p.hook.pullY = L.py[k]; p.hook.tension = pull; }
     // jerk: tapping space while hooked yanks back against the line

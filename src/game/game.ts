@@ -9,6 +9,7 @@ import { Post, POST } from '../gfx/post';
 import { UW } from '../gfx/shaders/underwater';
 import { audio } from '../audio/audio';
 import { Px } from '../gfx/px';
+import { textSprite, STYLES } from '../ui/text';
 
 export interface Screen {
   name: string;
@@ -50,6 +51,7 @@ export class Game {
   private curCam = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
   private curSprite: THREE.Sprite;
   private curTex: Record<string, THREE.Texture> = {};
+  private pauseSign!: THREE.Sprite;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -66,6 +68,9 @@ export class Game {
     this.curTex = makeCursors();
     this.curSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.curTex.normal, transparent: true, depthTest: false }));
     this.curScene.add(this.curSprite);
+    this.pauseSign = textSprite('PAUSED\nEsc to resume · M for menu', STYLES.title, 64);
+    this.pauseSign.visible = false;
+    this.curScene.add(this.pauseSign);
     addEventListener('resize', () => this.resize());
     this.resize();
     const unlock = () => audio.unlock();
@@ -127,6 +132,12 @@ export class Game {
       POST.uFlash.value.w *= Math.exp(-dt * 9);
       this.shake.amp *= Math.exp(-dt * 7); this.shake.t += dt;
       const s = this.screen;
+      // Esc pauses the dive: the world freezes under a floating pixel sign
+      if (!this.modal && s?.name === 'dive' && this.input.hit('pause')) { this.paused = !this.paused; audio.play(this.paused ? 'k_open1' : 'k_close1', { vol: 0.5, dry: true }); }
+      if (this.paused && s?.name === 'dive' && this.input.keyHit('KeyM')) { this.paused = false; this.go('menu', { mode: 'menu' }); }
+      if (this.paused && s?.name !== 'dive') this.paused = false;
+      this.pauseSign.visible = this.paused;
+      this.pauseSign.position.set(this.w / 2, this.h / 2 + Math.sin(performance.now() / 400) * 6, 0);
       if (this.modal) this.modal.update(dt);
       else if (s && !this.paused) s.update(dt);
       const view = this.modal ?? s;

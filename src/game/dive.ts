@@ -142,7 +142,6 @@ export class DiveScreen implements Screen {
       w.text.pop(kind === 'boss' ? 'VICTORY!' : 'SPOT CLEARED!', this.player.x, this.player.y + 1.8, 'title', { size: kind === 'boss' ? 0.9 : 0.7, life: 3 });
       w.sfx(kind === 'boss' ? 'jin_legend' : 'jin_good', this.player.x, 0.8);
     }
-    this.run.depth++;
     // the crossroads current opens a little ahead of you
     setTimeout(() => {
       const c = new Current(this.player.x + 7, Math.max(this.ocean.terrain.floorAt(this.player.x + 7) + 3, Math.min(-2.5, this.player.y)), () => this.leave('cleared'));
