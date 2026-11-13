@@ -236,7 +236,9 @@ float linDepth(float d) { float z = d * 2.0 - 1.0; return (2.0 * uNear * uFar) /
 void main() {
   float d = texture(tDepth, vUv).r;
   vec4 pp = uReproj * vec4(vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-  vec2 prevUv = pp.w > 0.0 ? pp.xy / pp.w * 0.5 + 0.5 : vUv;
+  vec2 prevUv = pp.w > 1e-4 ? pp.xy / pp.w * 0.5 + 0.5 : vUv;
+  // far / degenerate reprojections (sky, behind the camera) would give inf * 0 = NaN below and poison the history
+  if (any(isnan(prevUv)) || any(isinf(prevUv)) || abs(prevUv.x - vUv.x) > 0.5 || abs(prevUv.y - vUv.y) > 0.5) prevUv = vUv;
   float movePx = length((vUv - prevUv) * uRes); // this frame's camera-induced motion, in pixels
   vec2 v = (vUv - prevUv) * uMotionBlur * uDtScale;
   float L = length(v);
@@ -261,10 +263,14 @@ void main() {
   float tk = uTrailK * smoothstep(0.35, 2.0, movePx);
   if (tk > 0.0 && prevUv.x > 0.0 && prevUv.y > 0.0 && prevUv.x < 1.0 && prevUv.y < 1.0) {
     vec3 h = texture(tHist, prevUv).rgb;
-    tk *= 1.0 - 0.5 * smoothstep(3.0, 8.0, max(h.r, max(h.g, h.b)));
-    col = mix(col, h, tk);
+    if (!(any(isnan(h)) || any(isinf(h)))) {
+      tk *= 1.0 - 0.5 * smoothstep(3.0, 8.0, max(h.r, max(h.g, h.b)));
+      col = mix(col, h, tk);
+    }
   }
-  fragColor = vec4(col, 1.0);
+  // never let a bad pixel from any scene shader into the history (it would spread as a black block + bloom)
+  if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
+  fragColor = vec4(min(col, vec3(64.0)), 1.0);
 }`;
 
 const BRIGHT_FS = /* glsl */ `
