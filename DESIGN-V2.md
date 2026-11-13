@@ -21,8 +21,11 @@ Borrow from the user's projects (cloned in the scratchpad `repos/`):
 ## Game loop
 1. **Hideout** (hub + main menu): an isometric, orbitable 3D cave in the rocks. Cosy: sofa, CRT TV, rug, lamps,
    storage chests (stash of extracted loot), workshop bench (craft / upgrade), and anything the player builds.
-   - Main menu = the hideout. Click the **TV**: the camera dollies into the screen, which shows a pixel-art TV UI:
-     `NEW RUN` / `RESUME` → **run config** (mastery level, starting area, loadout chosen from the stash) → `ENTER`.
+   - Main menu = a cinematic **hero scene** (src/title): the blobfish on a ledge at the hideout hatch, kasa hat,
+     toothpick planted. `NEW RUN` → **run config** (mastery, start area, loadout from the stash) → `ENTER`; also RESUME,
+     HIDEOUT, WARDROBE (cosmetics), ACHIEVEMENTS, SETTINGS, PROLOGUE, CREDITS. The hideout TV is now décor.
+   - First play opens with the **prologue** (src/story): parents, the bread hook, the trawl net, REVENGE, Mr. Crab's
+     shop and the toothpick, an 8-step interactive tutorial, then the hideout.
    - **Cinematic** (letterboxed): the blobfish gears up at the locker/workshop, then waddles out of the hideout
      into the open ocean.
    - **Build mode**: a build button opens pixel-art **blueprint** cards showing the materials needed; place
@@ -65,6 +68,8 @@ Areas are about 3× wider than v1, with:
 | Waves director, smart human enemies (divers, boats, subs), low-poly humans + diver variants, gore on kills, nemesis, bosses | `src/waves/`, `src/humans/`, `src/fishing/` | agent D |
 | Builds, tags/set bonuses, items + skills (megalodon summon...), blobfish v2 model + gear, player combat | `src/player/`, `src/game/items.ts`, `src/skills/`, `src/backpack/` | agent E |
 | Contracts (`src/meta/`, `src/game/types.ts`, `run.ts`), the run screen, the flow, integration | `src/game/`, `src/meta/`, `src/main.ts` | lead |
+| Prologue, dialogue bubbles, Mr. Crab, 3D pixel text | `src/story/`, `src/ui/text3d.ts` | agent G |
+| Hero title menu, cosmetics, achievements | `src/title/`, `src/cosmetics/`, `src/achievements/` | agent I |
 
 ## Contracts
 - `src/meta/meta.ts`: persistent save (`META`, `saveMeta()`). Materials and gear sent home, built placements,
