@@ -99,9 +99,9 @@ function kelp(scen: Scenery, group: THREE.Group, r: Rng) {
   // aisles: open lanes every ~16 m where the light pours in; ranks of kelp columns between them
   const aisles: number[] = [];
   for (let x = sh.X0 + 8; x < sh.X1; x += r.range(13, 19)) aisles.push(x);
-  for (const z of [-5.5, -9, -14, -22]) {
-    for (let x = sh.X0 - 20; x < sh.X1 + 20; x += r.range(1.6, 2.8) * (z < -12 ? 1.5 : 1)) {
-      if (aisles.some((a) => Math.abs(a - x) < 2.6)) continue;
+  for (const z of [-7, -13, -22]) {
+    for (let x = sh.X0 - 20; x < sh.X1 + 20; x += r.range(3.5, 6) * (z < -12 ? 1.3 : 1)) {
+      if (aisles.some((a) => Math.abs(a - x) < 4)) continue;
       if (scen.isReserved(x, z, 0.5)) continue;
       const zz = z + r.range(-0.8, 0.8), y = scen.heightAt(x, zz);
       const reach = -y - r.range(0.3, 1.2);

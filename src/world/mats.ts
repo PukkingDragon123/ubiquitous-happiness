@@ -158,7 +158,8 @@ export function groundMaterial(sand: THREE.Texture, rock: THREE.Texture, o: { sa
       .replace('#include <project_vertex>', '#include <project_vertex>\n' + TRI_VB);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uRockMap;\n' + TRI_V)
       .replace('#include <map_fragment>', `
-        vec3 gn = normalize(cross(dFdx(vTW), dFdy(vTW)));
+        vec3 gcr = cross(dFdx(vTW), dFdy(vTW));
+        vec3 gn = dot(gcr, gcr) > 1e-12 ? normalize(gcr) : vec3(0.0, 1.0, 0.0);
         vec4 sc = texture2D(map, vTW.xz * ${ss});
         vec2 ruv = abs(gn.x) > abs(gn.z) ? vTW.zy : vTW.xy;
         vec4 rc = texture2D(uRockMap, ruv * ${rs});

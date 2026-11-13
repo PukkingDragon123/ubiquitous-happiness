@@ -97,8 +97,8 @@ export const AREAS: Record<AreaId, AreaDef> = {
       silt: '#a89c80', accent: ['#e0782a', '#c84a5a', '#8a2a6a', '#f0d070'],
     },
     flora: [
-      { sp: 'giantkelp', zones: ['play', 'mid', 'back', 'fg'], per10: 2.6, cluster: 3 },
-      { sp: 'bullkelp', zones: ['mid', 'back', 'fg'], per10: 0.9, cluster: 2 },
+      { sp: 'giantkelp', zones: ['play', 'mid', 'back', 'fg'], per10: 1.1, cluster: 2 },
+      { sp: 'bullkelp', zones: ['mid', 'back', 'fg'], per10: 0.6, cluster: 1 },
       { sp: 'sealettuce', zones: ['play', 'mid', 'fg'], per10: 2.6, cluster: 3, onRock: true },
       { sp: 'sargassum', zones: ['play', 'mid', 'fg'], per10: 1.8, cluster: 3, onRock: true },
       { sp: 'featheralgae', zones: ['play', 'mid', 'fg'], per10: 2.4, cluster: 4 },
@@ -171,7 +171,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   abyss: {
     id: 'abyss', name: 'The Abyss', music: 'mu_abyss', ambience: 'uw_amb1', swell: 'calm',
-    look: look('abyss', { rays: 0.2 }), lookId: 'abyss',
+    look: look('abyss', { rays: 0.2, hemi: 0.75, depthMin: [0.05, 0.08, 0.15] }), lookId: 'abyss',
     width: 150, floor: -24, amp: 3.2, sand: 0.7, backRise: 10,
     rock: 'pillow', ground: 'ooze',
     pal: {

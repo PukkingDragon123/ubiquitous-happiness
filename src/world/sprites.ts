@@ -64,14 +64,15 @@ function giantKelp(S: Pix, r: Rng, a: AreaDef) {
       const t = y / (path.length * 6);
       if (t > 1) break;
       const { p, d } = along(path, 1 - t);
-      side = -side;
-      blades.push({ p, dir: side, L: r.range(26, 40) * (t > 0.85 ? 1.3 : 1) });
+      if (r.chance(0.7)) side = -side;           // mostly alternate, sometimes two in a row
+      if (r.chance(0.12)) continue;              // a gap where a blade tore off
+      blades.push({ p, dir: side, L: r.range(18, 44) * (t > 0.85 ? 1.3 : 1) });
       void d;
     }
     for (const b of blades) {
       // long wrinkled blades hang off the stipe, each on its own float, drooping as they grow
-      const ang = -Math.PI / 2 + b.dir * r.range(0.6, 1.15), L = b.L;
-      const droop = r.range(0.25, 0.7) * b.dir;
+      const ang = -Math.PI / 2 + b.dir * r.range(0.45, 1.35), L = b.L;
+      const droop = r.range(0.15, 1.0) * b.dir;
       const c: P2[] = [[b.p[0] + b.dir * 2.5, b.p[1]]];
       for (let i = 1; i <= 4; i++) { const t = i / 4, aa = ang + droop * t; c.push([c[i - 1][0] + Math.cos(aa) * L / 4, c[i - 1][1] + Math.sin(aa) * L / 4 + t * t * 3]); }
       const wmax = r.range(6, 8.5);
@@ -330,16 +331,16 @@ const SP: Record<string, SpriteSpecies> = {
   plumose: { id: 'plumose', w: 26, h: 30, ppm: 24, n: 6, flex: 0.05, paint: (S, r, a, k) => plumose(S, r, a.id === 'arctic' && k % 2 ? '#e88a4a' : '#d8d2c4') },
   seawhip: { id: 'seawhip', w: 30, h: 40, ppm: 24, n: 6, flex: 0.18, paint: (S, r, a) => seaWhip(S, r, a.id === 'graveyard' ? '#c88a3a' : '#d86a2a') },
   seapen: { id: 'seapen', w: 14, h: 22, ppm: 24, n: 6, flex: 0.05, paint: (S, r) => seaPen(S, r, '#e0a070') },
-  seapenGlow: { id: 'seapenGlow', w: 14, h: 24, ppm: 24, n: 5, flex: 0.05, glow: 1.8, paint: (S, r) => seaPen(S, r, '#48c8e8', true) },
+  seapenGlow: { id: 'seapenGlow', w: 14, h: 24, ppm: 24, n: 5, flex: 0.05, glow: 3.5, paint: (S, r) => seaPen(S, r, '#48c8e8', true) },
   hydroid: { id: 'hydroid', w: 24, h: 20, ppm: 24, n: 6, flex: 0.06, paint: (S, r) => hydroid(S, r) },
   wrack: { id: 'wrack', w: 34, h: 34, ppm: 24, n: 6, flex: 0.1, paint: (S, r, a) => wrack(S, r, a.id === 'arctic' ? '#7a6a3a' : '#7a6420') },
   softcoralCold: { id: 'softcoralCold', w: 26, h: 24, ppm: 24, n: 6, flex: 0.03, paint: (S, r, _a, k) => softCoral(S, r, ['#e88a9a', '#ece6da', '#e8904a'][k % 3]) },
   softcoral: { id: 'softcoral', w: 26, h: 24, ppm: 24, n: 6, flex: 0.03, paint: (S, r, _a, k) => softCoral(S, r, ['#d8507a', '#e88a3a', '#9a5ad0'][k % 3]) },
   glasssponge: { id: 'glasssponge', w: 24, h: 34, ppm: 24, n: 4, flex: 0.02, paint: (S, r, a) => glassSponge(S, r, a.glow ? '#8ad8f0' : '#d8dcd0') },
-  tubeworms: { id: 'tubeworms', w: 26, h: 30, ppm: 24, n: 5, flex: 0.03, glow: 0.9, paint: (S, r) => tubeWorms(S, r) },
-  glowcoral: { id: 'glowcoral', w: 28, h: 28, ppm: 24, n: 6, flex: 0.02, glow: 2.2, paint: (S, r, _a, k) => softCoral(S, r, k % 2 ? '#e05ad8' : '#3ad0f0') },
+  tubeworms: { id: 'tubeworms', w: 26, h: 30, ppm: 24, n: 5, flex: 0.03, glow: 1.6, paint: (S, r) => tubeWorms(S, r) },
+  glowcoral: { id: 'glowcoral', w: 28, h: 28, ppm: 24, n: 6, flex: 0.02, glow: 4, paint: (S, r, _a, k) => softCoral(S, r, k % 2 ? '#e05ad8' : '#3ad0f0') },
   crinoid: { id: 'crinoid', w: 30, h: 30, ppm: 24, n: 5, flex: 0.08, paint: (S, r, a) => crinoid(S, r, a.glow ? '#b060e0' : '#d08a3a') },
-  bacteriaMat: { id: 'bacteriaMat', w: 40, h: 10, ppm: 24, n: 4, flex: 0, glow: 0.6, paint: (S, r) => bacteriaMat(S, r) },
+  bacteriaMat: { id: 'bacteriaMat', w: 40, h: 10, ppm: 24, n: 4, flex: 0, glow: 1.4, paint: (S, r) => bacteriaMat(S, r) },
 };
 
 // ------------------------------------------------------------------ seabed details (32 px/m)

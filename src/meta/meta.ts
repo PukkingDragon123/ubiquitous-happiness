@@ -25,6 +25,45 @@ export interface Nemesis {
 
 export interface RunConfig { mastery: number; startArea: string; loadout: number[] /* stash item uids */ }
 
+/** running totals for one run (the end-of-run card) */
+export interface RunTally { kills: number; time: number; waves: number; extracted: number; repairs: number; bosses: number }
+
+/**
+ * The run in progress (META.activeRun), written by src/game/runScreen.ts at every area start, wave clear,
+ * extraction and quit, so RESUME rebuilds the run from here. Its backpack items are out of the stash while it lives.
+ */
+export interface RunSave {
+  v: 2;
+  cfg: RunConfig;
+  seed: number;
+  /** the three areas of this run, in order */
+  areas: string[];
+  areaIdx: number;
+  /** waves cleared in the current area */
+  wavesCleared: number;
+  hp: number;
+  /** the run's backpack (Run.items): loadout + gear found */
+  items: ItemInst[];
+  nextUid: number;
+  /** the loot bag: material / item ids carried and not yet extracted (lost on death) */
+  bag: string[];
+  /** the current area's shipwreck progress */
+  wreck: { stage: number; paid: Record<string, number>; hp: number } | null;
+  tally: RunTally;
+}
+
+/** how a run ended (shown on the hideout's result card) */
+export interface RunResult {
+  outcome: 'dead' | 'sunk' | 'victory';
+  areaName: string; areaIdx: number; wave: number; mastery: number;
+  /** ids lost on death (bag + backpack) / brought home on victory */
+  items: string[];
+  killer: { name: string; title?: string; nemesis?: boolean } | null;
+  tally: RunTally;
+  /** mastery level newly unlocked by a win */
+  unlocked?: number;
+}
+
 export interface MetaSave {
   version: 2;
   materials: Record<string, number>;
@@ -36,7 +75,7 @@ export interface MetaSave {
   masteryUnlocked: number;  // highest beaten + 1
   nemeses: Nemesis[];
   runs: number; wins: number; deaths: number; extractions: number;
-  activeRun: unknown | null;
+  activeRun: RunSave | null;
   lastConfig: RunConfig | null;
   settings: { volume: number; music: number; lowQuality: boolean; motionBlur: number };
 }
@@ -82,4 +121,16 @@ export function stashItem(id: string, level = 1): ItemInst {
   const it: ItemInst = { uid: META.nextUid++, id, gx: -1, gy: -1, rot: 0, level };
   META.stash.push(it); saveMeta();
   return it;
+}
+/** take stash items out for a run (by uid); they leave the stash until returned */
+export function takeFromStash(uids: number[]): ItemInst[] {
+  const out = META.stash.filter((s) => uids.includes(s.uid));
+  META.stash = META.stash.filter((s) => !uids.includes(s.uid));
+  saveMeta();
+  return out.map((s) => ({ ...s }));
+}
+/** put items back in the stash (fresh uids, loose) */
+export function returnToStash(items: { id: string; level?: number }[]) {
+  for (const it of items) META.stash.push({ uid: META.nextUid++, id: it.id, gx: -1, gy: -1, rot: 0, level: it.level ?? 1 });
+  saveMeta();
 }
