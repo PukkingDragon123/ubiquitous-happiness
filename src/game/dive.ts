@@ -23,6 +23,7 @@ import { UW } from '../gfx/shaders/underwater';
 import { Pickup, pickupHooks } from './pickup';
 import { Current } from './current';
 import { spotLayout } from './spots';
+import { eventLayout } from './events';
 
 export interface DiveNode { type: string; spot: string; biome: string; difficulty: number; name?: string; id?: number }
 
@@ -53,6 +54,10 @@ export class DiveScreen implements Screen {
   /** creature spawner installed by the creatures module integration */
   static populate?: (w: World, biome: Biome, node: DiveNode, x0: number, x1: number) => void;
   static ambientSpawn?: (w: World, biome: Biome, camX: number, dt: number) => void;
+  /** spawns `n` hostile creatures; calls done() once they're all gone */
+  static ambush?: (w: World, x: number, y: number, n: number, done: () => void) => void;
+  /** sets up a boss fight for a boss node; calls done() on victory */
+  static boss?: (w: World, node: DiveNode, fishing: FishingSystem, done: () => void) => void;
 
   constructor(public game: Game) {}
 
@@ -98,8 +103,16 @@ export class DiveScreen implements Screen {
     this.fishing.onAllDefeated = () => this.spotCleared();
     this.player.onDeath = () => { this.deadT = 0; };
     pickupHooks(this.world);
-    // the spot: anglers, vessels, set dressing
-    spotLayout(this.world, this.fishing, this.node);
+    // the spot: anglers, vessels, set dressing — or an event / a boss
+    const t = this.node.type;
+    if (t === 'shop' || t === 'rest' || t === 'treasure' || t === 'mystery') {
+      eventLayout(this.world, this.node, () => this.spotCleared(t === 'shop' || t === 'rest' ? 'quiet' : 'loud'), (x, y, n) => {
+        if (DiveScreen.ambush) DiveScreen.ambush(this.world, x, y, n, () => this.spotCleared('loud'));
+        else this.spotCleared('loud');
+      });
+    } else if (t === 'boss' && DiveScreen.boss) {
+      DiveScreen.boss(this.world, this.node, this.fishing, () => this.spotCleared('boss'));
+    } else spotLayout(this.world, this.fishing, this.node);
     DiveScreen.populate?.(this.world, b, this.node, -30, 40);
     this.cleared = false; this.deadT = -1; this.introT = 0;
     this.camPos.set(this.player.x, this.player.y + 1, 16);
@@ -120,12 +133,14 @@ export class DiveScreen implements Screen {
 
   exit() { this.ambience?.stop(); this.ambience = null; this.player?.dispose(); this.fishing?.qte.cancel(); }
 
-  private spotCleared() {
+  private spotCleared(kind: 'loud' | 'quiet' | 'boss' = 'loud') {
     if (this.cleared) return;
     this.cleared = true;
     const w = this.world;
-    w.text.pop('SPOT CLEARED!', this.player.x, this.player.y + 1.8, 'title', { size: 0.7, life: 3 });
-    w.sfx('jin_good', this.player.x, 0.8);
+    if (kind !== 'quiet') {
+      w.text.pop(kind === 'boss' ? 'VICTORY!' : 'SPOT CLEARED!', this.player.x, this.player.y + 1.8, 'title', { size: kind === 'boss' ? 0.9 : 0.7, life: 3 });
+      w.sfx(kind === 'boss' ? 'jin_legend' : 'jin_good', this.player.x, 0.8);
+    }
     this.run.depth++;
     // the crossroads current opens a little ahead of you
     setTimeout(() => {

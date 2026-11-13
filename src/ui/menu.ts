@@ -13,7 +13,7 @@ import { BIOMES } from '../world/biomes';
 import { BlobModel, buildSword, outlineAt, SB_N } from '../player/blobModel';
 import { SoftBody } from '../player/softbody';
 import { voxelText } from './voxelText';
-import { STYLES, FloatText, textPlane } from './text';
+import { STYLES, FloatText, textPlane, textSprite } from './text';
 import { buildBait } from '../fishing/bait';
 import { Px, ramp, pxNoise } from '../gfx/px';
 import { hash2 } from '../core/math';
@@ -50,6 +50,9 @@ export class MenuScreen implements Screen {
   private camT = 0;
   onStart?: () => void;
   onCredits?: () => void;
+  onMenu?: () => void;
+  mode: 'menu' | 'gameover' | 'victory' | 'credits' = 'menu';
+  private statLines: THREE.Sprite[] = [];
 
   constructor(private game: Game) {
     this.light.applyLook(LOOKS.reef);
@@ -66,9 +69,9 @@ export class MenuScreen implements Screen {
     this.sword.scale.setScalar(1.15);
     this.scene.add(this.blob.root, ...this.blob.tailMeshes);
     // title
-    const t1 = voxelText('BLOBFISH', { ...STYLES.title, fill: ['#fff9e6', '#ffd36b', '#f7a13a', '#e0682a'] }, 1.25, 4);
-    const t2 = voxelText('REEL REBELLION', { ...STYLES.item, fill: ['#ffffff', '#c8f0ff', '#6fc8ff'] }, 0.55, 3);
-    t2.position.y = -0.95;
+    const t1 = voxelText('BLOBFISH', { ...STYLES.title, fill: ['#fffbe8', '#ffe07a', '#ffb43a', '#f07a2a'] }, 1.15, 4, 0.55);
+    const t2 = voxelText('REEL REBELLION', { ...STYLES.title, fill: ['#ffffff', '#d8f6ff', '#8ad8ff'], outline: '#0c2a4a', outline2: '#020a14' }, 0.5, 3, 0.5);
+    t2.position.y = -0.82;
     this.title.add(t1, t2);
     this.scene.add(this.title);
     // dangling bait on a line from the surface
@@ -83,14 +86,14 @@ export class MenuScreen implements Screen {
 
   private buildSignpost() {
     const wp = new Px(32, 64);
-    const wr = ramp(['#3a2414', '#5e3c20', '#86582e', '#a87a46'], 6);
+    const wr = ramp(['#6a4426', '#9a6a3c', '#c8925a', '#ecc28a'], 6);
     wp.fill((x, y) => wr(0.55 + Math.sin(x * 0.9 + pxNoise(x, y, 8, 2, 3) * 6) * 0.14 + (hash2(x, y, 3) > 0.96 ? -0.3 : 0), x, y));
-    const woodMat = uw(new THREE.MeshStandardMaterial({ map: wp.texture({ repeat: true }), roughness: 0.85 }));
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 3.6, 8), woodMat);
+    const woodMat = uw(new THREE.MeshStandardMaterial({ map: wp.texture({ repeat: true }), roughness: 0.85, emissive: '#3a2410', emissiveIntensity: 0.35 }), { depth: 0.5 });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 5.2, 8), woodMat);
     const base = new THREE.Group();
-    const floor = this.ocean.terrain.floorAt(4.4);
-    base.position.set(4.4, floor, 1.0);
-    post.position.y = 1.8; post.rotation.z = 0.06; post.castShadow = true;
+    const floor = this.ocean.terrain.floorAt(2.6);
+    base.position.set(2.6, floor + 0.85, 0.9);
+    post.position.y = 1.0; post.rotation.z = 0.06; post.castShadow = true;
     base.add(post);
     // barnacles on the post
     const barn = uw(new THREE.MeshStandardMaterial({ color: '#d8d0c0', roughness: 0.9 }));
@@ -109,7 +112,7 @@ export class MenuScreen implements Screen {
       plank.add(txt, n1, n2);
       plank.position.set(0.95, -0.28, 0);
       g.add(plank);
-      g.position.set(0, 3.1 - i * 0.62, 0.12);
+      g.position.set(0, 3.05 - i * 0.6, 0.12);
       g.userData.pick = plank;
       base.add(g);
       this.planks.push({ g, label, action, hover: 0, swing: 0, swingV: 0 });
@@ -127,7 +130,27 @@ export class MenuScreen implements Screen {
     this.fx.setPixelScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
     this.ocean.snow.setScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
   }
-  enter() { this.chomp = -1; audio.music('mu_aquarium'); POST.uDesat.value = 0; POST.uPulse.value = 0; this.game.timeScale = 1; }
+  enter(data?: unknown) {
+    const d = (data ?? {}) as { mode?: 'menu' | 'gameover' | 'victory' | 'credits'; stats?: [string, string][] };
+    this.mode = d.mode ?? 'menu';
+    this.chomp = -1; this.camT = 0;
+    audio.music(this.mode === 'gameover' ? 'mu_abyss' : 'mu_aquarium');
+    POST.uDesat.value = 0; POST.uPulse.value = 0; this.game.timeScale = 1;
+    for (const s of this.statLines) s.removeFromParent();
+    this.statLines = [];
+    this.title.visible = this.mode === 'menu';
+    const head = this.mode === 'gameover' ? 'BELLY UP' : this.mode === 'victory' ? 'THE OCEAN IS FREE!' : this.mode === 'credits' ? 'CREDITS' : '';
+    const lines: [string, string][] = this.mode === 'credits' ? CREDITS : this.mode === 'menu' ? [] : d.stats ?? [];
+    if (head) {
+      const h = textSprite(head, this.mode === 'gameover' ? STYLES.danger : STYLES.title, 0.75);
+      h.userData.row = -1; this.statLines.push(h); this.scene.add(h);
+    }
+    lines.forEach(([a, b], i) => {
+      const sp = textSprite(b ? `${a}  ${b}` : a, i % 2 ? STYLES.body : STYLES.hint, this.mode === 'credits' ? 0.24 : 0.32);
+      sp.userData.row = i; this.statLines.push(sp); this.scene.add(sp);
+    });
+    this.planks[0].label = this.mode === 'menu' ? this.planks[0].label : 'MENU';
+  }
   exit() {}
 
   update(dt: number) {
@@ -138,12 +161,12 @@ export class MenuScreen implements Screen {
     // camera: a slow drifting establishing push-in
     const intro = easeOutBack(clamp01(this.camT / 3), 1.1);
     const mx = this.game.input.mouse.nx, my = this.game.input.mouse.ny;
-    this.camera.position.set(0.9 + mx * 0.35 + Math.sin(t * 0.13) * 0.3, heroY + 1.0 + my * 0.2, 13 - intro * 3.2);
-    this.camera.lookAt(0.9, heroY + 0.7, 0);
+    this.camera.position.set(0.1 + mx * 0.3 + Math.sin(t * 0.13) * 0.2, heroY + 0.75 + my * 0.15, 12 - intro * 3.3);
+    this.camera.lookAt(0.1, heroY + 0.5, 0);
     this.light.follow(0, heroY);
     // hero: hovering, sword raised, a heroic slow bob
-    this.sb.angle = Math.sin(t * 0.8) * 0.05;
-    this.sb.accel((0 - this.sb.cx) * 3 + Math.sin(t * 1.1) * 0.6, (heroY + Math.sin(t * 1.4) * 0.15 - this.sb.cy) * 3, dt);
+    this.sb.angle = this.mode === 'gameover' ? this.sb.angle : Math.sin(t * 0.8) * 0.05;
+    this.sb.accel((-0.2 - this.sb.cx) * 3 + Math.sin(t * 1.1) * 0.6, (heroY + Math.sin(t * 1.4) * 0.15 - this.sb.cy) * 3, dt);
     this.sb.accel(-this.sb.vx * 2, -this.sb.vy * 2, dt);
     this.sb.step(dt, null, null);
     const root = this.blob.root;
@@ -152,18 +175,27 @@ export class MenuScreen implements Screen {
     root.updateMatrixWorld(true);
     // look toward the bait when hovering it, else at the camera
     this.blob.look.set(this.baitHover > 0.5 ? 0.6 : 0.2 + mx * 0.6, this.baitHover > 0.5 ? 0.5 : 0.1 + my * 0.4);
-    if (this.chomp < 0) this.blob.setExpression(this.baitHover > 0.5 ? 'happy' : 'brave');
+    if (this.chomp < 0) this.blob.setExpression(this.mode === 'gameover' ? 'sleep' : this.mode === 'victory' ? 'happy' : this.baitHover > 0.5 ? 'happy' : 'brave');
+    if (this.mode === 'gameover') { this.sb.angle = Math.PI * 0.92 + Math.sin(t * 0.6) * 0.08; root.rotation.z = 0; }
+    for (const sp of this.statLines) {
+      const row = sp.userData.row as number;
+      const appear = clamp01((this.camT - 0.6 - row * 0.18) * 2);
+      sp.position.set(0.4, heroY + 2.6 - (row + 1) * (this.mode === 'credits' ? 0.34 : 0.48) + (this.mode === 'credits' ? Math.max(0, this.camT - 4) * 0.25 : 0), 0.5);
+      if (row < 0) sp.position.y = heroY + 2.9;
+      sp.material.opacity = appear;
+    }
     this.blob.update(dt, { sb: this.sb, swim: 0.15, time: t, worldMatrix: root.matrixWorld, vel: new THREE.Vector2() });
     const hand = this.blob.handWorld(new THREE.Vector3());
     // sword raised to the light (in root space)
-    this.swordPivot.position.copy(root.worldToLocal(hand.clone()));
-    this.swordPivot.rotation.set(0, 0, 1.25 + Math.sin(t * 1.3) * 0.06);
+    // raised high behind the head like a little banner — never across the face
+    this.swordPivot.position.set(-0.12, 0.12, 0.5);
+    this.swordPivot.rotation.set(0, 0, 1.95 + Math.sin(t * 1.3) * 0.07);
     if (Math.random() < dt * 1.5) { const tip = new THREE.Vector3(0.66, 0, 0).applyMatrix4(this.sword.matrixWorld); this.fx.emit('spark', tip.x, tip.y, { n: 1, size: 0.25, life: 0.5, color: '#fff8e0' }); }
     // title bobbing in the rays
-    this.title.position.set(0.9, heroY + 2.75 + Math.sin(t * 0.9) * 0.06, -0.6);
+    this.title.position.set(0.1, heroY + 2.3 + Math.sin(t * 0.9) * 0.06, -0.8);
     this.title.rotation.set(Math.sin(t * 0.5) * 0.03, Math.sin(t * 0.37) * 0.08, Math.sin(t * 0.7) * 0.015);
     // the dangling bait
-    const bx = -2.6 + Math.sin(t * 0.7) * 0.15, by = heroY + 0.6 + Math.sin(t * 1.1) * 0.12;
+    const bx = -2.3 + Math.sin(t * 0.7) * 0.12, by = heroY + 0.35 + Math.sin(t * 1.1) * 0.1;
     this.bait.group.position.set(bx, by, 0.4);
     this.bait.group.rotation.z = Math.sin(t * 0.9) * 0.15;
     this.bait.tick(t, this.baitHover * 2);
@@ -188,7 +220,7 @@ export class MenuScreen implements Screen {
     }
     if (this.game.input.hit('attack')) {
       if (baitHit && this.chomp < 0) { this.chomp = 0; this.blob.setExpression('chomp'); audio.play('chomp1'); audio.play('splash_s', { vol: 0.5 }); }
-      else if (hoverPlank) { audio.play('k_click1'); hoverPlank.swingV += 6; hoverPlank.action(); if (hoverPlank.label.startsWith('SOUND')) { /* label refresh omitted */ } }
+      else if (hoverPlank) { audio.play('k_click1'); hoverPlank.swingV += 6; if (this.mode !== 'menu' && hoverPlank === this.planks[0]) this.onMenu?.(); else hoverPlank.action(); }
     }
     if (this.game.input.hit('interact') || this.game.input.keyHit('Enter')) { if (this.chomp < 0) { this.chomp = 0; this.blob.setExpression('chomp'); audio.play('chomp1'); } }
     if (this.chomp >= 0) {
@@ -211,3 +243,19 @@ export class MenuScreen implements Screen {
     return Math.hypot(o.x + d.x * tt - x, o.y + d.y * tt - y) < r;
   }
 }
+
+const CREDITS: [string, string][] = [
+  ['Made with three.js', ''],
+  ['Fonts', ''],
+  ['Alagard — Hewett Tsoi', ''],
+  ['m6x11plus, m5x7 — Daniel Linssen (managore)', ''],
+  ['Jacquard 24, Tiny5, Pixelify Sans — SIL OFL', ''],
+  ['TBME Goofy — from Chewy by Font Diner (Apache 2.0)', ''],
+  ['Sound & music: CC0 / public domain', ''],
+  ['Kenney, rubberduck, You\'re Perfect Studio, Memoraphile', ''],
+  ['cynicmusic, joth, TAD, umplix, Zane Little Music', ''],
+  ['and many OpenGameArt.org contributors', ''],
+  ['US National Park Service field recordings', ''],
+  ['Water from FISHTOP, people from Limbophobia', ''],
+  ['Full list: CREDITS.md', ''],
+];

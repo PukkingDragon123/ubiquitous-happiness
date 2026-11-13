@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { textCanvas, TextStyle } from './text';
 import { Voxels, voxelMaterial } from '../gfx/voxel';
 
-export function voxelText(text: string, st: TextStyle, height = 1, depth = 3): THREE.Mesh {
+export function voxelText(text: string, st: TextStyle, height = 1, depth = 3, glow = 0.15): THREE.Mesh {
   const c = textCanvas(text, { ...st, shadow: undefined });
   const ctx = c.canvas.getContext('2d')!;
   const img = ctx.getImageData(0, 0, c.w, c.h).data;
@@ -16,7 +16,7 @@ export function voxelText(text: string, st: TextStyle, height = 1, depth = 3): T
     const lum = (img[i] * 0.3 + img[i + 1] * 0.59 + img[i + 2] * 0.11) / 255;
     // outline pixels sit one voxel deeper so the fill letters stand proud of their outline
     const d = lum < 0.25 ? depth - 1 : depth;
-    for (let z = 0; z < d; z++) V.set(x, c.h - 1 - y, z, col, lum > 0.85 ? 40 : 0);
+    for (let z = 0; z < d; z++) V.set(x, c.h - 1 - y, z, col, lum > 0.3 ? Math.round(glow * 255 * (0.4 + lum * 0.6)) : 0);
   }
   const s = (height / (st.px * 1.15)) ;
   const geo = V.mesh(s);
