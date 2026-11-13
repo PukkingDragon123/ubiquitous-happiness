@@ -287,6 +287,8 @@ export class TitleScreen implements Screen {
     const ui = this.ui, inp = this.game.input;
     const n = this.items.length, rowH = 16;
     const x0 = 24, y0 = Math.max(108, Math.min(Math.round(ui.h * 0.42), ui.h - 30 - n * rowH - 14));
+    // impatient players: a click or Enter/Space during the opening skips straight to the ready menu
+    if (this.intro < 2.6 && !this.leaving && (ui.pressed || inp.keyHit('Enter') || inp.keyHit('Space'))) this.intro = 2.6;
     const appear = this.intro - 1.5;
     if (appear > 0 && !this.leaving) {
       if (inp.keyHit('ArrowDown') || inp.keyHit('KeyS')) { this.sel = this.nextOn(this.sel, 1); this.kbd = true; audio.play('k_tick1', { vol: 0.2, dry: true }); }
@@ -300,7 +302,7 @@ export class TitleScreen implements Screen {
       const slide = Math.round((1 - easeOutCubic(k)) * -120);
       const on = it.on();
       const w = 150;
-      const over = k >= 1 && ui.hover(x0 - 14, y - 3, w, rowH - 1);
+      const over = k >= 0.5 && ui.hover(x0 - 14, y - 3, w, rowH - 1);
       ui.mark('menu:' + it.id, x0 - 14, y - 3, w, rowH - 1);
       ui.block(x0 - 14, y - 3, w, rowH - 1);
       if (over) { hovered = i; this.kbd = false; if (on) { this.sel = i; ui.cursor = 'point'; } }

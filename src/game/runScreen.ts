@@ -298,7 +298,7 @@ export class RunScreen implements Screen {
     this.interT = this.interMax;
     this.holdT = 0;
     this.setPhase(this.wavesCleared >= areaWaves(idx) ? 'cleared' : 'intermission');
-    this.title3d(a.name.toUpperCase(), `AREA ${idx + 1} OF ${RUN_AREAS}  ·  ${areaWaves(idx)} WAVES${idx === RUN_AREAS - 1 ? ' + BOSS' : ''}`, T3D.title, 4.2, { x: sp.x + 1.5, y: sp.y + 3.7 });
+    this.title3d(a.name.toUpperCase(), `AREA ${idx + 1} OF ${RUN_AREAS}  ·  ${areaWaves(idx)} WAVES${idx === RUN_AREAS - 1 ? ' + BOSS' : ''}`, T3D.title, 4.2, { x: sp.x + 1.5, y: sp.y + 2.3 });
     this.player.sb.accel(9 / 0.016, 0, 0.016);
     fx.emit('bubbleBig', sp.x - 1, sp.y, { n: 18, spread: 0.8, speed: 2 });
     if (idx === 0 && this.wavesCleared === 0 && META.runs <= 1) setTimeout(() => w.text.pop('Break rocks for materials. Repair the wreck. Mail loot home.', sp.x + 3, sp.y + 2, 'hint', { size: 0.3, life: 5 }), 1500);
@@ -486,7 +486,7 @@ export class RunScreen implements Screen {
 
   /** a title card as chunky 3D text floating in the world (over `at`, else above the camera's look point) */
   private title3d(title: string, sub: string, st: T3DStyle, life = 3, at?: { x: number; y: number }) {
-    const x = at?.x ?? this.camLook.x, y = at?.y ?? this.camLook.y + 2.4;
+    const x = at?.x ?? this.camLook.x, y = at?.y ?? this.camLook.y + 1.7;
     this.t3d.add(title, x, y, 1.4, st, { size: 0.72, life, enter: 'drop', stagger: 0.05 });
     if (sub) this.t3d.add(sub, x, y - 0.78, 1.4, T3D.sub, { size: 0.24, life: life - 0.2, delay: 0.45, stagger: 0.015 });
   }

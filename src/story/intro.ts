@@ -152,6 +152,7 @@ export class IntroScreen implements Screen {
   private gen = 0;
   private waits: { fn: () => boolean; res: () => void; rej: (e: unknown) => void }[] = [];
   private skipT = 0;
+  private skipStart = -1;
   private skipping = -1;
   private finished = false;
   private step = -1;
@@ -253,11 +254,13 @@ export class IntroScreen implements Screen {
     fx.waterAt = (x) => water.heightAt(x);
     fx.onSurfacePop = (x) => { if (Math.random() < 0.3) water.disturb(x, 0.15, 0.1); };
     const a = this.area = buildArea(w, 'reef', SEED);
-    this.light.applyLook(a.look);
+    // the prologue's crane shots sit farther out than the run camera: thinner haze and a touch more contrast so the
+    // morning reef reads crisp and saturated instead of washed out
+    this.light.applyLook({ ...a.look, fogK: (a.look.fogK ?? 0.042) * 0.6, fogNear: (a.look.fogNear ?? 5) + 3, contrast: (a.look.contrast ?? 1) * 1.08, saturation: (a.look.saturation ?? 1) * 1.08, exposure: (a.look.exposure ?? 1) * 0.92 });
     a.setLighting(this.light);
     fx.ambient('reef');
     water.sim.setSwell(a.swell);
-    POST.uExposure.value = a.look.exposure;
+    POST.uExposure.value = (a.look.exposure ?? 1) * 0.92;
     // the manatee stays home until the tutorial calls for her
     a.mailbox.eta = 1e6;
     a.shipwreck.costMul = 0.5;
@@ -1221,7 +1224,13 @@ export class IntroScreen implements Screen {
     this.ui.begin(inp, real);
     // ---- skip: hold ESC
     if (this.skipping < 0) {
-      if (inp.key('Escape')) { this.skipT += real; if (this.skipT >= SKIP_HOLD) this.skip(); } else this.skipT = Math.max(0, this.skipT - real * 3);
+      // wall-clock hold (frame dt is capped, so a slow machine would otherwise need a much longer hold)
+      if (inp.key('Escape')) {
+        const now = performance.now();
+        if (this.skipStart < 0) this.skipStart = now - this.skipT * 1000;
+        this.skipT = (now - this.skipStart) / 1000;
+        if (this.skipT >= SKIP_HOLD) this.skip();
+      } else { this.skipStart = -1; this.skipT = Math.max(0, this.skipT - real * 3); }
     } else {
       this.skipping += real;
       if (this.skipping > 0.7) this.finish(true);

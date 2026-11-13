@@ -311,7 +311,20 @@ export class HeroSet {
     door.position.set(H.x + 1.35, H.y + 0.92, H.z - 2.62);
     door.rotation.y = -0.12;
     G.add(door);
-    this.interior = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb060').multiplyScalar(1.6) });
+    // the warm room seen through the hatch: banded amber glow, darker toward the rim (not a blown-out white disc)
+    const glowTex = (() => {
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const g = c.getContext('2d')!;
+      const bands = ['#2a1408', '#4a230c', '#6e3812', '#93511a', '#b86c24', '#d48a34'];
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        const d = Math.hypot(x + 0.5 - 16, (y + 0.5 - 18) * 1.15) / 16;
+        g.fillStyle = bands[Math.max(0, Math.min(5, Math.floor((1 - d) * 6.2)))];
+        g.fillRect(x, y, 1, 1);
+      }
+      const t = new THREE.CanvasTexture(c); t.magFilter = t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = false;
+      return t;
+    })();
+    this.interior = new THREE.MeshBasicMaterial({ map: glowTex, color: new THREE.Color(1, 1, 1).multiplyScalar(0.85) });
     const recess = new THREE.Mesh(new THREE.CircleGeometry(0.78, 10), this.interior); recess.position.z = -0.25; door.add(recess);
     const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.8, 0.5, 10, 1, true), psxMat(rockPage(false), { rough: 0.95, side: THREE.BackSide }));
     tunnel.rotation.x = Math.PI / 2; tunnel.position.z = -0.02; door.add(tunnel);
@@ -478,7 +491,7 @@ export class HeroSet {
     const fl = 0.85 + 0.1 * Math.sin(t * 7.3) * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 17);
     if (this.lamp) this.lamp.light.intensity = 4 * fl;
     (this.lantern.material as THREE.MeshBasicMaterial).color.setRGB(2.2 * fl, 1.6 * fl, 0.9 * fl);
-    this.interior.color.setRGB(1.6 * fl, 1.05 * fl, 0.55 * fl);
+    this.interior.color.setScalar(0.85 * fl);
     for (const p of this.hatchVents) if (Math.random() < dt * 1.2) this.bubbles.emit(p.x + (Math.random() - 0.5) * 0.4, p.y, p.z, { vy: 0.25, life: 7, size: 0.04 + Math.random() * 0.06 });
     if (Math.random() < dt * 2) this.bubbles.emit(H.x - 3 + Math.random() * 6, H.y - 6, H.z - 4 + Math.random() * 4, { vy: 0.4, life: 9, size: 0.05 + Math.random() * 0.05 });
     // marine snow keeps falling around the hero
