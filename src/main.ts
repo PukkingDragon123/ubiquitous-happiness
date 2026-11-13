@@ -15,6 +15,11 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   backpack: () => import('./dev/preview_backpack'),
   blob: () => import('./dev/preview_blob'),
   fishing: () => import('./dev/preview_fishing'),
+  hideout: () => import('./dev/preview_hideout'),
+  area: () => import('./dev/preview_area'),
+  waves: () => import('./dev/preview_waves'),
+  builds: () => import('./dev/preview_builds'),
+  retro: () => import('./dev/preview_retro'),
 };
 
 async function boot() {
