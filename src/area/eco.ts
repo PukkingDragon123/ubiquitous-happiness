@@ -25,7 +25,7 @@ class Plankton {
   private pos: Float32Array;
   private mat: THREE.ShaderMaterial;
   private food: Float32Array;
-  static PER = 140;
+  static PER = 90;
   constructor(n: number, color: string, glow: boolean, rng: Rng, x0: number, x1: number, floorAt: (x: number) => number) {
     for (let i = 0; i < n; i++) {
       const x = rng.range(x0, x1), fl = floorAt(x);
@@ -56,7 +56,7 @@ class Plankton {
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           vA = step(s, aFood) * (0.55 + 0.45 * sin(uT * (1.5 + s * 4.0) + s * 60.0));
-          gl_PointSize = vA > 0.05 ? max(1.0, (0.035 + s * 0.03) * uScale / -mv.z) : 0.0;
+          gl_PointSize = vA > 0.05 ? max(1.0, (0.018 + s * 0.02) * uScale / -mv.z) : 0.0;
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uCol; varying float vA;

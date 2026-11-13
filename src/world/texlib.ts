@@ -237,7 +237,7 @@ export function paintPlanks(p: { set(x: number, y: number, c: RGB | string, a?: 
     let c = R(t, x, y);
     if (o.rot) {
       const r = pxNoise(x, y, 7, 3, o.seed + 11);
-      if (r > 1 - o.rot * 0.5) c = mix(c, hex('#1a1612'), 0.6);
+      if (r > 1 - o.rot * 0.45) c = mix(c, hex('#2a241c'), 0.4);
       if (o.algae && pxNoise(x, y, 10, 2, o.seed + 13) > 1 - o.rot * 0.6) c = mix(c, hex(o.algae), 0.55 + hash2(x, y, 5) * 0.2);
     }
     if (o.nails && py === 3 && (xx % 13 === 5)) c = hex('#3a2a20');

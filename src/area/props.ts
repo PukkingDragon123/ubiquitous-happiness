@@ -60,10 +60,10 @@ export class PropKit {
   }
 }
 
-const woodOld = (a: AreaDef) => a.id === 'graveyard' ? ['#14120c', '#2a261a', '#46402c', '#625a40', '#7e7454'] :
-  a.id === 'arctic' ? ['#1a1a1c', '#34322e', '#504a40', '#6e665a', '#8e8678'] :
-    a.id === 'abyss' ? ['#0a0a0c', '#1a1a1e', '#2c2a2c', '#403c3a', '#56504a'] :
-      ['#1e160c', '#3a2c18', '#5a4626', '#7a6238', '#9a7e50'];
+const woodOld = (a: AreaDef) => a.id === 'graveyard' ? ['#26241c', '#423e30', '#5e5844', '#7a725a', '#948a70'] :
+  a.id === 'arctic' ? ['#2e3032', '#4c4c4a', '#6a6862', '#8a867e', '#a8a49a'] :
+    a.id === 'abyss' ? ['#1c1c20', '#302e30', '#46423e', '#5c5650', '#746c62'] :
+      ['#3a3226', '#5a4e3c', '#7a6c52', '#9a8a6c', '#b8a888'];
 const algae = (a: AreaDef) => (a.id === 'arctic' ? '#9aa8a8' : a.id === 'abyss' ? '#3a4a5a' : a.id === 'kelp' ? '#5a6a2a' : '#4a6a3a');
 const steelPaint = (a: AreaDef) => (a.id === 'abyss' ? ['#3a2a08', '#7a5a14', '#b08a2a', '#d8b050'] : a.id === 'arctic' ? ['#1a1010', '#4a1a14', '#7a2a20', '#a04030'] : ['#141a1c', '#283234', '#3e4a4c', '#5a6668']);
 
