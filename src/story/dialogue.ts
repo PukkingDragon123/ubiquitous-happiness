@@ -204,6 +204,7 @@ export class Dialogue {
     for (const b of this.barks) this.type(b, dt, 1);
     this.barks = this.barks.filter((b) => b.doneT < b.life);
     const a = this.cur;
+    if (input && [...input.pressed].some((k) => k.startsWith('Digit'))) console.log('DLGDBG', [...input.pressed].join(','), !!a, a && a.shown, a && a.chs.length, a && a.doneT, a && !!a.line.choices);
     if (!a) { this.holdT = 0; return; }
     const adv = !!input && (input.keyHit('Space') || input.keyHit('KeyE') || input.keyHit('Enter') || (input.pressed.has('Mouse0') && !a.line.choices));
     const held = !!input && (input.key('Space') || input.key('KeyE') || input.down.has('Mouse0'));
