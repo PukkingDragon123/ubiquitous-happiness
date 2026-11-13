@@ -88,7 +88,7 @@ export class Blobfish implements PlayerLike {
     this.obj.add(this.model.root);
     this.sword = buildSword();
     this.swordPivot.add(this.sword);
-    this.sword.scale.setScalar(1.1);
+    this.sword.scale.setScalar(1.35);
     this.obj.add(this.swordPivot, this.trail.mesh, ...this.model.tailMeshes);
     // laser beams (two eye beams converge)
     this.laser = new THREE.Group();

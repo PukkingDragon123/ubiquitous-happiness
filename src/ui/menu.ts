@@ -66,7 +66,7 @@ export class MenuScreen implements Screen {
     this.sb.place(0, 0);
     this.blob.root.add(this.swordPivot);
     this.swordPivot.add(this.sword);
-    this.sword.scale.setScalar(1.15);
+    this.sword.scale.setScalar(1.9);
     this.scene.add(this.blob.root, ...this.blob.tailMeshes);
     // title
     const t1 = voxelText('BLOBFISH', { ...STYLES.title, fill: ['#fffbe8', '#ffe07a', '#ffb43a', '#f07a2a'] }, 1.15, 4, 0.55);
@@ -188,8 +188,9 @@ export class MenuScreen implements Screen {
     const hand = this.blob.handWorld(new THREE.Vector3());
     // sword raised to the light (in root space)
     // raised high behind the head like a little banner — never across the face
-    this.swordPivot.position.set(-0.12, 0.12, 0.5);
-    this.swordPivot.rotation.set(0, 0, 1.95 + Math.sin(t * 1.3) * 0.07);
+    // raised upright beside the body, held in front (toward the camera) so it reads clearly without covering the face
+    this.swordPivot.position.set(-0.22, -0.12, 0.62);
+    this.swordPivot.rotation.set(0, 0.25, 1.32 + Math.sin(t * 1.3) * 0.06);
     if (Math.random() < dt * 1.5) { const tip = new THREE.Vector3(0.66, 0, 0).applyMatrix4(this.sword.matrixWorld); this.fx.emit('spark', tip.x, tip.y, { n: 1, size: 0.25, life: 0.5, color: '#fff8e0' }); }
     // title bobbing in the rays
     this.title.position.set(0.1, heroY + 2.3 + Math.sin(t * 0.9) * 0.06, -0.8);
