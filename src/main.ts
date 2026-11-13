@@ -8,6 +8,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   humans: () => import('./dev/preview_humans'),
   map: () => import('./dev/preview_map'),
   backpack: () => import('./dev/preview_backpack'),
+  blob: () => import('./dev/preview_blob'),
 };
 
 async function boot() {

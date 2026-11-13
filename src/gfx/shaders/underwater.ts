@@ -92,7 +92,7 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
       .replace('#include <common>', '#include <common>\n' + CAUSTIC_GLSL)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
       {
-        vec3 uwN = normalize(vUwNormal);
+        vec3 uwN = normalize(vUwNormal) * (gl_FrontFacing ? 1.0 : -1.0);
         vec3 dl = mix(vec3(1.0), uwDepthLight(vUwWorld.y), uMatDepth);
         reflectedLight.directDiffuse *= dl; reflectedLight.indirectDiffuse *= dl;
         reflectedLight.directSpecular *= dl; reflectedLight.indirectSpecular *= dl;

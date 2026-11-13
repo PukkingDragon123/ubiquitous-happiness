@@ -28,6 +28,12 @@ export interface Entity {
   /** optional: things the blobfish can bite (bait, food) */
   biteable?: boolean;
   onBite?(w: World): void;
+  /** optional: a blade swept from (ax, ay) to (bx, by) this frame (fishing lines get cut by this) */
+  slash?(ax: number, ay: number, bx: number, by: number, dmg: number, w: World): boolean;
+  /** optional flags read by other systems */
+  cutsLines?: boolean;
+  isBoss?: boolean;
+  bossName?: string;
 }
 
 export type DamageKind = 'sword' | 'laser' | 'rock' | 'zap' | 'bite' | 'spike' | 'explosion' | 'hook' | 'crush';
