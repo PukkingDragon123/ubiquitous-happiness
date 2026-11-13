@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Blobfish: Reel Rebellion</title>
+  <style>
+    @font-face { font-family: 'Alagard'; src: url('./fonts/alagard.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Jacquard'; src: url('./fonts/Jacquard24.woff2') format('woff2'); font-display: block; }
+    @font-face { font-family: 'M6x11'; src: url('./fonts/m6x11plus.woff2') format('woff2'); font-display: block; }
+    @font-face { font-family: 'M5x7'; src: url('./fonts/m5x7.woff2') format('woff2'); font-display: block; }
+    @font-face { font-family: 'Goofy'; src: url('./fonts/TBMEGoofy-Regular.woff2') format('woff2'); font-display: block; }
+    @font-face { font-family: 'Tiny5'; src: url('./fonts/Tiny5.woff2') format('woff2'); font-display: block; }
+    @font-face { font-family: 'Pixelify'; src: url('./fonts/PixelifySans.woff2') format('woff2'); font-display: block; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #02121c; }
+    body { cursor: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+    canvas#game { display: block; width: 100vw; height: 100vh; image-rendering: auto; }
+    #boot { position: fixed; inset: 0; display: grid; place-items: center; background: #02121c; transition: opacity .8s ease; z-index: 5; }
+    #boot canvas { image-rendering: pixelated; width: 384px; height: 192px; }
+    #boot.gone { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="boot"><canvas id="bootcv" width="128" height="64"></canvas></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

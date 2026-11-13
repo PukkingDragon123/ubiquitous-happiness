@@ -1,0 +1,21 @@
+{
+  "name": "blobfish-reel-rebellion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A reverse-fishing roguelike: a blobfish adventurer with a toothpick sword steals bait and snaps lines.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.187.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  }
+}
