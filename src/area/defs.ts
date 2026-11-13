@@ -78,7 +78,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     ],
     wreck: 'sloop',
     nodes: { ore: 4, crystal: 3, mana: 2, shells: 4, clam: 3, scrap: 2, crate: 3, kelp: 2 },
-    eco: { schools: ['sardine', 'cichlid_blue', 'unicornfish'], hunters: ['barracuda'], scavengers: ['crab', 'hermit'], plankton: '#c8f0a0', schoolsN: 4, huntersN: 2, scavN: 3 },
+    eco: { schools: ['sardine', 'cichlid_blue', 'unicornfish'], hunters: ['barracuda'], scavengers: ['crab', 'hermit'], plankton: '#c8f0a0', schoolsN: 4, huntersN: 2, scavN: 3 + 2 },
     snow: 0.5, snowCol: '#f0f6e8',
   },
   kelp: {
@@ -105,7 +105,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     ],
     wreck: 'trawler',
     nodes: { ore: 4, crystal: 2, mana: 2, kelp: 6, shells: 4, clam: 1, scrap: 2, crate: 2 },
-    eco: { schools: ['sardine', 'pumpkinseed'], hunters: ['pike', 'peacock_bass'], scavengers: ['crab'], plankton: '#e0f0a0', schoolsN: 4, huntersN: 2, scavN: 3 },
+    eco: { schools: ['sardine', 'pumpkinseed'], hunters: ['pike', 'peacock_bass'], scavengers: ['crab'], plankton: '#e0f0a0', schoolsN: 4, huntersN: 2, scavN: 3 + 2 },
     snow: 0.9, snowCol: '#e8f0d8',
   },
   graveyard: {
@@ -131,7 +131,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     ],
     wreck: 'galleon',
     nodes: { ore: 3, crystal: 2, mana: 2, scrap: 6, crate: 5, shells: 2, clam: 1 },
-    eco: { schools: ['snapper', 'sardine'], hunters: ['grouper', 'barracuda'], scavengers: ['crab'], plankton: '#d0e0b0', schoolsN: 3, huntersN: 2, scavN: 4 },
+    eco: { schools: ['snapper', 'sardine'], hunters: ['grouper', 'barracuda'], scavengers: ['crab'], plankton: '#d0e0b0', schoolsN: 3, huntersN: 2, scavN: 4 + 2 },
     snow: 1.6, snowCol: '#d8dccc',
   },
   arctic: {
@@ -157,7 +157,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     ],
     wreck: 'steamer',
     nodes: { ore: 4, crystal: 5, mana: 2, shells: 2, scrap: 2, crate: 2, clam: 1 },
-    eco: { schools: ['sardine'], hunters: ['pike'], scavengers: ['crab'], plankton: '#d0f0ff', schoolsN: 3, huntersN: 2, scavN: 3 },
+    eco: { schools: ['sardine'], hunters: ['pike'], scavengers: ['crab'], plankton: '#d0f0ff', schoolsN: 3, huntersN: 2, scavN: 3 + 2 },
     snow: 1.2, snowCol: '#f4f8ff', ice: true,
   },
   abyss: {
@@ -182,7 +182,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     ],
     wreck: 'sub',
     nodes: { ore: 4, crystal: 4, mana: 4, shells: 1, scrap: 3, crate: 2 },
-    eco: { schools: ['sardine'], hunters: ['anglerfish'], scavengers: ['sea_cucumber', 'crab'], plankton: '#7cf8ff', schoolsN: 3, huntersN: 2, scavN: 3 },
+    eco: { schools: ['sardine'], hunters: ['anglerfish'], scavengers: ['sea_cucumber', 'crab'], plankton: '#7cf8ff', schoolsN: 3, huntersN: 2, scavN: 3 + 2 },
     snow: 2.0, snowCol: '#9fe8ff', glow: true,
   },
 };

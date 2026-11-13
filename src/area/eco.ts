@@ -9,7 +9,8 @@ import * as THREE from 'three';
 import type { World, Entity } from '../game/types';
 import type { AreaDef } from './defs';
 import type { Scenery } from './scenery';
-import { FishSchool, preloadFish } from '../fish';
+import { FishSchool, preloadFish, buildFish, FishModel } from '../fish';
+import { spawnCreature } from '../creatures';
 import { Hunter, Scavenger, EcoLink, Prey } from '../creatures/eco';
 import { Soup } from '../world/lp';
 import { Rng } from '../core/rng';
@@ -122,6 +123,7 @@ export class Ecosystem implements EcoLink {
   private t = 0;
   private spawnT = 0;
   private boneGeo: THREE.BufferGeometry;
+  private swimmers: { m: FishModel; x: number; y: number; z: number; v: number }[] = [];
   private x0: number; private x1: number;
 
   constructor(public a: AreaDef, public scen: Scenery, public w: World, seed: number) {
@@ -138,6 +140,27 @@ export class Ecosystem implements EcoLink {
     bs.lathe([[0.04, 0], [0.05, 0.04], [0, 0.07]], 4, br);
     this.boneGeo = bs.geometry();
     for (let i = 0; i < a.eco.schoolsN; i++) this.spawnSchool(this.rng.range(this.x0, this.x1));
+    // background passers-by: turtles, mantas, a whale silhouette far in the blue
+    const bg: [string, number, number, number, number][] = a.id === 'reef' ? [['sea_turtle', -14, 1.6, 0.6, 1], ['stingray', -26, 3.2, 0.9, 1], ['sperm_whale', -55, 1.4, 0.4, 1]] :
+      a.id === 'kelp' ? [['sea_turtle', -16, 1.6, 0.6, 1], ['stingray_blue', -30, 3, 0.8, 1]] : a.id === 'arctic' ? [['orca', -30, 1.2, 1.5, 1], ['stingray_blue', -22, 2.6, 0.8, 1]] :
+        a.id === 'graveyard' ? [['stingray', -18, 2.6, 0.7, 1], ['grouper', -12, 1.4, 0.8, 1]] : [['sperm_whale', -50, 1.2, 0.35, 1], ['anglerfish', -10, 1.6, 0.4, 1]];
+    for (const [sp, z, sc, spd] of bg) {
+      try {
+        const m = buildFish(sp, this.rng.int(1, 999));
+        m.group.scale.setScalar(sc);
+        const dir = this.rng.sign();
+        m.setFlip(dir < 0);
+        if (sp.startsWith('stingray')) m.group.rotation.x = 0.35;
+        this.group.add(m.group);
+        this.swimmers.push({ m, x: this.rng.range(this.x0, this.x1), y: Math.max(scen.shape.back(0, z) + 4, -14 + this.rng.range(-3, 6)), z, v: spd * dir });
+      } catch (e) { console.warn('bg swimmer', sp, e); }
+    }
+    // drifting jellies with pulsing bells (glowing in the dark areas)
+    const nj = a.id === 'abyss' ? 6 : a.id === 'arctic' ? 3 : a.id === 'reef' ? 2 : 0;
+    for (let i = 0; i < nj; i++) {
+      const x = this.rng.range(this.x0, this.x1), y = this.rng.range(scen.sand.heightAt(x) + 3, -3);
+      try { const j = spawnCreature('jellyfish', w, x, y); j.team = 'neutral'; } catch (e) { console.warn('jelly', e); }
+    }
     for (let i = 0; i < a.eco.huntersN; i++) this.spawnHunter(this.rng.range(this.x0, this.x1));
     for (let i = 0; i < a.eco.scavN; i++) this.spawnScav(this.rng.range(this.x0, this.x1));
   }
@@ -208,6 +231,12 @@ export class Ecosystem implements EcoLink {
     this.t += dt;
     const w = this.w, p = w.player;
     this.plankton.update(dt, this.x0, this.x1);
+    for (const s of this.swimmers) {
+      s.x += s.v * dt;
+      if (s.x > this.x1 + 40) s.x = this.x0 - 40; if (s.x < this.x0 - 40) s.x = this.x1 + 40;
+      s.m.group.position.set(s.x, s.y + Math.sin(this.t * 0.3 + s.z) * 0.6, s.z);
+      s.m.update(dt, Math.abs(s.v), 0);
+    }
     for (const s of this.schools) this.updateSchool(s, dt, p);
     // remains sink and get eaten / decay
     for (let i = this.remainsL.length - 1; i >= 0; i--) {
@@ -297,6 +326,7 @@ export class Ecosystem implements EcoLink {
 
   dispose() {
     for (const s of this.schools) { s.fish.mesh.removeFromParent(); s.fish.dispose(); }
+    for (const s of this.swimmers) { s.m.group.removeFromParent(); s.m.dispose(); }
     for (const h of this.hunters) h.alive = false;
     for (const h of this.scavs) h.alive = false;
     for (const r of this.remainsL) r.mesh.removeFromParent();

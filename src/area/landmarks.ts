@@ -28,6 +28,10 @@ export function buildLandmarks(scen: Scenery, group: THREE.Group, w: World) {
     case 'arctic': arctic(scen, group, r, w); break;
     case 'abyss': abyss(scen, group, r, w); break;
   }
+  heroes(scen);
+  dressRocks(scen);
+  dressJunk(scen, w);
+  foregroundFrame(scen);
 }
 
 // ------------------------------------------------------------------ light shafts (additive sheets from the surface)
@@ -369,4 +373,101 @@ function abyss(scen: Scenery, group: THREE.Group, r: Rng, w: World) {
     scen.addRock(r.pick(scen.shapes('pillow')), x, scen.heightAt(x, z) - 0.3, z, R, R * 0.6, R, r.range(0, 6), { topK: 0.6 });
   }
   void group; void boulder; void crustPainter;
+}
+
+// ------------------------------------------------------------------ detail pass: dressing, junk with stories, heroes
+/** encrust rock tops near the camera with urchins, starfish, anemones and barnacle clusters */
+export function dressRocks(scen: Scenery) {
+  const r = new Rng(scen.seed ^ 0xd7e5);
+  const pool = scen.a.id === 'abyss' ? ['tubeworms', 'glowcoral', 'bacteriaMat'] : scen.a.id === 'arctic' ? ['seastarDeco', 'urchins', 'plumose', 'softcoralCold'] : scen.a.id === 'graveyard' ? ['plumose', 'hydroid', 'seastarDeco'] : ['urchins', 'seastarDeco', 'anemone', 'brain', 'staghorn'];
+  for (const t of scen.rockTops) {
+    if (t.z < -9) continue;
+    for (let k = 0; k < r.int(2, 4); k++) {
+      const a = r.range(0, TAU), d = r.range(0, t.r * 0.8);
+      scen.placePlant(r.pick(pool), t.x + Math.cos(a) * d, t.y - 0.05, t.z + Math.sin(a) * d * 0.7, r.range(0.6, 1.1));
+    }
+  }
+}
+
+/** sunken human junk that tells stories: tyres, bottles with messages, a bike, a shopping cart, a diving helmet, a snagged lure garden */
+export function dressJunk(scen: Scenery, w: World) {
+  const r = new Rng(scen.seed ^ 0x7a11), sh = scen.shape, P = scen.props;
+  const ir = P.get('iron'), st = P.get('steel'), br = P.get('brass'), rope = P.get('rope'), glass = P.get('gemCyan'), blk = P.get('black');
+  const kinds = ['tyre', 'bottle', 'bike', 'cart', 'helmet', 'lures', 'tyre', 'bottle'];
+  const n = scen.a.id === 'graveyard' ? 14 : scen.a.id === 'abyss' ? 4 : 8;
+  for (let i = 0; i < n; i++) {
+    const x = r.range(sh.X0 + 6, sh.X1 - 6), z = r.chance(0.6) ? r.range(-1.6, 0.8) : r.range(-7, -2);
+    if (scen.isReserved(x, z, 0.5)) continue;
+    const y = scen.heightAt(x, z) - 0.05, s = new Soup(), kind = kinds[i % kinds.length];
+    let rx = 0, rz = 0;
+    if (kind === 'tyre') { s.lathe([[0.28, -0.12], [0.42, -0.1], [0.45, 0], [0.42, 0.1], [0.28, 0.12], [0.26, 0]], 10, blk); rx = 1.3; }
+    else if (kind === 'bottle') { s.glow(0.15).lathe([[0.07, 0], [0.075, 0.2], [0.03, 0.3], [0.025, 0.38], [0, 0.39]], 6, glass); s.glow(0); s.box([-0.02, 0.06, -0.06], [0.04, 0.14, 0.01], P.get('sail')); rz = 1.45; }
+    else if (kind === 'bike') {
+      for (const wx of [-0.55, 0.55]) { const f = s.count; s.lathe([[0.34, -0.02], [0.34, 0.02]], 10, ir); s.transformSince(f, mat4(wx, 0.34, 0, 1, 1, 1, 0, Math.PI / 2, 0)); }
+      s.tube([[-0.55, 0.34, 0], [-0.05, 0.75, 0], [0.45, 0.75, 0], [0.55, 0.34, 0]], () => 0.025, 4, st);
+      s.tube([[-0.05, 0.75, 0], [0.05, 0.34, 0], [0.45, 0.75, 0]], () => 0.025, 4, st);
+      s.tube([[0.45, 0.75, 0], [0.5, 0.95, 0]], () => 0.02, 4, st); s.tube([[0.5, 0.95, -0.22], [0.5, 0.95, 0.22]], () => 0.02, 4, st);
+      rx = 1.4;
+    } else if (kind === 'cart') {
+      for (const [a, b] of [[[-0.4, 0.3, -0.25], [0.4, 0.3, -0.25]], [[-0.4, 0.3, 0.25], [0.4, 0.3, 0.25]], [[-0.4, 0.8, -0.28], [0.45, 0.8, -0.28]], [[-0.4, 0.8, 0.28], [0.45, 0.8, 0.28]], [[-0.4, 0.3, -0.25], [-0.4, 0.8, -0.28]], [[0.4, 0.3, -0.25], [0.45, 0.8, -0.28]], [[-0.4, 0.3, 0.25], [-0.4, 0.8, 0.28]], [[0.4, 0.3, 0.25], [0.45, 0.8, 0.28]], [[0.45, 0.8, -0.28], [0.6, 0.95, 0]], [[0.45, 0.8, 0.28], [0.6, 0.95, 0]]] as V3[][]) s.tube([a, b], () => 0.018, 3, st);
+      for (let k = -3; k <= 3; k++) s.tube([[k * 0.12, 0.3, -0.25], [k * 0.12, 0.8, -0.28]], () => 0.01, 3, st);
+      for (const [wx, wz] of [[-0.35, -0.2], [0.35, -0.2], [-0.35, 0.2], [0.35, 0.2]]) s.tube([[wx, 0.3, wz], [wx, 0.06, wz]], () => 0.015, 3, ir);
+      rz = r.range(0.2, 0.5);
+    } else if (kind === 'helmet') {
+      s.lathe([[0.3, 0], [0.34, 0.15], [0.32, 0.35], [0.22, 0.52], [0, 0.58]], 9, br);
+      for (const a of [0, Math.PI / 2, -Math.PI / 2]) { const f = s.count; s.glow(0.2).lathe([[0.1, 0], [0.1, 0.04]], 7, glass); s.glow(0); s.transformSince(f, mat4(Math.cos(a) * 0.3, 0.3, Math.sin(a) * 0.3, 1, 1, 1, -a, 0, Math.PI / 2)); }
+      s.lathe([[0.36, -0.08], [0.38, 0], [0.36, 0.04]], 9, br);
+      rz = 0.5;
+    } else {
+      // a lure garden: lost tackle snagged on a rock, lines trailing up into the water
+      const f = s.count; s.append(scen.shapes('boulder')[0], mat4(0, 0, 0, 0.6, 0.5, 0.5, r.range(0, 6)), { uv: P.get('rock') }); void f;
+      for (let k = 0; k < 4; k++) {
+        const lx = r.range(-0.4, 0.4), top = r.range(1.5, 3.5);
+        s.tube([[lx, 0.4, 0], [lx + r.range(-0.4, 0.4), top, r.range(-0.2, 0.2)]], () => 0.006, 3, P.get('rope'));
+        const f2 = s.count;
+        s.glow(0.3).lathe([[0.03, -0.05], [0.045, 0.02], [0, 0.08]], 5, r.pick([P.get('gemRed'), P.get('gold'), P.get('gemGreen')])); s.glow(0);
+        s.transformSince(f2, mat4(lx, 0.45 + k * 0.05, 0.1, 1, 1, 1));
+      }
+    }
+    scen.chunk(x).prop.append(s, mat4(x, y, z, 1, 1, 1, r.range(0, TAU), rx, rz));
+    void rope; void w;
+  }
+  // bubble vents: little streams of bubbles leaking from the sand
+  const vents = Array.from({ length: 6 }, () => ({ x: r.range(sh.X0 + 6, sh.X1 - 6), z: r.range(-1, 0.5) }));
+  scen.updaters.push((dt, camX) => { for (const v of vents) if (Math.abs(v.x - camX) < 14 && Math.random() < dt * 5) w.fx.emit('bubble', v.x + (Math.random() - 0.5) * 0.1, scen.sand.heightAt(v.x) + 0.1, { n: 1, vy: 1.4, z: v.z, life: 4 }); });
+}
+
+/** foreground framing: big dark rocks between the camera and the plane */
+export function foregroundFrame(scen: Scenery) {
+  const r = new Rng(scen.seed ^ 0xf0f0), sh = scen.shape;
+  for (let x = sh.X0; x < sh.X1; x += r.range(9, 16)) {
+    if (scen.isReserved(x, 2, 0.5)) continue;
+    const z = r.range(2.2, 2.85), R = r.range(0.8, 1.6);
+    scen.addRock(r.pick(scen.shapes('boulder')), x, scen.heightAt(x, z) - R * 0.5, z, R * 1.3, R, R * 0.6, r.range(0, 6), { tint: 0.32, topK: 0.4 });
+  }
+}
+
+/** the heroes: reef brain-coral arch + toppled statue, arctic ice cave */
+export function heroes(scen: Scenery) {
+  const r = new Rng(scen.seed ^ 0x4e40), sh = scen.shape;
+  if (scen.a.id === 'reef') {
+    // a giant brain coral grown into an arch
+    const x = sh.wreckX + 22, z = -5, y = scen.heightAt(x, z);
+    const brainUV = scen.flora.atlas.regions.get('brain0') ?? scen.props.get('rock');
+    scen.chunk(x).flora.append(arch(scen.seed + 99, { lintel: 0.32, foot: 1.3 }), mat4(x, y - 0.5, z, 4.5, 5.5, 3.2, 0.15), { uv: brainUV });
+    // a toppled statue: a stone torso and a great head lying in the sand, crusted with coral
+    const sx = sh.wreckX - 24, sz = -4, sy = scen.heightAt(sx, sz);
+    const s = new Soup(), stone = scen.props.get('rock');
+    s.lathe([[0.9, 0], [1.1, 1.2], [1.25, 2.2], [0.9, 2.7], [0.4, 2.9]], 8, stone);
+    s.tube([[1.1, 2.3, 0], [1.9, 1.4, 0.4], [2.2, 0.6, 0.6]], (t) => 0.35 * (1 - t * 0.3), 6, stone, { tip: true });
+    const h = s.count; s.lathe([[0.55, 0], [0.75, 0.4], [0.8, 1.0], [0.62, 1.5], [0, 1.65]], 8, stone); s.transformSince(h, mat4(-1.8, 0.1, 0.8, 1, 1, 1, 0.4, 0, 1.5));
+    s.box([-2.65, 0.5, 0.7], [0.25, 0.35, 0.5], stone);
+    scen.chunk(sx).prop.append(s, mat4(sx, sy - 0.4, sz, 1, 1, 1, 0.3, 0.1, -1.35));
+    for (let k = 0; k < 10; k++) scen.placePlant(r.pick(['staghorn', 'brain', 'seafan', 'tubesponge']), sx + r.range(-2.5, 2.5), sy + r.range(0.3, 1.4), sz + r.range(-0.8, 0.8), r.range(0.7, 1.1));
+  }
+  if (scen.a.id === 'arctic') {
+    // an ice cave: a great glowing arch of blue ice
+    const x = sh.wreckX - 26, z = -6, y = scen.heightAt(x, z);
+    scen.chunk(x).prop.append(arch(scen.seed + 7, { lintel: 0.28, foot: 1.2 }), mat4(x, y - 0.5, z, 6, Math.min(7, -y - 2.5), 3.5, 0.1), { uv: scen.props.get('ice'), glow: 0.45 });
+  }
 }
