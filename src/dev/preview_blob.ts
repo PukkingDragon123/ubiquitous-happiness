@@ -16,7 +16,7 @@ class BlobPreview extends MockScreen {
     this.blob.setStats({ ...BASE_STATS, abilities: ab });
     this.world.player = this.blob;
     this.scene.add(this.blob.obj);
-    if (q.get('close')) this.camDist = 4.2;
+    if (q.get('close')) { this.camDist = 3.2; this.camYOff = 0.05; }
   }
   tick() {
     const q = new URLSearchParams(location.search);

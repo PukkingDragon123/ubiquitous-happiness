@@ -12,13 +12,14 @@ import { uw } from '../gfx/shaders/underwater';
 import { clamp01, smooth, hash2, TAU } from '../core/math';
 
 export const SB_N = 18;
+const TAIL_N = 8;
 
 // ------------------------------------------------------------------ body profile (t: 0 tail .. 1 front)
-const KT = [0, 0.1, 0.3, 0.5, 0.65, 0.8, 0.9, 0.96, 1];
-const KTOP = [0.03, 0.085, 0.22, 0.34, 0.39, 0.37, 0.3, 0.19, 0.02];
-const KBOT = [0.03, 0.075, 0.2, 0.31, 0.37, 0.4, 0.36, 0.26, 0.02];
-const KWID = [0.025, 0.075, 0.22, 0.36, 0.41, 0.4, 0.33, 0.22, 0.02];
-const KCY = [0.02, 0.01, 0.0, 0.0, -0.01, -0.03, -0.06, -0.09, -0.1];
+const KT = [0, 0.12, 0.3, 0.5, 0.68, 0.82, 0.92, 0.97, 1];
+const KTOP = [0.05, 0.15, 0.28, 0.37, 0.42, 0.425, 0.385, 0.29, 0.06];
+const KBOT = [0.05, 0.13, 0.26, 0.35, 0.405, 0.435, 0.415, 0.345, 0.07];
+const KWID = [0.04, 0.13, 0.28, 0.39, 0.445, 0.46, 0.425, 0.335, 0.07];
+const KCY = [0.02, 0.01, 0.0, 0.0, -0.005, -0.02, -0.04, -0.06, -0.07];
 const X0 = -0.62, XL = 1.12;
 function interp(keys: number[], t: number) {
   t = clamp01(t);
@@ -58,7 +59,7 @@ const outlinePoly: [number, number][] = (() => {
   const top: [number, number][] = [], bot: [number, number][] = [];
   for (let i = 0; i <= 40; i++) { const t = i / 40, p = prof(t); top.push([p.x, p.cy + p.top]); bot.push([p.x, p.cy - p.bot]); }
   // the droopy nose bulges the front-bottom of the outline
-  const nose: [number, number][] = [[0.56, -0.02], [0.6, -0.1], [0.58, -0.2], [0.5, -0.24]];
+  const nose: [number, number][] = [[0.62, 0.12], [0.71, -0.06], [0.68, -0.24], [0.56, -0.3]];
   return [...top, ...nose, ...bot.reverse()];
 })();
 export function outlineAt(a: number): { x: number; y: number } {
@@ -89,46 +90,46 @@ function paintPage() {
   const p = new Px(PAGE, PAGE);
   const H = new Float32Array(PAGE * PAGE); // height for the normal map
   const rough = new Px(PAGE, PAGE);
-  const skin = ramp(['#7e3048', '#b9566f', '#dc7d93', '#f1a3b3', '#ffd2da'], 7, 0.7);
-  // --- body: u around (0 bottom, .25 -z, .5 top, .75 +z), v along (top of region = nose end)
+  // soft rose-pink jelly: hue-shifted ramp (cool rose shadows, warm cream lights), low-contrast mottling,
+  // sparse freckles on the back, a pale belly and blushing cheeks under the eyes
+  const skin = ramp(['#8e3a5a', '#c35e7a', '#e2869b', '#f4a9b6', '#ffcfd4', '#fff0ea'], 10, 0.55);
   const bh = PAGE * R_BODY.h;
   for (let y = 0; y < bh; y++) for (let x = 0; x < PAGE; x++) {
     const u = x / PAGE, t = 1 - y / bh;
     const ang = u * TAU; // 0 bottom
     const up = -Math.cos(ang); // 1 top, -1 bottom
-    const [f1, , cid] = worley(x, y, 14, 3, PAGE);
-    const blot = smooth(9, 2, f1) * (cid > 0.55 ? 1 : 0);
-    const mott = pxNoise(x, y, 22, 4, 5, PAGE);
-    const pores = hash2(x, y, 9) > 0.965 ? 1 : 0;
-    let v = 0.62 - up * 0.1 + (mott - 0.5) * 0.35 - blot * 0.22 - pores * 0.12;
-    v += smooth(0.85, 1.0, t) * 0.05; // nose end a touch lighter
-    v -= smooth(0.25, 0.0, t) * 0.12;  // tail darker
+    const side = Math.sin(ang); // +1 at u=.25 (-z), -1 at u=.75 (+z)
+    const mott = pxNoise(x, y, 26, 3, 5, PAGE);
+    const [f1, , cid] = worley(x, y, 11, 3, PAGE);
+    const freckle = up > 0.25 && cid > 0.6 && f1 < 1.6 ? 1 : 0;
+    let v = 0.56 - up * 0.13 + (mott - 0.5) * 0.12 - freckle * 0.16;
+    v += smooth(-0.2, -0.85, up) * 0.14;            // pale belly
+    v += smooth(0.35, 0.75, up) * smooth(0.3, 0.8, t) * 0.04 * Math.sin(t * 40); // faint jelly sheen bands
+    v -= smooth(0.3, 0.0, t) * 0.1;                  // tail a touch deeper
     let c: RGB = skin(v, x, y);
-    // faint veins near the belly
-    const vein = Math.abs(pxNoise(x * 1.6, y * 0.6, 12, 2, 31, 0) - 0.5);
-    if (vein < 0.018 && up < 0.2) c = mix(c, hex('#b04060'), 0.45);
-    // gill slit arc on both flanks
-    for (const side of [0.25, 0.75]) {
-      const gx = (u - side) * PAGE, gy = (t - 0.6) * bh;
-      const r = Math.hypot(gx, gy * 0.8);
-      if (Math.abs(r - 12) < 0.9 && gx > 2 && Math.abs(gy) < 12) c = hex('#6a2238');
-      if (Math.abs(r - 13.2) < 0.7 && gx > 2 && Math.abs(gy) < 11) c = mix(c, hex('#ffd2da'), 0.5);
+    // blush: soft dithered ovals on both cheeks, below and behind the eyes
+    for (const s0 of [-1, 1]) {
+      const cu = 0.5 + s0 * 0.215, ct = 0.8;
+      const dx = (u - cu) * PAGE / 9, dy = (t - ct) * bh / 7;
+      const b = 1 - (dx * dx + dy * dy);
+      if (b > 0 && hash2(x, y, 41) < b * 1.4) c = mix(c, hex('#ff6d8a'), 0.32 + b * 0.18);
     }
+    void side;
     p.set(x, y, c);
-    H[y * PAGE + x] = mott * 0.6 + blot * 0.5 - pores * 0.8 + (vein < 0.02 ? 0.25 : 0);
-    rough.set(x, y, [Math.round(70 + mott * 40 + pores * 80), 0, 0]);
+    H[y * PAGE + x] = mott * 0.35 - freckle * 0.3;
+    rough.set(x, y, [Math.round(55 + mott * 30), 0, 0]);
   }
-  // --- nose: bulbous, slightly redder, bigger pores
-  const nr = ramp(['#8a3450', '#c55f79', '#e88aa0', '#ffc2cf'], 6, 0.7);
+  // --- nose: big, soft, glossy, slightly warmer
+  const nr = ramp(['#9a3e5e', '#cc6680', '#ea8fa2', '#ffbcc8', '#ffe2e4'], 8, 0.55);
   const nx0 = 0, ny0 = PAGE * 0.75, nw = PAGE * 0.5, nh = PAGE * 0.25;
   for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
     const u = x / nw, t = 1 - y / nh, up = Math.cos(u * TAU);
-    const m = pxNoise(x, y, 9, 3, 11, 0);
-    const pore = hash2(x, y, 4) > 0.94 ? 1 : 0;
-    const v = 0.55 + up * 0.08 + (m - 0.5) * 0.3 - pore * 0.18 + t * 0.08;
+    const m = pxNoise(x, y, 11, 3, 11, 0);
+    const pore = hash2(x, y, 4) > 0.985 ? 1 : 0;
+    const v = 0.5 + up * 0.14 + (m - 0.5) * 0.1 - pore * 0.1 + t * 0.06;
     p.set(nx0 + x, ny0 + y, nr(v, x, y));
-    H[(ny0 + y) * PAGE + nx0 + x] = m * 0.5 - pore;
-    rough.set(nx0 + x, ny0 + y, [60 + pore * 90, 0, 0]);
+    H[(ny0 + y) * PAGE + nx0 + x] = m * 0.3 - pore * 0.5;
+    rough.set(nx0 + x, ny0 + y, [45, 0, 0]);
   }
   // --- fin membrane: translucent pink with darker rays, rounded edge (alpha)
   const fx0 = PAGE * 0.5, fy0 = PAGE * 0.75, fw = PAGE * 0.25, fh = PAGE * 0.25;
@@ -149,9 +150,11 @@ function paintPage() {
   const red = ramp(['#5e0d14', '#9c1b22', '#d0302e', '#f05a48'], 5);
   for (let y = 0; y < bhh; y++) for (let x = 0; x < bw; x++) {
     const weave = ((x + y) & 1) * 0.06 + ((x >> 1) & 1) * 0.03;
-    const dx = ((x + (y >> 3 & 1) * 4) % 8) - 3.5, dy = (y % 8) - 3.5;
-    const dot = dx * dx + dy * dy < 4.5;
-    const c = dot ? (dx * dx + dy * dy < 1.5 ? hex('#fff8ea') : hex('#f2e2cf')) : red(0.62 + weave + (pxNoise(x, y, 6, 2, 3) - 0.5) * 0.3, x, y);
+    const dx = ((x + (y >> 4 & 1) * 8) % 16) - 7.5, dy = (y % 16) - 7.5;
+    const r2 = dx * dx + dy * dy;
+    const dot = r2 < 9;
+    const hem = y > bhh - 6;
+    const c = hem ? red(0.3 + weave, x, y) : dot ? (r2 < 4 && dx < 0 ? hex('#ffffff') : hex('#fbecd6')) : red(0.62 + weave + (pxNoise(x, y, 6, 2, 3) - 0.5) * 0.25, x, y);
     p.set(bx0 + x, by0 + y, c);
     H[(by0 + y) * PAGE + bx0 + x] = weave * 3 + (dot ? 0.3 : 0);
     rough.set(bx0 + x, by0 + y, [200, 0, 0]);
@@ -284,14 +287,14 @@ function buildBody(): THREE.BufferGeometry {
   const NN = 14;
   for (let i = 0; i <= NN; i++) {
     const s = i / NN;
-    const ax = 0.3, ay = 0.05, bx = 0.6, by = 0.06, cx = 0.575, cyy = -0.16;
+    const ax = 0.33, ay = 0.16, bx = 0.62, by = 0.14, cx = 0.57, cyy = -0.16;
     const x = (1 - s) * (1 - s) * ax + 2 * (1 - s) * s * bx + s * s * cx;
     const y = (1 - s) * (1 - s) * ay + 2 * (1 - s) * s * by + s * s * cyy;
     nose.push([x, y, 0]);
   }
   const nr = (s: number) => {
-    const base = 0.07 + 0.055 * smooth(0.15, 0.8, s);
-    const cap = s > 0.82 ? Math.sqrt(Math.max(0, 1 - ((s - 0.82) / 0.18) ** 2)) : 1;
+    const base = 0.09 + 0.07 * smooth(0.15, 0.8, s);
+    const cap = s > 0.76 ? Math.sqrt(Math.max(0, 1 - ((s - 0.76) / 0.24) ** 2)) : 1;
     return Math.max(0.004, base * cap);
   };
   L.tube(nose, nr, 18, R_NOSE, 1, { capStart: false, capEnd: true });
@@ -360,17 +363,21 @@ export function buildSword(): THREE.Group {
 }
 
 // ------------------------------------------------------------------ eyes, lids, brows, mouth
+/** iris cap texture: row 0 = pole (pupil) .. last row = cap edge (limbal ring); x runs around the iris */
 function eyeTexture(): THREE.Texture {
-  const p = new Px(32, 32);
-  p.ellipse(16, 16, 15.5, 15.5, (nx, ny) => {
-    const d = Math.hypot(nx, ny);
-    if (d > 0.93) return hex('#120610');
-    if (d > 0.52) return mix(hex('#5a2a1a'), hex('#c07a3a'), clamp01((ny + 1) * 0.5) * 0.8 + (hash2(Math.round(nx * 20), Math.round(ny * 20), 3) - 0.5) * 0.3);
-    return hex('#0a0408');
+  const W = 64, H = 32;
+  const p = new Px(W, H);
+  const iris = ramp(['#2a1206', '#6e3410', '#b8661a', '#f0a43a', '#ffd88a'], 9, 0.6);
+  p.fill((x, y) => {
+    const v = y / (H - 1);
+    if (v < 0.36) return hex(v < 0.3 ? '#07030a' : '#1a0c08');
+    if (v > 0.9) return hex('#1a0a06');
+    const k = (v - 0.36) / 0.54; // 0 inner .. 1 outer
+    const stri = Math.sin(x * 0.9 + Math.sin(x * 0.31) * 3) * 0.12 + (hash2(x, 0, 4) - 0.5) * 0.18;
+    // lighter collarette ring near the pupil, darker toward the rim
+    const t = 0.78 - k * 0.55 + stri + (k < 0.18 ? 0.18 : 0);
+    return iris(t, x, y);
   });
-  p.ellipse(11, 10, 4.2, 3.6, '#ffffff');
-  p.ellipse(21, 21, 1.8, 1.8, '#f0f8ff');
-  p.set(13, 7, '#ffffff');
   return p.texture({ mip: false });
 }
 
@@ -420,55 +427,59 @@ export class BlobModel {
     this.root.add(this.body);
 
     // fins
-    this.finR = new THREE.Mesh(finGeo(0.22, 0.17, 0.03), this.skinMat);
-    this.finL = new THREE.Mesh(finGeo(0.22, 0.17, 0.03), this.skinMat);
+    this.finR = new THREE.Mesh(finGeo(0.3, 0.24, 0.04), this.skinMat);
+    this.finL = new THREE.Mesh(finGeo(0.3, 0.24, 0.04), this.skinMat);
     this.finR.position.copy(surf(0.55, Math.PI * 0.62, -0.02)); this.finL.position.copy(surf(0.55, -Math.PI * 0.62, -0.02));
     this.finR.castShadow = this.finL.castShadow = true;
-    this.tail = new THREE.Mesh(finGeo(0.2, 0.26, 0.0), this.skinMat);
-    this.tail.position.set(-0.6, 0.02, 0);
-    this.tail.rotation.set(Math.PI / 2, Math.PI, 0);
+    this.tail = new THREE.Mesh(finGeo(0.3, 0.42, 0.0), this.skinMat);
+    this.tail.position.set(-0.58, 0.02, 0);
+    this.tail.rotation.set(0, Math.PI, 0);
     this.tail.castShadow = true;
     this.body.add(this.finR, this.finL, this.tail);
 
-    // eyes
+    // eyes: glossy sclera, an amber iris cap that rotates to look around, fixed catchlights, skin lids and brows
     const eyeTex = eyeTexture();
-    const eyeMat = uw(new THREE.MeshPhysicalMaterial({ color: '#160810', roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, metalness: 0.0 }), { depth: 0.6, caustics: 0.3 });
-    const irisMat = new THREE.MeshPhysicalMaterial({ map: eyeTex, roughness: 0.1, clearcoat: 1, transparent: false, alphaTest: 0.5 });
-    const browMat = uw(new THREE.MeshStandardMaterial({ color: '#8a3a52', roughness: 0.7 }));
-    const eyeR = 0.078;
+    const scleraMat = uw(new THREE.MeshPhysicalMaterial({ color: '#f7f1ec', roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.05 }), { depth: 0.45, caustics: 0.25, sss: [1, 0.85, 0.85], sssK: 0.3 });
+    const irisMat = uw(new THREE.MeshPhysicalMaterial({ map: eyeTex, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.03 }), { depth: 0.35, caustics: 0.1 });
+    const glintMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+    const browMat = uw(new THREE.MeshStandardMaterial({ color: '#a64a66', roughness: 0.6 }));
+    const eyeR = 0.108;
+    const irisGeo = new THREE.SphereGeometry(eyeR * 1.006, 36, 14, 0, TAU, 0, 0.66);
+    irisGeo.rotateX(Math.PI / 2);
     for (const side of [1, -1]) {
       const g = new THREE.Group();
-      const ang = side * 0.95;
-      const pos = surf(0.8, ang, -eyeR * 0.45);
-      pos.y += 0.02;
+      const pos = surf(0.9, side * 0.86, -eyeR * 0.5);
       g.position.copy(pos);
-      // orient: +z = outward (mostly sideways and a bit forward/up)
-      const out = new THREE.Vector3(0.45, 0.35, side).normalize();
+      const out = new THREE.Vector3(0.72, 0.12, side * 0.68).normalize();
       g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), out);
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 24, 16), eyeMat);
-      const iris = new THREE.Mesh(new THREE.CircleGeometry(eyeR * 0.78, 24), irisMat);
-      iris.position.z = eyeR * 0.93;
-      const lidGeo = new THREE.SphereGeometry(eyeR * 1.12, 20, 10, 0, TAU, 0, Math.PI * 0.5);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 32, 24), scleraMat);
+      const iris = new THREE.Mesh(irisGeo, irisMat);
+      const glints = new THREE.Group();
+      const g1 = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.2, 12, 8), glintMat); g1.position.set(-eyeR * 0.32, eyeR * 0.38, eyeR * 0.9); g1.scale.z = 0.4;
+      const g2 = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.09, 8, 6), glintMat); g2.position.set(eyeR * 0.3, -eyeR * 0.28, eyeR * 0.95); g2.scale.z = 0.4;
+      glints.add(g1, g2);
+      const lidGeo = new THREE.SphereGeometry(eyeR * 1.08, 28, 12, 0, TAU, 0, Math.PI * 0.5);
       const lid = new THREE.Mesh(lidGeo, this.bodyMatPlain());
       const low = new THREE.Mesh(lidGeo, this.bodyMatPlain());
       low.rotation.x = Math.PI;
       const L = new Loft();
-      const bp: V3[] = []; for (let i = 0; i <= 8; i++) { const k = i / 8; bp.push([(k - 0.5) * eyeR * 2.2, Math.sin(k * Math.PI) * eyeR * 0.25, 0]); }
-      L.tube(bp, (k) => 0.012 * (0.6 + Math.sin(k * Math.PI) * 0.6), 6, { x: 0, y: 0, w: 1, h: 1 }, 0, { capStart: true, capEnd: true });
+      const bp: V3[] = []; for (let i = 0; i <= 10; i++) { const k = i / 10; bp.push([(k - 0.5) * eyeR * 2.3, Math.sin(k * Math.PI) * eyeR * 0.3, 0]); }
+      L.tube(bp, (k) => 0.019 * (0.55 + Math.sin(k * Math.PI) * 0.55), 8, { x: 0, y: 0, w: 1, h: 1 }, 0, { capStart: true, capEnd: true });
       const brow = new THREE.Mesh(L.build(), browMat);
-      brow.position.set(0, eyeR * 1.45, eyeR * 0.55);
-      g.add(ball, iris, lid, low, brow);
+      brow.position.set(0, eyeR * 1.42, eyeR * 0.5);
+      for (const m of [ball, iris, lid, low, brow]) m.castShadow = false;
+      g.add(ball, iris, glints, lid, low, brow);
       this.body.add(g);
       this.eyes.push({ g, iris, lid, low, brow, side, rest: pos.clone(), ang: Math.atan2(pos.y - SB_CENTER.y, pos.x - SB_CENTER.x) });
     }
 
     // mouth (rebuilt when the expression changes)
-    const lipMat = uw(new THREE.MeshStandardMaterial({ color: '#7a2438', roughness: 0.4 }));
+    const lipMat = uw(new THREE.MeshPhysicalMaterial({ color: '#c0566e', roughness: 0.3, clearcoat: 0.7 }), { sss: [1, 0.4, 0.5], sssK: 0.4 });
     const inMat = uw(new THREE.MeshStandardMaterial({ color: '#2a0810', roughness: 0.8, side: THREE.DoubleSide }), { caustics: 0 });
     const geoUp = new THREE.BufferGeometry(), geoLo = new THREE.BufferGeometry(), geoFill = new THREE.BufferGeometry();
     this.mouth = { up: new THREE.Mesh(geoUp, lipMat), lo: new THREE.Mesh(geoLo, lipMat), fill: new THREE.Mesh(geoFill, inMat), geoUp, geoLo, geoFill };
     this.body.add(this.mouth.up, this.mouth.lo, this.mouth.fill);
-    this.mouthPos = surfFront(-0.24, 0, 0.0);
+    this.mouthPos = surfFront(-0.31, 0, 0.0);
     this.buildMouth();
 
     // bandana: a cloth cap over the top of the head with a rolled hem, a knot at the back and two flowing tails
@@ -477,16 +488,16 @@ export class BlobModel {
     const capRings = [];
     for (let i = 0; i <= 10; i++) {
       const k = i / 10;
-      const t = 0.56 + k * 0.29;
+      const t = 0.55 + k * 0.34;
       // the hem dips lower over the brow at the front and wraps the sides
-      const span = 1.05 + 0.25 * Math.sin(k * Math.PI);
+      const span = 1.28 - k * 0.6;
       const pts = bus.map((u) => { const a = (u - 0.5) * 2 * span; return surf(t, a, 0.014 + (i === 10 ? 0.012 : 0)).toArray() as V3; });
       capRings.push({ pts, v: k });
     }
     bandL.loft(capRings, bus, R_BAND, 0, { alt: true });
     // rolled hem along the front edge
     const hem: V3[] = [];
-    for (let j = 0; j <= 16; j++) { const a = (j / 16 - 0.5) * 2 * 1.05; hem.push(surf(0.85, a, 0.02).toArray() as V3); }
+    for (let j = 0; j <= 16; j++) { const a = (j / 16 - 0.5) * 2 * 0.68; hem.push(surf(0.89, a, 0.03).toArray() as V3); }
     bandL.tube(hem, () => 0.016, 6, R_BAND, 1, { capStart: true, capEnd: true });
     const bandMat = uw(new THREE.MeshStandardMaterial({ map: pg.map, roughness: 0.85, side: THREE.DoubleSide }), { rim: 0.15 });
     const capMat = uw(new THREE.MeshStandardMaterial({ map: pg.map, roughness: 0.85, side: THREE.DoubleSide }), { rim: 0.15 });
@@ -504,13 +515,16 @@ export class BlobModel {
     this.body.add(this.bandKnot);
     for (let k = 0; k < 2; k++) {
       const pts: THREE.Vector3[] = [], prev: THREE.Vector3[] = [];
-      for (let i = 0; i < 7; i++) { pts.push(new THREE.Vector3()); prev.push(new THREE.Vector3()); }
+      for (let i = 0; i < TAIL_N; i++) { pts.push(new THREE.Vector3()); prev.push(new THREE.Vector3()); }
+      // a flat cloth strip with real thickness (rectangular cross-section) so it reads from any angle
       const geo = new THREE.BufferGeometry();
-      const pos = new Float32Array(7 * 2 * 3), uv = new Float32Array(7 * 2 * 2), idx: number[] = [];
-      for (let i = 0; i < 7; i++) { uv[i * 4] = 0.75 + (i / 6) * 0.25; uv[i * 4 + 1] = 0.25; uv[i * 4 + 2] = 0.75 + (i / 6) * 0.25; uv[i * 4 + 3] = 0.0; }
-      for (let i = 0; i < 6; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const nv = TAIL_N * 5;
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+      const uv = new Float32Array(nv * 2);
+      for (let i = 0; i < TAIL_N; i++) for (let j = 0; j < 5; j++) { uv[(i * 5 + j) * 2] = 0.76 + (i / (TAIL_N - 1)) * 0.22; uv[(i * 5 + j) * 2 + 1] = 0.02 + (j / 4) * 0.2; }
       geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      const idx: number[] = [];
+      for (let i = 0; i < TAIL_N - 1; i++) for (let j = 0; j < 4; j++) { const a = i * 5 + j, b = a + 1, c = a + 6, d = a + 5; idx.push(a, b, c, a, c, d); }
       geo.setIndex(idx);
       const mesh = new THREE.Mesh(geo, bandMat);
       mesh.frustumCulled = false; mesh.castShadow = true;
@@ -535,20 +549,20 @@ export class BlobModel {
 
   private buildMouth() {
     const e = this.expr;
-    const N = 13, w = 0.19 * e.width;
+    const N = 15, w = 0.23 * e.width;
     const up: THREE.Vector3[] = [], lo: THREE.Vector3[] = [];
     for (let i = 0; i < N; i++) {
       const k = (i / (N - 1)) * 2 - 1;
       const z = k * w;
       const curve = e.curve * 0.07 * (k * k) - e.curve * 0.016;
-      const yU = -0.235 + curve + e.open * 0.012;
+      const yU = -0.305 + curve + e.open * 0.015;
       const yL = yU - e.open * 0.11 * (1 - k * k * 0.9) - 0.003;
       up.push(surfFront(yU, z, 0.008));
       lo.push(surfFront(yL, z, 0.008));
     }
     const tubeGeo = (pts: THREE.Vector3[], g: THREE.BufferGeometry) => {
       const L = new Loft();
-      L.tube(pts.map((p) => p.toArray() as V3), (t) => 0.015 * (0.5 + Math.sin(t * Math.PI) * 0.7), 6, { x: 0, y: 0, w: 1, h: 1 }, 0, { capStart: true, capEnd: true });
+      L.tube(pts.map((p) => p.toArray() as V3), (t) => 0.022 * (0.45 + Math.sin(t * Math.PI) * 0.7), 6, { x: 0, y: 0, w: 1, h: 1 }, 0, { capStart: true, capEnd: true });
       const b = L.build();
       g.setAttribute('position', b.getAttribute('position')); g.setAttribute('normal', b.getAttribute('normal')); g.setAttribute('uv', b.getAttribute('uv'));
       g.setIndex(b.getIndex()); g.computeBoundingSphere();
@@ -609,14 +623,14 @@ export class BlobModel {
       e.brow.position.y = 0.078 * (1.45 + E.browUp * 0.35 - lid * 0.25);
       e.brow.rotation.z = E.browTilt * 0.42 * -e.side;
       // the iris looks toward the look direction (in body space), scaled by pupil
-      e.iris.position.x = this.look.x * 0.022; e.iris.position.y = this.look.y * 0.022;
-      e.iris.scale.setScalar(0.9 + (E.pupil - 1) * 0.35);
+      e.iris.rotation.set(-this.look.y * 0.38, this.look.x * 0.45 * e.side, 0);
+      e.iris.scale.setScalar(1 + (E.pupil - 1) * 0.12);
     }
     // fins
     const flap = o.time * (6 + o.swim * 10);
     this.finR.rotation.set(-0.5 + Math.sin(flap) * (0.25 + o.swim * 0.35), -0.6, -0.35);
     this.finL.rotation.set(0.5 - Math.sin(flap + 0.6) * (0.25 + o.swim * 0.35), 0.6, -0.35);
-    this.tail.rotation.set(Math.PI / 2, Math.PI + Math.sin(o.time * (5 + o.swim * 9)) * (0.25 + o.swim * 0.3), 0);
+    this.tail.rotation.set(0, Math.PI + Math.sin(o.time * (5 + o.swim * 9)) * (0.35 + o.swim * 0.35), Math.sin(o.time * 2.1) * 0.08);
     this.U.uWag.value += dt * (4 + o.swim * 9);
     this.U.uWagAmp.value = 0.02 + o.swim * 0.035;
     // bandana tails: verlet chains anchored at the knot (world space)
@@ -645,9 +659,17 @@ export class BlobModel {
         const p = T.pts[i];
         const nxt = T.pts[Math.min(T.pts.length - 1, i + 1)], prv = T.pts[Math.max(0, i - 1)];
         const dir = nxt.clone().sub(prv).normalize();
-        const side = new THREE.Vector3(-dir.y, dir.x, 1.1).normalize().multiplyScalar(0.06 * (1 - i / 10) * (k === 0 ? 1 : 0.8));
-        pos.setXYZ(i * 2, p.x + side.x, p.y + side.y, p.z + 0.01 * k);
-        pos.setXYZ(i * 2 + 1, p.x - side.x, p.y - side.y, p.z + 0.01 * k);
+        const wv = 0.05 * (1 - i / (TAIL_N + 2)) * (k === 0 ? 1 : 0.82);
+        const sx = -dir.y * wv, sy = dir.x * wv, th = 0.012;
+        // twist the strip a little along its length so it catches light like cloth
+        const tw = Math.sin(i * 0.9 + o.time * 3 + k) * 0.6;
+        const cz = Math.cos(tw), sz = Math.sin(tw);
+        const corners = [[1, 1], [-1, 1], [-1, -1], [1, -1], [1, 1]];
+        for (let j = 0; j < 5; j++) {
+          const [a, b] = corners[j];
+          const ox = sx * a * cz, oy = sy * a * cz, oz = wv * a * sz + th * b;
+          pos.setXYZ(i * 5 + j, p.x + ox, p.y + oy, p.z + oz + 0.03 * k);
+        }
       }
       pos.needsUpdate = true;
       T.geo.computeVertexNormals();

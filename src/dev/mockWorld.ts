@@ -65,6 +65,7 @@ export class MockScreen implements Screen {
   world: World;
   camTarget = new THREE.Vector3(0, -4, 0);
   camDist = 16;
+  camYOff = 0.8;
   followPlayer = true;
   protected terrainObj: THREE.Group;
 
@@ -144,8 +145,8 @@ export class MockScreen implements Screen {
     this.tick(dt);
     if (this.followPlayer) this.camTarget.set(w.player.x, w.player.y, 0);
     const sh = this.game.shakeOffset();
-    this.camera.position.set(this.camTarget.x + sh.x, this.camTarget.y + 0.8 + sh.y, this.camDist);
-    this.camera.lookAt(this.camTarget.x + sh.x, this.camTarget.y + 0.8 + sh.y, 0);
+    this.camera.position.set(this.camTarget.x + sh.x, this.camTarget.y + this.camYOff + sh.y, this.camDist);
+    this.camera.lookAt(this.camTarget.x + sh.x, this.camTarget.y + this.camYOff + sh.y, 0);
     this.light.follow(this.camTarget.x, this.camTarget.y);
     w.water.update(this.game.renderer, dt, this.camTarget.x);
     w.fx.update(dt);

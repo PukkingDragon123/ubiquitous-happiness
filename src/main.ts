@@ -9,6 +9,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   map: () => import('./dev/preview_map'),
   backpack: () => import('./dev/preview_backpack'),
   blob: () => import('./dev/preview_blob'),
+  fishing: () => import('./dev/preview_fishing'),
 };
 
 async function boot() {

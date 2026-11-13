@@ -35,8 +35,8 @@ export const POST = {
   uGain: { value: new THREE.Vector3(1.03, 1.0, 0.97) },
   uVignette: { value: 0.35 },
   uChroma: { value: 0.0007 },
-  uBloom: { value: 0.55 },
-  uBloomThreshold: { value: 0.85 },
+  uBloom: { value: 0.42 },
+  uBloomThreshold: { value: 1.0 },
   uFlash: { value: new THREE.Vector4(1, 1, 1, 0) }, // rgb + amount (hit flashes, ability flashes)
   uDesat: { value: 0 },          // e.g. when dragged up / low health
   uPulse: { value: 0 },          // red heartbeat vignette 0..1
