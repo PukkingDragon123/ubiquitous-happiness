@@ -86,6 +86,26 @@ function paintPage() {
     const y = (1 - t0) * bh + Math.pow(Math.sin(u * TAU), 2) * 4;
     setI(x, y, dark); add(x, y - 1, 1);
   }
+  // loose-skin wrinkles on the head: short curved creases (dark groove, lit lip), hand-placed in rows
+  for (let i = 0; i < 46; i++) {
+    const u0 = hash2(i, 5, 61), t0 = 0.64 + hash2(i, 6, 61) * 0.3;
+    const up0 = -Math.cos(u0 * TAU);
+    if (up0 < -0.5) continue;
+    const L = 5 + Math.floor(hash2(i, 7, 61) * 7), bend = (hash2(i, 8, 61) - 0.5) * 0.5;
+    const x0 = u0 * bw, y0 = (1 - t0) * bh;
+    for (let k = 0; k < L; k++) {
+      const x = x0 + k - L / 2, y = y0 + (k - L / 2) * (k - L / 2) * bend * 0.12;
+      setI(x, y, 3); add(x, y - 1, 1);
+    }
+  }
+  // translucent jelly: paler soft patches where the flesh is thin (cheeks, flanks)
+  for (let i = 0; i < 18; i++) {
+    const cx = hash2(i, 1, 71) * bw, cy = (0.2 + hash2(i, 2, 71) * 0.7) * bh, rx = 5 + hash2(i, 3, 71) * 8, ry = 3 + hash2(i, 4, 71) * 4;
+    for (let y = Math.floor(cy - ry); y <= cy + ry; y++) for (let x = Math.floor(cx - rx); x <= cx + rx; x++) {
+      const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + Math.sin(x * 0.9 + y * 0.7) * 0.15;
+      if (d < 1 && y >= 0 && y < bh && idx[I(x, y)] >= 3 && idx[I(x, y)] <= 4) add(x, y, 1);
+    }
+  }
   // gill slits: a bowed dark slit low on each flank with a pale rim behind it
   for (const s of [0.23, 0.77]) for (let k = -7; k <= 7; k++) {
     const x = s * bw + k, y = (1 - 0.665) * bh - (k * k) * 0.05;
@@ -220,7 +240,7 @@ function buildFace(body: THREE.BufferGeometry): { geo: THREE.BufferGeometry; hit
 function buildNose(base: THREE.Vector3): THREE.BufferGeometry {
   // a droopy bulb: from inside the forehead, forward, then hanging down over the mouth
   const L = new Loft();
-  const a = base.clone().add(new THREE.Vector3(-0.12, 0.03, 0)), b = base.clone().add(new THREE.Vector3(0.16, 0.0, 0)), c = base.clone().add(new THREE.Vector3(0.1, -0.24, 0));
+  const a = base.clone().add(new THREE.Vector3(-0.12, 0.03, 0)), b = base.clone().add(new THREE.Vector3(0.16, 0.0, 0)), c = base.clone().add(new THREE.Vector3(0.1, -0.27, 0));
   const path: V3[] = [];
   const N = 7;
   for (let i = 0; i <= N; i++) {
