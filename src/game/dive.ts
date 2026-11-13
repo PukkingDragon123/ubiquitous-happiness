@@ -24,6 +24,7 @@ import { Pickup, pickupHooks } from './pickup';
 import { Current } from './current';
 import { spotLayout } from './spots';
 import { eventLayout } from './events';
+import { setupBoss } from '../fishing/boss';
 
 export interface DiveNode { type: string; spot: string; biome: string; difficulty: number; name?: string; id?: number }
 
@@ -110,8 +111,8 @@ export class DiveScreen implements Screen {
         if (DiveScreen.ambush) DiveScreen.ambush(this.world, x, y, n, () => this.spotCleared('loud'));
         else this.spotCleared('loud');
       });
-    } else if (t === 'boss' && DiveScreen.boss) {
-      DiveScreen.boss(this.world, this.node, this.fishing, () => this.spotCleared('boss'));
+    } else if (t === 'boss') {
+      (DiveScreen.boss ?? setupBoss)(this.world, this.node, this.fishing, () => this.spotCleared('boss'));
     } else spotLayout(this.world, this.fishing, this.node);
     DiveScreen.populate?.(this.world, b, this.node, -30, 40);
     this.cleared = false; this.deadT = -1; this.introT = 0;
@@ -172,7 +173,7 @@ export class DiveScreen implements Screen {
       if (!e.alive) { e.dispose?.(w); e.obj?.removeFromParent(); w.entities.splice(i, 1); }
     }
     DiveScreen.ambientSpawn?.(w, this.biome, this.camLook.x, dt);
-    this.run.fire('tick', { dt });
+    w.emit('tick', { dt });
     // ---- camera
     let tx = p.x + clamp(p.vx * 0.35, -2.5, 2.5), ty = p.y + clamp(p.vy * 0.25, -1.5, 1.5);
     let dist = 15.5;
