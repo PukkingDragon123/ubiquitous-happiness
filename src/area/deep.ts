@@ -19,15 +19,16 @@ import { TAU, critterSkin, rgb01 } from './kit';
 type UVRect = { u0: number; v0: number; u1: number; v1: number };
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _ax = new THREE.Vector3(), _v = new THREE.Vector3();
 
-function fin(s: Soup, a: V3, b: V3, c: V3) { s.tri(a, b, c, [0, 0], [1, 0], [1, 1]); s.tri(a, c, b, [0, 0], [1, 1], [1, 0]); }
+let FR = { u0: 0, v0: 0, u1: 1, v1: 1 };
+function fin(s: Soup, a: V3, b: V3, c: V3) { const r = FR; s.tri(a, b, c, [r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1]); s.tri(a, c, b, [r.u0, r.v0], [r.u1, r.v1], [r.u1, r.v0]); }
 
 /** lantern-fish body (nose +x, tail base at x = -0.13): dark back, silver flank, big eye, photophores, a lure */
 function lanternBody(sk: UVRect) {
   const s = new Soup();
   const f = s.count;
-  s.glow(0.3).color(0.5, 0.58, 0.72).tube([[-0.14, 0, 0], [-0.08, 0.004, 0], [-0.01, 0.008, 0], [0.06, 0.008, 0], [0.12, 0.004, 0], [0.16, -0.004, 0]], (t) => [0.02, 0.038, 0.052, 0.055, 0.046, 0.024][Math.min(5, Math.round(t * 5))], 6, sk, { base: true, tip: true, shade: (t) => 0.8 + t * 0.3 });
+  s.glow(0.22).color(0.36, 0.44, 0.6).tube([[-0.14, 0, 0], [-0.08, 0.004, 0], [-0.01, 0.008, 0], [0.06, 0.008, 0], [0.12, 0.004, 0], [0.16, -0.004, 0]], (t) => [0.02, 0.038, 0.052, 0.055, 0.046, 0.024][Math.min(5, Math.round(t * 5))], 6, sk, { base: true, tip: true, shade: (t) => 0.8 + t * 0.3 });
   s.transformSince(f, mat4(0, 0, 0, 1, 1, 0.72));
-  s.glow(0.45).color(1.1, 1.18, 1.3).tube([[-0.1, -0.022, 0], [0.1, -0.026, 0]], () => 0.02, 4, sk, { shade: () => 1.1 });   // silver belly keel
+  s.glow(0.3).color(0.95, 1.02, 1.15).tube([[-0.1, -0.022, 0], [0.1, -0.026, 0]], () => 0.02, 4, sk, { shade: () => 1.1 });   // silver belly keel
   s.glow(0);
   s.color(0.04, 0.04, 0.06);
   for (const side of [-1, 1]) s.box([0.105, 0.0, side > 0 ? 0.03 : -0.042], [0.03, 0.03, 0.012], sk);          // big eyes
@@ -42,7 +43,7 @@ function lanternBody(sk: UVRect) {
   s.color(0.3, 0.32, 0.4).tube([[0.1, 0.04, 0], [0.13, 0.1, 0], [0.18, 0.13, 0], [0.22, 0.115, 0]], (t) => 0.007 * (1 - t * 0.4), 3, sk);
   const ico = icosphere(1);
   s.glow(4.5).color(0.65, 1.2, 1.5);
-  for (let q = 0; q < ico.i.length; q += 3) { const P = (i: number): V3 => [ico.p[i * 3] * 0.026 + 0.225, ico.p[i * 3 + 1] * 0.026 + 0.1, ico.p[i * 3 + 2] * 0.026]; s.tri(P(ico.i[q]), P(ico.i[q + 1]), P(ico.i[q + 2]), [0, 0], [1, 0], [1, 1]); }
+  for (let q = 0; q < ico.i.length; q += 3) { const P = (i: number): V3 => [ico.p[i * 3] * 0.034 + 0.225, ico.p[i * 3 + 1] * 0.034 + 0.1, ico.p[i * 3 + 2] * 0.034]; s.tri(P(ico.i[q]), P(ico.i[q + 1]), P(ico.i[q + 2]), [sk.u0, sk.v0], [sk.u1, sk.v0], [sk.u1, sk.v1]); }
   s.glow(0);
   return s.geometry();
 }
@@ -64,8 +65,9 @@ function isopodBody(sk: UVRect) {
   const plate = (x0: number, x1: number, k0: number, k1: number, shade: number) => {
     const A = arc(x0, k0), B = arc(x1, k1), Bl = arc(x1 - 0.004, k1 * 1.07, 0.004);
     for (let i = 0; i < 8; i++) {
-      s.quad(B[i], A[i], A[i + 1], B[i + 1], sk, [shade, shade, shade, shade]);
-      s.quad(Bl[i], B[i], B[i + 1], Bl[i + 1], sk, [shade * 1.25, shade * 1.25, shade * 1.25, shade * 1.25]);   // the lit lip
+      s.quad(A[i], B[i], B[i + 1], A[i + 1], sk, [shade, shade, shade, shade]);
+      const k = shade * 1.25;                                                                                 // the lit lip, both ways
+      s.quad(B[i], Bl[i], Bl[i + 1], B[i + 1], sk, [k, k, k, k]); s.quad(Bl[i], B[i], B[i + 1], Bl[i + 1], sk, [k, k, k, k]);
     }
   };
   s.color(1, 1, 1);
@@ -121,6 +123,8 @@ export class Deep {
   private schools: { x: number; y: number; z: number; hx: number; ph: number; r: number }[] = [];
   private pods: Pod[] = [];
   private back = new THREE.DirectionalLight('#6a9aff', 1.7);
+  /** pixel halos round the lure lamps (one point per fish, written every frame) */
+  private halo: THREE.Points; private haloPos: Float32Array; private haloK: Float32Array;
   private hazeMat: THREE.ShaderMaterial | null = null;
   private r: Rng;
   private t = 0;
@@ -128,14 +132,15 @@ export class Deep {
 
   constructor(public scen: Scenery, public w: World, seed: number) {
     const r = (this.r = new Rng(seed ^ 0xdee9)), sh = scen.shape, P = scen.props, sk = critterSkin(P.A), mat = scen.mats.prop;
+    FR = sk;
     // ---- lantern-fish
-    const nSch = 6, per = 4, N = nSch * per;
+    const nSch = 10, per = 4, N = nSch * per;
     this.body = new Herd(lanternBody(sk), mat, N, 'lanternfish');
     this.tail = new Herd(lanternTail(sk), mat, N, 'lanternfish-tail');
     for (let k = 0; k < nSch; k++) {
-      const x = sh.X0 + 10 + (k + r.range(0.1, 0.9)) * ((sh.X1 - sh.X0 - 20) / nSch), deep = k % 3 === 2;
+      const x = sh.X0 + 10 + (k + r.range(0.1, 0.9)) * ((sh.X1 - sh.X0 - 20) / nSch), deep = k % 4 === 3;
       const z = deep ? r.range(-6, -3) : r.range(-1.2, 1.0), fl = scen.sand.heightAt(x);
-      this.schools.push({ x, y: r.range(fl + 2, fl + 6), z, hx: x, ph: r.range(0, 10), r: r.range(0.8, 1.4) });
+      this.schools.push({ x, y: r.range(fl + 2.5, Math.min(-6, fl + 9)), z, hx: x, ph: r.range(0, 10), r: r.range(0.8, 1.4) });
       for (let i = 0; i < per; i++) {
         const sc = this.schools[k];
         this.fish.push({ i: this.fish.length, x: sc.x + r.range(-1, 1), y: sc.y + r.range(-0.5, 0.5), z: sc.z + r.range(-0.4, 0.4), vx: r.range(-0.3, 0.3), vy: 0, yaw: 0, ph: r.range(0, 10), g: k, flash: 0, s: r.range(0.95, 1.35), ox: r.range(-1, 1), oy: r.range(-0.5, 0.5) });
@@ -148,10 +153,30 @@ export class Deep {
     for (let i = 0; i < nP; i++) {
       const x = r.range(sh.X0 + 8, sh.X1 - 8), z = i < 6 ? r.range(-2.4, 0.9) : r.range(-7, -3.5);
       this.pods.push({ i, x, y: scen.heightAt(x, z), z, hx: x, v: r.range(0.08, 0.16), dir: r.sign(), t: r.range(0, 5), ph: r.range(0, 10), hunker: 0, s: r.range(1.0, 1.45), walk: r.chance(0.5) });
-      this.podB.color(i, rgb01(r.pick(['#c8b0d0', '#d8c0c0', '#b8a8d0']), 1.7));
-      this.podL.color(i, rgb01('#c0b0c0', 1.5));
+      this.podB.color(i, rgb01(r.pick(['#c8b0d0', '#d8c0c0', '#b8a8d0']), 1.35));
+      this.podL.color(i, rgb01('#c0b0c0', 1.2));
     }
     for (const h of [this.body, this.tail, this.podB, this.podL]) this.group.add(h.mesh);
+    this.haloPos = new Float32Array(N * 3).fill(-999); this.haloK = new Float32Array(N);
+    const hg = new THREE.BufferGeometry();
+    hg.setAttribute('position', new THREE.BufferAttribute(this.haloPos, 3).setUsage(THREE.DynamicDrawUsage));
+    hg.setAttribute('aK', new THREE.BufferAttribute(this.haloK, 1).setUsage(THREE.DynamicDrawUsage));
+    const hm = new THREE.ShaderMaterial({
+      uniforms: { uScale: { value: w.game.h * Math.min(devicePixelRatio || 1, 1.5) / (2 * Math.tan((w.camera.fov * Math.PI) / 360)) }, uT: UW.uTime },
+      vertexShader: /* glsl */ `attribute float aK; uniform float uScale; uniform float uT; varying float vK;
+        void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; vK = aK * (0.85 + 0.15 * sin(uT * 3.0 + position.x * 5.0));
+          gl_PointSize = max(3.0, floor(0.26 * uScale / -mv.z * (0.8 + aK * 0.4))); }`,
+      fragmentShader: /* glsl */ `varying float vK;
+        void main() { vec2 d = abs(gl_PointCoord - 0.5) * 2.0; float r = d.x + d.y;   // a pixel diamond: hot core, cool ring
+          if (r > 1.0 || vK < 0.02) discard;
+          vec3 c = r < 0.35 ? vec3(0.8, 1.0, 1.0) : r < 0.7 ? vec3(0.25, 0.7, 0.85) : vec3(0.06, 0.22, 0.3);
+          gl_FragColor = vec4(c * vK, 1.0); }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    this.halo = new THREE.Points(hg, hm);
+    this.halo.frustumCulled = false; this.halo.renderOrder = 13;
+    this.group.add(this.halo);
+    scen.disposables.push(hg, hm);
     // ---- vents: tube-worm crowds and heat haze
     const hz: number[] = [], hu: number[] = [], hi: number[] = [];
     for (const v of scen.vents) {
@@ -183,11 +208,11 @@ export class Deep {
             // wavering refraction bands rising out of the throat: thin crisp lines, no gradients
             float wob = sin(y * 9.0 - uT * 3.1 + sin(y * 4.0 + uT * 1.7) * 1.8) * 0.12 * (0.3 + y);
             float band = sin((y * 26.0 - uT * 7.0) + sin((x + wob) * 14.0 + uT * 2.3) * 2.2);
-            float lines = step(0.86, band);
+            float lines = step(0.93, band);
             float mask = (1.0 - smoothstep(0.18, 0.5, abs(x + wob))) * (1.0 - smoothstep(0.55, 1.0, y)) * smoothstep(0.0, 0.08, y);
             float k = lines * mask;
             if (k <= 0.0) discard;
-            vec3 col = mix(vec3(1.0, 0.55, 0.25), vec3(0.45, 0.6, 0.9), y) * 0.22;
+            vec3 col = mix(vec3(1.0, 0.7, 0.45), vec3(0.6, 0.7, 0.85), y) * 0.13;
             gl_FragColor = vec4(col * k, 1.0);
           }`,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -201,11 +226,13 @@ export class Deep {
     this.back.position.set(0, 12, -40);
     this.group.add(this.back, this.back.target);
     this.group.name = 'deep';
+    this.update(0, 0, true);
+    scen.glowDyn.length = 0;
   }
 
   scare(x: number, y: number, r: number) { this.scareX = x; this.scareY = y; this.scareT = 0.8 + r * 0.05; }
 
-  update(dt: number, camX: number) {
+  update(dt: number, camX: number, all = false) {
     this.t += dt;
     const w = this.w, p = w.player, scen = this.scen;
     this.scareT = Math.max(0, this.scareT - dt);
@@ -217,11 +244,11 @@ export class Deep {
       sc.ph += dt;
       sc.x = sc.hx + Math.sin(sc.ph * 0.07) * 9;
       const fl = scen.sand.heightAt(sc.x);
-      sc.y = clamp(sc.y + Math.sin(sc.ph * 0.23) * dt * 0.3, fl + 1.6, -3);
+      sc.y = clamp(sc.y + Math.sin(sc.ph * 0.23) * dt * 0.3, fl + 1.6, -5);
     }
     scen.glowDyn.length = 0;
     for (const f of this.fish) {
-      if (Math.abs(f.x - camX) > 20) continue;
+      if (!all && Math.abs(f.x - camX) > 20) continue;
       const sc = this.schools[f.g];
       f.ph += dt;
       const tx = sc.x + f.ox * sc.r * 1.6 + Math.sin(f.ph * 0.5) * 0.6, ty = sc.y + f.oy * sc.r + Math.sin(f.ph * 0.7) * 0.3;
@@ -249,17 +276,19 @@ export class Deep {
       const beat = Math.sin(f.ph * (f.flash > 0.3 ? 22 : 7)) * (f.flash > 0.3 ? 0.6 : 0.35);
       _m2.makeTranslation(-0.13, 0, 0).multiply(_m3.makeRotationY(beat));
       this.tail.setM(f.i, _m2.premultiply(_m));
-      const br = 1 + f.flash * 1.4;
+      const br = 1 + f.flash * 0.6;
       this.body.color(f.i, [br, br, br]);
-      if (Math.abs(f.x - camX) < 12) {
-        _v.copy(LURE).applyMatrix4(_m);
-        scen.glowDyn.push({ x: _v.x, y: _v.y, z: _v.z + 0.3, col: '#7cf8ff', k: 0.7 + f.flash });
-      }
+      _v.copy(LURE).applyMatrix4(_m);
+      this.haloPos[f.i * 3] = _v.x; this.haloPos[f.i * 3 + 1] = _v.y; this.haloPos[f.i * 3 + 2] = _v.z;
+      this.haloK[f.i] = 0.75 + f.flash * 0.6;
+      if (Math.abs(f.x - camX) < 12) scen.glowDyn.push({ x: _v.x, y: _v.y + 0.2, z: _v.z + 1.0, col: '#7cf8ff', k: 0.4 + f.flash * 0.35 });
     }
     this.body.commit(); this.tail.commit();
+    (this.halo.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.halo.geometry.attributes.aK as THREE.BufferAttribute).needsUpdate = true;
     // ---- isopods plod over the ooze
     for (const b of this.pods) {
-      if (Math.abs(b.x - camX) > 18) continue;
+      if (!all && Math.abs(b.x - camX) > 18) continue;
       b.t -= dt; b.ph += dt;
       const d = Math.hypot(b.x - p.x, b.y - p.y);
       const bothered = d < 1.6 || (this.scareT > 0 && Math.hypot(b.x - this.scareX, b.y - this.scareY) < 5);

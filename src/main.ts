@@ -53,9 +53,9 @@ async function boot() {
     game.register(new Sandbox(game));
     game.go('sandbox');
   } else {
-    // the real game (v2): the prologue on first boot, then the hideout is the hub and main menu -> runs -> back
+    // the real game (v2): the prologue on first boot, then the title (the hero-shot main menu) -> hideout / runs
     setupFlow(game);
-    game.go(wantsIntro() ? 'intro' : 'hideout', {});
+    game.go(wantsIntro() ? 'intro' : 'title', {});
   }
   game.start();
   document.getElementById('boot')?.classList.add('gone');

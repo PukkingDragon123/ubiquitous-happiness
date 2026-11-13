@@ -15,6 +15,10 @@ export interface MoteLayer {
   drift?: number; twinkle?: number;
   /** how strongly the wake swirls / lights this layer (0 = not at all) */
   swirl?: number; flare?: number;
+  /** wrap box (x, y) around the camera; a dense small box makes a wake layer */
+  box?: [number, number];
+  /** dark until stirred: specks only light up in the wake (bioluminescent dinoflagellates) */
+  wake?: boolean;
 }
 
 const TRAIL = 10;
@@ -33,7 +37,8 @@ export class Motes {
     this.uScale.value = w.game.h * Math.min(devicePixelRatio || 1, 1.5) / (2 * Math.tan((w.camera.fov * Math.PI) / 360));
     for (const L of layers) {
       const n = L.n, p = new Float32Array(n * 3), sd = new Float32Array(n);
-      for (let i = 0; i < n; i++) { p[i * 3] = Math.random() * 48; p[i * 3 + 1] = Math.random() * 30; p[i * 3 + 2] = L.z0 + Math.random() * (L.z1 - L.z0); sd[i] = Math.random(); }
+      const bx = L.box ?? [48, 30];
+      for (let i = 0; i < n; i++) { p[i * 3] = Math.random() * bx[0]; p[i * 3 + 1] = Math.random() * bx[1]; p[i * 3 + 2] = L.z0 + Math.random() * (L.z1 - L.z0); sd[i] = Math.random(); }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(p, 3));
       g.setAttribute('aSeed', new THREE.BufferAttribute(sd, 1));
@@ -41,15 +46,15 @@ export class Motes {
         uniforms: {
           uCam: this.uCam, uT: UW.uTime, uScale: this.uScale, uTrail: { value: this.trail },
           uCol: { value: new THREE.Color(L.col).multiplyScalar(L.k) }, uSize: { value: L.size }, uDrift: { value: L.drift ?? 1 }, uTw: { value: L.twinkle ?? 1 },
-          uSwirl: { value: L.swirl ?? 0 }, uFlare: { value: L.flare ?? 0 },
+          uSwirl: { value: L.swirl ?? 0 }, uFlare: { value: L.flare ?? 0 }, uBox: { value: new THREE.Vector2(...bx) }, uWake: { value: L.wake ? 1 : 0 },
         },
         vertexShader: /* glsl */ `
           attribute float aSeed;
           uniform vec3 uCam; uniform float uT; uniform float uScale; uniform vec4 uTrail[${TRAIL}];
-          uniform float uSize; uniform float uDrift; uniform float uTw; uniform float uSwirl; uniform float uFlare;
+          uniform float uSize; uniform float uDrift; uniform float uTw; uniform float uSwirl; uniform float uFlare; uniform vec2 uBox; uniform float uWake;
           varying float vA; varying float vF;
           void main() {
-            vec2 box = vec2(48.0, 30.0);
+            vec2 box = uBox;
             vec3 p = position;
             vec2 drift = vec2(sin(uT * 0.13 + aSeed * 31.0) * 0.5 + uT * 0.07, -uT * (0.03 + aSeed * 0.05) + cos(uT * 0.11 + aSeed * 17.0) * 0.3) * uDrift;
             p.xy = mod(p.xy + drift - uCam.xy + box * 0.5, box) - box * 0.5 + uCam.xy;
@@ -71,7 +76,7 @@ export class Motes {
             gl_Position = projectionMatrix * mv;
             float tw = 0.55 + 0.45 * sin(uT * (0.8 + aSeed * 2.5) * uTw + aSeed * 50.0);
             vF = min(1.0, stir * uFlare);
-            vA = tw * smoothstep(70.0, 6.0, -mv.z) * step(p.y, -0.3) + vF * 1.5;
+            vA = (1.0 - uWake) * tw * smoothstep(70.0, 6.0, -mv.z) * step(p.y, -0.3) + vF * 1.5 * step(p.y, -0.3);
             gl_PointSize = max(1.0, floor(uSize * (0.7 + aSeed * 0.6) * uScale / -mv.z + 0.5 + vF * 1.5));
           }`,
         fragmentShader: /* glsl */ `
@@ -99,8 +104,9 @@ export class Motes {
     this.acc += dt;
     const moved = Math.hypot(px - this.lx, py - this.ly);
     if (this.acc > 0.1 && (moved > 0.25 || speed > 0.6)) {
+      const v = Math.max(speed, moved / this.acc);
       this.acc = 0; this.lx = px; this.ly = py;
-      this.trail[this.head].set(px, py, 0, Math.min(1.2, 0.3 + speed * 0.25));
+      this.trail[this.head].set(px, py, 0, Math.min(1.3, 0.3 + v * 0.25));
       this.head = (this.head + 1) % TRAIL;
     }
   }

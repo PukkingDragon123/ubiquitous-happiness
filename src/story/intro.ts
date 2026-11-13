@@ -9,7 +9,7 @@
 //                desaturation, muffled sound, their last words, the net hauled up to the boat. Silence.
 //   c. TITLE     black stage: "REVENGE." slams down in 3D, then the logo.
 //   d. MR. CRAB  a gruff weapon dealer at his junk stall. A choice or two; he hands over the TOOTHPICK
-//                ("It ain't much, kid. Neither are you. Yet.") and a bandana.
+//                ("It ain't much, kid. Neither are you. Yet.") and a hat (DEFAULT_GEAR from here on).
 //   e. TUTORIAL  taught by doing, with Mr. Crab scuttling along and commenting: swim + dash through hoops, slash
 //                driftwood dummies, get hooked on a test line and struggle (QTE) or cut it, break a resource node,
 //                equip gear from the backpack (TAB), ring for MARGE the mail manatee and send the loot home, repair
@@ -35,6 +35,7 @@ import { Rng } from '../core/rng';
 import { clamp, damp, lerp, smooth, TAU } from '../core/math';
 import { audio } from '../audio/audio';
 import { Blobfish } from '../player/blobfish';
+import { DEFAULT_GEAR } from '../player/gear';
 import { BlobPuppet } from '../player/puppet';
 import { buildArea, materialId, type Area, type ResourceNode } from '../area';
 import { Human, newSquad } from '../waves';
@@ -48,7 +49,8 @@ import { PixelUI } from '../ui/pixel/ui';
 import { Text3DLayer, Float3D, T3D, type Text3D } from '../ui/text3d';
 import { HUD_ART } from '../game/runHud';
 import { Dialogue, type Line } from './dialogue';
-import { sailorCap, shellNecklace, buildBread, MrCrab, Stall, Dummy, Hoop, TrawlNet } from './models';
+import { sailorCap, shellNecklace, buildBread, Dummy, Hoop, TrawlNet } from './models';
+import { MrCrab, CrabShop } from './crab';
 
 export type IntroBeat = 'morning' | 'bread' | 'title' | 'crab' | 'tutorial';
 const BEATS: IntroBeat[] = ['morning', 'bread', 'title', 'crab', 'tutorial'];
@@ -129,8 +131,9 @@ export class IntroScreen implements Screen {
   kid!: Blobfish;
   private light = new Lighting();
   private mom!: Swimmer; private dad!: Swimmer;
-  private crab = new MrCrab();
-  private stall = new Stall();
+  private crab!: MrCrab;
+  private stall!: CrabShop;
+  private crabVy = 0;
   private boat: Vessel | null = null;
   private angler: Fisherman | null = null;
   private qte = new QTE();
@@ -173,6 +176,7 @@ export class IntroScreen implements Screen {
   private engineK = 0;
   private engineRate = 0;
   private built = false;
+  private armed = false;
 
   constructor(public game: Game) {
     this.gate = new Gate();
@@ -212,6 +216,7 @@ export class IntroScreen implements Screen {
     this.ambience?.stop(); this.ambience = null;
     this.game.timeScale = 1;
     this.setMuffle(0, true);
+    if (audio.ctx && audio.musicBus) audio.musicBus.gain.value = audio.volume.music;
     POST.uDesat.value = 0; POST.uPulse.value = 0; POST.uLetterbox.value = 0; POST.uFade.value = 0;
     this.game.cursor = 'normal';
     this.showTitle = false;
@@ -237,7 +242,8 @@ export class IntroScreen implements Screen {
     this.bag = []; this.step = -1; this.prompt = null; this.target = null; this.crabFollow = false; this.tears = 0;
     this.run = new Run(SEED);
     installItemSystem(this.run);
-    this.light = new Lighting();
+    // extra point-light slots: the shop's lantern, glow jar and rim light
+    this.light = new Lighting(2048, 7);
     const water = new WaterFX(), fx = new Particles(), text = new Float3D(this.t3d);
     this.kid = new Blobfish(0, -8);
     const w = this.world = new RunWorld(this.game, this.run, this.worldScene, this.worldCam, water, fx, text, new Rng(SEED), this.kid);
@@ -260,6 +266,7 @@ export class IntroScreen implements Screen {
     k.setStats(this.run.stats());
     k.setGear({ hat: 'none', weapon: 'toothpick' });
     k.model.weaponVisible = false;
+    this.armed = false;
     k.model.body.scale.setScalar(KID_SCALE);
     k.onDeath = () => { /* the tutorial never kills */ };
     // layout: home near the arrival, Mr. Crab between the wreck and the mail buoy
@@ -285,10 +292,14 @@ export class IntroScreen implements Screen {
     this.dad.p.attach('head', sailorCap());
     // Mr. Crab + his stall
     this.crab = new MrCrab();
-    this.stall = new Stall();
-    this.stall.group.position.set(this.crabX + 0.6, this.floorAt(this.crabX + 0.6) - 0.05, -2.0);
-    this.crab.group.position.set(this.crabX - 1.2, this.floorAt(this.crabX - 1.2) - 0.05, -0.5);
+    this.crab.group.scale.setScalar(0.8);
+    this.crab.onPuff = (p) => this.world.fx.emit('bubble', p.x, p.y, { n: 3, spread: 0.04, speed: 0.3, vy: 0.5, size: 0.06 });
+    this.stall?.release();
+    this.stall = new CrabShop();
+    this.stall.group.position.set(this.crabX + 0.3, Math.min(this.floorAt(this.crabX - 1.2), this.floorAt(this.crabX + 1.8)) - 0.05, -2.0);
     this.worldScene.add(this.stall.group, this.crab.group);
+    this.stall.setLighting(this.light);
+    this.crabOnCounter();
     // the boat (moored far off until the bread beat)
     this.boat = makeBoat('trawler', 7);
     this.boat.setX(this.home + 60);
@@ -334,6 +345,22 @@ export class IntroScreen implements Screen {
     const rim = new THREE.DirectionalLight('#ff4030', 0.7); rim.position.set(5, 3, -6);
     s.add(floor, key, key.target, rim, new THREE.HemisphereLight('#3a3040', '#060306', 0.5), this.titleT3d.group);
     this.titleCam.position.set(0, 1.7, 10); this.titleCam.lookAt(0, 1.3, 0);
+  }
+
+  /** Mr. Crab back on his counter, in the shop window */
+  private crabOnCounter() {
+    this.stall.group.updateMatrixWorld(true);
+    const p = this.stall.group.localToWorld(this.stall.counter.clone());
+    this.crab.group.position.copy(p);
+    this.crabVy = 0;
+  }
+  /** dev: hold the camera on a fixed framing (screenshots): intro.debugCam(dist, yaw, h, dx, dy) around Mr. Crab */
+  debugCam(dist = 4, yaw = 0, h = 0.3, dx = 0, dy = 0.9) {
+    const c = this.crab.group.position;
+    this.abort();
+    this.shot(() => ({ x: c.x + dx, y: c.y + dy, dist, yaw, h }), 50);
+    this.letterbox(0, 0.01);
+    this.crab.lookX = c.x + Math.sin(yaw) * dist;
   }
 
   // ================================================================ helpers
@@ -568,7 +595,7 @@ export class IntroScreen implements Screen {
     await this.until(() => {
       // after a while the kid can't resist
       if (this.clock - tg0 > 14) { this.script_(); this.gate.ax = { x: Math.sign(bxx - k.x), y: clamp((byy - k.y) * 2, -1, 1) }; }
-      return this.near(k, { x: bxx, y: byy }, 0.62);
+      return this.near(k, { x: bxx, y: byy }, 0.7);
     });
     this.target = null;
     word.hide();
@@ -784,7 +811,8 @@ export class IntroScreen implements Screen {
     audio.music('mu_junkyard', 2.5);
     this.crab.lookX = k.x;
     await this.talk([{ who: 'narr', text: 'The kid swam until the reef ran out of colour.', auto: 1.6 }]);
-    const name = this.t3d.add('MR. CRAB', this.crab.group.position.x, this.crab.group.position.y + 2.15, -0.3, T3D.name, { size: 0.36, angle: 0.25, delay: 0.3, follow: () => ({ x: this.crab.group.position.x - (this.crabX - 1.2), y: 0 }) });
+    this.crabOnCounter();
+    const name = this.t3d.add('MR. CRAB', 0, 0, 0, T3D.name, { size: 0.36, angle: 0.25, delay: 0.3, follow: () => { const g = this.crab.group.position; return { x: g.x, y: g.y + 1.55, z: g.z + 0.5 }; } });
     this.letterbox(0.35, 0.8);
     this.free(false, [cx - 14, cx + 4]);
     this.followKid(10, 0.7);
@@ -792,9 +820,12 @@ export class IntroScreen implements Screen {
     await this.until(() => k.x > cx - 3.4);
     name.hide();
     this.script_();
+    // the kid drifts up to the shop window
+    const cp = this.crab.group.position;
+    this.ticker(() => { if (this.control !== 'script' || this.step >= 0) return true; const dx = cp.x - 1.7 - k.x, dy = cp.y + 0.85 - k.y; this.gate.ax = { x: clamp(dx * 0.8, -0.6, 0.6), y: clamp(dy * 0.8, -0.6, 0.6) }; return false; });
     this.letterbox(1, 0.6);
     this.desatT = 0;
-    this.shot(() => ({ x: (k.x + this.crab.group.position.x) / 2, y: this.floorAt(cx) + 1.9, dist: 7.2, yaw: 0.3, h: 0.35 }), 2.5);
+    this.shot(() => ({ x: lerp(k.x, cp.x, 0.62), y: cp.y + 0.6, dist: 5.3, yaw: -0.16, h: 0.2 }), 2.5);
     this.crab.lookX = k.x;
     const p1 = await this.talk([
       { who: 'crab', text: 'Oi. Shop\'s closed.' },
@@ -809,8 +840,9 @@ export class IntroScreen implements Screen {
       { who: 'crab', text: 'Here.', do: () => this.crab.snip() },
     ]);
     // the toothpick
-    k.setGear({ weapon: 'toothpick', hat: 'bandana' });
+    k.setGear({ ...DEFAULT_GEAR });
     k.model.weaponVisible = true;
+    this.armed = true;
     k.play('gearUp');
     k.setExpr('cheer', 1.4);
     this.world.fx.burst('star', k.x, k.y + 0.4, 10, 2.5);
@@ -820,7 +852,7 @@ export class IntroScreen implements Screen {
     await this.wait(1.4);
     const p2 = await this.talk([
       { who: 'crab', text: 'It ain\'t much, kid. Neither are you. {shake}Yet.{/shake}' },
-      { who: 'crab', text: 'And the bandana. Every fighter needs one. So does every idiot. Same thing, mostly.' },
+      { who: 'crab', text: 'And a hat. Every fighter needs one. So does every idiot. Same thing, mostly.' },
       { who: 'kid', text: '...', choices: [{ text: 'Thank you, Mr. Crab.' }, { text: 'It\'s a toothpick.' }] },
     ]);
     await this.talk(p2[0] === 0
@@ -836,17 +868,19 @@ export class IntroScreen implements Screen {
     if (this.beat0 === 'tutorial') {
       this.mom.p.root.visible = false; this.dad.p.root.visible = false;
       this.boat?.setX(this.home + 200);
-      k.setGear({ weapon: 'toothpick', hat: 'bandana' });
+      k.setGear({ ...DEFAULT_GEAR });
       k.model.weaponVisible = true;
+      this.armed = true;
       const sx = [this.crabX - 1, this.crabX + 3, this.crabX + 9, this.crabX + 16, this.crabX + 19, this.crabX + 22, this.area.shipwreck.x + 6, this.area.shipwreck.x + 5][from];
       this.place(sx, this.floorAt(sx) + 2.2);
-      if (from > 0) this.crab.group.position.x = sx - 3;
+      if (from > 0) { this.crab.group.position.set(sx - 3, this.floorAt(sx - 3) - 0.05, -0.45); }
       this.fade(0, 1);
       audio.music('mu_shallows', 1.5);
     } else audio.music('mu_shallows', 3);
     this.letterbox(0, 1);
     this.free(true, null);
     this.followKid(11.5, 0.7);
+    if (!this.crabFollow) this.crabVy = 3.2;
     this.crabFollow = true;
     const steps = [() => this.lessonSwim(), () => this.lessonSlash(), () => this.lessonHook(), () => this.lessonNode(), () => this.lessonBag(), () => this.lessonMail(), () => this.lessonRepair(), () => this.lessonWave()];
     for (let i = from; i < steps.length; i++) {
@@ -955,7 +989,7 @@ export class IntroScreen implements Screen {
         bait.group.position.set(ex, ey, 0.05);
         bait.tick(this.time, 0.3);
         k.mouthWorld(mouth);
-        if (!free && Math.hypot(mouth.x - ex, mouth.y - ey) < 0.5) {
+        if (!free && (Math.hypot(mouth.x - ex, mouth.y - ey) < 0.55 || Math.hypot(k.x - ex, k.y - ey) < 0.6)) {
           hooked = true;
           sign.hide();
           this.target = null;
@@ -1124,11 +1158,13 @@ export class IntroScreen implements Screen {
   // ---------------------------------------------------------------- the end
   private async ending() {
     const k = this.kid;
+    await this.wait(1.6);
+    for (const t of this.t3d.items) t.hide();
+    this.step = -1;
     this.crabFollow = false;
     this.script_();
     this.letterbox(1, 0.8);
-    this.crab.group.position.x = k.x - 2.8;
-    this.crab.group.position.y = this.floorAt(k.x - 2.8) - 0.05;
+    this.crab.group.position.set(k.x - 2.8, this.floorAt(k.x - 2.8) - 0.05, -0.45);
     this.crab.lookX = k.x;
     this.shot(() => ({ x: k.x - 1.4, y: Math.max(k.y, this.floorAt(k.x) + 1.6) + 0.2, dist: 7.5, yaw: 0.25, h: 0.3 }), 2);
     k.setExpr('brave', 99);
@@ -1149,6 +1185,9 @@ export class IntroScreen implements Screen {
   private finish(skipped: boolean) {
     if (this.finished) return;
     this.finished = true;
+    // achievements etc.: the world bus (run.fire) and a DOM event, both 'prologueDone' {skipped}
+    try { this.world?.emit('prologueDone', { skipped }); } catch { /* torn down */ }
+    window.dispatchEvent(new CustomEvent('blobfish:prologueDone', { detail: { skipped } }));
     if (!skipped) {
       // what the kid carried goes home: gear to the stash, materials to the pile
       const mats: Record<string, number> = {};
@@ -1246,6 +1285,8 @@ export class IntroScreen implements Screen {
         if (k.y < fl) k.applyForce(0, (fl - k.y) * 8);
       }
       k.update(dt, w);
+      // no sword until Mr. Crab hands one over (Blobfish.update re-shows it every frame)
+      if (!this.armed) k.model.weaponPivot.visible = false;
       for (let i = 0; i < w.entities.length; i++) { const e = w.entities[i]; if (e.alive) e.update(dt, w); }
     } finally { g.input = realInput; gate.endFrame(); }
     for (let i = w.entities.length - 1; i >= 0; i--) {
@@ -1267,9 +1308,15 @@ export class IntroScreen implements Screen {
       const want = k.x - Math.sign(k.vx || 1) * 3.2;
       const dx = want - c.group.position.x;
       const v = Math.abs(dx) > 1.2 ? clamp(dx * 1.5, -4.5, 4.5) : 0;
-      c.move = damp(c.move, v, 5, dt);
-      c.group.position.x += c.move * dt;
-      c.group.position.y = damp(c.group.position.y, this.floorAt(c.group.position.x) - 0.05, 8, dt);
+      const gp = c.group.position, fl = this.floorAt(gp.x) - 0.05;
+      c.move = damp(c.move, gp.y > fl + 0.05 ? v * 0.4 : v, 5, dt);
+      gp.x += c.move * dt;
+      gp.z = damp(gp.z, -0.45, 3, dt);
+      // off the counter: a hop, a fall, a puff of sand
+      if (gp.y > fl + 0.02 || this.crabVy > 0) {
+        this.crabVy -= 14 * dt; gp.y += this.crabVy * dt;
+        if (gp.y <= fl) { gp.y = fl; if (this.crabVy < -2) { w.fx.emit('dust', gp.x, fl + 0.1, { n: 10, spread: 0.6, speed: 1.2 }); w.sfx('thud_heavy', gp.x, 0.4, 1.4); } this.crabVy = 0; }
+      } else gp.y = damp(gp.y, fl, 8, dt);
     } else c.move = damp(c.move, 0, 6, dt);
     c.lookX = k.x;
     c.update(dt);

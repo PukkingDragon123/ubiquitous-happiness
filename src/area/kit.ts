@@ -3,7 +3,7 @@
 // fans, and the extra painted prop surfaces (marble, clear ice, frost, leaded glass, critter skins).
 import * as THREE from 'three';
 import { Soup, V3, UVR, v3 } from '../world/lp';
-import type { Atlas, Region } from '../world/atlas';
+import type { Atlas } from '../world/atlas';
 import { hueRamp } from '../world/pixart';
 import { cells } from '../world/texlib';
 import { hex, RGB } from '../gfx/px';
@@ -174,7 +174,7 @@ export function iceFrost(A: Atlas): UVR {
 /** leaded stained glass: bold panes in a jewel colour with dark lead cames, a lit corner per pane */
 export function stainedGlass(A: Atlas, name: string, base: string): UVR {
   return A.paint(name, 32, 32, (p, w, h) => {
-    const T = hueRamp(base, 5, { spread: 1.2 });
+    const T = hueRamp(base, 5, { spread: 0.9, hi: 0.72 });
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const c = cells(x, y, 16, name.length * 13, 32), e = c.f2 - c.f1, l = Math.hypot(c.dx, c.dy) || 1;
       if (e < 1.4) { p.set(x, y, [24, 20, 26]); continue; }
@@ -193,9 +193,4 @@ export function critterSkin(A: Atlas): UVR {
       p.set(x, y, T[e < 0.8 ? ((c.dx / l) * -0.6 + (c.dy / l) * -0.8 > 0.1 ? 4 : 2) : 3]);
     }
   });
-}
-
-/** a flat colour swatch region (vertex colours do the work) */
-export function swatch(A: Atlas, name: string, c: string): UVR {
-  return A.paint(name, 4, 4, (p: Region) => p.fill(() => hex(c)));
 }

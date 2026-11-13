@@ -80,7 +80,14 @@ export interface MetaSave {
   settings: { volume: number; music: number; lowQuality: boolean; motionBlur: number };
   /** the prologue (src/story/intro.ts) has been played or skipped: boot goes straight to the hideout */
   introDone: boolean;
+  /** cosmetics (src/cosmetics): looks only, never stats. Ids per slot; '' never appears (the defaults are ids) */
+  cosmetics: CosmeticsSave;
+  /** achievements (src/achievements): unlocked ids, when, and the running counters they track */
+  achievements: AchievementsSave;
 }
+
+export interface CosmeticsSave { unlocked: string[]; equipped: { hat: string; skin: string; sword: string; trail: string; scarf: string } }
+export interface AchievementsSave { unlocked: string[]; at: Record<string, number>; counters: Record<string, number> }
 
 const KEY = 'blobfish.meta.v2';
 
@@ -93,6 +100,8 @@ function fresh(): MetaSave {
     activeRun: null, lastConfig: null,
     settings: { volume: 0.9, music: 0.55, lowQuality: false, motionBlur: 1 },
     introDone: false,
+    cosmetics: { unlocked: [], equipped: { hat: 'kasa', skin: 'pink', sword: 'toothpick', trail: 'bubbles', scarf: 'redScarf' } },
+    achievements: { unlocked: [], at: {}, counters: {} },
   };
 }
 
@@ -102,7 +111,14 @@ function load(): MetaSave {
     if (raw) {
       const m = JSON.parse(raw) as MetaSave;
       // saves from before the prologue existed: anyone who has played a run skips it
-      if (m.version === 2) return { ...fresh(), ...m, settings: { ...fresh().settings, ...m.settings }, introDone: m.introDone ?? (m.runs ?? 0) > 0 };
+      if (m.version === 2) {
+        const f = fresh();
+        return {
+          ...f, ...m, settings: { ...f.settings, ...m.settings }, introDone: m.introDone ?? (m.runs ?? 0) > 0,
+          cosmetics: { ...f.cosmetics, ...m.cosmetics, equipped: { ...f.cosmetics.equipped, ...m.cosmetics?.equipped } },
+          achievements: { ...f.achievements, ...m.achievements, at: { ...m.achievements?.at }, counters: { ...m.achievements?.counters } },
+        };
+      }
     }
   } catch { /* corrupt or blocked storage: start fresh */ }
   return fresh();

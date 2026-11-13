@@ -317,7 +317,7 @@ function iceCave(scen: Scenery, group: THREE.Group) {
 function lightHall(scen: Scenery, group: THREE.Group) {
   const sh = scen.shape, r = new Rng(scen.seed ^ 0x4a11), hx = sh.hallX;
   const SR = scen.simR, half = 3.4;
-  const cols = [-2.4, -5.0, -7.6, -10.2];
+  const cols = [-2.4, -4.8, -7.2];
   const kelpV = scen.flora.get('giantkelp', 3, 0), kelpFar = scen.flora.get('giantkelp', 2, 1);
   // a twisted cable of stipes: the column shaft
   const cable = (s: Soup, x: number, y: number, top: number, sd: number) => {
@@ -374,12 +374,12 @@ function lightHall(scen: Scenery, group: THREE.Group) {
         for (const tri of [[0, 1, 2], [0, 2, 3]]) for (const i of tri) { pos.push(...Pq[i]); col.push(C[i] * k, C[i] * k * 0.96, C[i] * k * 0.8); }
       }
     };
-    for (const [cz, dx] of [[-1.3, -1.8], [-3.7, 1.4], [-6.3, -1.0], [-8.9, 1.9], [-11.4, -2.4]]) sheet(hx + dx + r.range(-0.3, 0.3), cz, r.range(1.0, 1.7), r.range(0.16, 0.24), 0.16);
+    for (const [cz, dx] of [[-1.3, -1.8], [-3.6, 1.4], [-6.0, -1.0], [-8.4, 1.9]]) sheet(hx + dx + r.range(-0.3, 0.3), cz, r.range(1.1, 1.8), r.range(0.22, 0.3), 0.16);
     const m = addGlow(scen, group, pos, col, '#fff2c8');
     const mat = m.material as THREE.MeshBasicMaterial;
     scen.updaters.push((_dt, _cx, t) => { mat.opacity = 0.72 + Math.sin(t * 0.37) * 0.16 + Math.sin(t * 1.21 + 1) * 0.08; });
   }
-  roseWindow(scen, group, hx, -12.6, r);
+  roseWindow(scen, group, hx, -10.2, r);
   sunflecks(scen, group, hx, half);
 }
 
@@ -427,7 +427,7 @@ function roseWindow(scen: Scenery, group: THREE.Group, x: number, z: number, r: 
   faceUV(S, 0, stone, 0.6, glassFrom); faceUV(S, glassTo, stone, 0.6);
   const crust = rgb01('#c87a8a');
   faceTone(S, 0, (n, _c, f) => {
-    if (f >= glassFrom && f < glassTo) return [1.15, 1.15, 1.15, 1.35];
+    if (f >= glassFrom && f < glassTo) return [1.2, 1.2, 1.2, 1.9];
     const up = smooth(0.3, 0.8, n[1]);
     return [0.9 + (crust[0] - 0.9) * up, 0.88 + (crust[1] - 0.88) * up, 0.86 + (crust[2] - 0.86) * up, 0];
   });
@@ -442,10 +442,10 @@ function roseWindow(scen: Scenery, group: THREE.Group, x: number, z: number, r: 
   // the glow behind it and coloured light falling through it toward the nave
   const pos: number[] = [], col: number[] = [];
   glowFan(pos, col, [x, cy, z - 0.6], R * 1.5, R * 1.5, [0.2, 0.17, 0.1], 14);
-  glowFan(pos, col, [x, cy, z + 0.1], R * 1.05, R * 1.05, [0.1, 0.09, 0.06], 14);
+  glowFan(pos, col, [x, cy, z + 0.1], R * 1.05, R * 1.05, [0.04, 0.035, 0.025], 14);
   const tint: [number, number, number][] = [[0.9, 0.2, 0.25], [0.95, 0.7, 0.2], [0.25, 0.4, 0.95], [0.25, 0.8, 0.45], [0.6, 0.3, 0.85]];
   for (let k = 0; k < 5; k++) {
-    const a = -Math.PI / 2 + (k - 2) * 0.32, sx = x + Math.cos(a) * R * 0.6, sy = cy + Math.sin(a) * R * 0.6, ex = x + (k - 2) * 1.3, ez = z + 5.5, ey = scen.heightAt(ex, ez) + 0.05;
+    const a = -Math.PI / 2 + (k - 2) * 0.32, sx = x + Math.cos(a) * R * 0.6, sy = cy + Math.sin(a) * R * 0.6, ex = x + (k - 2) * 1.3, ez = z + 4.5, ey = scen.heightAt(ex, ez) + 0.05;
     const c = tint[k], w = 0.35, w2 = 1.0;
     const Pq: V3[] = [[sx - w, sy, z + 0.1], [sx + w, sy, z + 0.1], [ex + w2, ey, ez], [ex - w2, ey, ez]], C = [0.16, 0.16, 0.02, 0.02];
     for (const tri of [[0, 1, 2], [0, 2, 3]]) for (const i of tri) { pos.push(...Pq[i]); col.push(c[0] * C[i], c[1] * C[i], c[2] * C[i]); }
@@ -457,7 +457,7 @@ function roseWindow(scen: Scenery, group: THREE.Group, x: number, z: number, r: 
 
 /** dancing sunflecks: crisp dappled light patches on the floor of the hall, coloured near the window */
 function sunflecks(scen: Scenery, group: THREE.Group, hx: number, half: number) {
-  const x0 = hx - half - 2.5, x1 = hx + half + 2.5, z0 = -12, z1 = 1.2, st = 0.5;
+  const x0 = hx - half - 2.5, x1 = hx + half + 2.5, z0 = -9.8, z1 = 1.2, st = 0.5;
   const pos: number[] = [], idx: number[] = [];
   const nx = Math.round((x1 - x0) / st) + 1, nz = Math.round((z1 - z0) / st) + 1;
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const x = x0 + i * st, z = z0 + j * st; pos.push(x, scen.heightAt(x, z) + 0.035, z); }
@@ -478,12 +478,12 @@ function sunflecks(scen: Scenery, group: THREE.Group, hx: number, half: number) 
         float b = sin(p.x * 2.9 - t * 1.3 + p.y * 0.7) * sin(p.y * 2.5 + t * 1.1 - p.x * 0.4);
         float f = a * 0.65 + b * 0.45;
         float d = abs(vW.x - uC.x) / (uC.y + 1.5);
-        float th = 0.42 + d * d * 0.5;
+        float th = 0.3 + d * d * 0.55;
         float lit = step(th, f) + step(th + 0.3, f) * 0.6;
-        float edge = smoothstep(-12.0, -10.8, vW.z) * (1.0 - smoothstep(0.2, 1.2, vW.z));
-        vec3 col = vec3(1.0, 0.93, 0.7) * 0.42;
+        float edge = smoothstep(-9.8, -8.8, vW.z) * (1.0 - smoothstep(0.2, 1.2, vW.z));
+        vec3 col = vec3(1.0, 0.93, 0.7) * 0.75;
         // coloured light from the rose window pools on the floor in front of it
-        float near = 1.0 - smoothstep(-8.5, -5.5, vW.z);
+        float near = 1.0 - smoothstep(-8.0, -5.0, vW.z);
         float hue = floor((vW.x - uC.x) * 0.8 + 2.5);
         vec3 tint = hue < 1.0 ? vec3(1.0, 0.3, 0.35) : hue < 2.0 ? vec3(1.0, 0.75, 0.3) : hue < 3.0 ? vec3(0.4, 0.55, 1.0) : hue < 4.0 ? vec3(0.4, 0.95, 0.55) : vec3(0.75, 0.45, 1.0);
         col = mix(col, tint * 0.38, near);
@@ -612,8 +612,9 @@ function galleon(scen: Scenery, group: THREE.Group, w: World) {
   const ys = scen.heightAt(X - 6, Z), yb = scen.heightAt(X + 6, Z);
   const mS = mat4(X - 1.6, ys - 1.1, Z, 1, 1, 1, 0.12, 0.26, 0.04), mB = mat4(X + 3.6, yb - 1.4, Z + 0.8, 1, 1, 1, -0.3, -0.38, 0.32);
   const ch = scen.chunk(X);
-  ch.prop.append(stern, mS);
-  ch.prop.append(bow, mB);
+  // weathered, silt-greyed timber (the shared plank paint is a little too green for a wreck this old)
+  ch.prop.append(stern, mS, { tint: [0.9, 0.8, 0.8] });
+  ch.prop.append(bow, mB, { tint: [0.9, 0.8, 0.8] });
   // lamp point (world): the lantern centre through the stern pose
   const lv = new THREE.Vector3(-0.5 * C.L - 0.9, DY(0, C) + 3.0, 0).applyMatrix4(mS);
   scen.glowPts.push({ x: lv.x, y: lv.y, z: lv.z + 0.8, col: '#ffb050' });

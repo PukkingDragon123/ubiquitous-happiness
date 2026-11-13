@@ -337,7 +337,7 @@ export class Text3DLayer {
   damage(n: number, x: number, y: number, crit = false, heal = false): Text3D {
     const s = n >= 10 ? String(Math.round(n)) : String(+n.toFixed(1));
     return this.add((heal ? '+' : '') + s + (crit ? '!' : ''), x + (Math.random() - 0.5) * 0.3, y, 0.9, heal ? T3D.heal : crit ? T3D.crit : T3D.damage, {
-      size: crit ? 0.52 : 0.3, life: crit ? 1.1 : 0.75, rise: crit ? 1.6 : 1.3, face: 1, angle: 0, bob: 0, stagger: 0.02, shake: crit ? 0.6 : 0, shadow: true,
+      size: crit ? 0.62 : 0.4, life: crit ? 1.3 : 0.9, rise: crit ? 1.6 : 1.3, face: 1, angle: 0, bob: 0, stagger: 0.02, shake: crit ? 0.6 : 0, shadow: true,
     });
   }
 

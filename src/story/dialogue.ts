@@ -204,7 +204,6 @@ export class Dialogue {
     for (const b of this.barks) this.type(b, dt, 1);
     this.barks = this.barks.filter((b) => b.doneT < b.life);
     const a = this.cur;
-    if (input && [...input.pressed].some((k) => k.startsWith('Digit'))) console.log('DLGDBG', [...input.pressed].join(','), !!a, a && a.shown, a && a.chs.length, a && a.doneT, a && !!a.line.choices);
     if (!a) { this.holdT = 0; return; }
     const adv = !!input && (input.keyHit('Space') || input.keyHit('KeyE') || input.keyHit('Enter') || (input.pressed.has('Mouse0') && !a.line.choices));
     const held = !!input && (input.key('Space') || input.key('KeyE') || input.down.has('Mouse0'));
@@ -214,6 +213,10 @@ export class Dialogue {
     const total = a.chs.length;
     const typed = a.shown >= total;
     if (input) for (const k of ['Space', 'KeyE', 'Enter', 'Mouse0']) input.pressed.delete(k);
+    // a number key answers a choice straight away (even mid-typing)
+    if (a.line.choices?.length && input) {
+      for (let i = 0; i < a.line.choices.length; i++) if (input.keyHit('Digit' + (i + 1)) || input.keyHit('Numpad' + (i + 1))) { a.shown = total; this.choose(i); return; }
+    }
     if (!typed) {
       if (adv && a.t > 0.08) { a.shown = total; a.pause = 0; }
       return;
@@ -221,17 +224,8 @@ export class Dialogue {
     // choices
     if (a.line.choices?.length) {
       const n = a.line.choices.length;
-      let pick = -1;
-      for (let i = 0; i < n; i++) if (input?.keyHit('Digit' + (i + 1)) || input?.keyHit('Numpad' + (i + 1))) pick = i;
-      if (input && this.hoverChoice >= 0 && this.ui.released && a.doneT > 0.15) pick = this.hoverChoice;
-      if (pick >= 0 && a.doneT > 0.1) {
-        const c = a.line.choices[pick];
-        this.picks.push(pick);
-        audio.play('k_confirm1', { vol: 0.4, dry: true });
-        c.do?.();
-        if (c.then?.length) this.queue.unshift(...c.then);
-        this.next();
-      }
+      void n;
+      if (input && this.hoverChoice >= 0 && this.ui.released && a.doneT > 0.15) this.choose(this.hoverChoice);
       return;
     }
     const auto = a.line.auto !== undefined && a.doneT >= a.line.auto;
@@ -239,6 +233,18 @@ export class Dialogue {
       if (adv) audio.play('k_tick1', { vol: 0.15, dry: true, rate: 1.4 });
       this.next();
     }
+  }
+
+  /** answer the current line's choice i (keys, clicks, or scripts/tests) */
+  choose(i: number) {
+    const a = this.cur;
+    const c = a?.line.choices?.[i];
+    if (!a || !c) return;
+    this.picks.push(i);
+    audio.play('k_confirm1', { vol: 0.4, dry: true });
+    c.do?.();
+    if (c.then?.length) this.queue.unshift(...c.then);
+    this.next();
   }
 
   /** reveal characters (with punctuation pauses + voice blips) */

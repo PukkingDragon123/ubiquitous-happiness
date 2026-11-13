@@ -1,14 +1,15 @@
-// v2 flow: (first boot: the INTRO prologue + tutorial ->) HIDEOUT (hub + main menu) -> RUN (three areas of wave
-// defense) -> back to the HIDEOUT with a result card.
+// v2 flow: (first boot: the INTRO prologue + tutorial ->) TITLE (the hero-shot main menu, src/title) -> HIDEOUT
+// (hub: build, stash, bench) / RUN (three areas of wave defense) -> back to the HIDEOUT with a result card.
 //
-//   setupFlow(game); game.go(wantsIntro() ? 'intro' : 'hideout');
+//   setupFlow(game); game.go(wantsIntro() ? 'intro' : 'title');
 //
-// The intro (src/story/intro.ts) ends in the hideout with the 'welcome' modal (the cosy reveal); the TV's PROLOGUE
-// entry replays it.
+// The intro (src/story/intro.ts) ends on the title; the first visit to the HIDEOUT after it plays the 'welcome'
+// modal (the cosy reveal). The title's PROLOGUE entry replays the intro.
 //
-// The hideout's TV starts a run (onEnterRun(cfg) after the gear-up cinematic) or resumes META.activeRun
-// (onResume). The run screen calls onEnd(result) when it is lost / won (META already updated) or onQuit() from
-// the pause menu (the run stays in META.activeRun). The result card is a modal over the live hideout.
+// The title's NEW RUN opens the run config; ENTER plays the hideout's gear-up + walk-out cinematic, which calls
+// onEnterRun(cfg). RESUME continues META.activeRun. Clicking the hideout's TV (or MENU) goes back to the title. The
+// run screen calls onEnd(result) when it is lost / won (META already updated) or onQuit() from the pause menu (the
+// run stays in META.activeRun). The result card is a modal over the live hideout.
 import * as THREE from 'three';
 import type { Game, Screen } from './game';
 import { RunScreen } from './runScreen';
@@ -22,9 +23,14 @@ import { audio } from '../audio/audio';
 import { POST } from '../gfx/post';
 import { IntroScreen } from '../story/intro';
 import { WelcomeHome } from '../story/welcome';
+import { TitleScreen } from '../title/screen';
+import { installCosmetics } from '../cosmetics';
+import { CosmeticPuppet } from '../cosmetics/rig';
+import { installAchievements, achEvent } from '../achievements';
+import type { HideoutHero } from '../hideout/hero';
 
 /**
- * apply META.settings (written by the hideout TV's settings page): audio volumes and the motion blur strength.
+ * apply META.settings (written by the title's settings page): audio volumes and the motion blur strength.
  * Low quality is read by the Game at boot (syncLowQuality() before it is built); a change needs a reload.
  */
 export function applySettings() {
@@ -48,9 +54,16 @@ export function wantsIntro() {
   return !META.introDone;
 }
 
-export interface Flow { hideout: HideoutScreen; run: RunScreen; intro: IntroScreen; startRun(cfg: RunConfig): void; resume(): boolean }
+export interface Flow {
+  hideout: HideoutScreen; run: RunScreen; intro: IntroScreen; title: TitleScreen; startRun(cfg: RunConfig): void; resume(): boolean;
+  /** the prologue finished (skipped = held ESC). META.introDone is already set; reassign to route elsewhere */
+  afterIntro: (skipped: boolean) => void;
+}
 
 export function setupFlow(game: Game): Flow {
+  // cosmetics hook the gear looks before any blobfish is built; achievements watch runs, META and draw the toast
+  installCosmetics();
+  installAchievements(game);
   const run = new RunScreen(game);
   const startRun = (cfg: RunConfig) => {
     // a new run abandons the one in progress (its backpack and bag are lost, like a death without the card)
@@ -64,16 +77,26 @@ export function setupFlow(game: Game): Flow {
     return true;
   };
   const intro = new IntroScreen(game);
-  const hideout = new HideoutScreen(game, { onEnterRun: startRun, onResume: () => { resume(); }, onPrologue: () => game.go('intro', {}) });
-  // the prologue ends at home: the welcome card is the cosy reveal (not after a skip)
-  intro.onDone = (skipped) => {
-    META.introDone = true; saveMeta();
-    game.go('hideout', {});
-    if (!skipped) game.openModal('welcome');
-  };
-  // the TV settings take effect when you leave the hideout (and at boot)
+  const hideout = new HideoutScreen(game, {
+    onEnterRun: startRun, onResume: () => { resume(); }, onPrologue: () => game.go('intro', {}),
+    onMenu: () => game.go('title', {}), hero: () => new CosmeticPuppet() as unknown as HideoutHero,
+  });
+  // the title (main menu); the first trip home after the prologue plays the welcome reveal
+  let welcome = false;
+  const title = new TitleScreen(game, {
+    onNewRun: (cfg) => game.go('hideout', { view: 'cinematic', cfg }),
+    onResume: () => { if (!resume()) game.go('title', { quick: true }); },
+    onHideout: () => { game.go('hideout', {}); if (welcome) { welcome = false; game.openModal('welcome'); } },
+    onPrologue: () => game.go('intro', {}),
+  });
+  game.register(title);
+  // the prologue ends -> flow.afterIntro (by default home: the welcome card is the cosy reveal, not after a skip)
+  intro.onDone = (skipped) => { META.introDone = true; saveMeta(); if (!skipped) achEvent('prologue'); flow.afterIntro(skipped); };
+  // the settings take effect when you leave the title / hideout (and at boot)
   const hideoutExit = hideout.exit.bind(hideout);
   hideout.exit = () => { hideoutExit(); applySettings(); };
+  const titleExit = title.exit.bind(title);
+  title.exit = () => { titleExit(); applySettings(); };
   applySettings();
   const card = new ResultCard(game, hideout);
   game.register(hideout);
@@ -83,8 +106,11 @@ export function setupFlow(game: Game): Flow {
   game.register(new WelcomeHome(game, hideout));
   if (!game.get('backpack')) game.register(new BackpackScreen(game));
   run.onEnd = (r) => { game.go('hideout', {}); game.openModal('result', r); };
-  run.onQuit = () => { game.go('hideout', {}); };
-  const flow = { hideout, run, intro, startRun, resume };
+  run.onQuit = () => { game.go('title', { quick: true }); };
+  const flow: Flow = {
+    hideout, run, intro, title, startRun, resume,
+    afterIntro: (skipped) => { welcome = !skipped; game.go('title', {}); },
+  };
   Object.assign(window, { flow, META }); // console handles for testing
   return flow;
 }

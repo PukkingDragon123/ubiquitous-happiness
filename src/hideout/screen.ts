@@ -1,17 +1,17 @@
-// HideoutScreen: the hub and main menu. A cosy rock grotto seen as an orbitable near-isometric diorama; the
-// blobfish lounges on the sofa watching the CRT. Click the TV: the camera dollies into the tube and the TV UI
-// takes over (NEW RUN / RESUME / SETTINGS / CREDITS -> run config -> ENTER). Click the chest for the stash, the
-// bench for the workshop, BUILD for the blueprint drawer. ENTER plays the gear-up + walk-out cinematic and then
-// calls opts.onEnterRun(config).
+// HideoutScreen: the hub. A cosy rock grotto seen as an orbitable near-isometric diorama; the blobfish lounges on
+// the sofa watching the CRT (a looping nature channel). Click the TV (or MENU / Esc): the camera dollies into the
+// tube and opts.onMenu() takes you to the title's main menu. Click the chest for the stash, the bench for the
+// workshop, BUILD for the blueprint drawer. view 'cinematic' plays the gear-up + walk-out cinematic for a run
+// config (the title's NEW RUN -> ENTER) and then calls opts.onEnterRun(config).
 //
-//   const h = new HideoutScreen(game, { onEnterRun: (cfg) => ..., onResume: () => ..., hero?: () => myHero });
-//   game.register(h); game.go('hideout', { view?: 'tv' | 'config' | 'build' | 'stash' | 'workshop' | 'cinematic' });
+//   const h = new HideoutScreen(game, { onEnterRun: (cfg) => ..., onResume: () => ..., onMenu, hero?: () => myHero });
+//   game.register(h); game.go('hideout', { view?: 'build' | 'stash' | 'workshop' | 'cinematic', cfg?: RunConfig });
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { POST } from '../gfx/post';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
 import { PixelUI } from '../ui/pixel/ui';
-import { crtMaterial, crtUv, type CrtMaterial } from '../ui/pixel/crt';
+import { crtMaterial, type CrtMaterial } from '../ui/pixel/crt';
 import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
 import { Room, WALL_H, HALF_W, HALF_D } from './room';
@@ -26,8 +26,12 @@ import { StashPanel, WorkshopPanel } from './panels';
 import { Cinematic, Walker, faceToward } from './cinematic';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 
-export interface HideoutOpts { onEnterRun: (cfg: RunConfig) => void; onResume: () => void; hero?: HeroFactory; /** TV > PROLOGUE: replay the story intro */ onPrologue?: () => void }
-type Mode = 'room' | 'build' | 'stash' | 'workshop' | 'nemesis' | 'tvIn' | 'tv' | 'tvOut' | 'tvOff' | 'cine';
+export interface HideoutOpts {
+  onEnterRun: (cfg: RunConfig) => void; onResume: () => void; hero?: HeroFactory;
+  /** replay the story intro */ onPrologue?: () => void;
+  /** the TV / MENU button / Esc: back to the main menu (the title screen) */ onMenu?: () => void;
+}
+type Mode = 'room' | 'build' | 'stash' | 'workshop' | 'nemesis' | 'tvIn' | 'cine';
 
 const RECORDS = ['mu_aquarium', 'mu_shallows', 'mu_junkyard', 'mu_fjord', 'mu_metropolis'];
 
@@ -104,10 +108,6 @@ export class HideoutScreen implements Screen {
     this.applyTvMaterial();
     this.cine = new Cinematic(this.hero, this.furn, this.room, this.rig, this.scene, this.sparks, this.ocean.bubbles);
     this.cine.onDone = (cfg) => this.opts.onEnterRun(cfg);
-    this.tv.onBack = () => this.leaveTv();
-    this.tv.onResume = () => { audio.play('k_confirm1', { vol: 0.5, dry: true }); this.opts.onResume(); };
-    if (this.opts.onPrologue) this.tv.onPrologue = () => { audio.play('k_confirm1', { vol: 0.5, dry: true }); this.opts.onPrologue?.(); };
-    this.tv.onEnter = (cfg) => this.enterRun(cfg);
     this.ui.drawCursor = true;
     this.seatHero();
     (window as unknown as { hideout: HideoutScreen }).hideout = this;
@@ -133,7 +133,7 @@ export class HideoutScreen implements Screen {
   }
 
   enter(data?: unknown) {
-    const d = (data ?? {}) as { view?: string };
+    const d = (data ?? {}) as { view?: string; cfg?: RunConfig };
     this.prevClip = this.game.renderer.localClippingEnabled;
     this.game.renderer.localClippingEnabled = true;
     this.cine.reset();
@@ -145,14 +145,13 @@ export class HideoutScreen implements Screen {
     this.rig.shot = null; this.rig.snap();
     POST.uLetterbox.value = 0; POST.uFade.value = 1;
     this.fadeIn = 1;
-    audio.music(RECORDS[this.record], 2);
     this.game.cursor = 'none';
     const view = d.view ?? new URLSearchParams(location.search).get('view') ?? '';
-    if (view === 'tv' || view === 'config' || view === 'settings') { this.goTv(true); if (view !== 'tv') this.tv.go(view as 'config'); }
-    else if (view === 'build') this.setMode('build');
+    if (view !== 'cinematic') audio.music(RECORDS[this.record], 2);
+    if (view === 'build') this.setMode('build');
     else if (view === 'stash') this.setMode('stash');
     else if (view === 'workshop') this.setMode('workshop');
-    else if (view === 'cinematic') this.enterRun(META.lastConfig ?? { mastery: 0, startArea: 'reef', loadout: META.stash.slice(0, 4).map((s) => s.uid) }, true);
+    else if (view === 'cinematic') this.enterRun(d.cfg ?? META.lastConfig ?? { mastery: 0, startArea: 'reef', loadout: META.stash.slice(0, 4).map((s) => s.uid) });
   }
   private fadeIn = 0;
 
@@ -241,29 +240,20 @@ export class HideoutScreen implements Screen {
     const yaw = Math.atan2(f.x, f.z);
     return CamRig.frame(c, yaw, 0.47 * 1.12, 16, 0.92, 0.0);
   }
-  private goTv(instant = false) {
+  /** dolly into the TV, then over to the main menu */
+  private goTv() {
     const s = this.tvShot();
-    if (!s) return;
+    if (!s || !this.opts.onMenu || this.mode === 'tvIn') return;
     this.rig.shot = s; this.rig.k = 2.6;
-    if (instant) { this.rig.snap(); this.mode = 'tv'; this.tvK = 1; }
-    else this.mode = 'tvIn';
-    this.modeT = 0;
-    this.tv.go('main');
+    this.mode = 'tvIn'; this.modeT = 0;
     audio.play('crt_on', { vol: 0.5, dry: true });
+    audio.play('static2', { vol: 0.25, dry: true, delay: 0.5 });
     this.hero.expression?.('happy');
   }
-  private leaveTv() {
-    this.mode = 'tvOut'; this.modeT = 0;
-    this.rig.shot = null; this.rig.k = 3;
-    audio.play('k_back2', { vol: 0.4, dry: true });
-  }
-  private enterRun(cfg: RunConfig, instant = false) {
+  private enterRun(cfg: RunConfig) {
     this.pendingCfg = cfg;
     META.lastConfig = cfg; saveMeta();
-    if (instant) { this.tvPower = 1; this.startCine(); return; }
-    this.mode = 'tvOff'; this.modeT = 0;
-    audio.play('static2', { vol: 0.3, dry: true });
-    audio.play('k_confirm3', { vol: 0.5, dry: true });
+    this.tvPower = 1; this.startCine();
   }
   private startCine() {
     this.mode = 'cine'; this.modeT = 0;
@@ -290,16 +280,6 @@ export class HideoutScreen implements Screen {
     this.tvQuad.scale.set(x1 - x0, y1 - y0, 1);
     this.tvOverMat.uniforms.uOutSize.value.set(x1 - x0, y1 - y0);
   }
-  private tvMouse = (cx: number, cy: number): [number, number] | null => {
-    const pr = this.game.renderer.getPixelRatio();
-    const dx = cx * pr, dy = this.devSize[1] - cy * pr;
-    const r = this.screenRect;
-    const u = (dx - r.x) / r.w, v = (dy - r.y) / r.h;
-    if (u < -0.05 || v < -0.05 || u > 1.05 || v > 1.05) return null;
-    const [su, sv] = crtUv(u, v, this.tvOverMat.uniforms.uCurve.value as number);
-    return [Math.floor(su * TV_W), Math.floor((1 - sv) * TV_H)];
-  };
-
   // ---------------------------------------------------------------- test hooks
   /** CSS-pixel centre of a main-UI widget drawn last frame (e.g. 'hTv', 'hBuild', 'bDone', 'stashX') */
   uiButton(id: string): [number, number] | null {
@@ -313,21 +293,6 @@ export class HideoutScreen implements Screen {
     const v = new THREE.Vector3(x, y, z).project(this.camera);
     return [(v.x * 0.5 + 0.5) * this.game.w, (-v.y * 0.5 + 0.5) * this.game.h];
   }
-  /** CSS-pixel position of a point on the TV canvas (inverts the CRT curvature) */
-  tvPoint(tx: number, ty: number): [number, number] {
-    const curve = this.tvOverMat.uniforms.uCurve.value as number;
-    const tu = tx / TV_W, tv = 1 - ty / TV_H;
-    let u = tu, v = tv;
-    for (let i = 0; i < 12; i++) { const [su, sv] = crtUv(u, v, curve); u += tu - su; v += tv - sv; }
-    const r = this.screenRect, pr = this.game.renderer.getPixelRatio();
-    return [(r.x + u * r.w) / pr, (this.devSize[1] - (r.y + v * r.h)) / pr];
-  }
-  /** CSS-pixel centre of a TV widget drawn last frame (e.g. 'm0' NEW RUN, 'enter', 'mst:r', 'stash:3') */
-  tvButton(id: string): [number, number] | null {
-    const r = this.tv.ui.rects.get(id);
-    return r ? this.tvPoint(r[0] + r[2] / 2, r[1] + r[3] / 2) : null;
-  }
-
   // ---------------------------------------------------------------- frame
   update(dt: number) {
     this.t += dt; this.modeT += dt;
@@ -335,14 +300,14 @@ export class HideoutScreen implements Screen {
     const ui = this.ui;
     this.game.cursor = 'none';
     this.fadeIn = Math.max(0, this.fadeIn - dt * 1.5);
-    POST.uFade.value = Math.max(this.fadeIn, this.cine.fade);
+    POST.uFade.value = Math.max(this.fadeIn, this.cine.fade, this.mode === 'tvIn' ? clamp01((this.modeT - 0.55) / 0.45) : 0);
     POST.uLetterbox.value = this.cine.letterbox * (this.mode === 'cine' ? 1 : 0);
     // world ray
     this.ray.setFromCamera(new THREE.Vector2(input.mouse.nx, input.mouse.ny), this.camera);
 
     ui.begin(input, dt);
     // ---- per-mode UI + logic
-    const inTv = this.mode === 'tv' || this.mode === 'tvIn' || this.mode === 'tvOut' || this.mode === 'tvOff';
+    const inTv = this.mode === 'tvIn';
     if (this.mode === 'room') this.roomHud();
     else if (this.mode === 'build') { if (this.build.ui(ui, input)) this.setMode('room'); }
     else if (this.mode === 'stash') { this.miniHud(); if (this.stash.draw(ui)) this.setMode('room'); }
@@ -363,7 +328,7 @@ export class HideoutScreen implements Screen {
       if (this.hover) ui.cursor = 'point';
       if (this.hover && input.released.has('Mouse0') && !this.rig.dragged) this.use(this.hover);
       if (input.keyHit('KeyB')) this.setMode('build');
-      if (input.keyHit('KeyT') || input.keyHit('Enter')) this.goTv();
+      if (input.keyHit('KeyT') || input.keyHit('Enter') || input.keyHit('Escape')) this.goTv();
       if (input.keyHit('KeyI')) this.setMode('stash');
       if (input.keyHit('KeyK')) this.setMode('workshop');
     }
@@ -405,7 +370,7 @@ export class HideoutScreen implements Screen {
     if (Math.random() < dt * 4) this.dust.emit((Math.random() - 0.5) * 10, 0.5 + Math.random() * 2.5, (Math.random() - 0.5) * 8, { vy: 0.05, vx: (Math.random() - 0.5) * 0.1, life: 4, size: 0.035 });
     if (this.toast.t > 0) this.drawToast(dt);
     if (this.fadeIn > 0 || this.cine.fade > 0) ui.cursor = 'arrow';
-    ui.drawCursor = !(this.mode === 'tv' && this.tvK > 0.5) && this.mode !== 'cine';
+    ui.drawCursor = this.mode !== 'tvIn' && this.mode !== 'cine';
     ui.end();
   }
 
@@ -414,10 +379,7 @@ export class HideoutScreen implements Screen {
   private tvUpdate(dt: number, input: Game['input'], inTv: boolean) {
     const tvp = this.furn.byBp('tv');
     // power / static
-    if (this.mode === 'tvOff') {
-      this.tvPower = Math.max(0, this.tvPower - dt * 2.4);
-      if (this.tvPower <= 0 && this.modeT > 0.55) { this.tv.page = 'idle'; this.leaveTvForCine(); }
-    } else if (this.mode !== 'cine') {
+    if (this.mode !== 'cine') {
       if (this.powerDelay > 0) { this.powerDelay -= dt; if (this.powerDelay <= 0) audio.play('crt_on', { vol: 0.35, dry: true }); }
       else this.tvPower = Math.min(1, this.tvPower + dt * 1.4);
     }
@@ -425,21 +387,15 @@ export class HideoutScreen implements Screen {
       m.uniforms.uTime.value = this.t;
       m.uniforms.uPower.value = this.tvPower;
       m.uniforms.uRoll.value = this.tv.staticK > 0.05 ? (1 - this.tv.staticK) * this.tv.staticK * 1.4 : 0;
-      m.uniforms.uStatic.value = Math.max(this.tv.staticK * 0.8, this.mode === 'tvIn' ? 0.15 * (1 - clamp01(this.modeT * 2)) : 0);
+      m.uniforms.uStatic.value = Math.max(this.tv.staticK * 0.8, this.mode === 'tvIn' ? clamp01((this.modeT - 0.3) * 1.5) * 0.7 : 0);
     }
-    if (this.mode === 'tvIn') {
-      const c = this.rig.cur, g = this.rig.shot!;
-      const close = c.target.distanceTo(g.target) < 0.05 && Math.abs(c.dist - g.dist) < 0.25;
-      if (close || this.modeT > 2.4) { this.mode = 'tv'; this.modeT = 0; }
-    }
-    const wantOverlay = this.mode === 'tv' || this.mode === 'tvOff' ? 1 : 0;
+    if (this.mode === 'tvIn' && this.modeT > 1.05) { this.mode = 'room'; this.modeT = 0; this.rig.shot = null; this.rig.snap(); this.opts.onMenu?.(); return; }
+    const wantOverlay = 0; // the crisp CRT overlay is unused now that the TV has no menu
     this.tvK = damp(this.tvK, wantOverlay, 10, dt);
     this.tvQuad.visible = this.tvK > 0.01;
     this.tvOverMat.uniforms.uBright.value = this.tvK;
     if (this.tvQuad.visible) this.placeTvOverlay();
-    if (this.mode === 'tvOut' && this.modeT > 0.4) { this.mode = 'room'; this.tv.go('idle'); this.tv.staticK = 0; }
-    const live = this.mode === 'tv' && this.tvK > 0.6;
-    this.tv.draw(live ? input : null, dt, live ? this.tvMouse : undefined);
+    this.tv.draw(null, dt);
     // the TV's glow on the room
     const L = this.room.tvLight;
     if (tvp?.prop.screen) {
@@ -450,9 +406,6 @@ export class HideoutScreen implements Screen {
       L.color.set(this.tv.page === 'idle' ? '#8ad0ff' : '#9ab0ff');
     } else L.intensity = 0;
   }
-  private leaveTvForCine() {
-    this.startCine();
-  }
 
   private use(it: Placed) {
     const bp = BLUEPRINTS[it.p.bp];
@@ -461,7 +414,7 @@ export class HideoutScreen implements Screen {
       case 'tv': this.goTv(); break;
       case 'storage': this.setMode('stash'); break;
       case 'workshop': this.setMode('workshop'); break;
-      case 'locker': this.furn.setOpen(it, 1); audio.play('chest_creak', { vol: 0.4, rate: 1.3 }); setTimeout(() => this.furn.setOpen(it, 0), 1400); this.say('Pick your loadout on the TV, then ENTER'); break;
+      case 'locker': this.furn.setOpen(it, 1); audio.play('chest_creak', { vol: 0.4, rate: 1.3 }); setTimeout(() => this.furn.setOpen(it, 0), 1400); this.say('Plan a run from the menu: NEW RUN'); break;
       case 'sofa': if (this.heroState !== 'sit') this.seatHero(); else { this.heroT = 0; } audio.play('squish1', { vol: 0.4 }); break;
       case 'trophy': this.setMode('nemesis'); audio.play('page1', { vol: 0.4, dry: true }); break;
       case 'music': {
@@ -508,7 +461,7 @@ export class HideoutScreen implements Screen {
     y -= bh + 4;
     if (ui.button('hStash', 'STASH', x, y, bw, bh, { style: 'wood', icon: 'chest', key: 'KeyI', tip: ['Sea chest', 'Everything you extracted'] })) this.setMode('stash');
     y -= bh + 8;
-    if (ui.button('hTv', 'PLAY', x, y, bw, bh + 2, { style: 'gold', icon: 'play', key: 'KeyT', tip: ['Click the TV to plan a run'] })) this.goTv();
+    if (ui.button('hTv', 'MENU', x, y, bw, bh + 2, { style: 'gold', icon: 'play', key: 'KeyT', tip: ['Main menu: new run, resume, wardrobe...', 'or click the TV'] })) this.goTv();
     // perks
     const perks = stationPerks();
     if (perks.arch.length) {
@@ -532,9 +485,9 @@ export class HideoutScreen implements Screen {
         const p = this.toUi(tvp.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0)));
         if (p) {
           const bob = Math.round(Math.sin(this.t * 5) * 2);
-          const tw = Math.max(92, Math.ceil(ui.measure('click the TV to play', 'small')) + 14);
+          const tw = Math.max(92, Math.ceil(ui.measure('click the TV: main menu', 'small')) + 14);
           ui.frame('paper', p[0] - Math.round(tw / 2), p[1] - 22 + bob, tw, 16);
-          ui.text('click the TV to play', p[0], p[1] - 18 + bob, { font: 'small', color: '#2a1808', align: 'center' });
+          ui.text('click the TV: main menu', p[0], p[1] - 18 + bob, { font: 'small', color: '#2a1808', align: 'center' });
           ui.icon('down', p[0] - 3, p[1] - 6 + bob);
         }
       }
@@ -614,6 +567,6 @@ export class HideoutScreen implements Screen {
 }
 
 function useLabel(u?: string) {
-  return ({ tv: 'watch / play', storage: 'open stash', workshop: 'craft', locker: 'gear', sofa: 'sit', trophy: 'nemeses', music: 'next record', poke: 'poke' } as Record<string, string>)[u ?? ''] ?? '';
+  return ({ tv: 'main menu', storage: 'open stash', workshop: 'craft', locker: 'gear', sofa: 'sit', trophy: 'nemeses', music: 'next record', poke: 'poke' } as Record<string, string>)[u ?? ''] ?? '';
 }
 export { WALL_H, HALF_W, HALF_D };

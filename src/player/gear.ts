@@ -14,12 +14,29 @@ import { psxMat, mesh, facet, xf, uvTo } from './psx';
 
 export type WeaponId = 'toothpick' | 'sword' | 'wand' | 'trident' | 'staff' | 'wrench' | 'dagger';
 export type ArmorId = 'none' | 'shellPlate' | 'chainmail' | 'robe';
-export type HatId = 'none' | 'bandana' | 'helmet' | 'wizardHat' | 'crown' | 'goggles' | 'hood';
+/** cosmetic hats (src/cosmetics registers their builders in HAT_EXT): looks only, never stats */
+export type CosmeticHatId = 'roninKasa' | 'coralCrown' | 'tricorn' | 'viking' | 'toque' | 'partyCone' | 'jellyCap' | 'anglerLamp' | 'kabuto';
+export type HatId = 'none' | 'bandana' | 'kasa' | 'helmet' | 'wizardHat' | 'crown' | 'goggles' | 'hood' | CosmeticHatId;
 export type BackId = 'none' | 'pack' | 'tank' | 'cape';
 export interface BlobGear { weapon?: WeaponId; armor?: ArmorId; hat?: HatId; back?: BackId }
 export type BuildId = 'default' | 'mage' | 'warrior' | 'summoner' | 'tinkerer' | 'rogue';
 
-export const DEFAULT_GEAR: Required<BlobGear> = { weapon: 'toothpick', armor: 'none', hat: 'bandana', back: 'none' };
+/** the blobfish's own look: the conical straw kasa and the toothpick */
+export const DEFAULT_GEAR: Required<BlobGear> = { weapon: 'toothpick', armor: 'none', hat: 'kasa', back: 'none' };
+
+/**
+ * Cosmetic look overrides, installed by src/cosmetics: the model shows `hat(id)` instead of the hat it was given,
+ * and `weapon(id)` (a fresh group, or null for the stock model) instead of the weapon. Stats always keep the real
+ * gear id; BlobModel.setGear(gear, true) rebuilds a model after the look changes.
+ */
+export const GEAR_LOOK: { hat?: (id: HatId) => HatId; weapon?: (id: WeaponId) => THREE.Group | null } = {};
+/** extra hat builders (cosmetics): fill `h.root` (skin-tight shells, bend) / `h.rig` (rigid, on the head anchor) */
+export interface HatBuild {
+  root: THREE.Group; rig: THREE.Group; part: GearPart;
+  patch: (m: THREE.Material, bend: boolean) => THREE.Material;
+  add: (g: THREE.BufferGeometry, m: THREE.Material, bend: boolean, parent?: THREE.Object3D) => THREE.Mesh;
+}
+export const HAT_EXT: Partial<Record<HatId, (h: HatBuild) => void>> = {};
 export const BUILD_GEAR: Record<BuildId, Required<BlobGear>> = {
   default: DEFAULT_GEAR,
   mage: { weapon: 'staff', armor: 'robe', hat: 'wizardHat', back: 'none' },
@@ -87,6 +104,8 @@ const cyl = (r0: number, r1: number, h: number, n: number, at: V3 = [0, 0, 0], r
 // ------------------------------------------------------------------ weapons (+x from the hand)
 const weaponCache = new Map<WeaponId, THREE.Group>();
 export function buildWeapon(id: WeaponId): THREE.Group {
+  const look = GEAR_LOOK.weapon?.(id);
+  if (look) return look;
   const hit = weaponCache.get(id);
   if (hit) return hit.clone();
   const g = new THREE.Group();
@@ -258,6 +277,128 @@ const WIZ = () => tex('wizard', 64, 64, (p) => {
   for (let x = 4; x < 64; x += 10) { rect(p, x, 52, 3, 4, tone(T.purple, 2)); p.set(x, 52, tone(T.purple, 4)); }
 });
 
+// ------------------------------------------------------------------ the kasa: a conical woven straw hat
+// Page layout (u around the cone, 3 repeats; y = radius: row 0 at the apex, row 63 at the brim): a bound top knot,
+// concentric rows of woven straw strips crossing over / under radial bamboo spokes, a cord binding near the rim,
+// then frayed strand ends (alpha cut). The ronin variant is black lacquer with a red binding.
+const KASA_STRAW = ['#2e1e0c', '#5a4020', '#866634', '#b08e4c', '#d4b46a', '#f2da98'];
+const KASA_BLACK = ['#060608', '#101014', '#1c1c24', '#2c2c38', '#444452', '#686878'];
+const KASA_RED = ['#2a0408', '#5a0a12', '#981820', '#d0342c', '#f86848'];
+const KASA_ROPE = ['#1e1408', '#3e2a12', '#624420', '#8a6434', '#b08c52'];
+/** frayed strand length past the binding, per column pair (0 = cut short) */
+const frayLen = (x: number) => { const k = x >> 1; return 1 + Math.floor(hash2(k, 3, 77) * 4.6) + ((k % 5) === 2 ? 1 : 0); };
+const KASA_FRAY0 = 59;
+const KW = 128;
+function kasaTop(black: boolean) {
+  return tex(black ? 'kasaBlack' : 'kasaStraw', KW, 64, (p) => {
+    const S = black ? KASA_BLACK : KASA_STRAW, B = black ? KASA_RED : KASA_ROPE;
+    const st = (i: number) => tone(S, i);
+    // top knot: a spiral binding
+    for (let y = 0; y < 6; y++) for (let x = 0; x < KW; x++) p.set(x, y, (x + y * 2) % 6 < 3 ? tone(B, 3) : tone(B, 1));
+    rect(p, 0, 5, KW, 1, tone(B, 0));
+    // woven rows of flat straw strips passing over / under the radial bamboo spokes
+    for (let y = 6; y < 56; y++) {
+      const band = Math.floor((y - 6) / 3), yy = (y - 6) % 3;
+      for (let x = 0; x < KW; x++) {
+        const spoke = Math.floor(x / 6), sx = x % 6;
+        const over = (band + spoke) % 2 === 0;
+        let c: number;
+        if (yy === 2) c = over ? 2 : 1;                        // the shadow under each strip
+        else if (yy === 0) c = over ? 5 : 3;                   // the lit upper edge
+        else c = over ? 4 : 2;
+        if (!over && sx === 0) c = 1;                          // the spoke's dark side where it shows
+        if (over && sx === 5) c = Math.max(1, c - 1);          // the strip dips under the next spoke
+        if (yy === 1 && over && (x * 7 + band * 3) % 23 === 0) c = 3; // a fibre fleck
+        p.set(x, y, st(c));
+      }
+    }
+    // the rim binding: a twisted cord
+    for (let y = 56; y < KASA_FRAY0; y++) for (let x = 0; x < KW; x++) p.set(x, y, (x + (y - 56) * 2) % 5 < 3 ? tone(B, y === 56 ? 4 : 3) : tone(B, 1));
+    rect(p, 0, KASA_FRAY0 - 1, KW, 1, tone(B, 0));
+    // frayed straw ends
+    for (let x = 0; x < KW; x++) {
+      const L = frayLen(x);
+      for (let y = KASA_FRAY0; y < 64; y++) {
+        if (y - KASA_FRAY0 >= L) { p.set(x, y, '#000000', 0); continue; }
+        p.set(x, y, st(x % 2 ? 3 : 4));
+        if (y - KASA_FRAY0 === L - 1) p.set(x, y, st(2));
+      }
+    }
+  });
+}
+function kasaLining(black: boolean) {
+  return tex(black ? 'kasaLinB' : 'kasaLin', KW, 64, (p) => {
+    const D = ['#07070c', '#0e0e16', '#181822', '#24242e'], S = black ? KASA_BLACK : KASA_STRAW;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < KW; x++) p.set(x, y, D[(Math.floor(y / 6) + Math.floor(x / 4)) % 2 ? 1 : 2]);
+    // bamboo ribs fanning out under the cloth
+    for (let x = 0; x < KW; x += 12) for (let y = 4; y < KASA_FRAY0; y++) { p.set(x, y, tone(T.oak, 2)); p.set(x + 1, y, tone(T.oak, 1)); }
+    // the head ring: a leather band with stitching
+    rect(p, 0, 26, KW, 6, tone(T.leather, 2)); rect(p, 0, 26, KW, 1, tone(T.leather, 4)); rect(p, 0, 31, KW, 1, tone(T.leather, 0));
+    for (let x = 1; x < KW; x += 4) { p.set(x, 28, '#d8c090'); p.set(x + 1, 29, '#d8c090'); }
+    rect(p, 0, KASA_FRAY0 - 3, KW, 3, D[0]);
+    for (let x = 0; x < KW; x++) { const L = frayLen(x); for (let y = KASA_FRAY0; y < 64; y++) p.set(x, y, y - KASA_FRAY0 < L ? tone(S, x % 2 ? 1 : 2) : '#000000', y - KASA_FRAY0 < L ? 255 : 0); }
+  });
+}
+const KASA_CORD = (red: boolean) => tex(red ? 'kasaCordR' : 'kasaCord', 16, 16, (p) => {
+  const C = red ? KASA_RED : T.navy;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = (x * 2 + y) % 8; p.set(x, y, tone(C, k < 1 ? 0 : k < 4 ? 3 : k < 6 ? 2 : 4)); }
+});
+const KASA_TASSEL = () => tex('kasaTassel', 16, 16, (p) => {
+  for (let x = 0; x < 16; x++) {
+    const L = 11 + Math.floor(hash2(x, 1, 13) * 5);
+    for (let y = 0; y < 16; y++) p.set(x, y, y < L ? tone(KASA_STRAW, y < 3 ? 1 : x % 3 === 0 ? 2 : x % 3 === 1 ? 4 : 3) : '#000000', y < L ? 255 : 0);
+  }
+  rect(p, 0, 2, 16, 2, tone(KASA_RED, 3)); rect(p, 0, 3, 16, 1, tone(KASA_RED, 1));
+});
+/** cone radius / height of the kasa, and the sub-group offset on the head anchor */
+export const KASA = { R: 0.74, H: 0.32, sides: 9 };
+/** a low cone (apex up, brim drooping) as one flat-shaded mesh; `under` builds the lining just below it */
+function kasaGeo(R: number, H: number, n: number, droop: number, under: boolean) {
+  const F = [0, 0.1, 0.34, 0.62, 0.84, 1];
+  const yAt = (f: number) => H * (1 - f) - droop * Math.max(0, (f - 0.55) / 0.45) ** 2 - (under ? 0.014 : 0);
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const REP = 3;
+  F.forEach((f, i) => {
+    for (let j = 0; j <= n; j++) {
+      const a = (j / n) * TAU;
+      pos.push(Math.cos(a) * R * f, yAt(f), Math.sin(a) * R * f);
+      uv.push((j / n) * REP, 1 - f * 0.995);
+    }
+  });
+  for (let i = 0; i < F.length - 1; i++) for (let j = 0; j < n; j++) {
+    const a = i * (n + 1) + j, b = a + 1, c = a + n + 2, d = a + n + 1;
+    // outward-up facing for the top, down for the lining
+    if (i === 0) { if (under) idx.push(a, d, c); else idx.push(a, c, d); continue; }
+    if (under) idx.push(a, c, b, a, d, c); else idx.push(a, b, c, a, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return facet(g);
+}
+function buildKasa(h: HatBuild, black: boolean) {
+  const { R, H, sides } = KASA;
+  const tilt = new THREE.Group(); tilt.name = 'hatTilt';
+  // sits back on the dome of the head, tipped forward so the brim shades the eyes (ronin)
+  tilt.position.set(-0.08, 0.03, 0); tilt.rotation.z = -0.13;
+  h.rig.add(tilt);
+  h.add(kasaGeo(R, H, sides, 0.06, false), psxMat(kasaTop(black), { rough: black ? 0.45 : 0.95, alphaTest: 0.5 }), false, tilt);
+  h.add(kasaGeo(R, H, sides, 0.06, true), psxMat(kasaLining(black), { rough: 0.95, alphaTest: 0.5 }), false, tilt);
+  // the top knot finial
+  const knot = h.add(facet(xf(new THREE.ConeGeometry(0.045, 0.07, 6), [0, H + 0.02, 0])), psxMat(KASA_CORD(true), { rough: 0.9 }), false, tilt);
+  knot.name = 'kasaKnot';
+  // chin cords from the lining at the sides, straw tassels off the back of the brim: they stream in the current
+  const cordMat = psxMat(KASA_CORD(true), { rough: 0.9, side: THREE.DoubleSide });
+  const tasselMat = psxMat(KASA_TASSEL(), { rough: 0.95, side: THREE.DoubleSide, alphaTest: 0.5 });
+  const anchors: { o: THREE.Object3D; kind: 'cord' | 'tassel'; k: number }[] = [];
+  for (const s of [-1, 1]) { const o = new THREE.Object3D(); o.position.set(0.06, H * (1 - 0.74) - 0.04, s * R * 0.74); tilt.add(o); anchors.push({ o, kind: 'cord', k: s > 0 ? 1 : 0 }); }
+  for (const s of [-1, 1]) { const o = new THREE.Object3D(); o.position.set(-R * 0.9, -0.03, s * 0.07); tilt.add(o); anchors.push({ o, kind: 'tassel', k: s > 0 ? 0.8 : 0.2 }); }
+  h.part.ribbons = anchors.map((a) => a.kind === 'cord'
+    ? { mat: cordMat, opts: { n: 6, seg: 0.05, w0: 0.02, w1: 0.016, gravity: 0.0012, flutter: 0.0012, uv: [0, 0, 1, 1] as [number, number, number, number], thick: 0.008 }, anchor: a.o, k: a.k }
+    : { mat: tasselMat, opts: { n: 5, seg: 0.05, w0: 0.045, w1: 0.03, gravity: 0.001, flutter: 0.002, uv: [0, 0, 1, 1] as [number, number, number, number], thick: 0.006 }, anchor: a.o, k: a.k });
+}
+
 // ------------------------------------------------------------------ gear parts
 export interface GearPart { slot: 'weapon' | 'armor' | 'hat' | 'back'; root: THREE.Group; ribbons?: { mat: THREE.Material; opts: import('./ribbon').RibbonOpts; anchor: THREE.Object3D; k: number; axis?: boolean }[]; glow?: THREE.Mesh[] }
 
@@ -284,12 +425,16 @@ export function buildArmor(id: ArmorId, patch: (m: THREE.Material, bend: boolean
 
 /** hats: cloth caps are shells (bend), rigid ones hang off the head anchor (returned as root, placed by the caller) */
 export function buildHat(id: HatId, patch: (m: THREE.Material, bend: boolean) => THREE.Material): GearPart {
+  id = GEAR_LOOK.hat?.(id) ?? id;
   const root = new THREE.Group(); root.name = 'hat:' + id;
   const add = (g: THREE.BufferGeometry, m: THREE.Material, bend: boolean, parent: THREE.Object3D = root) => { const me = mesh(g, patch(m, bend)); parent.add(me); return me; };
   const part: GearPart = { slot: 'hat', root };
   const rig = new THREE.Group(); rig.name = 'hatRig'; // rigid pieces, positioned at the head anchor every frame
   root.add(rig);
-  if (id === 'bandana') {
+  const ext = HAT_EXT[id];
+  if (id === 'kasa' || id === 'roninKasa') buildKasa({ root, rig, part, patch, add }, id === 'roninKasa');
+  else if (ext) ext({ root, rig, part, patch, add });
+  else if (id === 'bandana') {
     const mat = psxMat(BANDANA(), { rough: 0.9, side: THREE.DoubleSide});
     add(shellGeo(0.52, 0.86, 0.27, 0.73, (t) => 0.016 + (t > 0.83 ? 0.008 : 0), undefined, { uvScale: [3, 1.2] }), mat, true);
     const knot = add(facet(xf(new THREE.IcosahedronGeometry(0.05, 0), [0, 0, 0], [0, 0, 0], [1.2, 0.85, 1.1])), psxMat(BANDANA(), { rough: 0.9 }), false);
@@ -412,6 +557,6 @@ export function buildBack(id: BackId, patch: (m: THREE.Material, bend: boolean) 
 export const GEAR_NAMES: Record<string, string> = {
   toothpick: 'Toothpick Sword', sword: 'Cutlass', dagger: 'Stingray Barb', wand: 'Mana Wand', staff: 'Driftwood Staff', trident: 'Trident', wrench: 'Pipe Wrench',
   none: '-', shellPlate: 'Turtle Shell', chainmail: 'Chainmail', robe: 'Mage Robe',
-  bandana: 'Bandana', helmet: 'Plumed Helm', wizardHat: 'Wizard Hat', crown: 'Tide Crown', goggles: 'Brass Goggles', hood: 'Shadow Hood',
+  bandana: 'Bandana', kasa: 'Straw Kasa', roninKasa: 'Ronin Kasa', helmet: 'Plumed Helm', wizardHat: 'Wizard Hat', crown: 'Tide Crown', goggles: 'Brass Goggles', hood: 'Shadow Hood',
   pack: 'Backpack', tank: 'Scuba Tank', cape: 'Hero Cape',
 };

@@ -163,9 +163,11 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       detail.update(dt, cameraX);
       if (glowLamps.length) {
         // pooled point lights on the glow sources nearest the camera: static (vents, lanterns) and moving (lures)
-        near.length = 0;
-        for (const g of scen.glowPts) if (Math.abs(g.x - cameraX) < 11) near.push({ x: g.x, y: g.y, z: g.z, col: g.col, k: 1, d: Math.abs(g.x - cameraX) });
-        for (const g of scen.glowDyn) near.push({ x: g.x, y: g.y, z: g.z, col: g.col, k: g.k, d: Math.abs(g.x - cameraX) + 1.5 });
+        let nn = 0;
+        const put = (g: { x: number; y: number; z: number; col: string }, k: number, d: number) => { const o = near[nn] ?? (near[nn] = { x: 0, y: 0, z: 0, col: '', k: 0, d: 0 }); o.x = g.x; o.y = g.y; o.z = g.z; o.col = g.col; o.k = k; o.d = d; nn++; };
+        for (const g of scen.glowPts) if (Math.abs(g.x - cameraX) < 11) put(g, 1, Math.abs(g.x - cameraX));
+        for (const g of scen.glowDyn) put(g, g.k, Math.abs(g.x - cameraX) + 1.5);
+        near.length = nn;
         near.sort((a, b) => a.d - b.d);
         glowLamps.forEach((l, i) => {
           const g = near[i];

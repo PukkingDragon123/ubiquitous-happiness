@@ -41,7 +41,8 @@ export class Herd {
 
 // ------------------------------------------------------------------ meshes (local: +x forward, y up, base on y = 0)
 /** a flat fin: both windings so it shows from either side on a front-sided material */
-function fin(s: Soup, a: V3, b: V3, c: V3) { s.tri(a, b, c, [0, 0], [1, 0], [1, 1]); s.tri(a, c, b, [0, 0], [1, 1], [1, 0]); }
+let FR = { u0: 0, v0: 0, u1: 1, v1: 1 };
+function fin(s: Soup, a: V3, b: V3, c: V3) { const r = FR; s.tri(a, b, c, [r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1]); s.tri(a, c, b, [r.u0, r.v0], [r.u1, r.v1], [r.u1, r.v0]); }
 
 function gobyGeo(sk: { u0: number; v0: number; u1: number; v1: number }) {
   const s = new Soup();
@@ -67,7 +68,7 @@ function crabGeo(sk: { u0: number; v0: number; u1: number; v1: number }) {
   s.color(0.82, 0.82, 0.82);
   for (const side of [-1, 1]) for (const z of [-0.05, -0.018, 0.016, 0.048]) {
     const k = 1 + Math.abs(z) * 2;
-    s.tube([[side * 0.08, 0.065, z], [side * 0.16 * k, 0.11, z * 1.4], [side * 0.21 * k, 0.0, z * 1.7]], () => 0.011, 3, sk, { tip: true });
+    s.tube([[side * 0.08, 0.065, z], [side * 0.13 * k, 0.1, z * 1.35], [side * 0.165 * k, 0.0, z * 1.6]], () => 0.012, 3, sk, { tip: true });
   }
   // claws held up in front (toward +z), white-tipped
   for (const side of [-1, 1]) {
@@ -138,6 +139,8 @@ interface Bug {
   h: Herd; i: number; kind: 'goby' | 'crab' | 'shrimp' | 'slug';
   x: number; y: number; z: number; hx: number; hz: number; yaw: number; s: number;
   vx: number; vy: number; vz: number; t: number; st: number; air: boolean; ph: number;
+  /** cached ground height under the critter (refreshed when it moves or every few frames) */
+  gx: number; gy: number; gt: number;
   path?: { p: V3[]; u: number; dir: number };
 }
 
@@ -162,6 +165,7 @@ export class Critters {
     this.r = new Rng(seed ^ 0xc417);
     const a = scen.a, mix = MIX[a.id] ?? MIX.reef, P = scen.props, r = this.r;
     const sk = critterSkin(P.A);
+    FR = sk;
     const mat = scen.mats.prop;
     const sh = scen.shape;
     const herd = (geo: THREE.BufferGeometry, n: number, name: string) => { const h = new Herd(geo, mat, n, name); this.herds.push(h); this.group.add(h.mesh); return h; };
@@ -219,7 +223,14 @@ export class Critters {
 
   private add(h: Herd, i: number, kind: Bug['kind'], x: number, z: number, s: number) {
     const y = this.ground(x, z);
-    this.bugs.push({ h, i, kind, x, y, z, hx: x, hz: z, yaw: kind === 'crab' ? this.r.range(-0.4, 0.4) : this.r.range(0, TAU), s, vx: 0, vy: 0, vz: 0, t: this.r.range(0, 4), st: 0, air: false, ph: this.r.range(0, 10) });
+    this.bugs.push({ h, i, kind, x, y, z, hx: x, hz: z, yaw: kind === 'crab' ? this.r.range(-0.4, 0.4) : this.r.range(0, TAU), s, vx: 0, vy: 0, vz: 0, t: this.r.range(0, 4), st: 0, air: false, ph: this.r.range(0, 10), gx: x, gy: y, gt: 0 });
+  }
+
+  /** cached live ground under a critter: recomputed when it has moved, else a few times a second */
+  private gb(b: Bug, dt: number) {
+    b.gt -= dt;
+    if (b.gt <= 0 || Math.abs(b.x - b.gx) > 0.03) { b.gx = b.x; b.gy = this.ground(b.x, b.z); b.gt = 0.3; }
+    return b.gy;
   }
 
   /** the live seabed height: the rest shape plus whatever explosions dug out of the sand strip */
@@ -245,7 +256,7 @@ export class Critters {
       scen.addRock(r.pick(scen.shapes('bigboulder')), x, gy - R * 0.3, z, R, H, R * 1.1, r.range(0, TAU), { topK: 1.1 });
       const f1 = ch.rock.count;
       const side = k % 2 ? 1 : -1;
-      const dir = new THREE.Vector3(side, 0.08, 0.5).normalize();
+      const dir = new THREE.Vector3(side, 0.1, 0.26).normalize();      // out of the rock's flank: we see the eel in profile
       const c = new THREE.Vector3(x, gy - R * 0.3 + H * 0.38, z);
       const o = c.clone().addScaledVector(dir, 5);
       const t = castSoup(ch.rock, [o.x, o.y, o.z], [-dir.x, -dir.y, -dir.z], 6, f0, f1);
@@ -282,10 +293,10 @@ export class Critters {
         case 'goby': {
           if (b.air) {
             b.vy -= 7 * dt; b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt;
-            const g = this.ground(b.x, b.z);
+            const g = this.gb(b, dt);
             if (b.y <= g && b.vy < 0) { b.y = g; b.air = false; b.t = this.r.range(1.2, 4.5); if (Math.abs(b.x - camX) < 9 && this.r.chance(0.5)) w.fx.emit('dust', b.x, g + 0.03, { n: 1, spread: 0.05, vy: 0.2, life: 0.8, size: 0.05, color: this.scen.a.pal.silt, z: b.z }); }
           } else {
-            b.y = this.ground(b.x, b.z);
+            b.y = this.gb(b, dt);
             if (scared || b.t <= 0) {
               const far = scared ? this.r.range(0.9, 1.5) : this.r.range(0.25, 0.6);
               let dirx = scared ? away : (this.r.chance(0.5) ? 1 : -1);
@@ -303,14 +314,14 @@ export class Critters {
           if (b.st > 0) b.st -= dt;
           else if (b.t <= 0) { b.t = this.r.range(0.8, 3.2); b.vx = this.r.chance(0.45) ? 0 : (Math.abs(b.x - b.hx) > 2.5 ? Math.sign(b.hx - b.x) : this.r.sign()) * this.r.range(0.18, 0.35); }
           b.x += b.vx * dt;
-          b.y = this.ground(b.x, b.z);
+          b.y = this.gb(b, dt);
           const walk = Math.abs(b.vx) > 0.01, bob = walk ? Math.abs(Math.sin(b.ph * (b.st > 0 ? 30 : 16))) * 0.012 : 0;
           this.pose(b, 0, walk ? Math.sin(b.ph * 16) * 0.06 : 0, bob);
           if (b.st <= 0 && b.vx === 0 && Math.sin(b.ph * 0.7) > 0.96) this.pose(b, -0.12, 0, 0);   // claw-wave pose: rear up
           break;
         }
         case 'shrimp': {
-          const g = this.ground(b.x, b.z);
+          const g = this.gb(b, dt);
           if (scared && b.st <= 0) { b.st = 0.5; const back = -Math.cos(b.yaw); b.vx = (Math.abs(back) > 0.2 ? back : away) * 2.6; b.vy = 1.0; }
           if (b.st > 0) { b.st -= dt; b.vx = damp(b.vx, 0, 3, dt); b.vy -= 3 * dt; }
           else {
@@ -361,10 +372,12 @@ class Eel {
   constructor(public m: FishModel, public mouth: THREE.Vector3, public dir: THREE.Vector3, public sc: number, r: Rng) {
     m.group.scale.setScalar(sc);
     m.mesh.castShadow = false;
-    this.q.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+    // yaw then pitch (no roll): the eel stays dorsal side up whichever way its den faces
+    this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-dir.z, dir.x)).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.asin(dir.y)));
     m.group.quaternion.copy(this.q);
     this.next = r.range(3, 8);
     this.mx = mouth.x; this.my = mouth.y;
+    m.group.position.copy(mouth).addScaledVector(dir, this.ext - m.length * sc * 0.5);
   }
   hide(t: number) { this.state = 'hide'; this.hideT = t; }
   update(dt: number, camX: number, w: World, t: number) {
@@ -375,13 +388,13 @@ class Eel {
     const near = d < 2.7;
     switch (this.state) {
       case 'out':
-        this.extT = 0.38 + Math.sin(t * 0.6 + this.mx) * 0.06;
+        this.extT = 0.55 + Math.sin(t * 0.6 + this.mx) * 0.07;
         this.m.setJaw(0.25 + 0.3 * Math.max(0, Math.sin(t * 1.7 + this.mx)));   // morays gape to breathe
         if (near) this.hide(2.2);
         else if (this.next <= 0 && d < 9) { this.state = 'snap'; this.st = 0; if (Math.abs(this.mx - camX) < 10) w.sfx(Math.random() < 0.5 ? 'chomp1' : 'snap1', this.mx, 0.25, 1.2); }
         break;
       case 'snap':
-        this.extT = 0.7; this.m.setJaw(this.st < 0.16 ? 1.15 : 0);
+        this.extT = 0.9; this.m.setJaw(this.st < 0.16 ? 1.15 : 0);
         if (this.st > 0.4) { this.state = 'out'; this.next = 4 + Math.random() * 7; }
         break;
       case 'hide':
@@ -391,7 +404,7 @@ class Eel {
         if (this.hideT <= 0) { this.state = 'peek'; this.st = 0; }
         break;
       case 'peek':
-        this.extT = 0.16; this.m.setJaw(0.15);
+        this.extT = 0.24; this.m.setJaw(0.15);
         if (near) this.hide(2);
         else if (this.st > 1.4) this.state = 'out';
         break;

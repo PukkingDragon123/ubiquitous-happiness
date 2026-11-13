@@ -22,7 +22,8 @@ import { WaterFX } from '../gfx/water/water';
 import { Lighting } from '../gfx/lighting';
 import { Particles } from '../gfx/particles';
 import { POST } from '../gfx/post';
-import { FloatText } from '../ui/text';
+import { Text3DLayer, Float3D, T3D, type T3DStyle } from '../ui/text3d';
+import type { Entity } from './types';
 import { Rng } from '../core/rng';
 import { clamp, damp } from '../core/math';
 import { audio } from '../audio/audio';
@@ -111,6 +112,12 @@ export class RunScreen implements Screen {
   private bossWave = false;
   private god = false;
   private v = new THREE.Vector3();
+  /** 3D floating text in the lit world: title cards, WAVE n, damage numbers, item names (src/ui/text3d.ts) */
+  t3d = new Text3DLayer();
+  private hpSeen = new WeakMap<Entity, number>();
+  private dmgAcc = new Map<Entity, number>();
+  private dmgT = 0;
+  private critPending = false;
 
   constructor(public game: Game) { (window as unknown as { runScreen: RunScreen }).runScreen = this; }
 
@@ -237,17 +244,18 @@ export class RunScreen implements Screen {
     this.player?.dispose();
     this.light.sun.shadow.dispose();
     this.scene.clear(); this.overlay.clear();
+    this.t3d.clear(); this.dmgAcc.clear();
   }
 
   private buildAreaAt(idx: number, wreckSave: RunSave['wreck']) {
     this.teardown();
     const id = this.areas[idx];
     this.light = new Lighting();
-    const water = new WaterFX(), fx = new Particles(), text = new FloatText();
+    const water = new WaterFX(), fx = new Particles(), text = new Float3D(this.t3d);
     this.player = new Blobfish(0, -5);
     const w = this.world = new RunWorld(this.game, this.run, this.scene, this.camera, water, fx, text, new Rng((this.seed ^ Math.imul(idx + 1, 2654435761)) >>> 0), this.player);
     w.god = this.god;
-    this.scene.add(makeSky(), water.group, this.light.group, fx.object, this.player.obj);
+    this.scene.add(makeSky(), water.group, this.light.group, fx.object, this.player.obj, this.t3d.group);
     this.overlay.add(text.group);
     fx.waterAt = (x) => water.heightAt(x);
     fx.onSurfacePop = (x) => { if (Math.random() < 0.3) water.disturb(x, 0.15, 0.1); };
@@ -290,7 +298,7 @@ export class RunScreen implements Screen {
     this.interT = this.interMax;
     this.holdT = 0;
     this.setPhase(this.wavesCleared >= areaWaves(idx) ? 'cleared' : 'intermission');
-    this.hud.banner(a.name.toUpperCase(), `AREA ${idx + 1} OF ${RUN_AREAS}  ·  ${areaWaves(idx)} WAVES${idx === RUN_AREAS - 1 ? ' + BOSS' : ''}`, '#fff6c8', 4);
+    this.title3d(a.name.toUpperCase(), `AREA ${idx + 1} OF ${RUN_AREAS}  ·  ${areaWaves(idx)} WAVES${idx === RUN_AREAS - 1 ? ' + BOSS' : ''}`, T3D.title, 4.2, { x: sp.x + 1.5, y: sp.y + 3.7 });
     this.player.sb.accel(9 / 0.016, 0, 0.016);
     fx.emit('bubbleBig', sp.x - 1, sp.y, { n: 18, spread: 0.8, speed: 2 });
     if (idx === 0 && this.wavesCleared === 0 && META.runs <= 1) setTimeout(() => w.text.pop('Break rocks for materials. Repair the wreck. Mail loot home.', sp.x + 3, sp.y + 2, 'hint', { size: 0.3, life: 5 }), 1500);
@@ -316,19 +324,21 @@ export class RunScreen implements Screen {
       if (d.boss) {
         // after the director's own "WAVE n: BOSS" call-out has faded
         const name = BOSS_NAME[String(d.bossKind)] ?? 'THE BOSS';
-        this.after(2.6, () => this.hud.banner(name, 'BOSS WAVE', '#ff6a5a', 3.5));
+        this.after(2.6, () => this.title3d(name, 'BOSS WAVE', T3D.danger, 3.5));
         audio.play('boss_growl', { vol: 0.6 });
       }
     });
     w.on('waveCleared', () => this.waveCleared());
+    w.on('hit', (d) => { if (d.crit) this.critPending = true; });
     w.on('kill', () => { this.tally.kills++; this.run.kills++; });
     w.on('nemesis', (d) => { if (d.promoted && d.line === 'killed you') this.killer = { name: String(d.name), title: String(d.title ?? ''), nemesis: true }; });
     w.on('extract', (d) => this.extracted(d));
     w.on('repair', (d) => {
       this.tally.repairs++;
       const wk = this.area.shipwreck;
-      if (d.ready) this.hud.banner('SEAWORTHY!', this.phase === 'cleared' ? 'SET SAIL AT THE WRECK' : 'SURVIVE THE WAVES, THEN SET SAIL', '#aaf08a', 3.2, true);
-      else this.hud.banner('WRECK REPAIRED', `STAGE ${wk.stage}/4 · NEXT: ${wk.stageName.toUpperCase()}`, '#ffe7a0', 2.6, true);
+      const top = { x: wk.x, y: wk.floor + wk.dims.D + 3.4 };
+      if (d.ready) this.title3d('SEAWORTHY!', this.phase === 'cleared' ? 'SET SAIL AT THE WRECK' : 'SURVIVE THE WAVES, THEN SET SAIL', T3D.heal, 3.2, top);
+      else this.title3d('WRECK REPAIRED', `STAGE ${wk.stage}/4 · NEXT: ${wk.stageName.toUpperCase()}`, T3D.gold, 2.8, top);
       this.save();
     });
     w.on('wreckDestroyed', () => this.die('sunk'));
@@ -360,7 +370,7 @@ export class RunScreen implements Screen {
     this.bossWave = false;
     if (this.wavesCleared >= areaWaves(this.areaIdx)) {
       this.setPhase('cleared');
-      this.after(2.4, () => this.hud.banner('AREA CLEAR', this.area.shipwreck.ready ? 'SET SAIL AT THE WRECK [E]' : 'REPAIR THE WRECK TO SAIL ON', '#ffe7a0', 3.5));
+      this.after(2.4, () => this.title3d('AREA CLEAR', this.area.shipwreck.ready ? 'SET SAIL AT THE WRECK [E]' : 'REPAIR THE WRECK TO SAIL ON', T3D.gold, 3.5));
     } else {
       this.setPhase('intermission');
       this.interT = this.interMax;
@@ -449,7 +459,7 @@ export class RunScreen implements Screen {
     this.sailT = 0;
     this.world.god = true;
     this.game.post.letterboxTo?.(1, 1.0);
-    this.hud.banner('SET SAIL!', this.areaIdx < RUN_AREAS - 1 ? `NEXT: ${(AREA_LIST.find((x) => x.id === this.areas[this.areaIdx + 1])?.name ?? '').toUpperCase()}` : 'HOME, VICTORIOUS', '#ffe7a0', 3);
+    this.title3d('SET SAIL!', this.areaIdx < RUN_AREAS - 1 ? `NEXT: ${(AREA_LIST.find((x) => x.id === this.areas[this.areaIdx + 1])?.name ?? '').toUpperCase()}` : 'HOME, VICTORIOUS', T3D.gold, 3, { x: wk.x, y: wk.floor + wk.dims.D + 3.6 });
     audio.play('jin_legend', { vol: 0.6 });
   }
 
@@ -473,6 +483,31 @@ export class RunScreen implements Screen {
   }
 
   private after(t: number, fn: () => void) { this.seq.push({ t, fn }); }
+
+  /** a title card as chunky 3D text floating in the world (over `at`, else above the camera's look point) */
+  private title3d(title: string, sub: string, st: T3DStyle, life = 3, at?: { x: number; y: number }) {
+    const x = at?.x ?? this.camLook.x, y = at?.y ?? this.camLook.y + 2.4;
+    this.t3d.add(title, x, y, 1.4, st, { size: 0.72, life, enter: 'drop', stagger: 0.05 });
+    if (sub) this.t3d.add(sub, x, y - 0.78, 1.4, T3D.sub, { size: 0.24, life: life - 0.2, delay: 0.45, stagger: 0.015 });
+  }
+
+  /** 3D damage numbers: every enemy's hp is watched, hits are summed per target for a beat, then pop */
+  private damageNumbers(dt: number) {
+    const w = this.world;
+    for (const e of w.entities) {
+      if (e.team !== 'enemy' || e.hp === undefined) continue;
+      const last = this.hpSeen.get(e);
+      if (last !== undefined && e.hp < last - 0.05) this.dmgAcc.set(e, (this.dmgAcc.get(e) ?? 0) + (last - e.hp));
+      this.hpSeen.set(e, e.hp);
+    }
+    this.dmgT -= dt;
+    if (this.dmgT > 0 || !this.dmgAcc.size) return;
+    this.dmgT = 0.12;
+    const crit = this.critPending;
+    this.critPending = false;
+    for (const [e, d] of this.dmgAcc) this.t3d.damage(d, e.x, e.y + e.r + 0.45, crit);
+    this.dmgAcc.clear();
+  }
 
   // ---------------------------------------------------------------- endings
   private die(kind: Ender) {
@@ -588,6 +623,7 @@ export class RunScreen implements Screen {
     this.wakeT -= dt;
     if (p.alive && spd > 1.4 && this.wakeT <= 0) { this.wakeT = 0.07; w.fx.wake(p.x - (p.vx / spd) * p.r, p.y - (p.vy / spd) * p.r, { x: p.vx, y: p.vy }, spd / 5); }
     for (let i = 0; i < w.entities.length; i++) { const e = w.entities[i]; if (e.alive) e.update(dt, w); }
+    this.damageNumbers(dt);
     for (let i = w.entities.length - 1; i >= 0; i--) {
       const e = w.entities[i];
       if (!e.alive) { e.dispose?.(w); e.obj?.removeFromParent(); w.entities.splice(i, 1); }
@@ -614,6 +650,7 @@ export class RunScreen implements Screen {
     w.water.update(this.game.renderer, dt, this.camLook.x);
     w.fx.update(dt);
     w.text.update(dt);
+    this.t3d.update(dt, this.camera);
     // ---- audio + feedback
     audio.listenerX = this.camLook.x;
     audio.setUnderwater(this.camera.position.y < 0.2 ? 0.55 : 0.15);
