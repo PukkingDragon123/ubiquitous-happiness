@@ -111,6 +111,7 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
     { x: shape.X1 - 3, y: (y0 + 0) * 0.5, side: 1 }, { x: shape.X1 - 3, y: y0 + 2, side: 1 },
   ];
   let t = 0, blastAge = 99;
+  const glowLamps: LampHandle[] = [];
   const impact = (x: number, y: number, r = 1.5, k = 1) => {
     sand.impact(x, y, r, k);
     ENV.uBlast.value.set(x, y, 0, Math.min(1.5, k));
@@ -152,16 +153,34 @@ export function buildArea(world: World, areaId: string, seed: number): Area {
       }
       for (; k < pu.length; k++) pu[k].set(0, -999, 0, 0);
       scen.sim.update(dt, world, cameraX);
+      if (glowLamps.length) {
+        const near = scen.glowPts.filter((g) => Math.abs(g.x - cameraX) < 11).sort((a, b) => Math.abs(a.x - cameraX) - Math.abs(b.x - cameraX));
+        glowLamps.forEach((l, i) => {
+          const g = near[i];
+          if (!g) { l.light.intensity = 0; return; }
+          l.set(g.x, g.y, g.z);
+          l.light.color.set(g.col);
+          l.light.intensity = 4.5 * (0.8 + 0.2 * Math.sin(t * 1.7 + i * 2));
+          l.light.distance = 7;
+        });
+      }
       scen.update(dt, cameraX, t);
       eco.update(dt, cameraX);
       snow.update(cameraX, p.y, t);
     },
     impact,
-    setLighting(rig) { shipwreck.setLighting(rig); },
+    setLighting(rig) {
+      shipwreck.setLighting(rig);
+      // bioluminescence: pooled point lights hang on the glow sources nearest the camera
+      for (const l of glowLamps) l.release();
+      glowLamps.length = 0;
+      if (rig && scen.glowPts.length) for (let i = 0; i < 3; i++) { const l = rig.lamp(0, -999, 0, '#5af0ff', 0, 7); if (l) glowLamps.push(l); }
+    },
     dispose() {
       for (const [ev, fn] of [['explosion', onBoom], ['kill', onKill]] as const) {
         const l = world.run.hooks.get(ev); if (l) world.run.hooks.set(ev, l.filter((f) => f !== fn));
       }
+      for (const l of glowLamps) l.release();
       eco.dispose();
       for (const n of nodes) n.alive = false;
       shipwreck.alive = false; mailbox.alive = false; plantField.alive = false;

@@ -422,8 +422,8 @@ export const SPECIES: Record<string, Species> = {
       for (let i = 0; i < 10; i++) {
         const ang = rng.range(-0.6, 0.6) + (i % 2 ? Math.PI : 0), L = rng.range(1.2, 2.2);
         const bp: V3[] = [];
-        for (let q = 0; q <= 4; q++) { const u = q / 4; bp.push([top[0] + Math.cos(ang) * L * u, top[1] + 0.3 - u * 0.5 - Math.sin(u * 3) * 0.1, top[2] + Math.sin(ang) * L * u * 0.4]); }
-        s.ribbon(bp, (u) => 0.1 * (1 - u * 0.5), rb, { side: [0, 1, 0], twist: rng.range(-1, 1), flex: (u) => fl(1) + u * 0.4 });
+        for (let q = 0; q <= 4; q++) { const u = q / 4; bp.push([top[0] + Math.cos(ang) * L * u * 0.7, top[1] + 0.15 - u * L * 0.55, top[2] + Math.sin(ang) * L * u * 0.4]); }
+        s.ribbon(bp, (u) => 0.14 * (1 - u * 0.5), rb, { side: [0, 0.5, 1], twist: rng.range(-1.5, 1.5), flex: (u) => fl(1) + u * 0.4, ruffle: 0.4 });
       }
       return s;
     },

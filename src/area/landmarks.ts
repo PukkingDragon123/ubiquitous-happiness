@@ -160,6 +160,38 @@ function graveyard(scen: Scenery, r: Rng) {
     s.tube([[-L / 2, 0.05, 0], [L / 2, 0.05, 0]], () => 0.16, 4, reg); // keel
     scen.chunk(x).prop.append(s, mat4(x, y - 0.3, z, 1, 1, 1, ry, 0, r.range(-0.08, 0.08)));
   }
+  // lone masts standing out of the silt, yards askew
+  for (let i = 0; i < 7; i++) {
+    const x = r.range(sh.X0, sh.X1), z = r.range(-9, -40);
+    if (scen.isReserved(x, z, 2)) continue;
+    const y = scen.heightAt(x, z), H = Math.min(r.range(7, 13), -y - 3), wd = scen.props.get('planksOld');
+    const ms = new Soup();
+    ms.tube([[0, -1, 0], [0, H, 0]], (t) => 0.22 * (1 - t * 0.5), 5, wd);
+    const yy = H * r.range(0.6, 0.85), ya = r.range(-0.4, 0.4);
+    ms.tube([[-2.4, yy - ya, 0], [2.4, yy + ya, 0]], () => 0.09, 4, wd);
+    ms.tube([[0, H, 0], [r.range(-4, 4), -1, r.range(-2, 2)]], () => 0.025, 3, scen.props.get('rope'));
+    scen.chunk(x).prop.append(ms, mat4(x, y, z, 1, 1, 1, r.range(0, 6), r.range(-0.15, 0.15), r.range(-0.25, 0.25)));
+  }
+  // a great anchor chain arcing from a buried anchor up into the gloom
+  {
+    const x = sh.wreckX + r.range(-30, -16), z = -10, y = scen.heightAt(x, z);
+    const ch = new Soup(), ir = scen.props.get('iron');
+    const path: V3[] = [];
+    for (let q = 0; q <= 24; q++) { const t = q / 24; path.push([t * 16, Math.sin(t * Math.PI * 0.5) * (-y - 2) * 0.95 - Math.sin(t * Math.PI) * 2, -t * 6]); }
+    ch.tube(path, () => 0.14, 5, ir);
+    for (let q = 0; q < 24; q += 2) { const p0 = path[q]; ch.box([p0[0] - 0.12, p0[1] - 0.22, p0[2] - 0.05], [0.24, 0.44, 0.1], ir); }
+    ch.tube([[0, 0, 0], [0, 2.2, 0]], () => 0.16, 5, ir);
+    ch.tube([[-1.4, 0.7, 0], [-0.9, 0.15, 0], [0, -0.1, 0], [0.9, 0.15, 0], [1.4, 0.7, 0]], () => 0.14, 5, ir, { tip: true });
+    scen.chunk(x).prop.append(ch, mat4(x, y - 0.4, z, 1, 1, 1, 0.2));
+  }
+  // more dead hulls deep in the gloom
+  ([[sh.X0 + 70, -46, 'galleon'], [sh.X1 - 75, -34, 'steamer'], [sh.wreckX + 8, -52, 'trawler']] as [number, number, WreckKind][]).forEach(([x, z, kind], i) => {
+    const parts = buildShip(kind, scen, (x * 31) | 0);
+    const y = scen.heightAt(x, z);
+    const m = mat4(x, y - 1.2, z, 1.2, 1.2, 1.2, r.range(-0.6, 0.6), i % 2 ? 0.6 : 0.15, i === 2 ? 0.45 : 0.05);
+    const c = scen.chunk(x);
+    for (const k of ['hullBroken', 'deckBroken', 'mastBroken', 'cabin'] as const) c.prop.append(parts[k], m);
+  });
   // anchors, cannons, chain on the gameplay floor and in front
   for (let i = 0; i < 12; i++) {
     const x = r.range(sh.X0 + 4, sh.X1 - 4), z = r.chance(0.5) ? r.range(-1, 0.6) : r.range(1.2, 2.6);
@@ -239,7 +271,25 @@ function arctic(scen: Scenery, group: THREE.Group, r: Rng, w: World) {
     scen.chunk(x).prop.append(bs, mat4(x, top + 0.2, z, 1, 1, 1, r.range(0, 6)));
   }
   // light through the leads
-  shafts(scen, group, r, 0, '#e8f8ff', 0.7, leads.flatMap(([a, b]) => [a + 1.5, (a + b) / 2, b - 1.5]));
+  shafts(scen, group, r, 0, '#cfe8f8', 0.16, leads.flatMap(([a, b]) => [a + 1.5, b - 1.5]));
+  // the shelf edge: hanging curtains of faceted icicles along every lead, and light leaking through cracks
+  const cr = scen.props.get('glassLit');
+  for (const [la, lb] of leads) for (const ex of [la, lb]) {
+    for (let k = 0; k < 7; k++) {
+      const z = r.range(-6, 2), L = r.range(0.8, 3.2), x = ex + (ex === la ? -1 : 1) * r.range(0.2, 2.5);
+      const bs = new Soup();
+      bs.glow(0.5).tube([[0, 0, 0], [0.04, -L * 0.6, 0], [0, -L, 0.02]], (t) => 0.22 * (1 - t * 0.9), 5, reg, { tip: true });
+      scen.chunk(x).prop.append(bs, mat4(x, -thick(x, z) + 0.15, z, 1, 1, 1, r.range(0, 6)));
+    }
+  }
+  for (let i = 0; i < 26; i++) {
+    const x = r.range(sh.X0, sh.X1), z = r.range(-14, 1);
+    if (open(x)) continue;
+    const y = -thick(x, z) - 0.02, L = r.range(1.5, 5), a = r.range(-0.8, 0.8);
+    const s2 = new Soup();
+    s2.glow(1.6).quad([0, 0, -0.04], [L, 0, -0.04 + Math.sin(a) * 0.3], [L, 0, 0.04 + Math.sin(a) * 0.3], [0, 0, 0.04], cr);
+    scen.chunk(x).prop.append(s2, mat4(x, y, z, 1, 1, 1, a));
+  }
   void w;
 }
 
@@ -275,6 +325,7 @@ function abyss(scen: Scenery, group: THREE.Group, r: Rng, w: World) {
     s.glow(0);
     scen.chunk(x).prop.append(s, mat4(x, y, z, 1, 1, 1, r.range(0, 6)));
     vents.push({ x, y: y + H, z, h: H });
+    scen.glowPts.push({ x, y: y + H + 0.4, z: z + 0.8, col: '#ff9040' });
     // tube worms crowd the warm base
     for (let k = 0; k < 4; k++) placeFloraAt(scen, 'tubeworms', x + r.range(-1.2, 1.2), scen.heightAt(x, z) - 0.05, z + r.range(-0.8, 0.8), r.range(0.9, 1.4));
     for (let k = 0; k < 2; k++) placeFloraAt(scen, 'bacteriaMat', x + r.range(-2, 2), scen.heightAt(x, z) - 0.02, z + r.range(-1, 1), r.range(1, 1.6));

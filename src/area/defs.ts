@@ -127,6 +127,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
       { sp: 'hydroid', zones: ['play', 'mid'], per10: 1.4, cluster: 3, onRock: true },
       { sp: 'wrackStrap', zones: ['play', 'fg'], per10: 1.2, cluster: 2 },
       { sp: 'brownweed', zones: ['mid', 'back'], per10: 1.2, cluster: 2 },
+      { sp: 'giantkelp', zones: ['mid', 'back', 'play'], per10: 0.35, cluster: 1 },
     ],
     wreck: 'galleon',
     nodes: { ore: 3, crystal: 2, mana: 2, scrap: 6, crate: 5, shells: 2, clam: 1 },
@@ -161,7 +162,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
   },
   abyss: {
     id: 'abyss', name: 'The Abyss', music: 'mu_abyss', ambience: 'uw_amb1', swell: 'calm',
-    look: look('abyss', { rays: 0.2, hemi: 0.75, depthMin: [0.05, 0.08, 0.15] }), lookId: 'abyss',
+    look: look('abyss', { rays: 0.2, hemi: 1.05, hemiSky: '#4a72b8', depthMin: [0.08, 0.12, 0.22], rim: ['#5aa8ff', 0.9], exposure: 1.15 } as Partial<Look>), lookId: 'abyss',
     width: 150, floor: -24, amp: 3.2, sand: 0.7, backRise: 10,
     rock: 'pillow', ground: 'ooze',
     pal: {

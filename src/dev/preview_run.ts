@@ -9,10 +9,8 @@
 // The full flow is set up too, so dying / winning / quitting lands in the hideout as in the real game.
 import type { Game, Screen } from '../game/game';
 import { setupFlow } from '../game/flow';
-import { META } from '../meta/meta';
 
 export default function make(game: Game): Screen {
   const f = setupFlow(game);
-  Object.assign(window, { flow: f, META });
   return f.run;
 }

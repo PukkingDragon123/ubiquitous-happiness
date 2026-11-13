@@ -113,7 +113,7 @@ export class PlantSim {
     const lean = r.range(-0.6, 0.6);
     const pts: [number, number, number][] = [];
     for (let i = 0; i <= segs; i++) { const t = i / segs; pts.push([x + lean * t * t + Math.sin(t * 4 + seed) * 0.15, y + t * H, z + Math.cos(t * 3 + seed) * 0.12]); }
-    const st = this.chain(p, pts, { kind: 'tube', size: (t) => 0.05 * (1 - t * 0.35), uv: R.stipe, buoy: 2.2, stiff: 0.02, drag: 1.6 });
+    const st = this.chain(p, pts, { kind: 'tube', size: (t) => 0.05 * (1 - t * 0.35), uv: R.stipe, buoy: 3.2, stiff: 0.07, drag: 1.8 });
     let side = r.chance(0.5) ? 1 : -1;
     for (let j = 1; j <= segs; j++) {
       const per = j === segs ? 4 : r.int(1, 2);
@@ -141,14 +141,14 @@ export class PlantSim {
     const segs = Math.max(6, Math.round(H / 0.9));
     const pts: [number, number, number][] = [];
     for (let i = 0; i <= segs; i++) { const t = i / segs; pts.push([x + Math.sin(t * 3 + seed) * 0.3, y + t * H, z]); }
-    const st = this.chain(p, pts, { kind: 'tube', size: (t) => 0.025 + t * 0.03, uv: R.stipe, buoy: 2.6, stiff: 0.015, drag: 1.4 });
+    const st = this.chain(p, pts, { kind: 'tube', size: (t) => 0.025 + t * 0.03, uv: R.stipe, buoy: 3.4, stiff: 0.06, drag: 1.6 });
     const top = st.nodes[segs];
     p.bulbs.push({ node: top, r: 0.17, uv: R.bulb });
     for (let k = 0; k < 9; k++) {
       const a = r.range(-0.6, 0.6), L = r.range(1.6, 2.8), b0: [number, number, number] = [this.X[top], this.Y[top], this.Z[top]];
       const bp: [number, number, number][] = [b0];
-      for (let q = 1; q <= 6; q++) { const t = q / 6; bp.push([b0[0] + Math.cos(a) * L * t, b0[1] + 0.1 - t * 0.4, b0[2] + Math.sin(a) * L * t * 0.4]); }
-      this.chain(p, bp, { kind: 'strip', size: (t) => 0.11 * (1 - t * 0.4) + 0.02, uv: R.bull, buoy: 0.25, stiff: 0.02, drag: 3.5, side: [0, 1, 0.2], twist: r.range(-1.5, 1.5), ruffle: 0.4, tint: r.range(0.85, 1.1) }, top);
+      for (let q = 1; q <= 6; q++) { const t = q / 6; bp.push([b0[0] + Math.cos(a) * L * t * 0.8, b0[1] - t * L * 0.45, b0[2] + Math.sin(a) * L * t * 0.4]); }
+      this.chain(p, bp, { kind: 'strip', size: (t) => 0.16 * (1 - t * 0.45) + 0.03, uv: R.bull, buoy: -0.15, stiff: 0.004, drag: 3, side: [0, 0.6, 1], twist: r.range(-2, 2), ruffle: 0.6, tint: r.range(0.85, 1.1) }, top);
     }
     return p;
   }
@@ -221,7 +221,7 @@ export class PlantSim {
           // split: the upper part drifts away (with anything attached to it)
           const rest = c.nodes.splice(i);
           const dir = c.dir.splice(i - 1);
-          const piece: Chain = { ...c, nodes: rest, dir: dir.slice(1).length ? dir.slice(1) : dir, anchor: null, parent: -1, free: true, age: 0, dead: false };
+          const piece: Chain = { ...c, nodes: rest, dir: dir.slice(1).length ? dir.slice(1) : dir, anchor: null, parent: -1, free: true, age: 0, dead: false, stiff: 0, buoy: 0.35, drag: 2.2 };
           if (rest.length >= 2) {
             p.chains.push(piece);
             for (const o of p.chains) if (o !== piece && o !== c && !o.anchor && rest.includes(o.nodes[0])) o.host = piece;
@@ -309,7 +309,23 @@ export class PlantSim {
             let dx = this.X[b] - this.X[a], dy = this.Y[b] - this.Y[a], dz = this.Z[b] - this.Z[a];
             const dir = c.dir[Math.min(c.dir.length - 1, i - 1)];
             if (dir && c.stiff > 0) { const s = c.stiff; dx += (dir[0] * c.rest - dx) * s; dy += (dir[1] * c.rest - dy) * s; dz += (dir[2] * c.rest - dz) * s; }
-            const l = Math.hypot(dx, dy, dz) || 1e-6, k = c.rest / l;
+            let l = Math.hypot(dx, dy, dz) || 1e-6;
+            // clamp the bend between consecutive segments (no kinks): at most ~25 degrees
+            if (i >= 2) {
+              const z0 = c.nodes[i - 2];
+              let px = this.X[a] - this.X[z0], py = this.Y[a] - this.Y[z0], pz = this.Z[a] - this.Z[z0];
+              const pl = Math.hypot(px, py, pz) || 1e-6; px /= pl; py /= pl; pz /= pl;
+              let ux = dx / l, uy = dy / l, uz = dz / l;
+              const cs = ux * px + uy * py + uz * pz, lim = c.kind === 'tube' ? 0.906 : 0.82;
+              if (cs < lim) {
+                let qx = ux - px * cs, qy = uy - py * cs, qz = uz - pz * cs;
+                const ql = Math.hypot(qx, qy, qz) || 1e-6; qx /= ql; qy /= ql; qz /= ql;
+                const sn = Math.sqrt(1 - lim * lim);
+                ux = px * lim + qx * sn; uy = py * lim + qy * sn; uz = pz * lim + qz * sn;
+                dx = ux * l; dy = uy * l; dz = uz * l;
+              }
+            }
+            const k = c.rest / l;
             this.X[b] = this.X[a] + dx * k; this.Y[b] = this.Y[a] + dy * k; this.Z[b] = this.Z[a] + dz * k;
             // keep out of the seabed
             const fl = p.ground() + 0.02;

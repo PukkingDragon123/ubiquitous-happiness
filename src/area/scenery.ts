@@ -58,6 +58,8 @@ export class Scenery {
   reserved: { x: number; r: number; z0: number; z1: number }[] = [];
   /** rock tops other things can sit on (onRock flora) */
   rockTops: { x: number; y: number; z: number; r: number }[] = [];
+  /** bioluminescent sources near the play plane (the area hangs pooled point lights on the nearest) */
+  glowPts: { x: number; y: number; z: number; col: string }[] = [];
 
   constructor(public a: AreaDef, public shape: Shape, public sand: SandField, public terrain: AreaTerrain, public seed: number) {
     this.rng = new Rng(seed ^ 0x5eed);
@@ -459,6 +461,7 @@ export class Scenery {
             if (reach < 2) continue;
             sy = reach / 10; sc = r.range(0.9, 1.25);
           }
+          if (S.glow && z > -6 && r.chance(0.5)) this.glowPts.push({ x, y: y + 0.6, z: z + 0.6, col: rule.sp === 'tubeworms' ? '#ff6a50' : rule.sp === 'bacteriaMat' ? '#ffc060' : r.chance(0.5) ? '#5af0ff' : '#ff6ae8' });
           const tint = r.range(0.82, 1.12);
           const mtx = mat4(x, y, z, sc, sy, sc, r.range(0, Math.PI * 2), (r.next() - 0.5) * 0.15, (r.next() - 0.5) * 0.15);
           const ch = this.chunk(x);

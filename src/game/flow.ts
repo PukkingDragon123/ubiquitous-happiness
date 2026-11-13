@@ -39,7 +39,9 @@ export function setupFlow(game: Game): Flow {
   if (!game.get('backpack')) game.register(new BackpackScreen(game));
   run.onEnd = (r) => { game.go('hideout', {}); game.openModal('result', r); };
   run.onQuit = () => { game.go('hideout', {}); };
-  return { hideout, run, startRun, resume };
+  const flow = { hideout, run, startRun, resume };
+  Object.assign(window, { flow, META }); // console handles for testing
+  return flow;
 }
 
 /** the end-of-run card: YOU DIED (what was lost, who did it) / VICTORY (what came home), over the hideout */
