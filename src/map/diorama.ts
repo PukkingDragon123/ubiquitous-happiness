@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { Loft } from '../gfx/loft';
 import { Rng } from '../core/rng';
-import { clamp, lerp, smooth } from '../core/math';
+import { clamp, smooth } from '../core/math';
 import { Px } from '../gfx/px';
 import type { ActMap } from './gen';
 import { Layout, SLAB, Island } from './layout';
@@ -114,7 +114,7 @@ export class Diorama {
     this.cap.renderOrder = 5;
     this.cap.frustumCulled = false;
     this.group.add(this.cap);
-    const tt = T.table.clone(); tt.needsUpdate = true; tt.wrapS = tt.wrapT = THREE.RepeatWrapping; tt.repeat.set(16, 22);
+    const tt = T.table.clone(); tt.needsUpdate = true; this.disposables.push(tt); tt.wrapS = tt.wrapT = THREE.RepeatWrapping; tt.repeat.set(16, 22);
     const tableMat = new THREE.MeshStandardMaterial({ map: tt, color: pal0.table, roughness: 0.62, metalness: 0.0 });
     tableMat.color.multiplyScalar(1.7);
     const table = new THREE.Mesh(new THREE.PlaneGeometry(190, 260).rotateX(-Math.PI / 2), tableMat);
@@ -434,7 +434,7 @@ export class Diorama {
     const coralFactor = (z: number) => blendNum(this.pals, lay.zoneW(z), (pp) => pp.coral);
     const cubes: { x: number; y: number; z: number; ry: number; s: number; c: THREE.Color }[] = [];
     const CORAL = ['#ff6a8a', '#ff9a4a', '#ffd84a', '#b86aff', '#4ae0d0', '#ff4a6a', '#f0f0ff', '#6a9aff'];
-    const head = (x: number, z: number, kindR: number) => {
+    const head = (x: number, z: number) => {
       const g = lay.sampleG(x, z);
       if (g > -0.15 || g < -1.6) return;
       const col = new THREE.Color(rng.pick(CORAL));
@@ -449,16 +449,15 @@ export class Diorama {
         const cc = col.clone().multiplyScalar(rng.range(0.75, 1.2));
         cubes.push({ x: x + dx, y: g + dy + vs * 0.4, z: z + dz, ry: 0, s: vs * rng.range(0.85, 1.05), c: cc });
       }
-      void kindR;
     };
     for (let i = 0; i < 900; i++) {
       const x = rng.range(-lay.W / 2 + 0.8, lay.W / 2 - 0.8), z = rng.range(lay.zBack + 1, lay.zFront - 0.3);
       if (rng.next() > coralFactor(z)) continue;
       const g = lay.sampleG(x, z);
       if (g < -1.3 || g > -0.18) continue;
-      head(x, z, 1);
+      head(x, z);
     }
-    for (const c of this.ctx.coral) for (let i = 0; i < c.n; i++) { const a = rng.range(0, 6.28), d = Math.sqrt(rng.next()) * c.r; head(c.x + Math.cos(a) * d, c.z + Math.sin(a) * d, 1); }
+    for (const c of this.ctx.coral) for (let i = 0; i < c.n; i++) { const a = rng.range(0, 6.28), d = Math.sqrt(rng.next()) * c.r; head(c.x + Math.cos(a) * d, c.z + Math.sin(a) * d); }
     const coralMat = this.reg(dio(new THREE.MeshStandardMaterial({ roughness: 0.55, emissive: '#000000' }), { caustics: 1.2 }));
     if (this.night > 0.5) { coralMat.emissive.set('#3a6aff'); coralMat.emissiveIntensity = 0.3; }
     mk(new THREE.BoxGeometry(1, 1, 1), coralMat, cubes, false);
@@ -649,11 +648,12 @@ export class Diorama {
       const s = Math.sin(wr.rot), c = Math.cos(wr.rot);
       if (Math.abs(s) < 0.2) continue;
       const u = (wr.z - z) / s;           // distance along the hull axis (+ toward the bow)
-      if (Math.abs(u) > 1.15) continue;
-      const t = (u + 1.2) / 2.4;
-      const half = 0.4 * Math.min(Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, (t - 0.42) / 0.58), 1.7)), 0.72), 0.7 + 0.3 * Math.sin(Math.min(1, t / 0.4) * Math.PI / 2));
-      const depth = 0.5 * (1 - 0.55 * Math.pow(t, 4));
-      const keel = wr.keel + 0.5 - depth + u * Math.sin(wr.pitch);
+      const k = wr.s;
+      if (Math.abs(u) > 1.15 * k) continue;
+      const t = (u / k + 1.2) / 2.4;
+      const half = 0.4 * k * Math.min(Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, (t - 0.42) / 0.58), 1.7)), 0.72), 0.7 + 0.3 * Math.sin(Math.min(1, t / 0.4) * Math.PI / 2));
+      const depth = 0.5 * k * (1 - 0.55 * Math.pow(t, 4));
+      const keel = wr.keel + 0.5 * k - depth + u * Math.sin(wr.pitch);
       if (half < 0.05) continue;
       U.uWr.value[nw].set(wr.x + u * c, keel, half / Math.abs(s), depth + 0.02);
       nw++;
@@ -695,7 +695,6 @@ export class Diorama {
     this.sun.position.set(focus.x + d.x * 40, d.y * 40, focus.z + d.z * 40);
     this.sun.target.position.set(focus.x, 0, focus.z);
     this.sun.target.updateMatrixWorld();
-    void lerp;
   }
 
   dispose() {

@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 import { Loft, ring, usFor, V3 } from '../gfx/loft';
 import { Px, ramp, pxNoise } from '../gfx/px';
-import { clamp01, damp, dampAngle } from '../core/math';
-import { blob, membrane, rod, gid, place } from './build';
+import { damp, dampAngle } from '../core/math';
+import { blob, membrane, rod, gid } from './build';
 import { A } from './tex';
 import { dio } from './shaders';
 
@@ -104,7 +104,6 @@ export class Token {
     this.body.add(this.sword);
     this.body.scale.setScalar(1.6);
     this.root.add(this.body);
-    void place; void clamp01;
   }
 
   update(dt: number, moving: boolean, speed = 0) {

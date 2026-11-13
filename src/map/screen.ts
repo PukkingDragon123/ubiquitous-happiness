@@ -19,7 +19,7 @@ import { STYLES, TextStyle, textCanvas } from '../ui/text';
 import { ActMap, MapNode, availableIds, ensureActMap, visitedIds } from './gen';
 import { Diorama } from './diorama';
 import { blendNum } from './palette';
-import { DIO, RIBBON } from './shaders';
+import { RIBBON } from './shaders';
 import { Marker } from './markers';
 import { Token } from './token';
 import type { Curve } from './layout';
@@ -104,7 +104,10 @@ export class MapScreen implements Screen {
     const map = ensureActMap(run, run.act);
     if (!this.dio || this.map !== map) {
       if (this.dio) { this.scene.remove(this.dio.group); this.dio.dispose(); }
-      if (this.token) this.scene.remove(this.token.root);
+      if (this.token) {
+        this.scene.remove(this.token.root);
+        this.token.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
+      }
       this.map = map;
       this.dio = new Diorama(map);
       this.scene.add(this.dio.group);
@@ -129,7 +132,7 @@ export class MapScreen implements Screen {
     this.placeToken();
     // camera: establishing shot on the first visit of this act
     const lay = this.dio!.lay;
-    this.zMax = lay.zFront - 7.2;
+    this.zMax = lay.zFront - 5.9;
     this.zMin = map.nodes[map.bossId].z + 2.2;
     const home = this.homeFocus();
     const key = map.seed + ':' + map.act;
@@ -218,8 +221,8 @@ export class MapScreen implements Screen {
     this.token.yaw = this.token.targetYaw = -Math.PI / 2 + 0.55;
   }
   private homeFocus(): number {
-    const z = this.at < 0 ? this.dio!.lay.dock.z - 1.5 : this.map!.nodes[this.at].z;
-    return clamp(z - 3.0, this.zMin, this.zMax);
+    if (this.at < 0) return this.zMax;
+    return clamp(this.map!.nodes[this.at].z - 3.0, this.zMin, this.zMax);
   }
   private pxPerUnit() { return this.camera.projectionMatrix.elements[5] * this.h / 2; }
   private pixelScale() { return Math.max(1, Math.round(this.h / 520)); }
@@ -428,7 +431,6 @@ export class MapScreen implements Screen {
     this.nextGull -= dt; this.nextWave -= dt;
     if (this.nextGull < 0) { this.nextGull = 6 + Math.random() * 9; if (map.act !== 3) sfx('gull', { vol: 0.25 + Math.random() * 0.2, x: (Math.random() - 0.5) * 20 }); }
     if (this.nextWave < 0) { this.nextWave = 7 + Math.random() * 8; sfx('wave', { vol: 0.25 + Math.random() * 0.15, x: (Math.random() - 0.5) * 16 }); }
-    void TAU;
   }
 
   private grade(fz: number) {
@@ -506,6 +508,5 @@ export class MapScreen implements Screen {
       this.game.addShake(0.06);
       for (const m of d.markers) m.focus = 0;
     }
-    void DIO;
   }
 }

@@ -230,12 +230,12 @@ export class Layout {
     this.reserve(this.dock.x, this.dock.z + 0.8, 1.0);
     // a sunken wreck lying across the front edge, so the opening cutaway slices right through it
     for (let k = 0; k < 12; k++) {
-      const wx = (k % 2 ? -1 : 1) * rng.range(2.2, this.W / 2 - 2.2), wz = this.zFront - rng.range(0.1, 0.5);
-      if (this.clearance(wx, wz, 0.2, 0.2) < 0.9) continue;
+      const wx = (k % 2 ? -1 : 1) * rng.range(2.2, this.W / 2 - 2.2), wz = this.zFront - rng.range(0.5, 0.8);
+      if (this.clearance(wx, wz, 0.2, 0.2) < 1.3) continue;
       this.frontWreck = { x: wx, z: wz, ang: Math.PI / 2 + rng.range(-0.25, 0.25) };
       this.vignettes.push({ node: null, kind: 'wreck', x: wx, z: wz, ang: this.frontWreck.ang, r: 1.4, seed: this.map.seed + 5 });
-      this.reserve(wx, wz, 1.5);
-      this.shelves.push({ x: wx, z: wz, r: 2.2, depth: 1.8 });
+      this.reserve(wx, wz, 2.2);
+      this.shelves.push({ x: wx, z: wz, r: 2.6, depth: 1.9 });
       break;
     }
   }

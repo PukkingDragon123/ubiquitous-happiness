@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Loft, V3, ring, usFor } from '../gfx/loft';
 import { Rng } from '../core/rng';
-import { clamp, smooth, TAU } from '../core/math';
+import { smooth, TAU } from '../core/math';
 import { A } from './tex';
 import { blob, membrane, gid } from './build';
 import { ship, ShipKind } from './ships';
@@ -35,7 +35,7 @@ export class Life {
   private schools: School[] = [];
   private m = new THREE.Matrix4(); private q = new THREE.Quaternion(); private e = new THREE.Euler(); private v = new THREE.Vector3(); private sv = new THREE.Vector3(1, 1, 1);
 
-  constructor(private lay: Layout, atlasMat: THREE.MeshStandardMaterial, extraSchools: { x: number; z: number; r: number }[], halo: (s: number) => THREE.Object3D) {
+  constructor(lay: Layout, atlasMat: THREE.MeshStandardMaterial, extraSchools: { x: number; z: number; r: number }[], halo: (s: number) => THREE.Object3D) {
     const rng = new Rng(lay.map.seed ^ 0xb0a7);
     // ---------------- boats
     const nb = 5 + lay.map.act;
@@ -229,6 +229,5 @@ export class Life {
       }
     }
     this.fish.instanceMatrix.needsUpdate = true;
-    void clamp;
   }
 }

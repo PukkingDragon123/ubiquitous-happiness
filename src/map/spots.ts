@@ -23,7 +23,7 @@ export class SpotCtx {
   beams: Beam[] = [];
   halos: V3[] = [];
   /** sunken hulls, so the cutaway can draw their cross-section: centre, heading, keel height, bow-up pitch */
-  wrecks: { x: number; z: number; rot: number; keel: number; pitch: number }[] = [];
+  wrecks: { x: number; z: number; rot: number; keel: number; pitch: number; s: number }[] = [];
   group = new THREE.Group();
   constructor(public lay: Layout, public mat: THREE.Material, public beamMat: (k: number) => THREE.Material, public halo: (s: number) => THREE.Object3D) {}
 
@@ -101,7 +101,6 @@ export function buildSpot(v: Vignette, ctx: SpotCtx) {
   const lines = n ? Math.max(1, n.lines) : 1;
   const zoneId = lay.zoneId(v.z);
   const cold = zoneId === 'arctic';
-  const night = zoneId === 'abyss' || zoneId === 'trench';
   const shipFloat = (kind: ShipKind, x: number, z: number, rot: number, o: { anglers?: number; pro?: boolean; paint?: number } = {}, castTo?: [number, number]) =>
     ctx.dyn((LL, ln) => {
       const out = ship(LL, kind, r.int(0, 1 << 30), o);
@@ -343,17 +342,20 @@ export function buildSpot(v: Vignette, ctx: SpotCtx) {
     }
     case 'wreck': {
       const g = lay.sampleG(v.x, v.z);
-      const mast = -g + (n ? 0.85 : -0.3);
+      const ws = n ? 1 : 1.6;
+      const keel = g - (n ? 0.12 : 0.05);
+      // treasure wrecks poke a mast out of the water; the cutaway wreck stays fully sunk
+      const mast = n ? -keel + 0.85 - 0.5 : (-keel - 0.35) / ws - 0.5;
       const f = L.count;
-      const top = wreck(L, v.seed, Math.max(0.4, mast));
+      const top = wreck(L, v.seed, Math.max(0.3, mast));
       const rot = n ? toNode + Math.PI / 2 : v.ang;
       if (!n) { ctx.schools.push({ x: v.x, z: v.z - 1.2, r: 0.8 }); }
-      place(L, f, [v.x, g - 0.12, v.z], rot);
-      ctx.wrecks.push({ x: v.x, z: v.z, rot, keel: g - 0.12, pitch: wreckPitch(v.seed) });
+      place(L, f, [v.x, keel, v.z], rot, ws);
+      ctx.wrecks.push({ x: v.x, z: v.z, rot, keel, pitch: wreckPitch(v.seed), s: ws });
       if (n) {
         // tattered black flag on the mast top
         const c = Math.cos(rot), s = Math.sin(rot);
-        const tx = v.x + top[0] * c + top[2] * s, tz = v.z - top[0] * s + top[2] * c, ty = g - 0.12 + top[1];
+        const tx = v.x + top[0] * c + top[2] * s, tz = v.z - top[0] * s + top[2] * c, ty = keel + top[1];
         ctx.dyn((LL) => {
           membrane(LL, [[[0, 0, 0], [-0.1, -0.01, 0], [-0.22, 0.01, 0]], [[0, -0.14, 0], [-0.11, -0.15, 0], [-0.2, -0.12, 0]]], A.black);
           rod(LL, [0, -0.3, 0], [0, 0.03, 0], 0.012, 0.01, 4, A.darkWood);
@@ -390,5 +392,4 @@ export function buildSpot(v: Vignette, ctx: SpotCtx) {
       break;
     }
   }
-  void night;
 }

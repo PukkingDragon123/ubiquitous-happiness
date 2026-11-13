@@ -524,7 +524,7 @@ export function kelpGeometry(seed: number): THREE.BufferGeometry {
     membrane(L, grid, F.kelp, () => 1);
   }
   // canopy fronds floating on the surface
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < 2; k++) {
     const a = k * 1.6 + r.next(), len = r.range(0.22, 0.36);
     const dir: V3 = [Math.cos(a), 0, Math.sin(a)], side: V3 = [-Math.sin(a), 0, Math.cos(a)];
     const grid: V3[][] = [0, 1, 2].map((i) => [0, 1, 2, 3].map((j): V3 => { const s = j / 3; return [dir[0] * len * s + side[0] * 0.05 * (i - 1), 1.0 + Math.sin(s * 3) * 0.004, dir[2] * len * s + side[2] * 0.05 * (i - 1)]; }));

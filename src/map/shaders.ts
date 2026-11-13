@@ -498,7 +498,8 @@ export function capMaterial(U: CapUniforms): THREE.ShaderMaterial {
             alpha = 1.0;
             if (wk.x < 1.5) {
               float seam = step(0.8, fract(y * 12.0));
-              col = mix(vec3(0.36, 0.25, 0.17), vec3(0.22, 0.15, 0.11), seam) * (0.85 + 0.25 * dHash(cell));
+              col = mix(vec3(0.55, 0.38, 0.24), vec3(0.3, 0.2, 0.13), seam) * (0.85 + 0.25 * dHash(cell));
+              if (wk.y > 0.9) col *= 1.25;
               if (dHash(cell * 1.31) > 0.93) col = mix(col, vec3(0.55, 0.62, 0.5), 0.6);
             } else {
               col = uW2 * 0.42 + vec3(0.01, 0.015, 0.02);

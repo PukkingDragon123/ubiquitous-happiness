@@ -4,7 +4,7 @@
 // ones sit low and dim with a little pixel flag planted on top.
 import * as THREE from 'three';
 import { Loft, V3 } from '../gfx/loft';
-import { clamp01, damp } from '../core/math';
+import { damp } from '../core/math';
 import { A } from './tex';
 import { barrel, blob, bottle, box, lathe, membrane, rod, weightsToAttr } from './build';
 import { DIO, dio, glowRingMaterial } from './shaders';
@@ -193,7 +193,6 @@ export class Marker {
     this.pennant.visible = !visited;
     this.flagK = damp(this.flagK, visited ? 1 : 0, 7, dt);
     this.flag.scale.setScalar(Math.max(0.001, this.flagK * (1 + Math.sin(this.flagK * Math.PI) * 0.4)));
-    void clamp01;
   }
   /** world point to anchor the floating label to */
   labelAnchor(out: THREE.Vector3) { return this.root.localToWorld(out.set(0, this.float.position.y + this.topY * this.sc + (this.big ? 0.35 : 0.22), 0)); }
