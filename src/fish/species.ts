@@ -3,16 +3,12 @@
 // 3D surface point for every texel of the body wrap (see PaintCtx) and return the base colour; the builder
 // adds scales, lateral line, gill cover, eye socket, mouth and sheen on top.
 import type { FishSpec, PaintCtx } from './builder';
-import { counter, C, mix, shade, hash2, smoothstep, noise2 } from './builder';
+import { C, mix, shade, hash2, smoothstep, noise2 } from './builder';
 import type { RGB } from '../gfx/px';
-import { bayer } from '../gfx/px';
 import { grad, dmix, paintSwatch } from './page';
 import { worley } from '../gfx/px';
 import { norm, sub, add, scale, cross } from '../gfx/loft';
-import { fbm } from '../core/math';
 
-const dith = (c: PaintCtx, k: number) => k > bayer(c.px, c.py) * 0.98 + 0.01;
-const band = (x: number, a: number, b: number, soft = 0.02) => smoothstep(a - soft, a + soft, x) * (1 - smoothstep(b - soft, b + soft, x));
 
 // ------------------------------------------------------------------------------------------- piranha
 // Red-bellied piranha: deep, slab-sided disc; blunt convex forehead; jutting lower jaw (underbite) packed with
@@ -50,7 +46,7 @@ const piranha: FishSpec = {
   fins: [
     { type: 'dorsal', t0: 0.43, t1: 0.6, h: [[0, 0.1], [0.25, 0.115], [1, 0.03]], sweep: 0.55, col: ['#6c7064', '#565a50', '#3e403a'], rays: 11, rayCol: '#34362e', alpha: [0.88, 0.58], ripple: 0.3, px: [64, 40] },
     { type: 'dorsal', t0: 0.79, t1: 0.86, h: [[0, 0.034], [0.5, 0.03], [1, 0.012]], sweep: 0.8, col: ['#7a7e72', '#5c5e56'], rays: 0, alpha: [1, 0.95], opaque: true, px: [24, 16] },
-    { type: 'anal', t0: 0.58, t1: 0.88, h: [[0, 0.095], [0.2, 0.085], [1, 0.03]], sweep: 0.5, col: ['#f2622c', '#d8461e', '#b02c14'], rayCol: '#8a1c0c', edge: '#1c0e0c', edgeW: 0.14, rays: 16, alpha: [0.95, 0.75], ripple: 0.3, px: [96, 36] },
+    { type: 'anal', t0: 0.58, t1: 0.88, h: [[0, 0.095], [0.2, 0.085], [1, 0.03]], sweep: 0.5, col: ['#f2622c', '#d8461e', '#b02c14'], rayCol: '#8a1c0c', edge: '#1c0e0c', edgeW: 0.14, rays: 13, alpha: [0.95, 0.75], ripple: 0.3, px: [96, 36] },
     { type: 'caudal', shape: 'emarginate', len: 0.18, span: 0.15, col: ['#7c8074', '#a4a89c', '#b4b8ac', '#9a9e92'], rayCol: '#4a4c44', base: '#2c2826', baseW: 0.2, edge: '#16120e', edgeW: 0.12, rays: 18, alpha: [0.92, 0.6], px: [80, 64] },
     { type: 'pectoral', t: 0.24, y: -0.55, len: 0.095, angle: 22, col: ['#f2a070', '#ec7a48', '#d85a30'], rays: 10, rayCol: '#c04a22', alpha: [0.75, 0.42], flutter: 0.06, out: 0.7 },
     { type: 'pelvic', t: 0.42, len: 0.07, angle: 62, col: ['#f26a3a', '#d84a22'], rays: 6, alpha: [0.9, 0.6], flutter: 0.03 },
@@ -162,8 +158,8 @@ const peacockBass: FishSpec = {
     return col;
   },
   fins: [
-    { type: 'dorsal', t0: 0.3, t1: 0.52, h: [[0, 0.06], [0.3, 0.085], [1, 0.03]], sweep: 0.3, col: ['#6a7030', '#7a7a38', '#8a8040'], spines: 7, rays: 0, notch: 0.35, spineCol: '#c8c080', alpha: [0.9, 0.65], ripple: 0.25, px: [64, 32] },
-    { type: 'dorsal', t0: 0.55, t1: 0.8, h: [[0, 0.06], [0.4, 0.085], [1, 0.03]], sweep: 0.4, col: ['#6a7030', '#7a7a38', '#8a8040'], rays: 11, rayCol: '#4a5018', spots: '#e8e0a0', spotK: 0.1, alpha: [0.9, 0.65], ripple: 0.3, px: [64, 32] },
+    { type: 'dorsal', t0: 0.31, t1: 0.52, h: [[0, 0.04], [0.25, 0.088], [0.6, 0.07], [1, 0.022]], sweep: 0.35, col: ['#7a8038', '#8a8a40', '#a09850'], spines: 8, rays: 0, notch: 0.3, spineCol: '#3a3a18', alpha: [0.85, 0.55], ripple: 0.25, px: [64, 32] },
+    { type: 'dorsal', t0: 0.54, t1: 0.8, h: [[0, 0.05], [0.35, 0.09], [0.75, 0.075], [1, 0.03]], sweep: 0.45, lean: [[0, 0], [1, 0.4]], col: ['#7a8038', '#8a8a40', '#a09850'], rays: 11, rayCol: '#4a5018', spots: '#f0e8b0', spotK: 0.1, alpha: [0.88, 0.6], ripple: 0.3, px: [64, 32] },
     { type: 'anal', t0: 0.68, t1: 0.86, h: [[0, 0.05], [0.4, 0.065], [1, 0.03]], sweep: 0.4, col: ['#e86a28', '#d8501c', '#c04014'], rays: 10, rayCol: '#902a0c', alpha: [0.92, 0.7], ripple: 0.3, px: [56, 28] },
     { type: 'caudal', shape: 'truncate', len: 0.16, span: 0.1, col: ['#7a8030', '#a09038', '#d06a28', '#e85a20'], rays: 14, rayCol: '#4a4a18', alpha: [0.92, 0.72], px: [72, 56],
       over: (u, v) => { const d = Math.hypot((u - 0.5) * 1.1, (v - 0.22) * 1.5); return d < 0.12 ? C('#0a0a06') : d < 0.17 ? C('#ffd040') : null; } },
@@ -232,22 +228,28 @@ const triggerfish: FishSpec = {
   scales: { w: 8, h: 5, k: 0.7, rim: 0.1, hi: 0.04, bump: 0.8 },
   rough: 0.45, sheen: 0.2,
   paint: (c) => {
-    let col = grad(['#7a6448', '#9a8060', '#bca484', '#d8c8a8', '#ece4d4', '#f4f2ea'])(0.36 - c.yn * 0.62, c.px, c.py);
     const x = c.t, y = c.yn;
-    // face: yellow-edged blue line from the mouth back, black + blue band through the eye down to the pectoral
-    const eyeBand = Math.abs((x - 0.29) + (y - 0.45) * 0.12);
-    if (eyeBand < 0.032 && y > -0.6) col = eyeBand < 0.02 ? C('#1a2a6a') : C('#4aa8f0');
-    for (const k of [0.2, 0.33]) { const d = Math.abs((x - 0.27 + y * 0.05) - k * 0.15 - 0.02); if (x > 0.15 && x < 0.27 && Math.abs(y - (0.2 - (0.27 - x) * 2.2) + k * 0.5) < 0.05 && d < 1) col = C('#4aa8f0'); }
-    if (x < 0.27 && Math.abs(y - (-0.25 + x * 0.6)) < 0.06) col = mix(col, C('#f0a020'), 0.85);
-    // black wedge on the rear lower flank with three pale diagonal stripes
-    const wedge = y < 0.25 - (x - 0.55) * 0.9 && y < 0.3 && x > 0.5 && x < 0.92 && y > -0.8 + (x - 0.5) * 0.4;
-    if (wedge) {
-      col = C('#14141a');
-      const st = ((x * 18 + y * 4) % 1 + 1) % 1;
-      if (st < 0.22 && x > 0.62) col = C('#e8e0d0');
+    // tan upper body -> white lower body (soft dithered divide)
+    let col = grad(['#6a5a40', '#8a7656', '#b09a7a', '#cdbb9c', '#e6dccb', '#f6f3ec', '#ffffff'])(0.32 - y * 0.75, c.px, c.py);
+    const BLUE = C('#3c9ae8'), NAVY = C('#14204a'), BLACK = C('#121216'), YEL = C('#f4b020');
+    // eye band: black core with blue edges, running from above the eye down to the pectoral base
+    const eb = (x - 0.29) + (y - 0.5) * 0.09;
+    if (y > -0.45 && y < 0.95) { const a = Math.abs(eb); if (a < 0.016) col = BLACK; else if (a < 0.026) col = BLUE; }
+    // blue + navy bands over the forehead in front of the eye
+    for (const k of [0.235, 0.205]) { const a = Math.abs((x - k) + (y - 0.55) * 0.12); if (y > 0.25 && y < 0.95 && a < 0.008) col = k === 0.235 ? NAVY : BLUE; }
+    // yellow-orange line from the mouth corner to the pectoral base, a blue line above it
+    const ly = -0.05 - x * 0.45;
+    if (x < 0.34 && x > 0.015) { const a = y - ly; if (Math.abs(a) < 0.045) col = YEL; else if (a > 0.045 && a < 0.08) col = BLUE; }
+    // dark wedge on the lower flank, crossed at the back by pale oblique stripes
+    const topW = 0.12 - (x - 0.4) * 0.7, botW = -0.62 + (x - 0.4) * 0.6;
+    if (x > 0.4 && x < 0.84 && y < topW && y > botW) {
+      col = dmix(BLACK, C('#3a2e22'), 0.35 - (y - botW) * 0.2, c.px, c.py);
+      const st = (((x * 15 - y * 2.2) % 1) + 1) % 1;
+      if (x > 0.56 && st < 0.24) col = C('#f2eee0');
     }
-    // dark saddle under the dorsal
-    if (y > 0.55 && x > 0.42 && x < 0.62) col = shade(col, 0.82);
+    // dark saddle beneath the soft dorsal, peduncle chevrons
+    if (y > 0.5 && x > 0.44 && x < 0.66) col = shade(col, 0.82);
+    if (x > 0.86 && Math.abs(y) < 0.5 && (c.px % 6) < 2) col = BLACK;
     return col;
   },
   fins: [
@@ -376,9 +378,9 @@ const cleaner: FishSpec = {
 const PUFF_C: [number, number, number] = [0.034, -0.004, 0];
 const pufferfish: FishSpec = {
   name: 'pufferfish', L: 0.36, body: 0.86, seg: 32, rings: 44,
-  top: [[0, 0.0], [0.02, 0.055], [0.08, 0.12], [0.18, 0.17], [0.32, 0.185], [0.5, 0.16], [0.68, 0.1], [0.84, 0.055], [1, 0.042]],
-  bot: [[0, 0.0], [0.02, 0.06], [0.1, 0.14], [0.24, 0.185], [0.42, 0.18], [0.6, 0.12], [0.8, 0.055], [1, 0.038]],
-  wid: [[0, 0.0], [0.03, 0.07], [0.12, 0.14], [0.3, 0.17], [0.5, 0.15], [0.7, 0.09], [0.88, 0.045], [1, 0.03]],
+  top: [[0, 0.0], [0.02, 0.06], [0.08, 0.135], [0.18, 0.19], [0.32, 0.21], [0.5, 0.185], [0.68, 0.115], [0.84, 0.058], [1, 0.042]],
+  bot: [[0, 0.0], [0.02, 0.065], [0.1, 0.155], [0.24, 0.205], [0.42, 0.2], [0.6, 0.135], [0.8, 0.06], [1, 0.038]],
+  wid: [[0, 0.0], [0.03, 0.075], [0.12, 0.155], [0.3, 0.19], [0.5, 0.17], [0.7, 0.1], [0.88, 0.048], [1, 0.03]],
   cy: [[0, -0.01], [0.3, 0], [1, 0.01]],
   mouth: { t: 0.035, th: 0.55, open: 0.45, lip: 0.1, lipCol: '#e8d8b0', interior: '#4a1a20', crease: '#3a2a18',
     teeth: { upper: 1, lower: 1, size: 0.016, style: 'beak', inset: 0.55, t0: 0.012, t1: 0.012, col: ['#fff8e8', '#f0e4c8', '#d8c8a0', '#b0a080'] } },
@@ -442,13 +444,13 @@ const pufferfish: FishSpec = {
 // round the tail to the belly; gaping jaws lined with fangs; tube nostrils; brown spots in a pale net.
 const moray: FishSpec = {
   name: 'moray', L: 2.0, body: 0.985, rings: 120, seg: 24, page: [512, 256], bodyH: 100,
-  top: [[0, 0.0], [0.006, 0.008], [0.02, 0.018], [0.045, 0.03], [0.08, 0.04], [0.14, 0.046], [0.3, 0.046], [0.6, 0.043], [0.82, 0.034], [0.95, 0.02], [1, 0.008]],
-  bot: [[0, 0.0], [0.006, 0.006], [0.02, 0.014], [0.05, 0.026], [0.1, 0.037], [0.25, 0.042], [0.6, 0.04], [0.85, 0.03], [1, 0.008]],
-  wid: [[0, 0.0], [0.01, 0.009], [0.04, 0.022], [0.12, 0.034], [0.4, 0.032], [0.7, 0.024], [0.9, 0.013], [1, 0.004]],
+  top: [[0, 0.0], [0.006, 0.011], [0.02, 0.026], [0.04, 0.04], [0.07, 0.052], [0.1, 0.057], [0.16, 0.054], [0.35, 0.05], [0.6, 0.045], [0.82, 0.035], [0.95, 0.02], [1, 0.008]],
+  bot: [[0, 0.0], [0.006, 0.008], [0.02, 0.02], [0.05, 0.034], [0.1, 0.046], [0.2, 0.047], [0.6, 0.042], [0.85, 0.031], [1, 0.008]],
+  wid: [[0, 0.0], [0.01, 0.012], [0.04, 0.028], [0.1, 0.038], [0.4, 0.034], [0.7, 0.025], [0.9, 0.013], [1, 0.004]],
   cy: [[0, -0.004], [0.06, 0], [1, 0]],
   mouth: { t: 0.06, th: [[0, 0.5], [0.06, 0.54]], open: 0.55, idle: 0.3, interior: '#7a3a3a', crease: '#1a1408', lip: 0.04, lipCol: '#c8b880',
     teeth: { upper: 8, lower: 8, size: 0.0085, style: 'fang', inset: 0.86, t0: 0.006, t1: 0.05, rake: 0.35 } },
-  eye: { t: 0.034, y: 0.62, r: 0.0085, fwd: 0.3, up: 0.25, lid: 'angry', lidCol: '#7a6a3a', lidLine: '#1a1408', lidTilt: 0.5, lidLevel: 0.25, bulge: 0.7,
+  eye: { t: 0.034, y: 0.6, r: 0.0105, fwd: 0.3, up: 0.25, lid: 'angry', lidCol: '#7a6a3a', lidLine: '#1a1408', lidTilt: 0.5, lidLevel: 0.25, bulge: 0.7,
     paint: { iris: ['#2a2a08', '#8a8a20', '#e0e050', '#ffffa0'], pupil: 0.5, ring: '#ffffd0', sclera: '#e8e0b0', irisR: 0.86 } },
   rough: 0.32, sheen: 0.3,
   paint: (c) => {
@@ -480,6 +482,7 @@ const moray: FishSpec = {
 };
 
 // ------------------------------------------------------------------------------------------- anglerfish
+const photophore = (c: PaintCtx) => c.t > 0.3 && c.t < 0.88 && Math.abs(c.yn - 0.05 + (c.t - 0.3) * 0.2) < 0.03 && (c.px % 14) === 0 && Math.abs(c.side) > 0.4;
 // Humpback anglerfish: a globe of a head that is mostly mouth, needle fangs, tiny pale eyes, black velvet skin;
 // a fishing rod (illicium) arches from the forehead to a glowing esca dangling in front of the jaws.
 const anglerfish: FishSpec = {
@@ -495,15 +498,16 @@ const anglerfish: FishSpec = {
     paint: { iris: ['#2a3a48', '#6a8aa0', '#b8d8e8', '#f0ffff'], pupil: 0.45, ring: '#ffffff', sclera: '#a0b0b8', irisR: 0.86 } },
   rough: 0.62, sheen: 0, normal: 3,
   scales: { w: 4, h: 4, k: 0.25, rim: 0.05, hi: 0.0, bump: 1.2, tMin: 0.0 },
-  lateral: { y: 0.0, col: '#6ae8ff', t0: 0.3, t1: 0.92, dash: 6 },
   emissive: 2.2,
+  glow: (c) => (photophore(c) ? [40, 150, 175] : null),
   paint: (c) => {
     let col = grad(['#141016', '#1e1820', '#2a2028', '#3a2a30', '#4a3438'])(0.35 - c.yn * 0.45, c.px, c.py);
     // velvety mottling + sparse pale pores
     const n = noise2(c.X * 40, c.Y * 40 + (c.Z > 0 ? 0 : 30), 8);
     col = shade(col, 0.85 + n * 0.3);
     if (hash2(c.px, c.py, 3) < 0.012) col = mix(col, C('#8a7a80'), 0.6);
-    // lip edge
+    // photophore row
+    if (photophore(c)) col = C('#a0f8ff');
     return col;
   },
   fins: [
@@ -541,9 +545,9 @@ const anglerfish: FishSpec = {
 // tailstock, crescent tail, tall dorsal and paddle flippers. Golden hide with black tiger stripes.
 const ichthyosaur: FishSpec = {
   name: 'ichthyosaur', L: 7, body: 0.85, page: [512, 512], bodyH: 256, rings: 64, seg: 32,
-  top: [[0, 0.0], [0.01, 0.006], [0.05, 0.012], [0.1, 0.02], [0.14, 0.034], [0.18, 0.058], [0.24, 0.082], [0.34, 0.102], [0.48, 0.104], [0.64, 0.084], [0.8, 0.05], [0.93, 0.026], [1, 0.022]],
-  bot: [[0, 0.0], [0.01, 0.005], [0.05, 0.01], [0.1, 0.017], [0.15, 0.032], [0.2, 0.054], [0.3, 0.088], [0.44, 0.104], [0.6, 0.088], [0.76, 0.052], [0.9, 0.026], [1, 0.021]],
-  wid: [[0, 0.0], [0.02, 0.007], [0.1, 0.016], [0.18, 0.048], [0.3, 0.082], [0.5, 0.084], [0.7, 0.055], [0.9, 0.022], [1, 0.016]],
+  top: [[0, 0.0], [0.01, 0.006], [0.05, 0.012], [0.1, 0.02], [0.14, 0.036], [0.18, 0.064], [0.24, 0.094], [0.34, 0.118], [0.46, 0.12], [0.62, 0.098], [0.78, 0.058], [0.92, 0.028], [1, 0.022]],
+  bot: [[0, 0.0], [0.01, 0.005], [0.05, 0.01], [0.1, 0.017], [0.15, 0.034], [0.2, 0.062], [0.3, 0.104], [0.42, 0.122], [0.58, 0.104], [0.74, 0.062], [0.9, 0.028], [1, 0.021]],
+  wid: [[0, 0.0], [0.02, 0.007], [0.1, 0.016], [0.18, 0.052], [0.3, 0.092], [0.5, 0.094], [0.7, 0.06], [0.9, 0.022], [1, 0.016]],
   cy: [[0, -0.004], [0.14, -0.002], [0.3, 0], [1, 0.002]],
   sq: [[0, 2.0], [0.2, 2.0], [0.9, 2.3], [1, 2.6]],
   mouth: { t: 0.15, th: [[0, 0.5], [0.15, 0.53]], open: 0.6, idle: 0.04, lip: 0.04, lipCol: '#8a6020', interior: '#6a1a24', crease: '#1a1008',
@@ -583,8 +587,275 @@ const ichthyosaur: FishSpec = {
   clearcoat: 0.45, clearcoatRough: 0.35,
 };
 
+// ------------------------------------------------------------------------------------------- pumpkinseed
+// Sunfish: a round, flat pan of a fish; olive-gold flanks speckled orange, wavy blue cheek lines, a black ear
+// flap tipped with a scarlet spot, sunset-orange belly.
+const pumpkinseed: FishSpec = {
+  name: 'pumpkinseed', L: 0.26, body: 0.8,
+  top: [[0, 0.0], [0.02, 0.04], [0.07, 0.1], [0.15, 0.16], [0.28, 0.21], [0.42, 0.225], [0.58, 0.2], [0.74, 0.13], [0.88, 0.08], [1, 0.07]],
+  bot: [[0, 0.0], [0.02, 0.035], [0.08, 0.08], [0.18, 0.15], [0.32, 0.2], [0.46, 0.21], [0.62, 0.17], [0.78, 0.1], [0.9, 0.07], [1, 0.064]],
+  wid: [[0, 0.0], [0.03, 0.03], [0.12, 0.05], [0.3, 0.062], [0.55, 0.055], [0.8, 0.035], [1, 0.02]],
+  cy: [[0, 0.005], [0.3, 0], [1, 0.004]],
+  mouth: { t: 0.045, th: 0.46, open: 0.4, lip: 0.08, lipCol: '#6a6a30', crease: '#2a2a10' },
+  eye: { t: 0.13, y: 0.38, r: 0.05, fwd: 0.2, up: 0.1, lid: 'none',
+    paint: { iris: ['#2a1a08', '#8a4a10', '#e09030', '#ffd070'], pupil: 0.52, ring: '#fff0a0', sclera: '#c8c090', irisR: 0.86 } },
+  gill: { t: 0.24, col: '#2a3a20', curve: 0.03, k: 0.5 },
+  scales: { w: 6, h: 4, k: 0.9, rim: 0.12, hi: 0.06 },
+  sheen: 0.3, rough: 0.38,
+  paint: (c) => {
+    let col = grad(['#3a4a20', '#5a6a28', '#8a8a38', '#b8a848', '#d8a040', '#f08a30', '#f8b060'])(0.38 - c.yn * 0.62, c.px, c.py);
+    // orange speckles on scale caps
+    if (c.t > 0.2 && c.sd < 0.4 && c.sid < 0.4 && c.yn > -0.5) col = mix(col, C('#f08a30'), 0.8);
+    if (c.t > 0.2 && c.sd < 0.35 && c.sid > 0.85) col = mix(col, C('#58c0b0'), 0.6);
+    // wavy blue lines across the cheek
+    if (c.t < 0.26 && c.yn < 0.55 && c.yn > -0.6) { const wv = Math.sin(c.yl * 300 + Math.sin(c.X * 200) * 1.2); if (wv > 0.8) col = C('#58b8e8'); }
+    // the "ear" flap: black with a scarlet tip
+    const ex = (c.t - 0.255) * 9, ey = (c.yn - 0.1) * 3;
+    const ed = Math.hypot(ex, ey);
+    if (ed < 0.35) col = ex > 0.12 ? C('#e82a1a') : C('#101010');
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.3, t1: 0.86, h: [[0, 0.05], [0.4, 0.075], [0.55, 0.07], [0.8, 0.1], [1, 0.05]], sweep: 0.35, col: ['#5a6a30', '#6a7a38', '#8a8a48'], spines: 10, rays: 10, notch: 0.22, spineCol: '#a8a868', rayCol: '#3a4a20', spots: '#e09040', spotK: 0.08, alpha: [0.88, 0.6], ripple: 0.3, px: [128, 32] },
+    { type: 'anal', t0: 0.62, t1: 0.88, h: [[0, 0.05], [0.6, 0.08], [1, 0.05]], sweep: 0.5, col: ['#6a7a38', '#8a8a48'], spines: 3, rays: 9, notch: 0.2, spineCol: '#a8a868', alpha: [0.88, 0.6], ripple: 0.3, px: [64, 28] },
+    { type: 'caudal', shape: 'emarginate', len: 0.18, span: 0.12, col: ['#5a6a30', '#7a8040', '#8a8a48'], rays: 14, rayCol: '#3a4a20', alpha: [0.88, 0.6], px: [64, 48] },
+    { type: 'pectoral', t: 0.27, y: -0.2, len: 0.12, angle: 15, shape: 'pointed', col: ['#d8c890', '#c0b070'], rays: 10, alpha: [0.55, 0.3], flutter: 0.07, out: 0.7 },
+    { type: 'pelvic', t: 0.32, len: 0.08, angle: 55, col: ['#e09040', '#c87030'], rays: 6, alpha: [0.85, 0.6], flutter: 0.03 },
+  ],
+  swim: { k: 0.8, a0: 0.03, pow: 2.4, amp: 0.09, freq: 1.3, freqK: 1.0, flutter: [7, 0.022], ripple: 0.014 },
+};
+
+// ------------------------------------------------------------------------------------------- orangespine unicornfish
+// Naso lituratus: oval grey-brown surgeonfish with bright orange lips, a yellow mask line from the eye to the
+// mouth, black dorsal with a white edge, lyre tail with streamer filaments and two orange scalpel spines.
+const unicornfish: FishSpec = {
+  name: 'unicornfish', L: 0.42, body: 0.78,
+  top: [[0, 0.0], [0.02, 0.03], [0.08, 0.075], [0.18, 0.135], [0.3, 0.175], [0.45, 0.185], [0.62, 0.16], [0.78, 0.1], [0.9, 0.055], [1, 0.045]],
+  bot: [[0, 0.0], [0.02, 0.03], [0.08, 0.06], [0.2, 0.11], [0.35, 0.155], [0.5, 0.165], [0.66, 0.135], [0.82, 0.075], [1, 0.042]],
+  wid: [[0, 0.0], [0.03, 0.025], [0.15, 0.045], [0.35, 0.056], [0.6, 0.048], [0.85, 0.028], [1, 0.016]],
+  cy: [[0, -0.02], [0.2, -0.004], [1, 0.004]],
+  mouth: { t: 0.035, th: 0.52, open: 0.35, lip: 0.14, lipCol: '#ff7a10', crease: '#4a1a08' },
+  eye: { t: 0.22, y: 0.42, r: 0.034, fwd: 0.15, up: 0.1, lid: 'none',
+    paint: { iris: ['#1a1408', '#5a4010', '#a07a20', '#e0c050'], pupil: 0.5, ring: '#ffe080', sclera: '#a09888', irisR: 0.88 } },
+  rough: 0.4, sheen: 0.2,
+  scales: { w: 4, h: 3, k: 0.4, rim: 0.06, hi: 0.03 },
+  paint: (c) => {
+    let col = grad(['#3a342c', '#4a443a', '#5e584c', '#757062', '#8c8678', '#a8a294'])(0.38 - c.yn * 0.5, c.px, c.py);
+    // orange-yellow crescent behind the lips, yellow mask from eye to mouth
+    const mx = c.t - 0.06 - Math.abs(c.yn) * 0.05;
+    if (mx > 0 && mx < 0.03 && c.yn < 0.5) col = C('#ffb020');
+    const mask = (c.yn - 0.42) + (0.22 - c.t) * 1.2;
+    if (c.t < 0.21 && c.t > 0.05 && Math.abs(mask) < 0.07) col = C('#f8c830');
+    // two orange scalpel plates on the caudal peduncle
+    for (const pt of [0.88, 0.95]) { const d = Math.hypot((c.t - pt) * 30, (c.yn) * 1.6); if (d < 0.75 && Math.abs(c.side) > 0.3) col = d < 0.5 ? C('#ff6a10') : C('#a03a08'); }
+    // dark mask through the forehead
+    if (c.t < 0.3 && c.yn > 0.5) col = shade(col, 0.85);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.22, t1: 0.88, h: [[0, 0.05], [0.2, 0.07], [0.8, 0.065], [1, 0.03]], sweep: 0.3, col: ['#141414', '#1a1a1a', '#202020'], edge: '#f4f4f0', edgeW: 0.14, spines: 6, rays: 22, notch: 0.15, spineCol: '#303030', rayCol: '#2a2a2a', alpha: [0.95, 0.85], ripple: 0.3, px: [140, 28],
+      base: '#f8b020', baseW: 0.12 },
+    { type: 'anal', t0: 0.5, t1: 0.88, h: [[0, 0.05], [0.5, 0.06], [1, 0.03]], sweep: 0.3, col: ['#3a342c', '#2a2620'], edge: '#ff9020', edgeW: 0.14, spines: 2, rays: 20, rayCol: '#1a1814', alpha: [0.95, 0.85], ripple: 0.3, px: [96, 24] },
+    { type: 'caudal', shape: 'lyre', len: 0.24, span: 0.15, col: ['#4a443a', '#5e584c', '#6a6458'], edge: '#ffd030', edgeW: 0.08, rays: 14, rayCol: '#2a2620', alpha: [0.95, 0.8], px: [80, 64],
+      ext: (u) => { const w = Math.abs(2 * u - 1); return 0.48 + 0.25 * Math.pow(w, 2) + (w > 0.9 ? (w - 0.9) * 5.2 : 0); } },
+    { type: 'pectoral', t: 0.3, y: -0.15, len: 0.11, angle: 10, shape: 'pointed', col: ['#5e584c', '#757062'], rays: 9, alpha: [0.75, 0.45], flutter: 0.09, out: 0.7 },
+    { type: 'pelvic', t: 0.32, len: 0.05, angle: 55, col: ['#3a342c', '#2a2620'], rays: 4, alpha: [0.9, 0.7], flutter: 0.03 },
+  ],
+  swim: { k: 0.6, a0: 0.02, pow: 2.8, amp: 0.05, freq: 1.0, freqK: 0.7, flutter: [5, 0.04], ripple: 0.012 },
+};
+
+// ------------------------------------------------------------------------------------------- grouper
+// Big-mouthed sea bass: robust body, jutting lower jaw, rounded tail; green-grey with darker blotches and pale spots.
+const grouper: FishSpec = {
+  name: 'grouper', L: 1.0, body: 0.82, page: [512, 512],
+  top: [[0, 0.0], [0.02, 0.025], [0.08, 0.06], [0.18, 0.1], [0.32, 0.128], [0.48, 0.13], [0.64, 0.115], [0.8, 0.08], [0.92, 0.062], [1, 0.058]],
+  bot: [[0, 0.0], [0.02, 0.035], [0.08, 0.07], [0.2, 0.105], [0.36, 0.122], [0.52, 0.12], [0.68, 0.095], [0.84, 0.066], [1, 0.054]],
+  wid: [[0, 0.0], [0.03, 0.035], [0.12, 0.065], [0.3, 0.08], [0.55, 0.074], [0.8, 0.045], [1, 0.024]],
+  cy: [[0, -0.018], [0.2, 0], [1, 0.004]],
+  mouth: { t: 0.11, th: [[0, 0.5], [0.11, 0.53]], open: 0.7, lip: 0.08, lipCol: '#6a7058', interior: '#6a2a30', crease: '#1a1e14',
+    teeth: { upper: 8, lower: 8, size: 0.007, style: 'needle', inset: 0.85 } },
+  eye: { t: 0.12, y: 0.45, r: 0.026, fwd: 0.2, up: 0.15, lid: 'sleepy', lidCol: '#4a5240', lidLine: '#141810', lidLevel: 0.35, lidTilt: 0.2,
+    paint: { iris: ['#2a2a10', '#6a6a28', '#b0a850', '#e8e090'], pupil: 0.5, ring: '#f0f0b0', sclera: '#a8a888', irisR: 0.86 } },
+  gill: { t: 0.27, col: '#2a3020', curve: 0.04, k: 0.5 },
+  scales: { w: 6, h: 4, k: 0.8, rim: 0.12, hi: 0.05 },
+  rough: 0.42, sheen: 0.25,
+  paint: (c) => {
+    let col = grad(['#2a3424', '#3a4630', '#52604a', '#6e7a62', '#8a947a', '#b0b49c', '#ccccb4'])(0.38 - c.yn * 0.6, c.px, c.py);
+    // dark irregular blotches arranged in vertical bands
+    const n = noise2(c.X * 9, c.yl * 30, 3) + 0.3 * Math.sin(c.t * 28);
+    if (n > 0.68 && c.yn > -0.6) col = dmix(col, C('#1e261a'), Math.min(1, (n - 0.68) * 6), c.px, c.py);
+    // pale spots
+    if (c.sid < 0.12 && c.sd < 0.55 && c.t > 0.1) col = mix(col, C('#d8dcc4'), 0.7);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.3, t1: 0.82, h: [[0, 0.05], [0.3, 0.075], [0.55, 0.06], [0.75, 0.085], [1, 0.05]], sweep: 0.35, col: ['#3a4630', '#4a5640', '#5a6650'], spines: 11, rays: 14, notch: 0.25, spineCol: '#8a947a', rayCol: '#2a3424', spots: '#a8b098', spotK: 0.08, alpha: [0.92, 0.75], ripple: 0.3, px: [220, 40] },
+    { type: 'anal', t0: 0.64, t1: 0.86, h: [[0, 0.05], [0.6, 0.08], [1, 0.05]], sweep: 0.45, col: ['#3a4630', '#4a5640'], spines: 3, rays: 8, notch: 0.2, spineCol: '#8a947a', alpha: [0.92, 0.75], ripple: 0.3, px: [100, 36] },
+    { type: 'caudal', shape: 'round', len: 0.18, span: 0.11, col: ['#3a4630', '#4a5640', '#5a6650'], edge: '#c8ccb0', edgeW: 0.06, rays: 14, rayCol: '#2a3424', spots: '#a8b098', spotK: 0.08, alpha: [0.92, 0.75], px: [100, 80] },
+    { type: 'pectoral', t: 0.28, y: -0.3, len: 0.12, angle: 15, col: ['#5a6650', '#6e7a62'], rays: 14, rayCol: '#3a4630', alpha: [0.85, 0.6], flutter: 0.06, out: 0.6, px: [64, 40] },
+    { type: 'pelvic', t: 0.33, len: 0.08, angle: 55, col: ['#3a4630', '#4a5640'], rays: 6, alpha: [0.9, 0.7], flutter: 0.03 },
+  ],
+  swim: { k: 0.8, a0: 0.025, pow: 2.5, amp: 0.07, freq: 0.7, freqK: 0.8, flutter: [3.5, 0.022], ripple: 0.008 },
+};
+
+// ------------------------------------------------------------------------------------------- northern pike
+// Long torpedo with a flat duck-bill snout full of needle teeth; dorsal and anal set far back by the tail;
+// green with rows of pale yellow bean spots, white belly, spotted orange-tinted fins.
+const pike: FishSpec = {
+  name: 'pike', L: 1.0, body: 0.84, rings: 60, page: [512, 256], bodyH: 128,
+  top: [[0, 0.0], [0.02, 0.008], [0.06, 0.016], [0.12, 0.028], [0.18, 0.042], [0.26, 0.055], [0.45, 0.064], [0.65, 0.062], [0.82, 0.05], [0.94, 0.038], [1, 0.034]],
+  bot: [[0, 0.0], [0.02, 0.01], [0.06, 0.018], [0.12, 0.03], [0.2, 0.044], [0.35, 0.056], [0.55, 0.06], [0.75, 0.052], [0.9, 0.038], [1, 0.032]],
+  wid: [[0, 0.0], [0.02, 0.016], [0.08, 0.028], [0.2, 0.04], [0.45, 0.046], [0.75, 0.034], [1, 0.018]],
+  sq: [[0, 2.8], [0.1, 2.3], [0.25, 2.0], [1, 2.2]],
+  cy: [[0, -0.004], [0.2, 0], [1, 0.002]],
+  mouth: { t: 0.13, th: 0.5, open: 0.6, lip: 0.04, lipCol: '#a0a878', interior: '#7a3a3a', crease: '#1a2010',
+    teeth: { upper: 12, lower: 12, size: 0.006, style: 'needle', inset: 0.88, t0: 0.01 } },
+  eye: { t: 0.14, y: 0.55, r: 0.019, fwd: 0.35, up: 0.3, lid: 'angry', lidCol: '#4a6a30', lidLine: '#121a0a', lidTilt: 0.4, lidLevel: 0.38,
+    paint: { iris: ['#2a2a08', '#8a8a20', '#e0d040', '#fff8a0'], pupil: 0.48, ring: '#ffffc0', sclera: '#c8c8a0', irisR: 0.86 } },
+  gill: { t: 0.25, col: '#1a2a10', curve: 0.02, hi: '#d8e8a0', k: 0.45 },
+  lateral: { y: 0.0, col: '#e8f0b0', t0: 0.28, t1: 0.96 },
+  scales: { w: 4, h: 3, k: 0.6, rim: 0.08, hi: 0.04 },
+  rough: 0.36, sheen: 0.35,
+  paint: (c) => {
+    let col = grad(['#1e3214', '#2c4a1c', '#3e6226', '#5a7e32', '#8aa048', '#d8dcb0', '#f4f2e4'])(0.36 - c.yn * 0.62, c.px, c.py);
+    // rows of pale bean-shaped spots / short bars on the flank
+    if (c.t > 0.22 && c.yn > -0.55 && c.yn < 0.75) {
+      const row = Math.round(c.yn * 4.2), off = (row & 1) * 0.5 + hash2(row, 3, 1) * 0.3;
+      const cell = Math.floor(c.t * 30 + off), bx = (c.t * 30 + off) % 1, by = c.yn * 4.2 - row;
+      const jx = (hash2(cell, row, 5) - 0.5) * 0.3, jy = (hash2(cell, row, 6) - 0.5) * 0.3, sz = 0.26 + hash2(cell, row, 7) * 0.16;
+      const d = Math.hypot((bx - 0.5 - jx) * 1.5, (by - jy) * 0.85);
+      if (d < sz) col = mix(C('#ece4a0'), C('#c8c060'), d / sz);
+    }
+    if (c.t < 0.2 && c.yn > 0.2) col = shade(col, 0.88);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.74, t1: 0.9, h: [[0, 0.06], [0.4, 0.075], [1, 0.04]], sweep: 0.4, col: ['#4a5a2a', '#6a6a30', '#a07030'], rays: 14, rayCol: '#2a3410', spots: '#1a2010', spotK: 0.12, alpha: [0.92, 0.75], ripple: 0.3, px: [64, 40] },
+    { type: 'anal', t0: 0.76, t1: 0.9, h: [[0, 0.055], [0.4, 0.068], [1, 0.035]], sweep: 0.4, col: ['#8a7a3a', '#b07a30', '#c06a28'], rays: 12, rayCol: '#5a4010', spots: '#2a1a08', spotK: 0.12, alpha: [0.92, 0.75], ripple: 0.3, px: [64, 36] },
+    { type: 'caudal', shape: 'fork', len: 0.15, span: 0.1, col: ['#6a6a30', '#9a7a34', '#c07030'], rays: 16, rayCol: '#3a3410', spots: '#1a1a08', spotK: 0.12, alpha: [0.92, 0.75], px: [80, 64], ext: (u) => { const w = Math.abs(2 * u - 1); return 0.62 + 0.38 * Math.pow(w, 1.2); } },
+    { type: 'pectoral', t: 0.27, y: -0.6, len: 0.07, angle: 25, col: ['#c0a050', '#b08040'], rays: 10, alpha: [0.75, 0.45], flutter: 0.06 },
+    { type: 'pelvic', t: 0.52, len: 0.06, angle: 50, col: ['#c0a050', '#b08040'], rays: 8, alpha: [0.8, 0.5], flutter: 0.03 },
+  ],
+  swim: { k: 0.9, a0: 0.02, pow: 2.6, amp: 0.08, freq: 0.9, freqK: 1.2, flutter: [5, 0.015] },
+  clearcoat: 0.6,
+};
+
+// ------------------------------------------------------------------------------------------- red snapper (rockfish)
+// Triangular-headed reef snapper: rosy red fading to pink-silver below, red eye, spiny dorsal, slightly forked tail.
+const snapper: FishSpec = {
+  name: 'snapper', L: 0.6, body: 0.8,
+  top: [[0, 0.0], [0.02, 0.03], [0.08, 0.075], [0.18, 0.13], [0.3, 0.165], [0.42, 0.17], [0.58, 0.15], [0.74, 0.1], [0.88, 0.064], [1, 0.058]],
+  bot: [[0, 0.0], [0.02, 0.025], [0.08, 0.05], [0.2, 0.09], [0.36, 0.12], [0.52, 0.12], [0.68, 0.09], [0.84, 0.062], [1, 0.054]],
+  wid: [[0, 0.0], [0.03, 0.028], [0.15, 0.055], [0.35, 0.066], [0.6, 0.055], [0.85, 0.03], [1, 0.018]],
+  cy: [[0, -0.02], [0.2, -0.004], [1, 0.006]],
+  mouth: { t: 0.09, th: [[0, 0.5], [0.09, 0.54]], open: 0.6, lip: 0.06, lipCol: '#d84030', interior: '#7a1a24', crease: '#3a0a0a',
+    teeth: { upper: 6, lower: 6, size: 0.008, style: 'needle', inset: 0.85 } },
+  eye: { t: 0.15, y: 0.48, r: 0.04, fwd: 0.2, up: 0.1, lid: 'none',
+    paint: { iris: ['#4a0606', '#b01410', '#f0301a', '#ff8060'], pupil: 0.52, ring: '#ffc0a0', sclera: '#e0a8a0', irisR: 0.86 } },
+  gill: { t: 0.26, col: '#7a1a14', curve: 0.03, hi: '#ffc0b0', k: 0.5 },
+  lateral: { y: 0.35, col: '#ffd8d0', arch: 0.015, t0: 0.26 },
+  scales: { w: 6, h: 4, k: 1, rim: 0.13, hi: 0.07 },
+  sheen: 0.5, rough: 0.34,
+  paint: (c) => {
+    let col = grad(['#6a0a0c', '#a01a14', '#d03420', '#e85a40', '#f08a78', '#f8c0b0', '#fff0ea'])(0.3 - c.yn * 0.62, c.px, c.py);
+    // faint diagonal rows of darker scale centres (snapper pin-striping)
+    if (c.t > 0.22 && c.sd < 0.45 && ((c.py + c.px) % 9) < 2 && c.yn > -0.3) col = shade(col, 0.85);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.3, t1: 0.8, h: [[0, 0.05], [0.25, 0.085], [0.55, 0.06], [0.75, 0.075], [1, 0.04]], sweep: 0.4, col: ['#d84a3a', '#e86a50', '#f08a70'], spines: 10, rays: 13, notch: 0.25, spineCol: '#ffc0a8', rayCol: '#a02a1a', edge: '#8a1a10', edgeW: 0.08, alpha: [0.9, 0.62], ripple: 0.3, px: [128, 36] },
+    { type: 'anal', t0: 0.64, t1: 0.84, h: [[0, 0.05], [0.4, 0.07], [1, 0.03]], sweep: 0.45, col: ['#e86a50', '#f08a70'], spines: 3, rays: 8, spineCol: '#ffc0a8', alpha: [0.9, 0.62], ripple: 0.3, px: [64, 28] },
+    { type: 'caudal', shape: 'emarginate', len: 0.18, span: 0.13, col: ['#c83a2a', '#e06048', '#f08a70'], edge: '#7a1410', edgeW: 0.1, rays: 16, rayCol: '#a02a1a', alpha: [0.92, 0.65], px: [80, 64] },
+    { type: 'pectoral', t: 0.27, y: -0.25, len: 0.14, angle: 18, shape: 'pointed', col: ['#f8a890', '#f08a70'], rays: 12, alpha: [0.7, 0.4], flutter: 0.07, out: 0.6 },
+    { type: 'pelvic', t: 0.32, len: 0.08, angle: 55, col: ['#f08a70', '#e86a50'], rays: 6, alpha: [0.85, 0.6], flutter: 0.03 },
+  ],
+  swim: { k: 0.85, a0: 0.03, pow: 2.4, amp: 0.09, freq: 1.1, freqK: 1.0, flutter: [5, 0.02], ripple: 0.01 },
+};
+
+// ------------------------------------------------------------------------------------------- orca
+// Killer whale: robust torpedo, blunt head, towering dorsal fin, paddle flippers, horizontal flukes (vertical
+// beat). Glossy black with the white eye patch, white chin + belly sweep and a grey saddle.
+const orca: FishSpec = {
+  name: 'orca', L: 6, body: 0.86, page: [512, 512], bodyH: 256, rings: 56, seg: 32,
+  top: [[0, 0.0], [0.01, 0.025], [0.04, 0.05], [0.1, 0.08], [0.2, 0.105], [0.35, 0.118], [0.5, 0.112], [0.66, 0.088], [0.8, 0.055], [0.92, 0.032], [1, 0.026]],
+  bot: [[0, 0.0], [0.01, 0.022], [0.04, 0.045], [0.1, 0.075], [0.22, 0.1], [0.38, 0.11], [0.54, 0.1], [0.7, 0.072], [0.84, 0.045], [1, 0.022]],
+  wid: [[0, 0.0], [0.01, 0.024], [0.06, 0.06], [0.2, 0.098], [0.4, 0.108], [0.6, 0.09], [0.8, 0.05], [0.95, 0.02], [1, 0.014]],
+  sq: [[0, 2.0], [0.7, 2.0], [0.88, 2.6], [1, 3.0]],
+  cy: [[0, -0.01], [0.15, 0], [1, 0.004]],
+  noseRound: 0.004,
+  mouth: { t: 0.085, th: [[0, 0.52], [0.085, 0.6]], open: 0.55, interior: '#c84a58', crease: '#0a0a0e',
+    teeth: { upper: 11, lower: 11, size: 0.007, style: 'peg', inset: 0.9, t0: 0.012, t1: 0.075 } },
+  eye: { t: 0.105, y: 0.08, r: 0.008, fwd: 0.2, up: 0.05, lid: 'none', bulge: 0.5,
+    paint: { iris: ['#100808', '#3a1a10', '#6a3a20', '#a06a40'], pupil: 0.55, ring: '#c09070', sclera: '#e8e0d8', irisR: 0.7 } },
+  rough: 0.32, sheen: 0.3, normal: 1,
+  paint: (c) => {
+    const x = c.t, y = c.yn;
+    let col = grad(['#06070a', '#0c0e14', '#14161e', '#1c1e28'])(0.5 - y * 0.3, c.px, c.py);
+    const WHITE = grad(['#f8f8f4', '#e8eaea', '#d0d4d8']);
+    // white eye patch: an oval above and behind the eye
+    const ex = (x - 0.15) * 7.5, ey = (y - 0.32) * 2.8;
+    if (Math.hypot(ex, ey) < 1 && Math.abs(c.side) > 0.2) col = WHITE(0.3, c.px, c.py);
+    // white chin + throat, sweeping back along the belly, with the flank lobe rising behind the dorsal
+    const belly = -0.55 + Math.sin(Math.min(1, x / 0.12) * Math.PI / 2) * -0.0;
+    let wl = x < 0.08 ? -0.15 - (0.08 - x) * 0 : -0.45;
+    if (x > 0.45 && x < 0.75) wl = -0.45 + Math.sin(((x - 0.45) / 0.3) * Math.PI) * 0.7;
+    if (y < wl && x < 0.8) col = WHITE(0.5 + y * 0.2, c.px, c.py);
+    if (x < 0.085 && y < 0.0) col = WHITE(0.4, c.px, c.py);
+    void belly;
+    // grey saddle behind the dorsal fin
+    if (y > 0.65 && x > 0.47 && x < 0.62) col = dmix(col, C('#6a6e78'), 0.75, c.px, c.py);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.36, t1: 0.48, h: [[0, 0.06], [0.2, 0.2], [0.45, 0.17], [1, 0.012]], sweep: 0.28, lean: [[0, 0], [0.3, 0.05], [1, 0.4]], col: ['#0c0e14', '#14161e', '#1c1e28'], rays: 0, opaque: true, thick: 0.006, px: [96, 96] },
+    { type: 'fluke', len: 0.1, span: 0.13, col: ['#0c0e14', '#14161e', '#1c1e28'], rays: 0, opaque: true, thick: 0.006, px: [96, 48] },
+    { type: 'pectoral', t: 0.17, y: -0.75, len: 0.13, baseLen: 0.06, span: 0.55, angle: 42, col: ['#0c0e14', '#14161e', '#1c1e28'], rays: 0, opaque: true, thick: 0.012, out: 0.35, flutter: 0.04, px: [64, 48],
+      ext: (u) => 0.7 + 0.3 * Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2)) },
+  ],
+  swim: { k: 0.55, a0: 0.01, pow: 2.8, amp: 0.06, freq: 0.35, freqK: 0.9, vertical: true, flutter: [1.2, 0.012] },
+  clearcoat: 0.55, clearcoatRough: 0.28,
+};
+
+// ------------------------------------------------------------------------------------------- sperm whale
+// Giant square-fronted head (a third of the body), narrow underslung jaw with peg teeth, wrinkled dark grey
+// skin with pale scars, a low hump and knuckles toward the flukes, stubby flippers.
+const spermWhale: FishSpec = {
+  name: 'sperm_whale', L: 12, body: 0.88, page: [512, 512], bodyH: 256, rings: 60, seg: 32,
+  top: [[0, 0.0], [0.003, 0.075], [0.02, 0.098], [0.1, 0.104], [0.24, 0.104], [0.32, 0.096], [0.4, 0.082], [0.55, 0.076], [0.64, 0.072], [0.75, 0.05], [0.88, 0.03], [1, 0.022]],
+  bot: [[0, 0.0], [0.003, 0.03], [0.03, 0.045], [0.12, 0.056], [0.22, 0.07], [0.36, 0.088], [0.5, 0.084], [0.66, 0.062], [0.82, 0.035], [1, 0.02]],
+  wid: [[0, 0.0], [0.003, 0.05], [0.04, 0.064], [0.2, 0.07], [0.4, 0.078], [0.6, 0.064], [0.8, 0.035], [1, 0.016]],
+  sq: [[0, 4.5], [0.22, 3.6], [0.38, 2.3], [1, 2.4]],
+  cy: [[0, 0.022], [0.25, 0.016], [0.4, 0], [1, 0]],
+  noseRound: 0.003,
+  mouth: { t: 0.24, th: [[0, 0.78], [0.04, 0.8], [0.24, 0.7]], open: 0.5, interior: '#e0c8c8', crease: '#1a1814', lipCol: '#d8d0c8', lip: 0.02,
+    teeth: { upper: 0, lower: 18, size: 0.006, style: 'peg', inset: 0.8, t0: 0.03, t1: 0.22, col: ['#fffcf0', '#f0e8d0', '#c8b898', '#7a6a58'] } },
+  eye: { t: 0.27, y: -0.2, r: 0.005, fwd: 0.1, up: 0.05, lid: 'none', bulge: 0.5,
+    paint: { iris: ['#0a0808', '#2a1a10', '#4a3020', '#6a4a30'], pupil: 0.5, sclera: '#c8c0b8', irisR: 0.7 } },
+  rough: 0.5, sheen: 0.15, normal: 3,
+  scales: { w: 12, h: 3, k: 0.4, rim: 0.12, hi: 0.0, bump: 1.0, tMin: 0.0 },
+  paint: (c) => {
+    let col = grad(['#24262a', '#2e3034', '#3a3c40', '#4a4c50', '#5a5c60'])(0.45 - c.yn * 0.35, c.px, c.py);
+    // wrinkles: wavy horizontal grooves behind the head
+    if (c.t > 0.3) { const wv = Math.sin(c.py * 1.7 + Math.sin(c.px * 0.21) * 2.0); if (wv > 0.85) col = shade(col, 0.8); }
+    // pale scars + lips
+    if (hash2(c.px >> 2, c.py >> 1, 9) < 0.03 && c.t < 0.5) col = mix(col, C('#a8a8a8'), 0.6);
+    if (c.t < 0.24 && c.yn < -0.55) col = mix(col, C('#d8d4cc'), 0.7);
+    // dorsal knuckles
+    if (c.t > 0.66 && c.t < 0.86 && c.yn > 0.85 && (Math.floor(c.t * 60) % 2 === 0)) col = shade(col, 1.15);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.58, t1: 0.68, h: [[0, 0.01], [0.4, 0.026], [1, 0.004]], sweep: 0.6, col: ['#2e3034', '#3a3c40'], rays: 0, opaque: true, thick: 0.006, px: [64, 32] },
+    { type: 'fluke', len: 0.09, span: 0.1, col: ['#2e3034', '#3a3c40', '#24262a'], rays: 0, opaque: true, thick: 0.004, px: [96, 48],
+      ext: (u) => { const w = Math.abs(2 * u - 1); return 0.25 + 0.75 * Math.pow(w, 0.8); } },
+    { type: 'pectoral', t: 0.32, y: -0.7, len: 0.05, baseLen: 0.02, span: 0.5, angle: 35, col: ['#2e3034', '#3a3c40'], rays: 0, opaque: true, thick: 0.004, out: 0.3, flutter: 0.03 },
+  ],
+  swim: { k: 0.5, a0: 0.008, pow: 3, amp: 0.05, freq: 0.22, freqK: 0.9, vertical: true, flutter: [1, 0.008] },
+  clearcoat: 0.4, clearcoatRough: 0.4,
+};
+
 export const SPECS: Record<string, FishSpec> = {
   piranha, cichlid, cichlid_blue: cichlidBlue, peacock_bass: peacockBass, napoleon, triggerfish, sardine, barracuda, cleaner_wrasse: cleaner,
   pufferfish, moray, anglerfish, ichthyosaur,
+  pumpkinseed, unicornfish, grouper, pike, snapper, orca, sperm_whale: spermWhale,
 };
-export { band, dith, fbm, noise2, C };

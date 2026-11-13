@@ -9,6 +9,8 @@ import type { Game, Screen } from '../game/game';
 import { MockScreen } from './mockWorld';
 import { buildFish, SPECIES, FishModel } from '../fish';
 import { textSprite, STYLES } from '../ui/text';
+import { spawnCreature, SeaTurtle } from '../creatures';
+import type { Entity } from '../game/types';
 
 const Q = new URLSearchParams(location.search);
 const num = (k: string, d: number) => { const v = Q.get(k); return v === null ? d : parseFloat(v); };
@@ -58,16 +60,17 @@ class FishGallery extends MockScreen {
       // true-scale lineup, smallest first, wrapped into rows
       const ms = list.map((s, i) => buildFish(s, i + 1)).sort((a, b) => a.length - b.length);
       const maxW = num('w', 16);
-      let row: FishModel[] = [], x = 0, y = -1.2;
+      let row: FishModel[] = [], x = 0, y = -0.5;
+      const hOf = (m: FishModel) => { const b = m.mesh.geometry.boundingBox; return b ? b.max.y - b.min.y : m.length * 0.3; };
       const flush = () => {
-        const rowH = Math.max(...row.map((m) => m.length * 0.5)) + 0.45;
+        const rowH = Math.max(...row.map(hOf)) + 0.7;
         const w = row.reduce((s, m) => s + m.length + 0.5, -0.5);
         let cx = -w / 2;
         for (const m of row) {
           const p = new THREE.Vector3(cx + m.length / 2, y - rowH / 2, 0);
           add(m, p);
-          const label = textSprite(m.species, STYLES.small, 0.16);
-          label.position.set(p.x, p.y - m.length * 0.25 - 0.14, 0.3);
+          const label = textSprite(m.species, STYLES.small, 0.26);
+          label.position.set(p.x, p.y - hOf(m) * 0.5 - 0.22, 0.3);
           this.overlay.add(label);
           cx += m.length + 0.5;
         }
@@ -75,8 +78,8 @@ class FishGallery extends MockScreen {
       };
       for (const m of ms) { if (x + m.length > maxW && row.length) flush(); row.push(m); x += m.length + 0.5; }
       if (row.length) flush();
-      this.camTarget.set(num('cx', 0), (y - 1.2) / 2 - 0.8 + num('cy', 0), 0);
-      this.camDist = num('dist', 24);
+      this.camTarget.set(num('cx', 0), (y - 0.5) / 2 - 0.8 + num('cy', 0), 0);
+      this.camDist = num('dist', 22);
     }
   }
   tick(dt: number) {
@@ -98,6 +101,84 @@ class FishGallery extends MockScreen {
   }
 }
 
+// ------------------------------------------------------------------------------------------- live AI scene
+// WASD swim, click / Space = sword poke (hits within 1.2 m), E = bite, R = ride a nearby turtle,
+// H = toggle "hooked" (the hermit crab comes to snip the line), B = spawn the boss again.
+class FishAI extends MockScreen {
+  declare hud: HTMLDivElement;
+  declare riding: SeaTurtle | null;
+  declare baseSun: number; declare baseHemi: number;
+  declare slashT: number;
+  declare ff: number;
+  update(dt: number) {
+    // &ff=N: fast-forward N seconds of simulation in fixed steps on the first frame (deterministic shots)
+    if (this.ff > 0) { const n = Math.round(this.ff * 30); this.ff = 0; for (let i = 0; i < n; i++) super.update(1 / 30); }
+    super.update(dt);
+  }
+  setup() {
+    this.ff = num('ff', 0);
+    const w = this.world;
+    this.riding = null; this.slashT = 0;
+    this.baseSun = this.light.sun.intensity; this.baseHemi = this.light.hemi.intensity;
+    w.run.on('heal', (d) => { w.player.hp = Math.min(w.player.maxHp ?? 6, (w.player.hp ?? 6) + ((d.amount as number) ?? 1)); });
+    w.run.on('darkness', (d) => { const k = d.k as number; this.light.sun.intensity = this.baseSun * (1 - k * 0.92); this.light.hemi.intensity = this.baseHemi * (1 - k * 0.9); });
+    const F = (x: number) => w.terrain.floorAt(x);
+    const boss = Q.get('boss');
+    if (boss) {
+      spawnCreature(boss === 'angler' ? 'mother_angler' : 'old_ichthy', w, 0, -5);
+      w.player.x = -3; w.player.y = -4;
+    } else {
+      for (let i = 0; i < 5; i++) spawnCreature('piranha', w, 7 + i * 0.5, -4 + (i % 2) * 0.6);
+      spawnCreature('pufferfish', w, -3.5, -5.5);
+      spawnCreature('moray', w, -6 + 1.15, -8.5);
+      spawnCreature('barracuda', w, 13, -3);
+      spawnCreature('jellyfish', w, 3, -2.2);
+      spawnCreature('jellyfish', w, -9, -3);
+      spawnCreature('crab', w, 2.5, F(2.5) + 0.3);
+      spawnCreature('anglerfish', w, -13, -6);
+      spawnCreature('sardines', w, 0, -2.5);
+      spawnCreature('cleaner_wrasse', w, -2, -7);
+      spawnCreature('sea_turtle', w, 9, -6);
+      spawnCreature('hermit', w, -1, F(-1) + 0.2);
+      spawnCreature('triggerfish', w, 16, -7.5);
+      spawnCreature('stingray', w, -14, F(-14) + 0.6);
+      spawnCreature('cichlid', w, 4, -6.5);
+      spawnCreature('cichlid_blue', w, 5, -7);
+    }
+    this.hud = document.createElement('div');
+    this.hud.style.cssText = 'position:fixed;left:8px;top:8px;color:#e8fbff;font:12px monospace;text-shadow:0 1px 2px #000;z-index:10;pointer-events:none;white-space:pre';
+    document.body.appendChild(this.hud);
+  }
+  tick(dt: number) {
+    const w = this.world, p = w.player, inp = this.game.input;
+    this.slashT -= dt;
+    if ((inp.keyHit('Space') || inp.keyHit('Mouse0')) && this.slashT <= 0) {
+      this.slashT = 0.3;
+      for (const e of w.near(p.x + p.facing * 0.5, p.y, 1.2) as Entity[]) {
+        if (e === p || !e.hit) continue;
+        const dx = e.x - p.x, dy = e.y - p.y, l = Math.hypot(dx, dy) || 1;
+        e.hit(1, dx / l, dy / l, w, p, 'sword');
+      }
+      w.fx.burst('spark', p.x + p.facing * 0.7, p.y, 6, 3);
+      w.sfx('sw_swish1', p.x);
+    }
+    if (inp.keyHit('KeyE')) for (const e of w.near(p.x, p.y, 0.9)) if (e.biteable && e.onBite) { e.onBite(w); break; }
+    if (inp.keyHit('KeyR')) {
+      if (this.riding) { this.riding.dismount(); this.riding = null; }
+      else for (const e of w.near(p.x, p.y, 1.5)) if (e instanceof SeaTurtle) { this.riding = e; break; }
+    }
+    if (this.riding) { if (!this.riding.alive) this.riding = null; else this.riding.carry(dt, p); }
+    if (inp.keyHit('KeyH')) p.hooked = !p.hooked;
+    if (inp.keyHit('KeyB')) spawnCreature(Q.get('boss') === 'angler' ? 'mother_angler' : 'old_ichthy', w, p.x + 6, -5);
+    const boss = w.entities.find((e) => e.isBoss && e.alive);
+    this.hud.textContent = `hp ${p.hp}/${p.maxHp}  ${p.hooked ? 'HOOKED ' : ''}${this.riding ? 'RIDING ' : ''}entities ${w.entities.length}  fps ${this.game.fps.toFixed(0)}\n` +
+      (boss ? `${boss.bossName}: ${Math.max(0, boss.hp ?? 0).toFixed(0)}/${boss.maxHp}\n` : '') +
+      'WASD swim  Space/click poke  E bite  R ride turtle  H hooked  B boss';
+    if (p.hp !== undefined && p.hp <= 0) p.hp = p.maxHp;
+  }
+}
+
 export default function make(game: Game): Screen {
+  if (Q.get('mode') === 'ai') return new FishAI(game, 'fish', Q.get('look') || (Q.get('boss') === 'angler' ? 'abyss' : 'reef'));
   return new FishGallery(game, 'fish');
 }

@@ -18,7 +18,12 @@ const cache = new Map<string, SpeciesAsset>();
 const v3 = (p?: number[]) => (p ? new THREE.Vector3(p[0], p[1], p[2]) : new THREE.Vector3());
 
 export function assetFromSpec(spec: FishSpec): SpeciesAsset {
-  const b = new FishBuilder(spec).build();
+  let b;
+  // grow the texture page if the fins / extras don't fit
+  for (let k = 0; ; k++) {
+    try { b = new FishBuilder(k ? { ...spec, page: [spec.page?.[0] ?? 256, (spec.page?.[1] ?? 256) + 128 * k], bodyH: spec.bodyH ?? Math.round((spec.page?.[1] ?? 256) / 2) } : spec).build(); break; }
+    catch (e) { if (k > 3 || !String(e).includes('page full')) throw e; }
+  }
   const sw = spec.swim ?? {};
   const uni = {
     uShape: { value: new THREE.Vector4(b.noseX, b.bodyLen, sw.k ?? 0.9, sw.a0 ?? 0.04) },
@@ -58,3 +63,4 @@ export function buildFish(species: string, seed = 0): FishModel {
 
 /** warm the cache (paint + upload) so first spawns don't hitch */
 export function preloadFish(list: string[] = SPECIES) { for (const s of list) speciesAsset(s); }
+export { FishSchool } from './school';

@@ -74,6 +74,8 @@ export interface FishSpec {
   rings?: number; seg?: number;
   mouth?: MouthSpec; eye: EyeSpec; fins: FinSpec[];
   paint: BodyPaint;
+  /** optional emissive paint (photophores, glowing markings) */
+  glow?: (c: PaintCtx) => RGB | null;
   scales?: ScaleSpec;
   gill?: { t: number; col?: string; k?: number; hi?: string; curve?: number; top?: number; bot?: number };
   lateral?: { y: number; col: string; t0?: number; t1?: number; dash?: number; arch?: number };
@@ -563,6 +565,7 @@ export class FishBuilder extends Kit {
         if (hb * s.sheen > bayer(i, j) * 0.9 + 0.05) c = shade(c, 1.12);
       }
       pg.set(r.x + i, r.y + j, c, 255, rough, hgt);
+      if (s.glow) { const g = s.glow(ctx); if (g) pg.setGlow(r.x + i, r.y + j, g); }
     }
   }
 

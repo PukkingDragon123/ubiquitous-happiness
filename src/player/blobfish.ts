@@ -76,6 +76,7 @@ export class Blobfish implements PlayerLike {
   private bodyAngle = 0;
   private hurtCount = 0;
   carried: ((dt: number) => void) | null = null;
+  riding = false;
   private lipHook = buildHook();
   onDeath?: () => void;
 
@@ -149,10 +150,10 @@ export class Blobfish implements PlayerLike {
     const rocky = this.rock > 0.5;
     const speed = s.speed * weak * (rocky ? 0.35 : 1) * (this.puffT > 0 ? 0.6 : 1);
     let accel = s.accel * weak;
-    if (this.outOfWater) accel = 0;
+    if (this.outOfWater || this.riding) accel = 0;
     const tvx = ax.x * speed, tvy = ax.y * speed;
     let fx = (tvx - this.sb.vx) * (accel / speed), fy = (tvy - this.sb.vy) * (accel / speed);
-    if (!this.swimming) { fx = -this.sb.vx * 1.2; fy = -this.sb.vy * 1.2; }
+    if (!this.swimming || this.riding) { fx = this.riding ? 0 : -this.sb.vx * 1.2; fy = this.riding ? 0 : -this.sb.vy * 1.2; }
     // buoyancy: blobfish are almost neutrally buoyant; rock sinks; puff floats; air drops you
     if (this.outOfWater) fy -= 18;
     else if (rocky) fy -= 14;

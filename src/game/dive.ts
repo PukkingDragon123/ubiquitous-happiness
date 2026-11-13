@@ -25,6 +25,9 @@ import { Current } from './current';
 import { spotLayout } from './spots';
 import { eventLayout } from './events';
 import { setupBoss } from '../fishing/boss';
+import { populate, ambientSpawn, ambush, creatureElite, resolveDrop } from './population';
+
+interface RideableLike { alive: boolean; x: number; y: number; vx: number; vy: number; carry(dt: number, p: Blobfish): void; seatX(): number; seatY(): number }
 
 export interface DiveNode { type: string; spot: string; biome: string; difficulty: number; name?: string; id?: number }
 
@@ -51,6 +54,10 @@ export class DiveScreen implements Screen {
   private ambience: ReturnType<typeof audio.loop> | null = null;
   private heartbeat = 0;
   private introT = 0;
+  private dark = 0;
+  private riding: RideableLike | null = null;
+  private rideT = 0;
+  private darkK = 0;
   onExit?: (result: 'cleared' | 'dead', run: Run) => void;
   /** creature spawner installed by the creatures module integration */
   static populate?: (w: World, biome: Biome, node: DiveNode, x0: number, x1: number) => void;
@@ -108,14 +115,16 @@ export class DiveScreen implements Screen {
     const t = this.node.type;
     if (t === 'shop' || t === 'rest' || t === 'treasure' || t === 'mystery') {
       eventLayout(this.world, this.node, () => this.spotCleared(t === 'shop' || t === 'rest' ? 'quiet' : 'loud'), (x, y, n) => {
-        if (DiveScreen.ambush) DiveScreen.ambush(this.world, x, y, n, () => this.spotCleared('loud'));
-        else this.spotCleared('loud');
+        (DiveScreen.ambush ?? ambush)(this.world, x, y, n, () => this.spotCleared('loud'));
       });
     } else if (t === 'boss') {
       (DiveScreen.boss ?? setupBoss)(this.world, this.node, this.fishing, () => this.spotCleared('boss'));
-    } else spotLayout(this.world, this.fishing, this.node);
-    DiveScreen.populate?.(this.world, b, this.node, -30, 40);
-    this.cleared = false; this.deadT = -1; this.introT = 0;
+    } else if (!creatureElite(this.world, this.node, () => this.spotCleared('boss'))) spotLayout(this.world, this.fishing, this.node);
+    (DiveScreen.populate ?? populate)(this.world, b, this.node, -30, 40);
+    this.dark = 0;
+    this.world.on('darkness', (d) => { this.dark = (d.k as number) ?? 0; });
+    this.world.on('kill', () => { this.run.kills++; });
+    this.cleared = false; this.deadT = -1; this.introT = 0; this.riding = null;
     this.camPos.set(this.player.x, this.player.y + 1, 16);
     this.camLook.set(this.player.x, this.player.y, 0);
     this.resize(this.game.w, this.game.h);
@@ -164,6 +173,20 @@ export class DiveScreen implements Screen {
     if (w.statsDirty) { const hp = p.hp; p.setStats(this.run.stats()); p.hp = Math.min(hp, p.maxHp); w.statsDirty = false; }
     // dynamic colliders: boat hulls, pilings
     this.ocean.terrain.dynamic = this.fishing.colliders();
+    // riding a sea turtle: E to hop on / off (the turtle steers with your swim keys)
+    if (this.riding && (!this.riding.alive || p.hooked || inp.hit('dash') || (inp.hit('interact') && this.rideT > 0.3))) { this.riding = null; p.riding = false; p.carried = null; w.sfx('swish_a', p.x, 0.4); }
+    else if (!this.riding && inp.hit('interact') && !p.hooked) {
+      const t = w.entities.find((e) => e.alive && (e as unknown as { rideable?: boolean }).rideable && Math.hypot(e.x - p.x, e.y - p.y) < 1.8);
+      if (t) { this.riding = t as unknown as RideableLike; this.rideT = 0; p.riding = true; w.text.pop('ALL ABOARD!', p.x, p.y + 1, 'gold', { size: 0.34 }); w.sfx('boing', p.x, 0.5); }
+    }
+    if (this.riding) {
+      const r = this.riding;
+      this.rideT += dt;
+      p.carried = (d) => {
+        r.carry(d, { x: p.x, y: p.y, vx: p.vx, vy: p.vy, r: p.r } as unknown as Blobfish);
+        p.sb.accel((r.seatX() - p.x) * 45 - (p.vx - r.vx) * 9, (r.seatY() + p.r * 0.55 - p.y) * 45 - (p.vy - r.vy) * 9 + 0.4, d);
+      };
+    }
     p.update(dt, w);
     this.fishing.update(dt, w);
     for (let i = 0; i < w.entities.length; i++) { const e = w.entities[i]; if (e.alive) e.update(dt, w); }
@@ -171,7 +194,11 @@ export class DiveScreen implements Screen {
       const e = w.entities[i];
       if (!e.alive) { e.dispose?.(w); e.obj?.removeFromParent(); w.entities.splice(i, 1); }
     }
-    DiveScreen.ambientSpawn?.(w, this.biome, this.camLook.x, dt);
+    (DiveScreen.ambientSpawn ?? ambientSpawn)(w, this.biome, this.camLook.x, dt);
+    // Mother Angler swallows the light
+    this.darkK = damp(this.darkK, this.dark, 2, dt);
+    POST.uExposure.value = (LOOKS[this.biome.look] ?? LOOKS.reef).exposure * (1 - this.darkK * 0.7);
+    POST.uRays.value = (LOOKS[this.biome.look] ?? LOOKS.reef).rays * (1 - this.darkK);
     w.emit('tick', { dt });
     // ---- camera
     let tx = p.x + clamp(p.vx * 0.35, -2.5, 2.5), ty = p.y + clamp(p.vy * 0.25, -1.5, 1.5);
@@ -247,7 +274,7 @@ export class DiveWorld implements World {
   }
   drop(x: number, y: number, what: { coins?: number; item?: string; heal?: number }) {
     if (what.coins) { const n = Math.min(8, Math.ceil(what.coins / 3)); for (let i = 0; i < n; i++) this.add(new Pickup(x, y, { coins: Math.ceil(what.coins / n) })); }
-    if (what.item) this.add(new Pickup(x, y, { item: what.item }));
+    if (what.item) { const id = resolveDrop(what.item, this.rng.next()); if (id) this.add(new Pickup(x, y, { item: id })); else this.add(new Pickup(x, y, { coins: 4 })); }
     if (what.heal) this.add(new Pickup(x, y, { heal: what.heal }));
   }
   on(ev: string, fn: (d: Record<string, unknown>) => void) { const l = this.listeners.get(ev) || []; l.push(fn); this.listeners.set(ev, l); }

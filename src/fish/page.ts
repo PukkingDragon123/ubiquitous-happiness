@@ -17,7 +17,8 @@ export class Page {
   hgt: Float32Array;
   rid: Uint16Array;
   glow: Px | null = null;
-  private sx = 0; private sy = 0; private rowH = 0; private nid = 1;
+  private shelves: { y: number; h: number; x: number }[] = [];
+  private nextY = 0; private nid = 1;
   constructor(W: number, H: number) {
     this.W = W; this.H = H;
     this.col = new Px(W, H);
@@ -25,21 +26,23 @@ export class Page {
     this.hgt = new Float32Array(W * H);
     this.rid = new Uint16Array(W * H);
   }
-  /** reserve a w x h pixel rect (2 px gutter) */
+  /** reserve a w x h pixel rect (2 px gutter), first fit across shelves */
   alloc(w: number, h: number): Rect {
     const pad = 2;
-    if (this.sx + w + pad > this.W) { this.sx = 0; this.sy += this.rowH + pad; this.rowH = 0; }
-    if (this.sy + h > this.H) throw new Error(`page full (${w}x${h} in ${this.W}x${this.H})`);
-    const r = { x: this.sx, y: this.sy, w, h, id: this.nid++ };
-    this.sx += w + pad; this.rowH = Math.max(this.rowH, h);
+    let sh = this.shelves.find((q) => q.h >= h && q.x + w <= this.W && q.h <= h * 1.6 + 4) ?? this.shelves.find((q) => q.h >= h && q.x + w <= this.W);
+    if (!sh) {
+      if (this.nextY + h > this.H || w > this.W) throw new Error(`page full (${w}x${h} in ${this.W}x${this.H})`);
+      sh = { y: this.nextY, h, x: 0 };
+      this.shelves.push(sh);
+      this.nextY += h + pad;
+    }
+    const r = { x: sh.x, y: sh.y, w, h, id: this.nid++ };
+    sh.x += w + pad;
     for (let y = r.y; y < r.y + h; y++) for (let x = r.x; x < r.x + w; x++) this.rid[y * this.W + x] = r.id;
     return r;
   }
   /** a full-width band (body wraps) */
-  band(h: number): Rect {
-    if (this.sx > 0) { this.sx = 0; this.sy += this.rowH + 2; this.rowH = 0; }
-    return this.alloc(this.W, h);
-  }
+  band(h: number): Rect { return this.alloc(this.W, h); }
   reg(r: Rect): Reg { return { x: (r.x + 0.5) / this.W, y: (r.y + 0.5) / this.H, w: (r.w - 1) / this.W, h: (r.h - 1) / this.H }; }
   /** uv (three convention, v up) of a point (u, v) inside a rect */
   uv(r: Rect, u: number, v: number): [number, number] { return [(r.x + 0.5 + u * (r.w - 1)) / this.W, 1 - (r.y + 0.5 + v * (r.h - 1)) / this.H]; }
@@ -167,15 +170,15 @@ export function paintFin(pg: Page, r: Rect, f: FinPaint) {
       if (isSpine) { c = shade(spC, 1.04 - v * 0.1); a = 1; h = 1; }
       else {
         // soft ray: darker line, segmented (a lit joint every few px), fading toward the tip
-        const joint = (j + (k & 1) * 2) % 5 === 0;
-        c = rayC ? mix(c, rayC, 0.45 * (1 - v * 0.4)) : shade(c, 0.86 + v * 0.06);
+        const joint = (j + (k & 1) * 3) % 6 === 0;
+        c = rayC ? mix(c, rayC, 0.36 * (1 - v * 0.4)) : shade(c, 0.88 + v * 0.06);
         if (joint) c = shade(c, 1.12);
         a = Math.min(1, Math.max(a, a0 * 0.9) + 0.12); h = 0.6;
       }
     } else {
       // membrane: slightly brighter mid-way between rays, a lit pixel line beside each ray
       c = shade(c, 0.97 + 0.06 * Math.sin(fr * Math.PI));
-      if (dRay < 1.5 && dRay >= 0.5) { c = shade(c, 1.06); h = 0.3; }
+      if (dRay < 1.5 && dRay >= 0.5) { c = shade(c, 1.04); h = 0.25; }
       a *= 0.92 + 0.08 * Math.cos(fr * Math.PI * 2);
     }
     if (f.over) { const o = f.over(u, v, c, i, j); if (o) { c = o; a = Math.max(a, 0.9); } }
