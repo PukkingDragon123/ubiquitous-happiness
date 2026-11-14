@@ -79,7 +79,7 @@ export function clearDungeonSave() { if (loadDungeonSave() || META.activeRun) { 
 /** the run's end, for flow / the result card: RunResult (the v2 card reads it) + the dungeon's own fields */
 export interface DungeonResult extends RunResult {
   won: boolean;
-  /** 0-based floor reached / floors in the run */
+  /** the floor reached, 1-based, and the floors in the run ("FLOOR 2/3") */
   floor: number; floors: number;
   kills: number;
   /** ids lost with the pack (death) */
@@ -925,7 +925,7 @@ export class DungeonScreen implements Screen {
     return {
       outcome: won ? 'victory' : 'dead', areaName: AREA_NAME(area), areaIdx: this.floorIdx, wave: this.tally.rooms, mastery: this.cfg.mastery,
       items, killer: won ? null : this.killer, tally: { ...this.tally },
-      won, floor: this.floorIdx, floors: this.floors.length, kills: this.tally.kills,
+      won, floor: this.floorIdx + 1, floors: this.floors.length, kills: this.tally.kills,
       packLost: won ? [] : items, mailed: [...this.mailed], broughtHome: won ? items : [],
     };
   }
