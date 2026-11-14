@@ -126,7 +126,7 @@ export class PixelUI {
   fixed: boolean;
   /** add to a Screen's overlays */
   layer: { scene: THREE.Scene; camera: THREE.Camera };
-  private cam = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
+  private cam = new THREE.OrthographicCamera(0, 1, 1, 0, -4000, 4000);
   private tex: THREE.CanvasTexture;
   private quad: THREE.Mesh;
   private targetH: number;
@@ -172,6 +172,8 @@ export class PixelUI {
     const g = new THREE.PlaneGeometry(1, 1); g.translate(0.5, -0.5, 0);
     this.quad = new THREE.Mesh(g, mat);
     this.quad.frustumCulled = false;
+    // the 2D canvas draws after any 3D objects sharing this layer (src/ui/obj/stage.ts): text sits on top
+    this.quad.renderOrder = 10;
     const scene = new THREE.Scene();
     scene.add(this.quad);
     this.layer = { scene, camera: this.cam };
