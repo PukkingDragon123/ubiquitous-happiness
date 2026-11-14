@@ -530,7 +530,8 @@ export class HideoutScreen implements Screen {
   /** a small painted wooden tag over a station: [E] WORD in reach, just the word when hovered from afar */
   private prompt(s: Station, inReach: boolean) {
     const b = this.stationBox(s); if (!b) { this.promptTag.hide(); return; }
-    const top = new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y + 0.15, s.id === 'trophy' ? 2.4 : 9), (b.min.z + b.max.z) / 2);
+    // at eye level over the piece (not above the top of tall things like the mirror or the niche)
+    const top = new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y, b.min.y + 1.45) + 0.2, (b.min.z + b.max.z) / 2);
     if (s.id === 'crab') top.y = b.max.y + 0.25;
     this.promptTag.show([{ text: s.label, key: inReach ? 'E' : undefined, color: inReach ? '#fff0c8' : '#d8c8a8' }]);
     this.promptTag.place(this.camera, top, this.game.post.h, [0, -4 + Math.round(Math.sin(this.t * 4) * 1.5)], this.game.dt);

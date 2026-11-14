@@ -96,7 +96,7 @@ export class Tag {
   place(cam: THREE.PerspectiveCamera, anchor: THREE.Vector3, internalH: number, off: [number, number] = [0, -10], dt = 1 / 60, align: 'bottom' | 'left' | 'right' = 'bottom') {
     if (!this.mesh.visible) return;
     this.pop = Math.min(1, this.pop + dt * 6);
-    const d = 1;
+    const d = Math.max(1, cam.near * 1.6);
     const th = Math.tan((cam.fov * Math.PI) / 360);
     const px = (2 * d * th) / internalH; // world metres per rendered pixel at distance d
     const ndc = anchor.clone().project(cam);

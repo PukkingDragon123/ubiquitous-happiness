@@ -187,12 +187,12 @@ type Build = (b: B, d: ItemDef) => void;
 const MODELS: Record<string, Build> = {
   // ================================================================ materials
   copperOre(b) {
-    b.add(rockGeo(0.32, 3, [1.1, 0.9, 0.85]), mOre('cu', ['#1e1a1c', '#3a3236', '#5a4e50', '#7c6c6a', '#a08c84'], COPPER));
-    for (const [x, y, z, s] of [[0.12, 0.14, 0.22, 0.11], [-0.18, 0.06, 0.2, 0.09], [0.02, -0.16, 0.24, 0.08], [0.22, -0.05, 0.12, 0.07]] as number[][]) b.add(rockGeo(s, 7 + x * 10, [1, 1, 1], 0, 0.3), M('cuNug', { color: '#d87a40', rough: 0.35, metal: 0.55 }), [x, y, z]);
+    b.add(rockGeo(0.32, 3, [1.1, 0.9, 0.85]), mOre('cu', ['#3a3034', '#5a4e50', '#7c6c6a', '#a08c84', '#c8b4a8'], COPPER));
+    for (const [x, y, z, s] of [[0.12, 0.14, 0.2, 0.14], [-0.18, 0.06, 0.18, 0.12], [0.02, -0.16, 0.22, 0.11], [0.22, -0.05, 0.1, 0.09]] as number[][]) b.add(rockGeo(s, 7 + x * 10, [1, 1, 1], 0, 0.3), M('cuNug', { color: '#e88a48', rough: 0.3, metal: 0.45, emissive: '#5a2010', emissiveK: 0.3 }), [x, y, z]);
     for (const [x, y, z] of [[-0.05, 0.2, 0.2], [0.24, 0.12, 0.08]] as V3[]) b.add(new THREE.OctahedronGeometry(0.05, 0), M('patina', { color: '#4ab88a', rough: 0.4, emissive: '#1a6a4a', emissiveK: 0.3 }), [x, y, z], [0.5, 0.3, 0.2], [1, 1.6, 1]);
   },
   ironOre(b) {
-    b.add(rockGeo(0.33, 11, [1.05, 0.85, 0.9], 0, 0.22), mOre('fe', ['#14141c', '#2a2c38', '#444858', '#626a7c', '#8a94a8'], ['#20242e', '#4a5262', '#8a94a8', '#c8d2e2', '#ffffff']));
+    b.add(rockGeo(0.33, 11, [1.05, 0.85, 0.9], 0, 0.22), mOre('fe', ['#2a2c38', '#444858', '#626a7c', '#8a94a8', '#b4bccc'], ['#20242e', '#4a5262', '#8a94a8', '#c8d2e2', '#ffffff']));
     for (const [x, y, z] of [[0.1, 0.12, 0.26], [-0.14, -0.08, 0.26], [0.2, -0.12, 0.18]] as V3[]) b.add(new THREE.BoxGeometry(0.07, 0.07, 0.05), mMetal('ironbit', T.steel, 0.6), [x, y, z], [0.4, 0.7, 0.2]);
   },
   goldNugget(b) {
@@ -200,7 +200,7 @@ const MODELS: Record<string, Build> = {
     b.add(rockGeo(0.12, 23, [1, 1, 1], 0, 0.3), M('goldN', { map: METAL('gold', GOLD), rough: 0.3, metal: 0.65 }), [0.24, -0.14, 0.05]);
   },
   riverStone(b) {
-    b.addSmooth(rockGeo(0.3, 31, [1.25, 0.72, 0.9], 1, 0.08), M('pebble', () => ({ map: STONE('pebble', T.slate.map((c, i) => i ? c : '#14161e'), 4), rough: 0.6, smooth: true })));
+    b.addSmooth(rockGeo(0.3, 31, [1.25, 0.72, 0.9], 1, 0.08), M('pebble', () => ({ map: STONE('pebble', ['#3a3640', '#5e5a66', '#86828c', '#aeaab2', '#d6d2d8'], 4), rough: 0.6, smooth: true })));
     b.add(cyl(0.302, 0.302, 0.03, 12), mFlat('#d8d4cc', 0.6), [0, 0.02, 0], [0.2, 0, 1.4], [1.22, 1, 0.88]);
   },
   lodestone(b) {

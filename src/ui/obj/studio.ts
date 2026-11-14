@@ -26,11 +26,12 @@ function renderer(): THREE.WebGLRenderer | null {
 
 const scene = new THREE.Scene();
 const cam = new THREE.PerspectiveCamera(26, 1, 0.05, 100);
-const key = new THREE.DirectionalLight('#fff1dc', 3.0);
-const rim = new THREE.DirectionalLight('#ffc890', 2.0);
-const fill = new THREE.HemisphereLight('#d8e8ff', '#6a5040', 1.2);
-key.position.set(-1.2, 1.8, 2.2); rim.position.set(1.6, 0.8, -1.6);
-scene.add(key, rim, fill);
+const key = new THREE.DirectionalLight('#fff1dc', 3.4);
+const rim = new THREE.DirectionalLight('#ffc890', 2.2);
+const front = new THREE.DirectionalLight('#e8f0ff', 1.1);
+const fill = new THREE.HemisphereLight('#e8f0ff', '#7a6050', 1.9);
+key.position.set(-1.2, 1.8, 2.2); rim.position.set(1.6, 0.8, -1.6); front.position.set(0.3, 0.2, 2);
+scene.add(key, rim, front, fill);
 
 const _box = new THREE.Box3(), _v = new THREE.Vector3();
 
