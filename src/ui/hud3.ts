@@ -83,12 +83,58 @@ export interface HudData {
   /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
   skills?: SkillHudState | null;
   /** the diving depth gauge: metres now, the deepest ever (red marker); floorMax = the dial's full scale */
-  depth?: { m: number; record: number; floorMax?: number } | null;
+  depth?: { m: number; record: number; floorMax?: number; floorTop?: number; floorBottom?: number; zone?: string; descending?: boolean } | null;
   /** hide everything but title cards (cutscenes) */
   hidden?: boolean;
 }
 
 const C = { white: '#f6f1e6', ink: '#06080e' };
+
+/**
+ * The HUD is laid out in a 360-row DESIGN space and drawn at the finer UI density (~540 rows): 3D pieces scale up
+ * by k, 2D text stays at its native pixel size (so it reads finer and crisper), positions are multiplied by k.
+ */
+class DUi {
+  k = 1;
+  constructor(public ui: PixelUI) {}
+  get w() { return this.ui.w / this.k; }
+  get h() { return this.ui.h / this.k; }
+  get mx() { return this.ui.mx / this.k; }
+  get my() { return this.ui.my / this.k; }
+  text(str: string, x: number, y: number, o: Parameters<PixelUI['text']>[3] = {}) { return this.ui.text(str, Math.round(x * this.k), Math.round(y * this.k), o) / this.k; }
+  measure(str: string, f?: Parameters<PixelUI['measure']>[1]) { return this.ui.measure(str, f) / this.k; }
+  img(c: HTMLCanvasElement, x: number, y: number, o?: Parameters<PixelUI['img']>[3]) { this.ui.img(c, Math.round(x * this.k), Math.round(y * this.k), o); }
+  hover(x: number, y: number, w: number, h: number) { return this.ui.hover(x * this.k, y * this.k, w * this.k, h * this.k); }
+}
+
+/** an engraved brass page (canvas): polished band, an engraved border with corner rosettes, patina in the cuts */
+function brassPage(w: number, h: number, label?: string): HTMLCanvasElement {
+  const cv = document.createElement('canvas'); cv.width = Math.max(4, Math.round(w)); cv.height = Math.max(4, Math.round(h));
+  const x = cv.getContext('2d')!, W = cv.width, H = cv.height;
+  const f = (px: number, py: number, ww: number, hh: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, ww, hh); };
+  f(0, 0, W, H, '#c88a2a');
+  for (let yy = 0; yy < H; yy++) { const k = yy / H; f(0, yy, W, 1, k < 0.18 ? '#f0c060' : k < 0.3 ? '#e0a840' : k > 0.82 ? '#9a6418' : '#c88a2a'); }
+  f(0, Math.round(H * 0.22), W, 1, '#fff0b0');
+  f(0, 0, W, 1, '#5a3a0c'); f(0, H - 1, W, 1, '#3a2408'); f(0, 0, 1, H, '#5a3a0c'); f(W - 1, 0, 1, H, '#3a2408');
+  if (W > 10 && H > 8) {
+    for (let px = 3; px < W - 3; px++) { f(px, 2, 1, 1, px % 2 ? '#7a5010' : '#a87020'); f(px, H - 3, 1, 1, px % 2 ? '#7a5010' : '#a87020'); }
+    for (let py = 3; py < H - 3; py++) { f(2, py, 1, 1, '#7a5010'); f(W - 3, py, 1, 1, '#7a5010'); }
+    for (const [cx, cy] of [[2, 2], [W - 3, 2], [2, H - 3], [W - 3, H - 3]]) { f(cx - 1, cy, 3, 1, '#5a8a6a'); f(cx, cy - 1, 1, 3, '#5a8a6a'); f(cx, cy, 1, 1, '#fff0b0'); }
+  }
+  if (label) {
+    drawText(x, label, W / 2 + 1, Math.round((H - 7) / 2) + 1, { font: 'small', color: '#fff0b0', shadow: null, align: 'center' });
+    drawText(x, label, W / 2, Math.round((H - 7) / 2), { font: 'small', color: '#3a2008', shadow: null, align: 'center' });
+  }
+  return cv;
+}
+const brassTexCache = new Map<string, THREE.CanvasTexture>();
+const drawTextWidth = (s: string) => { const c = document.createElement('canvas').getContext('2d')!; c.font = "16px 'M5x7'"; return Math.ceil(c.measureText(s).width); };
+function brassTex(w: number, h: number, label?: string) {
+  const k = `${w}|${h}|${label ?? ''}`;
+  let t = brassTexCache.get(k);
+  if (!t) { t = new THREE.CanvasTexture(brassPage(w, h, label)); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; brassTexCache.set(k, t); }
+  return t;
+}
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
@@ -133,7 +179,7 @@ class Heart3D {
 /** a horizontal glass tube with a glowing liquid inside (stamina: seawater; mana: a cut-crystal vial) */
 class Tube3D {
   root = new THREE.Group();
-  private liquid: THREE.Mesh; private chip: THREE.Mesh; private liqMat: THREE.MeshStandardMaterial;
+  private liquid: THREE.Mesh; private chip: THREE.Mesh; private liqMat: THREE.MeshStandardMaterial; private meniscus!: THREE.Mesh;
   private bubbles: THREE.Mesh[] = [];
   readonly len: number; private r: number;
   constructor(len: number, r: number, color: string, crystal = false) {
@@ -142,11 +188,18 @@ class Tube3D {
     const glass = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, sides, 1, true), glassMat()); glass.rotation.z = Math.PI / 2;
     this.liqMat = new THREE.MeshStandardMaterial({ color, roughness: 0.25, emissive: color, emissiveIntensity: 0.35, flatShading: crystal });
     this.liquid = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, 1, sides), this.liqMat); this.liquid.rotation.z = Math.PI / 2;
+    this.meniscus = new THREE.Mesh(new THREE.SphereGeometry(r * 0.78, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, transparent: true, opacity: 0.55, emissive: color, emissiveIntensity: 0.4 }));
+    this.meniscus.rotation.z = -Math.PI / 2; this.meniscus.scale.y = 0.35; this.root.add(this.meniscus);
     this.chip = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.76, r * 0.76, 1, sides), new THREE.MeshStandardMaterial({ color: '#fff4d8', emissive: '#fff0c0', emissiveIntensity: 0.5, transparent: true, opacity: 0.7 })); this.chip.rotation.z = Math.PI / 2;
     for (const sx of [-1, 1]) {
-      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.25, r * 1.25, r * 1.1, 10), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : brassMat);
-      cap.rotation.z = sx * Math.PI / 2; cap.position.x = sx * (len / 2 + (crystal ? r * 0.9 : r * 0.3));
+      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.3, r * 1.3, r * 1.4, 12), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : new THREE.MeshStandardMaterial({ map: brassTex(24, 8), roughness: 0.35, metalness: 0.6 }));
+      cap.rotation.z = sx * Math.PI / 2; cap.position.x = sx * (len / 2 + (crystal ? r * 0.9 : r * 0.45));
       this.root.add(cap);
+      if (!crystal) {
+        // a collar band and a domed screw cap with a rivet
+        const band = new THREE.Mesh(new THREE.TorusGeometry(r * 1.32, r * 0.18, 4, 14), brassMat); band.rotation.y = Math.PI / 2; band.position.x = sx * (len / 2 - r * 0.15); this.root.add(band);
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 1.0, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), brassMat); dome.rotation.z = -sx * Math.PI / 2; dome.position.x = sx * (len / 2 + r * 1.15); dome.scale.y = 0.5; this.root.add(dome);
+      }
     }
     for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(r * 0.22, 5, 4), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 })); this.bubbles.push(b); this.root.add(b); }
     const inner = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.86, r * 0.86, len, sides), new THREE.MeshStandardMaterial({ color: '#0c1a24', roughness: 0.6 })); inner.rotation.z = Math.PI / 2; inner.position.z = -r * 0.2;
@@ -157,6 +210,7 @@ class Tube3D {
     if (color) { this.liqMat.color.set(color); this.liqMat.emissive.set(color); }
     const L = this.len, w = Math.max(0.001, L * clamp01(v)), cw = Math.max(0.001, L * clamp01(chip));
     this.liquid.scale.y = w; this.liquid.position.x = -L / 2 + w / 2; this.liquid.visible = v > 0.002;
+    this.meniscus.visible = v > 0.01 && v < 0.995; this.meniscus.position.x = -L / 2 + w + Math.sin(t * 9) * 0.15;
     this.chip.scale.y = Math.max(0.001, cw - w); this.chip.position.x = -L / 2 + w + (cw - w) / 2; this.chip.visible = cw > w + 0.3;
     this.bubbles.forEach((b, i) => { const k = (t * 0.35 + i * 0.27) % 1; b.position.set(-L / 2 + ((i * 0.31 + t * 0.05) % 1) * w, (k - 0.5) * this.r * 1.2, this.r * 0.2); b.visible = v > 0.05; });
   }
@@ -165,7 +219,7 @@ class Tube3D {
 /** a kelp-tea bottle that sloshes and empties */
 class Flask3D {
   root = new THREE.Group();
-  private liq: THREE.Mesh;
+  private liq: THREE.Mesh; private surf: THREE.Mesh;
   private full = 1; private slosh = 0; private t = Math.random() * 6;
   constructor() {
     const prof = [[0, -0.42], [0.3, -0.38], [0.36, -0.1], [0.28, 0.16], [0.12, 0.26], [0.12, 0.42], [0, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
@@ -173,7 +227,16 @@ class Flask3D {
     this.liq = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 6, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: '#3a9a1a', roughness: 0.2, emissive: '#2a8a14', emissiveIntensity: 0.45 }));
     this.liq.position.y = -0.1;
     const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.14, 8), new THREE.MeshStandardMaterial({ color: '#b07a44', roughness: 0.9, flatShading: true })); cork.position.y = 0.48;
-    this.root.add(this.liq, glass, cork);
+    this.surf = new THREE.Mesh(new THREE.CircleGeometry(0.3, 12), new THREE.MeshStandardMaterial({ color: '#8ae860', roughness: 0.15, emissive: '#4ab830', emissiveIntensity: 0.5, side: THREE.DoubleSide }));
+    this.surf.rotation.x = -Math.PI / 2;
+    const lc = document.createElement('canvas'); lc.width = 24; lc.height = 10; const lx = lc.getContext('2d')!;
+    lx.fillStyle = '#efe0b8'; lx.fillRect(0, 0, 24, 10); lx.fillStyle = '#b89a6a'; lx.fillRect(0, 0, 24, 1); lx.fillRect(0, 9, 24, 1);
+    lx.fillStyle = '#3a8a2a'; lx.fillRect(10, 2, 4, 6); lx.fillRect(9, 3, 1, 3); lx.fillRect(14, 3, 1, 3); lx.fillStyle = '#1a4a14'; lx.fillRect(11, 3, 1, 5);
+    const lt = new THREE.CanvasTexture(lc); lt.magFilter = THREE.NearestFilter; lt.minFilter = THREE.NearestFilter; lt.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.18, 12, 1, true, -0.9, 1.8), new THREE.MeshStandardMaterial({ map: lt, roughness: 0.9, side: THREE.DoubleSide }));
+    label.position.y = -0.08;
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 4, 10), new THREE.MeshStandardMaterial({ color: '#c8a060', roughness: 0.9 })); tie.rotation.x = Math.PI / 2; tie.position.y = 0.32;
+    this.root.add(this.liq, this.surf, glass, label, cork, tie);
   }
   update(dt: number, level: number) {
     this.t += dt;
@@ -183,6 +246,8 @@ class Flask3D {
     this.liq.visible = this.full > 0.03;
     this.liq.scale.set(1, Math.max(0.05, this.full), 1);
     this.liq.position.y = -0.36 + this.full * 0.26;
+    this.surf.visible = this.full > 0.05 && this.full < 0.98;
+    this.surf.position.y = -0.4 + this.full * 0.5; this.surf.scale.setScalar(0.6 + Math.sin(Math.min(1, this.full) * Math.PI) * 0.45);
     this.root.rotation.z = Math.sin(this.t * 7) * 0.18 * this.slosh + Math.sin(this.t * 1.3) * 0.03;
     this.liq.rotation.z = -this.root.rotation.z * 1.6;
   }
@@ -191,8 +256,8 @@ class Flask3D {
 /** a little brass plaque the counts are printed on (the number itself is 2D text on top) */
 function plaque(w: number, h: number): THREE.Group {
   const g = new THREE.Group();
-  const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2), brassMat); g.add(p);
-  const inset = new THREE.Mesh(new THREE.BoxGeometry(w - 3, h - 3, 0.6), darkBrass); inset.position.z = 1.1; g.add(inset);
+  const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2), [brassMat, brassMat, brassMat, brassMat, new THREE.MeshStandardMaterial({ map: brassTex(w * 2, h * 2), roughness: 0.4, metalness: 0.5 }), brassMat]); g.add(p);
+  const inset = new THREE.Mesh(new THREE.BoxGeometry(w - 5, h - 5, 0.6), darkBrass); inset.position.z = 1.1; g.add(inset);
   for (const sx of [-1, 1]) { const r = new THREE.Mesh(new THREE.SphereGeometry(0.9, 6, 4), brassMat); r.position.set(sx * (w / 2 - 1.6), 0, 1.2); g.add(r); }
   return g;
 }
@@ -204,12 +269,15 @@ class ScrollMap {
   private tex: THREE.CanvasTexture;
   private paper: THREE.Mesh;
   private rollers: THREE.Group[] = [];
-  private W = 0; private H = 0;
+  private W = 0; private H = 0; private res = 1;
+  private plate: THREE.Mesh; private plateName = '';
   constructor() {
     this.tex = new THREE.CanvasTexture(this.cv);
     this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
     this.paper = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 12, 1), new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.95 }));
     this.root.add(this.paper);
+    this.plate = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1.6), new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.5 }));
+    this.root.add(this.plate);
     for (let i = 0; i < 2; i++) {
       const r = new THREE.Group();
       const rod = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 1, 10), new THREE.MeshStandardMaterial({ color: '#d8c49a', roughness: 0.9, flatShading: true }));
@@ -218,10 +286,20 @@ class ScrollMap {
       this.rollers.push(r); this.root.add(r);
     }
   }
-  layout(W: number, H: number) {
-    if (W === this.W && H === this.H) return;
-    this.W = W; this.H = H;
-    this.cv.width = W; this.cv.height = H;
+  /** the area name engraved on a brass plate riveted to the top of the left roller */
+  setName(name: string, k: number) {
+    if (name === this.plateName) return;
+    this.plateName = name;
+    const tw = Math.ceil((drawTextWidth(name) + 12) / k), th = Math.ceil(13 / k);
+    const m = this.plate.material as THREE.MeshStandardMaterial;
+    m.map = brassTex(Math.round(tw * k), Math.round(th * k), name); m.needsUpdate = true;
+    this.plate.scale.set(tw, th, 1);
+    this.plate.position.set(-this.W / 2 + tw / 2 - 2, this.H / 2 + th / 2 + 1, 3);
+  }
+  layout(W: number, H: number, res = 1) {
+    if (W === this.W && H === this.H && res === this.res) return;
+    this.W = W; this.H = H; this.res = res; this.plateName = '';
+    this.cv.width = Math.round(W * res); this.cv.height = Math.round(H * res);
     this.tex.dispose(); this.tex = new THREE.CanvasTexture(this.cv);
     this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
     (this.paper.material as THREE.MeshStandardMaterial).map = this.tex;
@@ -239,13 +317,15 @@ class ScrollMap {
     let k = 0; for (const r of this.rollers) r.children.forEach((c) => { if (c.name === 'knob') { c.position.y = (k++ % 2 ? 1 : -1) * (H / 2 + 5.5); } });
   }
   draw(m: StripMap, t: number) {
-    const x = this.cv.getContext('2d')!, W = this.W, H = this.H;
+    const x = this.cv.getContext('2d')!, W = this.cv.width, H = this.cv.height;
     const f = (px: number, py: number, w: number, h: number, c: string, a = 1) => { x.globalAlpha = a; x.fillStyle = c; x.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); x.globalAlpha = 1; };
     const L = Math.max(1e-6, m.length);
     const X = (v: number) => 2 + Math.round(clamp01(v / L) * (W - 5));
-    // parchment
+    // parchment: laid lines, fibres, a couple of tea stains, scorched edges
     f(0, 0, W, H, '#e8d4a6');
     for (let yy = 0; yy < H; yy += 3) f(0, yy, W, 1, '#e0c898', 0.5);
+    for (let i = 0; i < W * 0.6; i++) { const fx = (i * 37) % W, fy = (i * 53) % H; f(fx, fy, 2 + (i % 3), 1, i % 2 ? '#d8c090' : '#f2e2bc', 0.7); }
+    for (const [sx, sy, sr] of [[W * 0.18, H * 0.3, 6], [W * 0.66, H * 0.7, 8]]) { x.globalAlpha = 0.18; x.strokeStyle = '#8a5a20'; x.beginPath(); x.ellipse(sx, sy, sr, sr * 0.6, 0, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 0.08; x.fillStyle = '#a07030'; x.fill(); x.globalAlpha = 1; }
     f(0, 0, W, 1, '#c8a870'); f(0, H - 1, W, 1, '#a88a58');
     // water (light wash), upper lanes, seabed, caves, in ink tones
     for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 2, X(ln.x1) - X(ln.x0), 6, '#b8d0c8', 0.8);
@@ -331,7 +411,7 @@ class DepthGauge {
   root = new THREE.Group();
   private face: THREE.Mesh; private faceCv = document.createElement('canvas'); private faceTex: THREE.CanvasTexture;
   private needle = new THREE.Group(); private rec = new THREE.Group(); private glint: THREE.Mesh;
-  private ang = 0; private angV = 0; private scaleMax = 0; private lastTen = -1; private prevM = 0;
+  private ang = 0; private angV = 0; private scaleMax = 0; private faceRes = 0; private lastTen = -1; private prevM = 0;
   readonly R = 24;
   constructor() {
     const R = this.R;
@@ -341,6 +421,7 @@ class DepthGauge {
     const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(0, R + 6, 0);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(3.4, 1.1, 4, 10), brassMat); ring.position.set(0, R + 11, 0);
     this.faceCv.width = this.faceCv.height = R * 2;
+    this.faceRes = 1;
     this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace;
     this.face = new THREE.Mesh(new THREE.CircleGeometry(R, 28), new THREE.MeshStandardMaterial({ map: this.faceTex, roughness: 0.7 }));
     this.face.position.z = 0.5;
@@ -362,8 +443,10 @@ class DepthGauge {
     this.root.add(back, bezel, crown, ring, this.face, this.rec, this.needle, glass, this.glint);
   }
   /** the engraved face: metre scale on a 270-degree sweep, major ticks with numbers, minor ticks */
-  private paintFace(max: number) {
-    const R = this.R, c = this.faceCv.getContext('2d')!, S = R * 2;
+  private paintFace(max: number, res: number) {
+    const S = Math.round(this.R * 2 * res), R = S / 2;
+    if (this.faceCv.width !== S) { this.faceCv.width = this.faceCv.height = S; this.faceTex.dispose(); this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace; (this.face.material as THREE.MeshStandardMaterial).map = this.faceTex; (this.face.material as THREE.MeshStandardMaterial).needsUpdate = true; }
+    const c = this.faceCv.getContext('2d')!;
     c.fillStyle = '#ece0c4'; c.fillRect(0, 0, S, S);
     const g = c.createRadialGradient(R - 6, R - 8, 2, R, R, R); g.addColorStop(0, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(90,60,30,0.35)');
     c.fillStyle = g; c.fillRect(0, 0, S, S);
@@ -375,13 +458,18 @@ class DepthGauge {
       c.strokeStyle = major ? '#1a1008' : '#6a5440'; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
     }
     c.fillStyle = '#7a1414'; c.beginPath(); c.arc(R, R, R - 3, (-45) * Math.PI / 180, (45) * Math.PI / 180); c.arc(R, R, R - 5, (45) * Math.PI / 180, (-45) * Math.PI / 180, true); c.fill();
-    for (const k of [0, 1]) { const [x, y] = at(k, R - 9); drawText(c, String(Math.round(max * k)), x, y - 4, { font: 'small', color: '#1a1008', shadow: null, align: 'center' }); }
-    drawText(c, 'M', R, R - 12, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
+    for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R - 15); drawText(c, String(Math.round(max * k)), x, y - 4, { font: 'small', color: '#1a1008', shadow: null, align: 'center' }); }
+    drawText(c, 'DEPTH', R, R + 9, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
+    // the maker's engraved ring and a hairline inner bezel
+    c.strokeStyle = '#8a7050'; c.lineWidth = 1; c.beginPath(); c.arc(R, R, R - 1.5, 0, Math.PI * 2); c.stroke();
     this.faceTex.needsUpdate = true;
   }
-  update(dt: number, t: number, d: { m: number; record: number; floorMax?: number }) {
-    const max = Math.max(10, d.floorMax ?? Math.ceil((Math.max(d.m, d.record) + 1) / 100) * 100);
-    if (max !== this.scaleMax) { this.scaleMax = max; this.paintFace(max); }
+  update(dt: number, t: number, d: NonNullable<HudData['depth']>, res = 1) {
+    // full scale: the bottom of this floor's shaft, rounded up to a clean number
+    const span = d.floorBottom ?? d.floorMax ?? Math.max(d.m, d.record) + 1;
+    const step = span <= 100 ? 20 : span <= 400 ? 50 : 100;
+    const max = Math.max(step, Math.ceil(span / step) * step);
+    if (max !== this.scaleMax || res !== this.faceRes) { this.scaleMax = max; this.faceRes = res; this.paintFace(max, res); }
     const toAng = (m: number) => (-135 + 270 * Math.max(0, Math.min(1, m / max))) * Math.PI / 180;
     // the needle chases the depth on a spring, and wobbles while you sink
     const sink = (d.m - this.prevM) / Math.max(1e-3, dt); this.prevM = d.m;
@@ -415,7 +503,7 @@ export class Hud {
   private scroll = new ScrollMap();
   private boss = new BossPlaque();
   private gauge = new DepthGauge();
-  private gaugePlaque = plaque(34, 11);
+  private gaugePlaque = plaque(40, 14);
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
   private ribbon = new THREE.Group();
@@ -429,7 +517,7 @@ export class Hud {
   constructor() {
     const S = this.stage;
     S.ui.add(this.avatar.root, this.avatarShadow);
-    this.avatar.root.scale.setScalar(25);
+    this.avatar.root.scale.setScalar(28);
     this.avatarShadow.rotation.x = -1.2;
     S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque);
     this.pouch.scale.multiplyScalar(13);
@@ -466,9 +554,14 @@ export class Hud {
   }
 
   /** draw into any PixelUI between its begin() and end() */
-  drawInto(ui: PixelUI, dt: number, s: HudData) {
+  private d: DUi | null = null;
+  drawInto(pui: PixelUI, dt: number, s: HudData) {
     this.t += dt;
-    this.stage.attach(ui);
+    this.stage.attach(pui);
+    if (!this.d || this.d.ui !== pui) this.d = new DUi(pui);
+    const ui = this.d;
+    ui.k = Math.max(1, pui.h / 360);
+    this.stage.ui.scale.setScalar(ui.k);
     this.animate(dt, s);
     const on = !s.hidden;
     for (const o of this.stage.ui.children) o.visible = on || o === this.ribbon;
@@ -519,11 +612,11 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- top left: the blobfish + jelly hearts
-  private healthRow(_ui: PixelUI, dt: number, s: HudData) {
+  private healthRow(_ui: DUi, dt: number, s: HudData) {
     const S = this.stage;
     const frac = s.maxHp > 0 ? clamp01(s.hp / s.maxHp) : 0;
     this.avatar.update(dt, frac, s.hp > 0 && s.hp <= 2);
-    S.put(this.avatar.root, 26, 30, 20);
+    S.put(this.avatar.root, 27, 30, 20);
     S.put(this.avatarShadow, 26, 47, -5);
     const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2), total = red + soul;
     while (this.hearts.length < total) { const h = new Heart3D(); h.root.scale.setScalar(12); S.ui.add(h.root); this.hearts.push(h); }
@@ -544,7 +637,7 @@ export class Hud {
     });
   }
 
-  private bars(ui: PixelUI, dt: number, s: HudData): number {
+  private bars(ui: DUi, dt: number, s: HudData): number {
     const S = this.stage, c = s.combat;
     let y = 32 + Math.floor(Math.max(0, Math.ceil(s.maxHp / 2) + Math.ceil((s.soul ?? 0) / 2) - 1) / 10) * 14;
     this.stamina.root.visible = !!c && c.staminaMax > 0;
@@ -571,7 +664,7 @@ export class Hud {
     return y + (n ? 20 : 4);
   }
 
-  private counterCol(ui: PixelUI, dt: number, s: HudData, y0: number) {
+  private counterCol(ui: DUi, dt: number, s: HudData, y0: number) {
     const S = this.stage;
     let y = Math.max(y0, 66);
     for (const k of ['pearls', 'keys', 'bombs'] as const) {
@@ -596,16 +689,16 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- top right: the parchment strip map
-  private strip(ui: PixelUI, m: StripMap | null) {
+  private strip(ui: DUi, m: StripMap | null) {
     this.scroll.root.visible = !!m;
     if (!m) return;
     const W = Math.max(150, Math.min(240, Math.round(ui.w * 0.3))), H = 30;
-    this.scroll.layout(W, H);
+    this.scroll.layout(W, H, ui.k);
+    this.scroll.setName((m.name ?? '').toUpperCase(), ui.k);
     this.scroll.draw(m, this.t);
     const cx = ui.w - W / 2 - 14, cy = 26 + H / 2;
     this.stage.put(this.scroll.root, cx, cy, 0);
     this.scroll.root.rotation.x = -0.12;
-    if (m.name) ui.text(m.name.toUpperCase(), cx - W / 2, cy - H / 2 - 13, { font: 'small', color: '#f0e6d0', outline: C.ink });
     const fl = `FLOOR ${m.floor}/${m.floors}`;
     const tw = ui.measure(fl, 'small');
     ui.text(fl, cx + W / 2, cy + H / 2 + 6, { font: 'small', color: '#f0e6d0', outline: C.ink, align: 'right' });
@@ -613,19 +706,20 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- the depth gauge (under the strip map)
-  private depthGauge(ui: PixelUI, dt: number, d: HudData['depth'], hasStrip: boolean) {
+  private depthGauge(ui: DUi, dt: number, d: HudData['depth'], hasStrip: boolean) {
     this.gauge.root.visible = this.gaugePlaque.visible = !!d;
     if (!d) return;
     const x = ui.w - 40, y = hasStrip ? 102 : 40;
-    this.gauge.update(dt, this.t, d);
+    this.gauge.update(dt, this.t, d, ui.k);
     this.gauge.root.rotation.set(-0.08, -0.12 + Math.sin(this.t * 0.6) * 0.03, Math.sin(this.t * 1.1) * 0.02);
     this.stage.put(this.gauge.root, x, y, 10);
-    this.stage.put(this.gaugePlaque, x, y + 36, 6);
-    ui.text(`${Math.floor(d.m)} M`, x, y + 31, { font: 'small', color: '#fff0d0', outline: '#2a1606', align: 'center' });
+    this.stage.put(this.gaugePlaque, x, y + 37, 6);
+    // the depth, once: on the plaque under the gauge
+    ui.text(`${Math.round(d.m)} M`, x, y + 32, { font: 'body', color: d.descending ? '#bff4ff' : '#fff0d0', outline: '#2a1606', align: 'center' });
   }
 
   // ---------------------------------------------------------------- bottom centre: the boss plaque
-  private bossBar(ui: PixelUI, dt: number, b: BossBar | null) {
+  private bossBar(ui: DUi, dt: number, b: BossBar | null) {
     this.boss.root.visible = !!b;
     if (!b) return;
     const ease = 1 - (1 - this.bossIn) ** 3;
@@ -640,7 +734,7 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- bottom left: the hand of skill cards
-  private hand(ui: PixelUI, dt: number, sk: SkillHudState | null) {
+  private hand(ui: DUi, dt: number, sk: SkillHudState | null) {
     const ids = (sk?.slots ?? []).map((x) => x?.id ?? '');
     if (ids.join('|') !== this.cardIds.join('|')) {
       for (const c of this.cards) c.root.removeFromParent();
@@ -666,7 +760,7 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- title cards / pickup streaks
-  private drawCards(ui: PixelUI, dt: number) {
+  private drawCards(ui: DUi, dt: number) {
     for (const c of this.cardsT) c.t += dt;
     for (const c of this.cardsT) if (c.t >= c.life && c.model) c.model.removeFromParent();
     this.cardsT = this.cardsT.filter((c) => c.t < c.life);

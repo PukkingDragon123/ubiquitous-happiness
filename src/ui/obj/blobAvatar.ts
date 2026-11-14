@@ -8,6 +8,7 @@
 //   dead         flops, eyes closed
 import * as THREE from 'three';
 import { BlobModel } from '../../player/blobModel';
+import { retro } from '../../gfx/retro';
 
 const TAU = Math.PI * 2;
 
@@ -47,6 +48,8 @@ export class BlobAvatar {
       m.root.rotation.y = -0.62;
       this.bob.add(m.root);
       this.model = m;
+      // the HUD renders at full canvas resolution: no PS1 vertex snapping to the world's low-res grid here
+      m.root.traverse((o) => { const me = o as THREE.Mesh; if (!me.isMesh) return; for (const mt of Array.isArray(me.material) ? me.material : [me.material]) retro(mt, { snap: 0 }); });
     } catch (e) {
       console.warn('[hud] blob avatar failed', e);
     }
