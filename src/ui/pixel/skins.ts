@@ -37,6 +37,8 @@ class Img {
 
 // ------------------------------------------------------------------ painters (flat tones only: every pixel is part of a shape)
 const OUT = hx('#140a06');
+/** a small integer hash (deterministic placement of knots, nails, fibres and stains: deliberate, never noise) */
+const hh = (a: number, b: number, c = 0) => { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; };
 const WF = ['#4a2412', '#6e3a1c', '#8f5428', '#b06e38', '#d08c50'].map(hx); // frame planks
 const WI = ['#26120a', '#3a1e10', '#4c2a16', '#5e3820'].map(hx);             // inner boards
 const IRON = ['#1c1c24', '#3a3a46', '#5c5c6c', '#9a9aaa'].map(hx);
@@ -76,6 +78,21 @@ function paintWood(w: number, h: number) {
     if (jx === joint) t = 0; else if (jx === joint + 1 && ry > 0) t = 3;
     if (ry === 5 && (x + row * 7) % 19 < 8) t = Math.max(0, t - 1); // grain stroke
     im.set(x, y, WI[t]);
+  }
+  // detail: long grain lines along the frame planks, a few knots, worn (lighter) chips on the lit outer edge,
+  // nail heads along the inner boards' joints
+  if (w > 40 && h > 30) {
+    for (let x = F + 6; x < w - F - 6; x++) {
+      if ((x * 7) % 23 < 15) im.set(x, 3, WF[(x >> 3) % 2 ? 2 : 1]);
+      if ((x * 5) % 19 < 12) im.set(x, h - 4, WF[0]);
+      if (hh(x, 1) < 0.05) { im.set(x, 1, WF[4]); im.set(x + 1, 1, WF[4]); }
+    }
+    for (let y = F + 6; y < h - F - 6; y++) { if ((y * 7) % 23 < 15) im.set(3, y, WF[1]); if ((y * 5) % 19 < 12) im.set(w - 4, y, WF[0]); if (hh(1, y) < 0.05) im.set(1, y, WF[4]); }
+    for (let k = 0; k < Math.floor(w / 70); k++) {
+      const kx = Math.floor(F + 14 + hh(k, 7) * (w - 2 * F - 28)), ky = F + 3 + Math.floor(hh(k, 9) * Math.max(1, h - 2 * F - 10));
+      for (const [dx, dy, t] of [[0, 0, 0], [1, 0, 0], [-1, 0, 1], [2, 0, 1], [0, -1, 1], [1, 1, 1], [0, 1, 2], [1, -1, 2]] as const) { const px = kx + dx, py = ky + dy; if (px > F && py > F && px < w - F - 1 && py < h - F - 1) im.set(px, py, WI[t]); }
+    }
+    for (let x = F + 10; x < w - F - 8; x += 40) for (const y of [F + 3, h - F - 4]) { im.set(x, y, hx('#a8a4b0')); im.set(x + 1, y + 1, hx('#2a2830')); im.set(x + 1, y, hx('#5a5866')); im.set(x, y + 1, hx('#5a5866')); }
   }
   // iron corner brackets + rivets
   for (const [cx, cy, sx, sy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]] as const) {
@@ -137,8 +154,16 @@ function paintPaper(w: number, h: number) {
     if (dm === 0) { im.set(x, y, ink); continue; }
     if (x === 1 || y === 1) { im.set(x, y, lit); continue; }
     if (x === w - 2 || y === h - 2) { im.set(x, y, sh); continue; }
+    // torn bottom edge: a few bites out of the paper
+    if (y >= h - 3 && hh(x >> 1, 3) < 0.18) continue;
+    // scorched corners
+    const cd = Math.min(x + y, (w - 1 - x) + (h - 1 - y), x + (h - 1 - y));
+    if (cd < 6) { im.set(x, y, cd < 3 ? hx('#6a4a24') : hx('#b48a54')); continue; }
     im.set(x, y, base);
   }
+  // fibres (short horizontal strands) and two faint tea stains as rings
+  for (let i = 0; i < Math.floor((w * h) / 90); i++) { const fx = 3 + Math.floor(hh(i, 11) * (w - 8)), fy = 3 + Math.floor(hh(i, 13) * (h - 6)), len = 2 + Math.floor(hh(i, 17) * 3); for (let k = 0; k < len; k++) if (im.alpha(fx + k, fy)) im.set(fx + k, fy, hh(i, 19) < 0.5 ? hx('#e4d09e') : hx('#f8ecca')); }
+  if (w > 50 && h > 30) for (const [sx, sy, r] of [[w * 0.72, h * 0.3, 7], [w * 0.2, h * 0.75, 5]]) for (let a = 0; a < 40; a++) { const t = (a / 40) * Math.PI * 2; const px = Math.round(sx + Math.cos(t) * r), py = Math.round(sy + Math.sin(t) * r * 0.7); if (im.alpha(px, py)) im.set(px, py, hx('#dcc28e')); }
   return im.done();
 }
 
@@ -164,8 +189,10 @@ function paintDark(w: number, h: number) {
     const dm = Math.min(x, y, w - 1 - x, h - 1 - y);
     if (dm === 0) { im.set(x, y, hx('#02040a')); continue; }
     if (dm === 1) { im.set(x, y, y === 1 ? hx('#4a5a74') : y === h - 2 ? hx('#0a0e16') : hx('#26303f')); continue; }
-    im.set(x, y, hx('#111a28'), 232);
+    if (dm === 3 && w > 30 && h > 20) { im.set(x, y, (x + y) % 2 ? hx('#8a6a32') : hx('#6a5024'), 235); continue; }
+    im.set(x, y, y < 8 ? hx('#162236') : hx('#111a28'), 232);
   }
+  if (w > 30 && h > 20) for (const [cx, cy] of [[3, 3], [w - 4, 3], [3, h - 4], [w - 4, h - 4]]) { im.set(cx, cy, hx('#f0d080')); im.set(cx + 1, cy, hx('#a07a30')); im.set(cx, cy + 1, hx('#a07a30')); im.set(cx + 1, cy + 1, hx('#4a3410')); }
   return im.done();
 }
 
@@ -201,9 +228,12 @@ function paintPlaque(w: number, h: number) {
     if (dm === 0) { im.set(x, y, OUT); continue; }
     let t = y < h / 2 ? 3 : 2;
     if (dm === 1) t = y === 1 || x === 1 ? 4 : 1;
+    if (y === 3) t = 4;                                                    // polished highlight band
+    if (dm === 2 && h > 10) t = (x + y) % 2 ? 1 : 2;                       // engraved dotted border
     im.set(x, y, R[t]);
+    if (dm === 2 && h > 10 && (x + y) % 6 === 0) im.set(x, y, hx('#5a8a6a')); // patina in the engraving
   }
-  for (const sx of [3, w - 4]) { const sy = Math.floor(h / 2); im.set(sx, sy, R[0]); im.set(sx - 1, sy, R[4]); im.set(sx + 1, sy, R[1]); }
+  for (const sx of [4, w - 5]) { const sy = Math.floor(h / 2); im.set(sx, sy, R[4]); im.set(sx + 1, sy, R[1]); im.set(sx, sy + 1, R[1]); im.set(sx + 1, sy + 1, R[0]); }
   return im.done();
 }
 
@@ -273,6 +303,11 @@ function paintBtn(style: BtnStyle, state: BtnState, w: number, h: number) {
     if (ly === faceH - 1 || lx === lw - 2) { im.set(x, y, down ? face : lo); continue; }
     im.set(x, y, face);
   }
+  // detail: a polished band under the top lip; wood faces get a grain stroke; long buttons get end rivets
+  const fy = top + 3;
+  if (h > 12) for (let x = 3; x < w - 3; x++) if ((x * 3) % 7 < 5) im.set(x, fy, shiftC(face, 0.12));
+  if (style === 'wood' && h > 14) { const gy = top + Math.floor((h - LIP - top) * 0.62); for (let x = 4; x < w - 4; x++) if ((x * 5) % 17 < 11) im.set(x, gy, shiftC(face, -0.12)); }
+  if (w > 50 && h > 14) for (const rx of [3, w - 5]) { const ry = top + Math.floor((h - LIP - top) / 2); im.set(rx, ry, shiftC(hi, 0.3)); im.set(rx + 1, ry + 1, lo); }
   // state 'on' gets a lit pip in the corner
   if (state === 'on') { im.set(w - 4, top + 3, hx('#fff6a0')); im.set(w - 5, top + 3, hx('#ffd040')); im.set(w - 4, top + 4, hx('#ffd040')); }
   return im.done();

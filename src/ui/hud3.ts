@@ -32,7 +32,7 @@ import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
-import { drawText } from './pixel/font';
+import { drawText, type FontName } from './pixel/font';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -101,8 +101,15 @@ class DUi {
   get h() { return this.ui.h / this.k; }
   get mx() { return this.ui.mx / this.k; }
   get my() { return this.ui.my / this.k; }
-  text(str: string, x: number, y: number, o: Parameters<PixelUI['text']>[3] = {}) { return this.ui.text(str, Math.round(x * this.k), Math.round(y * this.k), o) / this.k; }
-  measure(str: string, f?: Parameters<PixelUI['measure']>[1]) { return this.ui.measure(str, f) / this.k; }
+  /** on a tall logical canvas (720p / 1440p, k ~2) the native fonts read small next to the 2x objects: promote one step */
+  font(f: FontName = 'body'): FontName {
+    if (this.k < 1.75) return f;
+    return f === 'small' || f === 'tiny' ? 'body' : f;
+  }
+  /** cap height of a (promoted) font in design units */
+  cap(f: FontName = 'body') { return this.ui.cap(this.font(f)) / this.k; }
+  text(str: string, x: number, y: number, o: Parameters<PixelUI['text']>[3] = {}) { return this.ui.text(str, Math.round(x * this.k), Math.round(y * this.k), { ...o, font: this.font(o.font) }) / this.k; }
+  measure(str: string, f?: Parameters<PixelUI['measure']>[1]) { return this.ui.measure(str, this.font(f)) / this.k; }
   img(c: HTMLCanvasElement, x: number, y: number, o?: Parameters<PixelUI['img']>[3]) { this.ui.img(c, Math.round(x * this.k), Math.round(y * this.k), o); }
   hover(x: number, y: number, w: number, h: number) { return this.ui.hover(x * this.k, y * this.k, w * this.k, h * this.k); }
 }
@@ -459,7 +466,8 @@ class DepthGauge {
     }
     c.fillStyle = '#7a1414'; c.beginPath(); c.arc(R, R, R - 3, (-45) * Math.PI / 180, (45) * Math.PI / 180); c.arc(R, R, R - 5, (45) * Math.PI / 180, (-45) * Math.PI / 180, true); c.fill();
     for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R - 15); drawText(c, String(Math.round(max * k)), x, y - 4, { font: 'small', color: '#1a1008', shadow: null, align: 'center' }); }
-    drawText(c, 'DEPTH', R, R + 9, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
+    // the maker's word only when the face is big enough to keep it clear of the 0 / max numerals
+    if (R >= 44) drawText(c, 'DEPTH', R, R + 9, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
     // the maker's engraved ring and a hairline inner bezel
     c.strokeStyle = '#8a7050'; c.lineWidth = 1; c.beginPath(); c.arc(R, R, R - 1.5, 0, Math.PI * 2); c.stroke();
     this.faceTex.needsUpdate = true;
@@ -715,7 +723,7 @@ export class Hud {
     this.stage.put(this.gauge.root, x, y, 10);
     this.stage.put(this.gaugePlaque, x, y + 37, 6);
     // the depth, once: on the plaque under the gauge
-    ui.text(`${Math.round(d.m)} M`, x, y + 32, { font: 'body', color: d.descending ? '#bff4ff' : '#fff0d0', outline: '#2a1606', align: 'center' });
+    ui.text(Math.round(d.m) > 0 ? `-${Math.round(d.m)} M` : '0 M', x, y + 32, { font: 'body', color: d.descending ? '#bff4ff' : '#fff0d0', outline: '#2a1606', align: 'center' });
   }
 
   // ---------------------------------------------------------------- bottom centre: the boss plaque
@@ -729,8 +737,11 @@ export class Hud {
     const y = ui.h - 26 + (1 - ease) * 40;
     this.stage.put(this.boss.root, ui.w / 2, y, 0);
     this.boss.root.rotation.x = -0.25 + Math.sin(this.t * 0.7) * 0.02;
-    ui.text(b.name.toUpperCase(), ui.w / 2, y - 24, { font: 'title', color: '#ffe8d0', color2: '#ff9a7a', outline: '#1a0606', align: 'center', alpha: ease });
-    if (b.title) ui.text(b.title, ui.w / 2, y - 34, { font: 'small', color: '#c8b8a8', outline: '#1a0606', align: 'center', alpha: ease });
+    // the name sits on the plaque's top edge; on a tall logical canvas it gets the 32px Alagard
+    const nf: FontName = ui.k >= 1.75 ? 'big' : 'title';
+    const ny = y - 13 - ui.cap(nf);
+    ui.text(b.name.toUpperCase(), ui.w / 2, ny, { font: nf, color: '#ffe8d0', color2: '#ff9a7a', outline: '#1a0606', align: 'center', alpha: ease });
+    if (b.title) ui.text(b.title, ui.w / 2, ny - 3 - ui.cap('small'), { font: 'small', color: '#c8b8a8', outline: '#1a0606', align: 'center', alpha: ease });
   }
 
   // ---------------------------------------------------------------- bottom left: the hand of skill cards
@@ -784,13 +795,13 @@ export class Hud {
           this.stage.put(c.model, x + 22, y + 20, 30);
         }
         ui.text(c.title, x + 46 - slide, y + 9, { font: 'title', color: c.color, outline: '#1a0e04', alpha: a });
-        if (sub) ui.text(sub, x + 46 + slide, y + 26, { font: 'small', color: '#d8d0c0', alpha: a });
+        if (sub) ui.text(sub, x + 46 + slide, y + 13 + ui.cap('title'), { font: 'small', color: '#d8d0c0', alpha: a });
       } else {
         // top centre, between the health corner and the strip map: never over the play area
         const y = 10;
         const big = ui.measure(c.title, 'big') < ui.w * 0.42;
         ui.text(c.title, ui.w / 2, y - slide, { font: big ? 'big' : 'title', color: c.color, color2: '#ffc860', outline: '#140a04', align: 'center', alpha: a });
-        if (c.sub) ui.text(c.sub, ui.w / 2, y + (big ? 30 : 16) + slide, { font: 'small', color: '#e8e0d0', outline: '#06080e', align: 'center', alpha: a });
+        if (c.sub) ui.text(c.sub, ui.w / 2, y + ui.cap(big ? 'big' : 'title') + 5 + slide, { font: 'small', color: '#e8e0d0', outline: '#06080e', align: 'center', alpha: a });
       }
     }
   }

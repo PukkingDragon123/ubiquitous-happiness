@@ -151,10 +151,26 @@ export function diorama(key: string, w: number, h: number, build: (set: THREE.Gr
     const p = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), new THREE.MeshStandardMaterial({ color: '#5a5462', flatShading: true }));
     p.position.set(x, -0.78, z); set.add(p);
   }
-  for (const x of [-1.4, 1.5]) {
-    const k = new THREE.Mesh(new THREE.ConeGeometry(0.08, 1.4, 4), new THREE.MeshStandardMaterial({ color: '#4c8a2a', flatShading: true }));
-    k.position.set(x, -0.2, -0.6); k.rotation.z = x * 0.1; set.add(k);
+  // kelp of different heights swaying behind, coral fans and a sea-star in front, bubbles rising
+  const kelpM = new THREE.MeshStandardMaterial({ color: '#4c8a2a', flatShading: true, roughness: 0.8 });
+  for (const [x, z, h] of [[-1.5, -0.7, 1.8], [-1.2, -1.0, 2.4], [1.4, -0.8, 2.0], [1.7, -1.1, 1.4], [0.9, -1.3, 2.6]] as [number, number, number][]) {
+    const k = new THREE.Mesh(new THREE.ConeGeometry(0.07, h, 4), kelpM);
+    k.position.set(x, -0.9 + h / 2, z); k.rotation.z = x * 0.05; set.add(k);
+    const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.5), new THREE.MeshStandardMaterial({ color: '#6aa83a', side: THREE.DoubleSide, flatShading: true }));
+    leaf.position.set(x + 0.1, -0.3 + h * 0.3, z); leaf.rotation.z = -0.6; set.add(leaf);
   }
+  const coralM = new THREE.MeshStandardMaterial({ color: '#e8604a', flatShading: true, roughness: 0.8 });
+  for (const [x, s2] of [[-0.95, 0.3], [1.05, 0.24]] as [number, number][]) for (let i = 0; i < 4; i++) {
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, s2 * 1.4, 5), coralM);
+    br.position.set(x + (i - 1.5) * 0.06, -0.75 + s2 * 0.6, 0.3); br.rotation.z = (i - 1.5) * 0.35; set.add(br);
+  }
+  const star = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 5), new THREE.MeshStandardMaterial({ color: '#f08a26', flatShading: true }));
+  star.position.set(0.75, -0.8, 0.7); set.add(star);
+  const bubM = new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.1, transparent: true, opacity: 0.5 });
+  for (const [x, y, r] of [[-0.6, 0.6, 0.06], [-0.5, 0.9, 0.04], [0.6, 0.75, 0.05], [0.7, 1.05, 0.035], [-0.2, 1.2, 0.03]] as [number, number, number][]) { const b = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), bubM); b.position.set(x, y, 0.5); set.add(b); }
+  // a far shoal of fish silhouettes
+  const fishM = new THREE.MeshBasicMaterial({ color: '#2a5a7a', toneMapped: false });
+  for (let i = 0; i < 6; i++) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 3), fishM); f.position.set(-1.2 + i * 0.22 + (i % 2) * 0.1, 1.1 + (i % 3) * 0.12, -1.6); f.rotation.z = Math.PI / 2; set.add(f); }
   build(set);
   const out = photoSet(set, w, h);
   dioCache.set(key, out);
@@ -166,7 +182,7 @@ function photoSet(set: THREE.Object3D, w: number, h: number): HTMLCanvasElement 
   if (!r) return out;
   r.setSize(w * 2, h * 2, false);
   scene.add(set);
-  cam.fov = 34; cam.aspect = w / h; cam.position.set(0, 0.25, 3.4); cam.lookAt(0, -0.05, 0); cam.near = 0.1; cam.far = 20; cam.updateProjectionMatrix();
+  cam.fov = 34; cam.aspect = w / h; cam.position.set(0, 0.2, 3.0); cam.lookAt(0, -0.05, 0); cam.near = 0.1; cam.far = 20; cam.updateProjectionMatrix();
   r.setClearColor('#0a2a4a', 1);
   r.render(scene, cam);
   scene.remove(set);

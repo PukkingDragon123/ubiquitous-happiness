@@ -60,10 +60,20 @@ export class UiStage {
 
   /** place an object at UI px (x, y down), z toward the viewer */
   put(o: THREE.Object3D, x: number, y: number, z = 0) {
-    if (o.parent !== this.ui) this.ui.add(o);
+    if (o.parent !== this.ui) { this.ui.add(o); noSnap(o); }
     o.position.set(x, -y, z);
     return o;
   }
+}
+
+/** the UI renders at full canvas resolution: turn off PS1 vertex snapping on world-style (retro-patched) materials */
+function noSnap(o: THREE.Object3D) {
+  if (o.userData.noSnap) return;
+  o.userData.noSnap = true;
+  o.traverse((c) => {
+    const me = c as THREE.Mesh; if (!me.isMesh) return;
+    for (const mt of Array.isArray(me.material) ? me.material : [me.material]) { const l = (mt.userData as { retro?: { uRetroMatSnap: { value: number } } }).retro; if (l) l.uRetroMatSnap.value = 0; }
+  });
 }
 
 /** a soft round contact shadow (a dark radial-gradient disc), for objects resting on the UI */

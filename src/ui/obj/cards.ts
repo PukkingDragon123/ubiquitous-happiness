@@ -72,10 +72,14 @@ export class SkillCard3D {
     const back = new THREE.Mesh(new THREE.ShapeGeometry(roundRect(W * 0.98, H * 0.98, W * 0.1)), new THREE.MeshStandardMaterial({ color: '#2a1a10', roughness: 0.9 }));
     back.position.z = -W * 0.03;
     this.tilt.add(back);
-    const artCv = diorama('skill:' + skill, 96, 70, (set) => {
+    // rendered at the window's own aspect (nearly square) so nothing is stretched; the subject fills ~85% of it
+    const artCv = diorama('skill:' + skill, 120, Math.round(120 * win.h / win.w), (set) => {
       const m = it ? itemModel(it.id) : new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 0), new THREE.MeshStandardMaterial({ color: o.color ?? '#9a7aff' }));
-      m.scale.multiplyScalar(1.5);
-      m.position.set(0, -0.15, 0.2); m.rotation.set(0.1, -0.5, 0);
+      // item models are fitted to their cell footprint (1 unit per cell): normalise so a 1x1 trinket and a 2x2 tome
+      // both end up ~1.35 units across, about 80% of the window
+      const cells = (m.userData.cells as [number, number] | undefined) ?? [1, 1];
+      m.scale.multiplyScalar(1.5 / Math.max(cells[0], cells[1]));
+      m.position.set(0, -0.1, 0.3); m.rotation.set(0.15, -0.55, 0.05);
       set.add(m);
       const glow = new THREE.PointLight(o.color ?? '#9adfff', 6, 3);
       glow.position.set(0.4, 0.6, 1.2); set.add(glow);
@@ -94,18 +98,22 @@ export class SkillCard3D {
     this.tilt.add(frame);
     // name plaque (bottom)
     const pw = W * 0.86, ph = H * 0.18;
-    const plaque = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, W * 0.05), new THREE.MeshStandardMaterial({ color: '#3a2412', roughness: 0.7, flatShading: true }));
-    plaque.position.set(0, -H * 0.36, W * 0.03);
-    this.tilt.add(plaque);
+    // a walnut plate in a brass bezel, standing proud of the frame (whose bevelled face is at +0.06 W)
+    const plaque = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, W * 0.04), new THREE.MeshStandardMaterial({ color: '#3a2412', roughness: 0.7, flatShading: true }));
+    plaque.position.set(0, -H * 0.36, W * 0.08);
+    const bezel = new THREE.Mesh(new THREE.BoxGeometry(pw + W * 0.04, ph + W * 0.04, W * 0.03), new THREE.MeshStandardMaterial({ color: '#d8a038', roughness: 0.35, metalness: 0.7, flatShading: true }));
+    bezel.position.set(0, -H * 0.36, W * 0.07);
     const name = SKILL_NAMES[skill] ?? skill;
     const scale = W >= 90 ? 1 : 0;
+    // HUD-size cards carry no name, so no plate either: the frame's lower band shows through
     if (scale) {
+      this.tilt.add(bezel, plaque);
       const cv = document.createElement('canvas'); cv.width = Math.round(pw); cv.height = Math.round(ph);
       const x = cv.getContext('2d')!;
       const lines = wrap(name.toUpperCase(), 'small', cv.width - 6).slice(0, 2);
       lines.forEach((l, i) => drawText(x, l, cv.width / 2, Math.round((cv.height - lines.length * 9) / 2) + i * 9, { font: 'small', color: '#f8e0a0', shadow: '#1a0c04', align: 'center' }));
       const np = canvasPlane(cv, pw, ph);
-      np.position.set(0, -H * 0.36, W * 0.06);
+      np.position.set(0, -H * 0.36, W * 0.105);
       this.tilt.add(np);
     }
     // gems in the top corners + a mana crystal bottom right

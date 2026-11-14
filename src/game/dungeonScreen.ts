@@ -455,12 +455,13 @@ export class DungeonScreen implements Screen {
       if (i > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
       this.world.emit('enterNode', { type: 'floor', n: i });
     }
-    // the depth title, stamped in 3D: "-92 M · KELP CATHEDRAL"
+    // the area title, stamped in 3D: "KELP CATHEDRAL" (the depth number is on the HUD gauge plaque)
     const dTop = Math.round(depthOf(plan, plan.base));
     this.after(0.6, () => {
       const deeper = i >= this.planned;
       const tx = this.camLook.x, ty = this.camLook.y + 1.6;
-      this.t3d.add(`-${dTop} M · ${AREA_NAME(area).toUpperCase()}`, tx, ty, 2.2, deeper ? T3D.danger : T3D.title, { size: 0.5, life: 4, enter: 'slam', stagger: 0.04, onLand: (k) => { if (k % 4 === 0) audio.play('k_tick1', { vol: 0.25, dry: true }); } });
+      // the depth itself lives on the gauge plaque only (one number on screen); the stamp names the place
+      this.t3d.add(AREA_NAME(area).toUpperCase(), tx, ty, 2.2, deeper ? T3D.danger : T3D.title, { size: 0.5, life: 4, enter: 'slam', stagger: 0.04, onLand: (k) => { if (k % 4 === 0) audio.play('k_tick1', { vol: 0.25, dry: true }); } });
       this.t3d.add(deeper ? `THE DEEP · ${ZONE_NAME[zoneOf(dTop)]}` : `FLOOR ${i + 1} OF ${this.planned} · ${ZONE_NAME[zoneOf(dTop)]}`, tx, ty - 0.7, 2.2, T3D.sub, { size: 0.2, life: 3.6, delay: 0.7, stagger: 0.012 });
       audio.play('thud_heavy1', { vol: 0.5, dry: true });
       this.game.addShake(0.15);

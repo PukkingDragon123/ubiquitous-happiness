@@ -26,7 +26,8 @@ import { audio } from '../audio/audio';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
-const C = 32; // px per cell (icons are painted at 32 px per cell: 1:1)
+/** UI px per cell: 32 at the old density, 48-64 on the finer (~540 row) UI so the miniatures are big and detailed */
+let C = 32;
 
 function sfx(ids: string | string[], o: { vol?: number; rate?: number; delay?: number } = {}) {
   for (const id of Array.isArray(ids) ? ids : [ids]) if (audio.has(id)) { audio.play(id, { vol: o.vol ?? 0.6, rate: o.rate, delay: o.delay, dry: true, jitter: 0.06 }); return; }
@@ -106,8 +107,10 @@ function packArt(n: number, c: number): HTMLCanvasElement {
       else if (!inBody(px, py, 5)) col = ((px + py) >> 1) % 2 ? LE.st : LE.b; // stitching
       f(px, py, 1, 1, col);
     }
-    // a couple of creases and scuffs (deliberate, not noise)
-    for (const [cx0, cy0, len] of [[ox + 9, by + 60, 14], [ox + W - 14, by + 90, 10], [ox + 12, by + H - 40, 12]]) for (let i = 0; i < len; i++) f(cx0 + (i % 2 ? 0 : 1) * 0, cy0 + i, 1, 1, LE.d1);
+    // creases (a dark fold with a lit lip beside it), scuffs and stitch holes: deliberate, not noise
+    for (const [cx0, cy0, len, dir] of [[ox + 9, by + 60, 14, 1], [ox + W - 14, by + 90, 10, -1], [ox + 12, by + H - 40, 12, 1], [ox + W - 12, by + 40, 9, -1]]) for (let i = 0; i < len; i++) { const xx = cx0 + Math.round(Math.sin(i * 0.5) * 1.5) * dir; f(xx, cy0 + i, 1, 1, LE.d1); f(xx + dir, cy0 + i, 1, 1, LE.l1); }
+    for (const [sx, sy, sw] of [[ox + 24, by + 18, 10], [ox + W - 40, by + H - 30, 14], [ox + W / 2 - 30, by + H - 22, 8]]) { f(sx, sy, sw, 1, LE.l2); f(sx + 2, sy + 1, sw - 4, 1, LE.l1); }
+    for (let py = 0; py < cv.height; py++) for (let px = 0; px < cv.width; px++) if (inBody(px, py, 4) && !inBody(px, py, 5) && ((px + py) >> 1) % 2 === 1 && ((px + py) % 4 === 3)) f(px, py, 1, 1, LE.out);
     // the pocket panel (canvas) with stitched cells
     const gx0 = ox + PACK_IN.x, gy0 = PACK_IN.y;
     f(gx0 - 5, gy0 - 5, gw + 10, gw + 10, LE.out);
@@ -120,8 +123,10 @@ function packArt(n: number, c: number): HTMLCanvasElement {
       f(X + 1, Y + c - 2, c - 2, 1, PK.lit); f(X + c - 2, Y + 1, 1, c - 2, PK.lit);
       // stitched seams between pockets
       for (let i = 2; i < c - 2; i += 3) { f(X + i, Y, 2, 1, PK.st); f(X, Y + i, 1, 2, PK.st); }
-      // a faint weave in the canvas: a 1 px dot every 4 px on a diagonal lattice
-      for (let yy = 4; yy < c - 3; yy += 4) for (let xx = 4 + ((yy / 4) % 2) * 2; xx < c - 3; xx += 4) f(X + xx, Y + yy, 1, 1, PK.fl);
+      // the canvas weave: short warp / weft threads on a lattice, darker in the pocket's bottom corner
+      for (let yy = 4; yy < c - 3; yy += 3) for (let xx = 4 + ((yy / 3) % 2) * 2; xx < c - 4; xx += 4) { f(X + xx, Y + yy, 2, 1, PK.fl); if (xx + yy > c * 1.3) f(X + xx, Y + yy + 1, 1, 1, PK.sh); }
+      // a worn patch in some pockets
+      if ((cx * 7 + cy * 3) % 5 === 0) { f(X + c - 10, Y + c - 9, 5, 1, PK.lit); f(X + c - 9, Y + c - 8, 3, 1, PK.lit); }
     }
     for (let i = 2; i < gw; i += 3) { f(gx0 + i, gy0 + gw - 1, 2, 1, PK.st); f(gx0 + gw - 1, gy0 + i, 1, 2, PK.st); }
     // the flap thrown open over the top, with a brass buckle
@@ -259,8 +264,10 @@ export class BackpackScreen implements Screen {
   // ---------------------------------------------------------------- layout
   private layout() {
     const ui = this.ui;
+    // cell size follows the logical height: 720p / 1440p run at 1x / 2x of a 720-row canvas, 1080p / 4K of a 540-row one
+    C = ui.h >= 680 && ui.w >= 1200 ? 80 : ui.h >= 600 && ui.w >= 1000 ? 64 : ui.h >= 500 ? 56 : ui.h >= 420 ? 44 : 32;
     const packW = GRID * C + PACK_IN.x * 2 + 16, packH = GRID * C + PACK_IN.y + 22;
-    const infoW = 176, gap = 12;
+    const infoW = C >= 80 ? 216 : 176, gap = C >= 80 ? 20 : 12;
     let bCols = 4;
     let card = ui.w >= packW + gap + bCols * C + 16 + gap + infoW + 12;
     if (!card) bCols = Math.max(2, Math.min(4, Math.floor((ui.w - packW - gap - 28) / C)));
@@ -586,10 +593,13 @@ export class BackpackScreen implements Screen {
   private cardItem: { uid: number; o: THREE.Object3D } | null = null;
   private cardModel(it: ItemInst, x: number, y: number, w: number, h: number) {
     if (!this.cardBoard) {
-      const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+      // parchment: laid lines, fibres, a foxing stain and a darker margin
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
       const g = c.getContext('2d')!;
-      g.fillStyle = '#e8d6ae'; g.fillRect(0, 0, 32, 32);
-      for (let yy = 0; yy < 32; yy += 3) { g.fillStyle = '#dcc8a0'; g.fillRect(0, yy, 32, 1); }
+      g.fillStyle = '#e8d6ae'; g.fillRect(0, 0, 64, 64);
+      for (let yy = 0; yy < 64; yy += 3) { g.fillStyle = yy % 9 === 0 ? '#d8c49a' : '#e2d0a6'; g.fillRect(0, yy, 64, 1); }
+      for (let i = 0; i < 46; i++) { g.fillStyle = i % 2 ? '#d4bc8c' : '#f4e6c4'; g.fillRect((i * 29) % 62, (i * 43) % 62, 2 + (i % 3), 1); }
+      g.globalAlpha = 0.25; g.fillStyle = '#b08a50'; g.beginPath(); g.ellipse(48, 46, 8, 5, 0.4, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
       const board = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 3), [
         new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }),
