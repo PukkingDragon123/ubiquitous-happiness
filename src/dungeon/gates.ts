@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import type { World } from '../game/types';
 import { arenaGateModel, crackedPlug, disposeModel, type GateKind, type GateModel } from './models';
 import type { LevelTerrain, Body } from './terrain';
+import { additiveMaterial } from '../world/mats';
 
 const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
 const easeIn = (t: number) => t * t;
@@ -27,8 +28,19 @@ export class ArenaGate {
     this.model.root.position.set(x, floorY - 0.4, 0);
     this.group.add(this.model.root);
     this.body = terrain.addBody({ x0: x - 0.7, x1: x + 0.7, y0: floorY - 3, y1: topY + 3, r: 0.3, on: () => this.up > 0.45, tag: 'gate' });
+    // a warning glow behind the bars while it's shut: the lock reads at a glance, even in a kelp forest
+    const gh = topY - floorY;
+    const geo = new THREE.PlaneGeometry(2.6, gh, 1, 4);
+    const col = new Float32Array(geo.attributes.position.count * 3);
+    for (let i = 0; i < geo.attributes.position.count; i++) { const v = 0.5 - (geo.attributes.position as THREE.BufferAttribute).getY(i) / gh; const k = Math.max(0, Math.min(1, v)) ** 1.5; col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k; }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    this.glow = new THREE.Mesh(geo, additiveMaterial(kind === 'boss' ? '#ff2a18' : kind === 'challenge' ? '#ff6a20' : '#ff9a50', { opacity: 0 }));
+    this.glow.position.set(x, floorY + gh / 2, -0.2);
+    this.glow.renderOrder = 11;
+    this.group.add(this.glow);
     this.pose();
   }
+  private glow: THREE.Mesh;
   get shut() { return this.up > 0.98; }
   raise(instant = false) {
     if (this.target === 1) return;
@@ -37,7 +49,7 @@ export class ArenaGate {
     this.rumble = 0.5;
     this.w.sfx('rock_crumble1', this.x, 0.7, 0.8); this.w.sfx('uw_rumble1', this.x, 0.7); this.w.sfx('thud_heavy1', this.x, 0.6, 0.7);
     this.w.fx.debrisBurst(this.x, this.floorY + 0.2, 16, this.sandColor, 4.5, 0.07);
-    this.w.fx.emit('ink', this.x, this.floorY + 0.3, { n: 14, spread: 0.9, speed: 1.2, life: 2, size: 0.5, size1: 1.4, color: new THREE.Color(this.sandColor), alpha: 0.55, drag: 2 });
+    this.w.fx.emit('silt', this.x, this.floorY + 0.3, { n: 14, spread: 0.9, speed: 1.2, life: 2, size: 0.5, size1: 1.4, color: new THREE.Color(this.sandColor), alpha: 0.55, drag: 2 });
     this.w.game.addShake(0.25);
   }
   drop(instant = false) {
@@ -71,6 +83,7 @@ export class ArenaGate {
       c.visible = u > 0.002;
     });
     for (const g of m.glow) { const k = 0.7 + Math.sin(this.t * 3) * 0.3; (g.material as THREE.MeshBasicMaterial).color.setRGB(2.2 * k, 0.25 * k, 0.15 * k); }
+    if (this.glow) { const gm = this.glow.material as THREE.MeshBasicMaterial; gm.opacity = Math.max(0, this.up - 0.3) * (0.75 + Math.sin(this.t * 4) * 0.2); this.glow.visible = gm.opacity > 0.01; }
   }
   dispose() { this.group.removeFromParent(); disposeModel(this.group); }
 }
@@ -101,7 +114,7 @@ export class CrackedLid {
     const cx = (this.x0 + this.x1) / 2, cy = (this.y0 + this.y1) / 2;
     const col = { reef: '#a89878', kelp: '#6a6658', graveyard: '#5a5a4e', arctic: '#8a9aaa', abyss: '#343a48' }[this.area] ?? '#7a7a70';
     for (let k = 0; k < 4; k++) this.w.fx.debrisBurst(this.x0 + (k + 0.5) * (this.x1 - this.x0) / 4, cy, 9, col, 4.5, 0.13);
-    this.w.fx.emit('ink', cx, cy, { n: 18, spread: 2, speed: 1.2, life: 2.6, size: 0.7, size1: 1.8, color: new THREE.Color(this.silt), alpha: 0.6, drag: 2 });
+    this.w.fx.emit('silt', cx, cy, { n: 18, spread: 2, speed: 1.2, life: 2.6, size: 0.7, size1: 1.8, color: new THREE.Color(this.silt), alpha: 0.6, drag: 2 });
     this.w.sfx('rock_crumble2', cx, 0.9); this.w.sfx('rock_crumble1', cx, 0.7, 0.8);
     this.w.game.addShake(0.35);
   }

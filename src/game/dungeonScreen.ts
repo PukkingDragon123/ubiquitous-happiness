@@ -67,6 +67,8 @@ export interface DungeonSave {
   hp: number; items: ItemInst[]; nextUid: number;
   pearls: number; keys: number; bombs: number;
   tally: DungeonTally; mailed: string[]; loot: FloorLoot[];
+  /** v2 aliases (achievements and other META readers look at activeRun.areas[activeRun.areaIdx]) */
+  areas: string[]; areaIdx: number;
 }
 /** the run in progress lives in META.activeRun (v 4) like the v2 run's did, so flow's RESUME finds it */
 export function loadDungeonSave(): DungeonSave | null {
@@ -511,7 +513,7 @@ export class DungeonScreen implements Screen {
     list.forEach((e, i) => {
       const pos = this.spawnPoint(rng, e.kind, a, p.x);
       f.pending.push({ t: 0.8 + i * 0.15, kind: e.kind, x: pos.x, y: pos.y, elite: e.elite });
-      this.after(0.3 + i * 0.15, () => { if (this.fight === f) this.world.fx.emit('ink', pos.x, pos.y, { n: 10, spread: 0.6, speed: 0.6, life: 1.4, size: 0.5, size1: 1.3, color: new THREE.Color(lvl.a.pal.silt), alpha: 0.55, drag: 2 }); });
+      this.after(0.3 + i * 0.15, () => { if (this.fight === f) this.world.fx.emit('silt', pos.x, pos.y, { n: 10, spread: 0.6, speed: 0.6, life: 1.4, size: 0.5, size1: 1.3, color: new THREE.Color(lvl.a.pal.silt), alpha: 0.55, drag: 2 }); });
     });
   }
 
@@ -991,6 +993,7 @@ export class DungeonScreen implements Screen {
       v: 4, cfg: this.cfg, seed: this.seed, floors: [...this.floors], floorIdx: this.floorIdx, plan: this.plan, checkX: this.checkX,
       hp: this.player?.hp ?? this.run.hp, items: this.run.items.map((i) => ({ ...i })), nextUid: this.run.nextUid,
       pearls: this.run.coins, keys: this.keys, bombs: this.bombs, tally: { ...this.tally }, mailed: [...this.mailed], loot,
+      areas: [...this.floors], areaIdx: this.floorIdx,
     };
     META.activeRun = s as unknown as typeof META.activeRun;
     saveMeta();

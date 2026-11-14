@@ -559,7 +559,10 @@ export class HideoutScreen implements Screen {
     this.player.face(sp.face, dt);
     this.nooks.spots.mirror.obj.visible = this.modeT < 0.25;
     const hp = this.hero.root.position;
-    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.6, hp.z + 0.75), yaw: Math.PI / 2 + 0.25, pitch: 0.12, dist: 3.3, fov: 32 };
+    const fr = new THREE.Vector3().subVectors(sp.face, sp.stand).setY(0).normalize();
+    const yaw = Math.atan2(fr.x, fr.z) + 0.3;
+    const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.5, hp.z).addScaledVector(side, -0.75), yaw, pitch: 0.4, dist: 3.8, fov: 32 };
     const close = this.ward.draw(ui, 8, Math.round((ui.h - 242) / 2), dt);
     if (this.ward.hover !== this.wardHover) { this.wardHover = this.ward.hover; this.wardPreview(this.wardHover); }
     if (this.ward.equipped) { this.wardHover = null; this.wardPreview(null); this.hero.play?.('gear'); this.nooks.glint(); }

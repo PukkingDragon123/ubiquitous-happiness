@@ -20,6 +20,8 @@ import {
   setBonuses, statLines, stackCap, stackOnto, itemIcon, type ItemDef,
 } from '../game/items';
 import { PixelUI } from '../ui/pixel/ui';
+import { UiStage, contactShadow } from '../ui/obj/stage';
+import { itemModel } from './models';
 import { audio } from '../audio/audio';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
@@ -190,7 +192,13 @@ export class BackpackScreen implements Screen {
   get camera(): THREE.PerspectiveCamera { return this.under?.camera ?? this.bgCam; }
   get underwater() { return this.under?.underwater ?? false; }
   ui = new PixelUI();
-  overlays = [this.ui.layer];
+  /** the item miniatures (lit 3D models) between the pack art and the text */
+  stage = new UiStage();
+  /** text, stamped stack tags, the cursor: over the models */
+  fg = new PixelUI();
+  overlays = [this.ui.layer, this.stage.layer, this.fg.layer];
+  private models = new Map<number, { o: THREE.Object3D; sh: THREE.Mesh; key: string }>();
+  private cardBoard: THREE.Mesh | null = null;
 
   private run: Run | null = null;
   private onClose?: () => void;
@@ -239,7 +247,7 @@ export class BackpackScreen implements Screen {
     sfx(['bag_zip1', 'cloth1'], { vol: 0.5 });
   }
   exit() { this.under = null; if (this.prevCursor !== null) this.game.cursor = this.prevCursor; this.prevCursor = null; }
-  resize(w: number, h: number) { this.ui.resize(w, h, this.game.renderer.getPixelRatio()); this.bgCam.aspect = w / h; this.bgCam.updateProjectionMatrix(); }
+  resize(w: number, h: number) { this.ui.resize(w, h, this.game.renderer.getPixelRatio()); this.fg.resize(w, h, this.game.renderer.getPixelRatio()); this.bgCam.aspect = w / h; this.bgCam.updateProjectionMatrix(); }
 
   close() {
     if (this.closing || !this.run) return;
@@ -321,13 +329,18 @@ export class BackpackScreen implements Screen {
     const run = this.run;
     const ui = this.ui;
     this.t += dt;
-    ui.drawCursor = true;
+    ui.drawCursor = false;
     ui.begin(this.game.input, dt);
-    if (!run) { ui.end(); return; }
+    this.fg.drawCursor = true;
+    this.fg.begin(this.game.input, dt);
+    this.stage.follow(ui);
+    if (!run) { ui.end(); this.fg.end(); return; }
     this.layout();
     this.open = this.closing ? Math.max(0, this.open - dt * 6) : Math.min(1, this.open + dt * 5);
     if (this.closing && this.open <= 0) {
-      ui.end();
+      ui.end(); this.fg.end();
+      for (const m of this.models.values()) { m.o.removeFromParent(); m.sh.removeFromParent(); }
+      this.models.clear();
       this.closing = false;
       installItemSystem(run);
       const cb = this.onClose; this.run = null;
@@ -348,9 +361,12 @@ export class BackpackScreen implements Screen {
     this.drawHeld(dt);
     this.drawFx(dt);
     if (this.L.card) this.drawCard(slide);
-    else if (this.hover || this.held) ui.tooltip(this.tipLines(this.held ?? this.hover!), { kind: 'dark', maxW: 170 });
+    else if (this.hover || this.held) this.fg.tooltip(this.tipLines(this.held ?? this.hover!), { kind: 'dark', maxW: 170 });
     this.drawHints();
+    this.syncModels();
+    this.fg.cursor = ui.cursor;
     ui.end();
+    this.fg.end();
     const inp = this.game.input;
     if (inp.keyHit('Tab') || inp.keyHit('Escape')) this.close();
   }
@@ -398,34 +414,67 @@ export class BackpackScreen implements Screen {
       const [tx, ty] = this.targetOf(it);
       this.spring(v, tx, ty, dt);
       v.pop = Math.min(1, v.pop + dt * 4);
-      if (v.pop <= 0) continue;
       const hov = this.hover === it && !this.held;
-      v.lift += ((hov ? 2 : 0) - v.lift) * Math.min(1, dt * 18);
+      v.lift += ((hov ? 3 : 0) - v.lift) * Math.min(1, dt * 18);
       v.shake = Math.max(0, v.shake - dt * 3);
-      const sx = Math.round(Math.sin(this.t * 60) * v.shake * 3);
-      const ic = rotIcon(it.id, it.level ?? 1, it.rot);
-      const key = `${it.id}|${it.level ?? 1}|${it.rot}`;
-      const px = Math.round(v.x) + sx, py = Math.round(v.y - v.lift) + slide;
-      const a = Math.min(1, v.pop * 1.6);
-      // a rarity tint in the pockets it fills
+      const sx = Math.sin(this.t * 60) * v.shake * 3;
+      const a = Math.max(0, Math.min(1, v.pop * 1.6));
+      // a rarity tint in the pockets it fills (on the pack art, under the miniature)
       if (it.gx >= 0) for (const [cx, cy] of rotCells(getItem(it.id).shape, it.rot)) ui.fill(this.L.gridX + (it.gx + cx) * C + 3, this.L.gridY + (it.gy + cy) * C + 3 + slide, C - 5, C - 5, RARITY_COLOR[getItem(it.id).rarity], hov ? 0.22 : 0.09);
-      ui.img(silhouette(ic, '#000000', key), px + 2, py + 2 + Math.round(v.lift), { alpha: 0.45 * a });
-      if (hov) ui.img(rim(ic, '#fff6d0', key), px - 1, py - 1);
-      ui.img(ic, px, py, { alpha: a });
-      this.stackBadge(it, px, py, ic);
-      if (this.plan.kind === 'stack' || this.plan.kind === 'fuse') if (this.plan.target === it) ui.img(rim(ic, Math.sin(this.t * 14) > 0 ? '#ffe070' : '#ffb020', key), px - 1, py - 1);
+      const target = (this.plan.kind === 'stack' || this.plan.kind === 'fuse') && this.plan.target === it;
+      this.placeModel(it, v.x + sx, v.y + slide, v.lift, a, hov ? 1 : target ? 0.6 : 0, false);
+      const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+      this.stackBadge(it, Math.round(v.x), Math.round(v.y + slide - v.lift), w * C, h * C);
     }
   }
 
-  private stackBadge(it: ItemInst, px: number, py: number, ic: HTMLCanvasElement) {
+  /** put an item's miniature on the stage: (x, y) = the top-left of its rotated footprint in UI px */
+  private placeModel(it: ItemInst, x: number, y: number, lift: number, alpha: number, hot: number, held: boolean) {
+    const key = `${it.id}|${it.level ?? 1}`;
+    let m = this.models.get(it.uid);
+    if (!m || m.key !== key) {
+      if (m) { m.o.removeFromParent(); m.sh.removeFromParent(); }
+      const o = itemModel(it.id);
+      const d = getItem(it.id);
+      const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
+      const sh = contactShadow(cw * C * 0.95, ch * C * 0.95, 0.5);
+      m = { o, sh, key };
+      this.models.set(it.uid, m);
+    }
+    m.o.userData.seen = this.t;
+    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+    const cx = x + (w * C) / 2, cy = y + (h * C) / 2;
+    const sc = C * (0.94 + hot * 0.05) * (held ? 1.08 : 1) * Math.max(0.01, alpha);
+    m.o.scale.setScalar(sc);
+    // lying in the pocket, tilted a touch toward the light; a slow turn when hovered / held
+    const turn = hot > 0 || held ? Math.sin(this.t * 2.6) * 0.35 : 0;
+    m.o.rotation.set(0.32 - lift * 0.04, -0.28 + turn, -it.rot * (Math.PI / 2));
+    this.stage.put(m.o, cx, cy - lift, 20 + lift * 6 + (held ? 120 : 0));
+    m.sh.rotation.z = -it.rot * (Math.PI / 2);
+    (m.sh.material as THREE.MeshBasicMaterial).opacity = (held ? 0.35 : 0.5) * alpha;
+    this.stage.put(m.sh, cx + 2 + lift * 0.8, cy + 3 + lift * 0.6, -10);
+  }
+
+  /** drop the miniatures of items that are gone */
+  private syncModels() {
+    for (const [uid, m] of this.models) if (m.o.userData.seen !== this.t || !this.run?.items.some((i) => i.uid === uid)) { m.o.removeFromParent(); m.sh.removeFromParent(); this.models.delete(uid); }
+  }
+
+  /** the stack count as a stamped paper tag tied to the item's corner (drawn over the miniature) */
+  private stackBadge(it: ItemInst, px: number, py: number, w: number, h: number) {
     const cap = stackCap(it.id);
     const n = it.n ?? 1;
     if (cap <= 1 || n <= 1) return;
-    const s = `${n}`;
-    const tw = this.ui.measure(s, 'body');
-    const bx = px + ic.width - tw - 4, by = py + ic.height - 14;
-    this.ui.fill(bx - 2, by - 1, tw + 4, 13, '#0a0604', 0.55);
-    this.ui.text(s, bx, by + 1, { font: 'body', color: n >= cap ? '#ffd860' : '#ffffff', outline: '#0a0604' });
+    const f = this.fg;
+    const s = `x${n}`;
+    const tw = f.measure(s, 'small');
+    const bx = px + w - tw - 7, by = py + h - 12;
+    f.fill(bx - 6, by - 4, 6, 1, '#c8a060');
+    f.fill(bx - 3, by - 3, tw + 7, 12, '#3a2410');
+    f.fill(bx - 2, by - 2, tw + 5, 10, n >= cap ? '#f8d878' : '#f0e2c0');
+    f.fill(bx - 2, by + 7, tw + 5, 1, n >= cap ? '#b08a28' : '#b8a07a');
+    f.fill(bx, by + 2, 1, 1, '#3a2410');
+    f.text(s, bx + 2, by, { font: 'small', color: n >= cap ? '#6a2a04' : '#a01818', shadow: null });
   }
 
   private drawPreview() {
@@ -455,27 +504,26 @@ export class BackpackScreen implements Screen {
     if (!it) return;
     const v = this.visOf(it);
     const tx = ui.mx - this.grab.x, ty = ui.my - this.grab.y;
+    const px0 = v.x;
     v.x += (tx - v.x) * Math.min(1, dt * 30); v.y += (ty - v.y) * Math.min(1, dt * 30);
     v.pop = Math.max(0, v.pop - dt * 6);
-    const ic = rotIcon(it.id, it.level ?? 1, it.rot);
-    const key = `${it.id}|${it.level ?? 1}|${it.rot}`;
-    const sq = 1 + v.pop * 0.12;
-    const w = Math.round(ic.width * sq), h = Math.round(ic.height / sq);
-    const px = Math.round(v.x + (ic.width - w) / 2), py = Math.round(v.y + (ic.height - h) / 2) - 4;
-    ui.img(silhouette(ic, '#000000', key), px + 5, py + 7, { alpha: 0.4, w, h });
-    ui.img(ic, px, py, { w, h });
-    this.stackBadge(it, px, py, ic);
+    this.placeModel(it, v.x, v.y, 6, 1, 1, true);
+    const m = this.models.get(it.uid);
+    if (m) m.o.rotation.z += Math.max(-0.4, Math.min(0.4, (v.x - px0) * -0.03));
+    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+    this.stackBadge(it, Math.round(v.x), Math.round(v.y - 6), w * C, h * C);
     const p = this.plan;
     if (p.kind === 'stack' || p.kind === 'fuse') {
+      const f = this.fg;
       const label = p.kind === 'stack' ? `STACK +${p.k}` : `FUSE: ${getItem(p.id).name}${p.id === it.id ? ` +${p.level - 1}` : ''}`;
-      const lw = ui.measure(label, 'small');
-      ui.fill(ui.mx + 10, ui.my - 16, lw + 8, 12, '#1a0e02', 0.85);
-      ui.text(label, ui.mx + 14, ui.my - 14, { font: 'small', color: '#ffe070', outline: '#1a0e02' });
+      const lw = f.measure(label, 'small');
+      f.fill(ui.mx + 10, ui.my - 16, lw + 8, 12, '#1a0e02', 0.85);
+      f.text(label, ui.mx + 14, ui.my - 14, { font: 'small', color: '#ffe070', outline: '#1a0e02' });
     }
   }
 
   private drawFx(dt: number) {
-    const ui = this.ui;
+    const ui = this.fg;
     for (const s of this.sparks) { s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 160 * dt; s.vx *= Math.exp(-dt * 2); }
     this.sparks = this.sparks.filter((s) => s.t < s.life);
     for (const s of this.sparks) { const a = 1 - s.t / s.life; ui.fill(Math.round(s.x), Math.round(s.y), 2, 2, s.col, a); if (a > 0.6) ui.fill(Math.round(s.x) - 1, Math.round(s.y), 4, 1, s.col, a * 0.5); }
@@ -488,16 +536,19 @@ export class BackpackScreen implements Screen {
     }
   }
 
-  private tipLines(it: ItemInst) {
+  /** the item's lines; paper = dark inks for the parchment card, else light text for the dark tooltip */
+  private tipLines(it: ItemInst, paper = false) {
     const d = getItem(it.id), lv = it.level ?? 1;
+    const dim = paper ? '#7a5a3a' : '#9aa4b8';
+    const rar = paper ? ({ common: '#4a3a2a', uncommon: '#2a6a1a', rare: '#1a4a8a', epic: '#6a2a9a', legendary: '#9a5a00' } as Record<string, string>)[d.rarity] : RARITY_COLOR[d.rarity];
     const out: { text: string; color?: string; font?: 'body' | 'small' | 'title'; gap?: number }[] = [
-      { text: d.name + (lv > 1 ? ` +${lv - 1}` : ''), font: 'title', color: RARITY_COLOR[d.rarity] },
-      { text: `${d.rarity} ${d.kind}`.toUpperCase(), font: 'small', color: '#9aa4b8', gap: 1 },
+      { text: d.name + (lv > 1 ? ` +${lv - 1}` : ''), font: 'title', color: rar },
+      { text: `${d.rarity} ${d.kind}`.toUpperCase(), font: 'small', color: dim, gap: 1 },
     ];
     const cap = stackCap(it.id);
-    out.push({ text: `${d.shape.length} cell${d.shape.length > 1 ? 's' : ''}` + (cap > 1 ? `  ·  stack ${it.n ?? 1}/${cap}` : ''), font: 'small', color: cap > 1 ? '#ffd860' : '#9aa4b8' });
-    for (const l of statLines(it.id, lv)) out.push({ text: l.text, font: 'small', color: l.key === 'note' ? '#8ae8ff' : l.good ? '#8af07a' : '#ff8a7a' });
-    out.push({ text: d.desc, font: 'small', color: '#d8d0c0', gap: 2 });
+    out.push({ text: `${d.shape.length} cell${d.shape.length > 1 ? 's' : ''}` + (cap > 1 ? `  ·  stack ${it.n ?? 1}/${cap}` : ''), font: 'small', color: cap > 1 ? (paper ? '#9a5a00' : '#ffd860') : dim });
+    for (const l of statLines(it.id, lv)) out.push({ text: l.text, font: 'small', color: l.key === 'note' ? (paper ? '#1a4a7a' : '#8ae8ff') : l.good ? (paper ? '#2a6a1a' : '#8af07a') : (paper ? '#a01818' : '#ff8a7a') });
+    out.push({ text: d.desc, font: 'small', color: paper ? '#3a2810' : '#d8d0c0', gap: 2 });
     return out;
   }
 
@@ -506,11 +557,14 @@ export class BackpackScreen implements Screen {
     const it = this.held ?? this.hover;
     const x = L.infoX, y = L.infoY + slide, w = L.infoW;
     if (it) {
+      // a physical card: a leather-bound parchment board swaying on the stage, the item's miniature turning in
+      // its window, the words printed over it
       const h = this.cardBody(it, x, y, w, false);
-      ui.panel('dark', x, y, w, h);
+      this.cardModel(it, x, y, w, h);
       this.cardBody(it, x, y, w, true);
       return;
     }
+    this.hideCard();
     // nothing hovered: the build
     const sets = setBonuses(run).slice(0, 6);
     const h = 26 + Math.max(1, sets.length) * 24;
@@ -529,19 +583,57 @@ export class BackpackScreen implements Screen {
   }
 
   /** the item card; draw=false only measures. Returns its height */
+  private cardItem: { uid: number; o: THREE.Object3D } | null = null;
+  private cardModel(it: ItemInst, x: number, y: number, w: number, h: number) {
+    if (!this.cardBoard) {
+      const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+      const g = c.getContext('2d')!;
+      g.fillStyle = '#e8d6ae'; g.fillRect(0, 0, 32, 32);
+      for (let yy = 0; yy < 32; yy += 3) { g.fillStyle = '#dcc8a0'; g.fillRect(0, yy, 32, 1); }
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      const board = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 3), [
+        new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ color: '#5a3418', roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: '#3a2010', roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 }), new THREE.MeshStandardMaterial({ color: '#3a2010', roughness: 0.8 }),
+      ]);
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 2), new THREE.MeshStandardMaterial({ color: '#6a3a1c', roughness: 0.7, flatShading: true }));
+      rim.position.z = -1.2; rim.name = 'rim';
+      board.add(rim);
+      this.cardBoard = board;
+    }
+    const b = this.cardBoard;
+    b.scale.set(w, h, 1);
+    (b.getObjectByName('rim') as THREE.Mesh).scale.set(1 + 6 / w, 1 + 6 / h, 1);
+    b.rotation.set(0.05 + Math.sin(this.t * 1.1) * 0.02, -0.08 + Math.sin(this.t * 0.8) * 0.03, Math.sin(this.t * 0.9) * 0.008);
+    this.stage.put(b, x + w / 2, y + h / 2, -40);
+    b.visible = true;
+    if (!this.cardItem || this.cardItem.uid !== it.uid) {
+      this.cardItem?.o.removeFromParent();
+      this.cardItem = { uid: it.uid, o: itemModel(it.id) };
+    }
+    const o = this.cardItem.o;
+    const d = getItem(it.id);
+    const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
+    o.scale.setScalar(30 / Math.max(cw, ch));
+    o.rotation.set(0.3, this.t * 1.4, 0);
+    o.visible = true;
+    this.stage.put(o, x + 6 + 17, y + 6 + 17, 30);
+  }
+  private hideCard() { if (this.cardBoard) this.cardBoard.visible = false; if (this.cardItem) this.cardItem.o.visible = false; }
+
   private cardBody(it: ItemInst, x: number, y: number, w: number, draw: boolean): number {
-    const ui = this.ui;
+    const ui = this.fg;
     const d = getItem(it.id), lv = it.level ?? 1;
-    const lines = this.tipLines(it);
+    const lines = this.tipLines(it, true);
     const tw = w - 12, bw = 34;
     const tb = (str: string, tx: number, ty: number, ww: number, o: { font: 'body' | 'small' | 'title'; color?: string }) => (draw ? ui.textBox(str, tx, ty, ww, o) : ui.textBox(str, -9999, -9999, ww, o));
     if (draw) {
-      ui.fill(x + 6, y + 6, bw, bw, '#06080e', 0.8);
       ui.rect(x + 6, y + 6, bw, bw, RARITY_COLOR[d.rarity]);
-      ui.item(it.id, x + 7, y + 7, 32, 32, lv);
+      ui.rect(x + 7, y + 7, bw - 2, bw - 2, '#5a3a1c');
     }
+    void lv;
     const nh = tb(lines[0].text, x + bw + 12, y + 7, w - bw - 18, { font: 'title', color: lines[0].color });
-    tb(lines[1].text, x + bw + 12, y + 9 + nh, w - bw - 18, { font: 'small', color: '#9aa4b8' });
+    tb(lines[1].text, x + bw + 12, y + 9 + nh, w - bw - 18, { font: 'small', color: '#7a5a3a' });
     let yy = y + Math.max(46, 12 + nh + 12);
     for (const l of lines.slice(2)) { yy += l.gap ?? 0; yy += tb(l.text, x + 6, yy, tw, { font: l.font ?? 'small', color: l.color }) + 1; }
     const tags = (d.tags ?? []).filter((t) => t !== 'gem' && t !== 'metal');
@@ -551,7 +643,7 @@ export class BackpackScreen implements Screen {
         const tw2 = ui.measure(t.toUpperCase(), 'small') + 8;
         if (tx + tw2 > x + w - 6) { tx = x + 6; yy += 13; }
         const col = SET_COL[t] ?? '#8a94a8';
-        if (draw) { ui.fill(tx, yy, tw2, 11, col, 0.25); ui.rect(tx, yy, tw2, 11, col); ui.text(t.toUpperCase(), tx + 4, yy + 2, { font: 'small', color: '#ffffff', shadow: null }); }
+        if (draw) { ui.fill(tx, yy, tw2, 11, col, 0.9); ui.rect(tx, yy, tw2, 11, '#3a2410'); ui.text(t.toUpperCase(), tx + 4, yy + 2, { font: 'small', color: '#1a0c04', shadow: null }); }
         tx += tw2 + 3;
       }
       yy += 14;
@@ -559,17 +651,17 @@ export class BackpackScreen implements Screen {
     const recipes = recipesWith(it.id).slice(0, 3);
     if (recipes.length) {
       yy += 2;
-      if (draw) ui.text('FUSES WITH', x + 6, yy, { font: 'small', color: '#ffd860' });
+      if (draw) ui.text('FUSES WITH', x + 6, yy, { font: 'small', color: '#9a5a00', shadow: null });
       yy += 11;
       for (const r of recipes) {
         const other = r.a === it.id ? r.b : r.a;
         if (draw) {
           ui.item(other, x + 6, yy - 2, 16, 16);
-          ui.text('>', x + 25, yy + 2, { font: 'small', color: '#9aa4b8' });
+          ui.text('>', x + 25, yy + 2, { font: 'small', color: '#7a5a3a', shadow: null });
           ui.item(r.out, x + 33, yy - 2, 16, 16);
           let name = getItem(r.out).name;
           while (name.length > 3 && ui.measure(name, 'small') > w - 60) name = name.slice(0, -2) + '…';
-          ui.text(name, x + 52, yy + 2, { font: 'small', color: '#e8dcc4' });
+          ui.text(name, x + 52, yy + 2, { font: 'small', color: '#3a2810', shadow: null });
         }
         yy += 17;
       }

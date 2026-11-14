@@ -1,34 +1,36 @@
-// The dungeon-run HUD (v3): a crisp pixel-art layer on the shared PixelUI density (~360 UI px tall).
+// The dungeon-run HUD (v3, "UI as objects"): lit 3D miniatures on a stage inside the HUD's PixelUI layer
+// (src/ui/obj/stage.ts), rendered after post so they are crisp and never fogged. Text only lives on plaques.
 //
-//   top left      hearts (full / half / empty + blue soul hearts, heartbeat when low), a stamina bar (trailing
-//                 drain chip, amber while regen is delayed, red flash when guard-broken / empty), a mana bar,
-//                 kelp-tea flask pips (the one being drunk fills up), then pearl / key / bomb counters and
-//                 the pack gauge (cells used / total, red when full)
-//   top right     the STRIP MINIMAP of the whole side-scrolling level: explored vs fog, the upper water lane,
-//                 the seabed profile and caves as vertical band hints, POI glyphs (treasure, Mr. Crab's shop,
-//                 post office, challenge, secret, arena lock, boss gate), the blinking player dot; area name
-//                 above, floor pips + "FLOOR 1/3" below
-//   bottom centre an ornate boss bar: name + title, delayed damage chip, phase notches + pips, poise sliver
-//   centre        title cards (floor names) and pickup streaks (item icon + name + one line)
+//   top left      HEALTH is a chibi of our blobfish (a real BlobModel) that bounces at full health, squishes
+//                 and jiggles on hits, wears a plaster when low, sweats at one heart and glows when healed; next to
+//                 it a row of wobbly pink JELLY HEARTS (full / half / empty glass) gives the exact count.
+//                 STAMINA is a glass tube of glowing seawater that drains (amber while regen waits, red when
+//                 guard-broken); MANA a cut-crystal vial; the kelp-tea FLASKS are real bottles that slosh and
+//                 empty as they are drunk; PEARLS / KEYS / BOMBS are a turning pearl, a rusty key and a puffer bomb
+//                 with their counts on little brass plaques; the PACK a leather pouch with cells used.
+//   top right     the STRIP MAP: an old parchment strip-chart rolled between two brass rollers, inked with the
+//                 level (explored stretch, upper lane, seabed, caves, POIs) and a red pin for you
+//   bottom left   the SKILLS: a hand of physical cards (keys 1-4): sculpted rarity frames, photographed art, gems,
+//                 a shadow sweeping over the art + a spinning sand-timer while on cooldown; they tilt toward the
+//                 mouse and breathe on hover
+//   bottom centre the BOSS plaque: an engraved bronze plaque with a red enamel health inlay, a pale damage chip,
+//                 phase gems
+//   centre        title cards and pickup streaks (the item's model turning on a ribbon)
 //
-// Usage (the dungeon screen owns the data; the HUD only draws it and animates changes):
-//
-//   const hud = new Hud();                         overlays: [..., hud.layer]
-//   resize(w, h)  -> hud.resize(w, h, renderer.getPixelRatio())
-//   update(dt)    -> hud.draw(dt, data, game.input)
-//                    or, inside your own ui.begin() / ui.end(): hud.drawInto(ui, dt, data)
-//   hud.title('SUNLIT REEF', 'FLOOR 1 OF 3')      a centred title card
-//   hud.pickup('copperOre')                        an item streak (icon via itemIcon, name + desc from ITEMS)
-//   hud.flash('pack')                              shake a counter ('pearls' | 'keys' | 'bombs' | 'pack' | 'hp')
-//
-// HudData takes K's PlayerCombatHud and BossBar (src/combat/types) as they are, and J's hp in half hearts.
+// Usage (unchanged): const hud = new Hud(); overlays: [hud.layer]; hud.resize(w, h, pr);
+//   hud.draw(dt, data, input)   or hud.drawInto(myUi, dt, data) inside your own ui.begin()/ui.end()
+//   hud.title(name, sub) / hud.pickup(itemId) / hud.flash('pack' | 'pearls' | ...)
 import * as THREE from 'three';
 import { PixelUI } from './pixel/ui';
 import type { Input } from '../core/input';
 import type { PlayerCombatHud, BossBar } from '../combat/types';
-import { hudArt } from './hudArt';
-import { ITEMS, skillItem } from '../game/items';
+import { ITEMS } from '../game/items';
 import type { SkillHudState } from '../skills/hud';
+import { UiStage, contactShadow } from './obj/stage';
+import { BlobAvatar } from './obj/blobAvatar';
+import { SkillCard3D } from './obj/cards';
+import { hudModel, itemModel } from '../backpack/models';
+import { hudArt } from './hudArt';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -82,38 +84,299 @@ export interface HudData {
   hidden?: boolean;
 }
 
-const C = { white: '#f6f1e6', dim: '#9aa8b8', gold: '#ffd860', red: '#ff5a4a', ink: '#06080e' };
+const C = { white: '#f6f1e6', ink: '#06080e' };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
+interface Card { title: string; sub: string; icon?: string; t: number; life: number; color: string; model?: THREE.Object3D }
 
-interface Card { title: string; sub: string; icon?: string; t: number; life: number; color: string }
+// ------------------------------------------------------------------ materials
+const glassMat = () => new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, depthWrite: false });
+const brassMat = new THREE.MeshStandardMaterial({ color: '#d8a038', roughness: 0.32, metalness: 0.75, flatShading: true });
+const darkBrass = new THREE.MeshStandardMaterial({ color: '#6a4a1c', roughness: 0.5, metalness: 0.6, flatShading: true });
+const bronzeMat = new THREE.MeshStandardMaterial({ color: '#9a6a3a', roughness: 0.38, metalness: 0.7, flatShading: true });
+const grooveMat = new THREE.MeshStandardMaterial({ color: '#1a0c0a', roughness: 0.9 });
+
+/** a heart split down the middle so halves can be full or empty */
+function heartHalf(side: -1 | 1, mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), mat); lobe.position.set(side * 0.2, 0.12, 0);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.55, 10, 1, false, side < 0 ? Math.PI : 0, Math.PI), mat);
+  tip.position.set(0, -0.25, 0); tip.rotation.x = Math.PI; tip.scale.z = 0.7;
+  const fillL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8, side < 0 ? Math.PI : 0, Math.PI), mat); fillL.position.set(0, 0.02, 0);
+  g.add(lobe, tip, fillL);
+  return g;
+}
+const jelly = new THREE.MeshStandardMaterial({ color: '#ff4a6a', roughness: 0.22, emissive: '#b01434', emissiveIntensity: 0.35 });
+const jellySoul = new THREE.MeshStandardMaterial({ color: '#5a9aff', roughness: 0.22, emissive: '#1a3a9a', emissiveIntensity: 0.35 });
+const jellyEmpty = new THREE.MeshStandardMaterial({ color: '#3a1a2a', roughness: 0.3, transparent: true, opacity: 0.75 });
+
+class Heart3D {
+  root = new THREE.Group();
+  private L: THREE.Group; private R: THREE.Group;
+  private state = '';
+  bump = 0; flash = 0;
+  constructor() { this.L = heartHalf(-1, jelly); this.R = heartHalf(1, jelly); this.root.add(this.L, this.R); const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), new THREE.MeshBasicMaterial({ color: '#ffffff' })); s.position.set(-0.24, 0.22, 0.22); s.name = 'shine'; this.root.add(s); }
+  set(l: THREE.Material, r: THREE.Material) {
+    const k = (l as THREE.MeshStandardMaterial).uuid + (r as THREE.MeshStandardMaterial).uuid;
+    if (k === this.state) return; this.state = k;
+    this.L.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = l; });
+    this.R.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = r; });
+    (this.root.getObjectByName('shine') as THREE.Mesh).visible = l !== jellyEmpty;
+  }
+}
+
+/** a horizontal glass tube with a glowing liquid inside (stamina: seawater; mana: a cut-crystal vial) */
+class Tube3D {
+  root = new THREE.Group();
+  private liquid: THREE.Mesh; private chip: THREE.Mesh; private liqMat: THREE.MeshStandardMaterial;
+  private bubbles: THREE.Mesh[] = [];
+  readonly len: number; private r: number;
+  constructor(len: number, r: number, color: string, crystal = false) {
+    this.len = len; this.r = r;
+    const sides = crystal ? 6 : 10;
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, sides, 1, true), glassMat()); glass.rotation.z = Math.PI / 2;
+    this.liqMat = new THREE.MeshStandardMaterial({ color, roughness: 0.25, emissive: color, emissiveIntensity: 0.35, flatShading: crystal });
+    this.liquid = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, 1, sides), this.liqMat); this.liquid.rotation.z = Math.PI / 2;
+    this.chip = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.76, r * 0.76, 1, sides), new THREE.MeshStandardMaterial({ color: '#fff4d8', emissive: '#fff0c0', emissiveIntensity: 0.5, transparent: true, opacity: 0.7 })); this.chip.rotation.z = Math.PI / 2;
+    for (const sx of [-1, 1]) {
+      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.25, r * 1.25, r * 1.1, 10), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : brassMat);
+      cap.rotation.z = sx * Math.PI / 2; cap.position.x = sx * (len / 2 + (crystal ? r * 0.9 : r * 0.3));
+      this.root.add(cap);
+    }
+    for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(r * 0.22, 5, 4), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 })); this.bubbles.push(b); this.root.add(b); }
+    const inner = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.86, r * 0.86, len, sides), new THREE.MeshStandardMaterial({ color: '#0c1a24', roughness: 0.6 })); inner.rotation.z = Math.PI / 2; inner.position.z = -r * 0.2;
+    const shine = new THREE.Mesh(new THREE.BoxGeometry(len * 0.9, r * 0.22, 0.2), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55 })); shine.position.set(0, r * 0.55, r * 0.9);
+    this.root.add(inner, this.liquid, this.chip, glass, shine);
+  }
+  update(t: number, v: number, chip: number, color?: string) {
+    if (color) { this.liqMat.color.set(color); this.liqMat.emissive.set(color); }
+    const L = this.len, w = Math.max(0.001, L * clamp01(v)), cw = Math.max(0.001, L * clamp01(chip));
+    this.liquid.scale.y = w; this.liquid.position.x = -L / 2 + w / 2; this.liquid.visible = v > 0.002;
+    this.chip.scale.y = Math.max(0.001, cw - w); this.chip.position.x = -L / 2 + w + (cw - w) / 2; this.chip.visible = cw > w + 0.3;
+    this.bubbles.forEach((b, i) => { const k = (t * 0.35 + i * 0.27) % 1; b.position.set(-L / 2 + ((i * 0.31 + t * 0.05) % 1) * w, (k - 0.5) * this.r * 1.2, this.r * 0.2); b.visible = v > 0.05; });
+  }
+}
+
+/** a kelp-tea bottle that sloshes and empties */
+class Flask3D {
+  root = new THREE.Group();
+  private liq: THREE.Mesh;
+  private full = 1; private slosh = 0; private t = Math.random() * 6;
+  constructor() {
+    const prof = [[0, -0.42], [0.3, -0.38], [0.36, -0.1], [0.28, 0.16], [0.12, 0.26], [0.12, 0.42], [0, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
+    const glass = new THREE.Mesh(new THREE.LatheGeometry(prof, 10), glassMat());
+    this.liq = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 6, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: '#3a9a1a', roughness: 0.2, emissive: '#2a8a14', emissiveIntensity: 0.45 }));
+    this.liq.position.y = -0.1;
+    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.14, 8), new THREE.MeshStandardMaterial({ color: '#b07a44', roughness: 0.9, flatShading: true })); cork.position.y = 0.48;
+    this.root.add(this.liq, glass, cork);
+  }
+  update(dt: number, level: number) {
+    this.t += dt;
+    if (Math.abs(level - this.full) > 0.01) this.slosh = 1;
+    this.full += (level - this.full) * Math.min(1, dt * 6);
+    this.slosh = Math.max(0, this.slosh - dt * 1.5);
+    this.liq.visible = this.full > 0.03;
+    this.liq.scale.set(1, Math.max(0.05, this.full), 1);
+    this.liq.position.y = -0.36 + this.full * 0.26;
+    this.root.rotation.z = Math.sin(this.t * 7) * 0.18 * this.slosh + Math.sin(this.t * 1.3) * 0.03;
+    this.liq.rotation.z = -this.root.rotation.z * 1.6;
+  }
+}
+
+/** a little brass plaque the counts are printed on (the number itself is 2D text on top) */
+function plaque(w: number, h: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2), brassMat); g.add(p);
+  const inset = new THREE.Mesh(new THREE.BoxGeometry(w - 3, h - 3, 0.6), darkBrass); inset.position.z = 1.1; g.add(inset);
+  for (const sx of [-1, 1]) { const r = new THREE.Mesh(new THREE.SphereGeometry(0.9, 6, 4), brassMat); r.position.set(sx * (w / 2 - 1.6), 0, 1.2); g.add(r); }
+  return g;
+}
+
+// ------------------------------------------------------------------ the strip map: parchment between brass rollers
+class ScrollMap {
+  root = new THREE.Group();
+  cv = document.createElement('canvas');
+  private tex: THREE.CanvasTexture;
+  private paper: THREE.Mesh;
+  private rollers: THREE.Group[] = [];
+  private W = 0; private H = 0;
+  constructor() {
+    this.tex = new THREE.CanvasTexture(this.cv);
+    this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
+    this.paper = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 12, 1), new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.95 }));
+    this.root.add(this.paper);
+    for (let i = 0; i < 2; i++) {
+      const r = new THREE.Group();
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 1, 10), new THREE.MeshStandardMaterial({ color: '#d8c49a', roughness: 0.9, flatShading: true }));
+      r.add(rod);
+      for (const sy of [-1, 1]) { const cap = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 2.4, 10), brassMat); cap.position.y = sy * 0.5; cap.name = 'cap'; r.add(cap); const knob = new THREE.Mesh(new THREE.SphereGeometry(2.4, 8, 6), brassMat); knob.name = 'knob'; r.add(knob); }
+      this.rollers.push(r); this.root.add(r);
+    }
+  }
+  layout(W: number, H: number) {
+    if (W === this.W && H === this.H) return;
+    this.W = W; this.H = H;
+    this.cv.width = W; this.cv.height = H;
+    this.tex.dispose(); this.tex = new THREE.CanvasTexture(this.cv);
+    this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
+    (this.paper.material as THREE.MeshStandardMaterial).map = this.tex;
+    // the paper bows slightly toward the viewer in the middle and curls into the rollers
+    const g = new THREE.PlaneGeometry(W, H, 16, 1);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i) / (W / 2); pos.setZ(i, (1 - x * x) * 2.5 - (Math.abs(x) > 0.92 ? 3 : 0)); }
+    g.computeVertexNormals();
+    this.paper.geometry.dispose(); this.paper.geometry = g;
+    this.rollers.forEach((r, i) => {
+      r.position.set((i ? 1 : -1) * (W / 2 + 1), 0, 0);
+      const rod = r.children[0]; rod.scale.y = H + 4;
+      r.children.forEach((c) => { if (c.name === 'cap') c.position.y = Math.sign(c.position.y || 1) * (H / 2 + 3); if (c.name === 'knob') c.position.y = (c.id % 2 ? 1 : -1) * (H / 2 + 5.5); });
+    });
+    let k = 0; for (const r of this.rollers) r.children.forEach((c) => { if (c.name === 'knob') { c.position.y = (k++ % 2 ? 1 : -1) * (H / 2 + 5.5); } });
+  }
+  draw(m: StripMap, t: number) {
+    const x = this.cv.getContext('2d')!, W = this.W, H = this.H;
+    const f = (px: number, py: number, w: number, h: number, c: string, a = 1) => { x.globalAlpha = a; x.fillStyle = c; x.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); x.globalAlpha = 1; };
+    const L = Math.max(1e-6, m.length);
+    const X = (v: number) => 2 + Math.round(clamp01(v / L) * (W - 5));
+    // parchment
+    f(0, 0, W, H, '#e8d4a6');
+    for (let yy = 0; yy < H; yy += 3) f(0, yy, W, 1, '#e0c898', 0.5);
+    f(0, 0, W, 1, '#c8a870'); f(0, H - 1, W, 1, '#a88a58');
+    // water (light wash), upper lanes, seabed, caves, in ink tones
+    for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 2, X(ln.x1) - X(ln.x0), 6, '#b8d0c8', 0.8);
+    const sb = m.seabed ?? [0.72];
+    const bedAt = (cx: number) => { const tt = clamp01(cx / Math.max(1, W - 1)) * (sb.length - 1); const i = Math.floor(tt), fr = tt - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], fr); };
+    let prev = -1;
+    for (let cx = 1; cx < W - 1; cx++) {
+      const by = Math.round(clamp01(bedAt(cx)) * (H - 2));
+      f(cx, by + 1, 1, H - by - 2, '#c8ac78', 0.9);
+      if (prev >= 0) f(cx, Math.min(prev, by), 1, Math.abs(prev - by) + 1, '#5a3a1a');
+      prev = by;
+    }
+    for (const ln of m.lanes ?? []) if (ln.kind === 'cave') for (let cx = X(ln.x0); cx <= X(ln.x1); cx++) { const by = Math.round(clamp01(bedAt(cx)) * (H - 2)); const top = by + 3, bot = H - 3; if (bot > top) { f(cx, Math.round((top + bot) / 2), 1, 2, '#3a2410'); if (cx % 3 === 0) f(cx, top, 1, 1, '#7a5a3a'); } }
+    // fog: unexplored stretches hatched in faded ink
+    const spans = [...m.explored].sort((a, b) => a[0] - b[0]);
+    let cur = 0;
+    const fog = (a: number, b: number) => { if (b <= a) return; const xa = X(a), xb = X(b); f(xa, 1, xb - xa + 1, H - 2, '#d8c090', 0.85); for (let cx = xa; cx < xb; cx += 4) f(cx, 2 + ((cx / 4) % 3) * 3, 2, 1, '#a88a58', 0.6); };
+    for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
+    if (cur < L) fog(cur, L);
+    // POIs as inked glyphs
+    const defY: Record<PoiType, number> = { treasure: 0.62, shop: 0.5, post: 0.45, challenge: 0.5, secret: 0.8, boss: 0.5, arena: 0.5, start: 0.5 };
+    const glyph: Record<PoiType, string> = { treasure: 'mTreasure', shop: 'mShop', post: 'mPost', challenge: 'mChallenge', secret: 'mSecret', boss: 'mBoss', arena: 'mArena', start: 'mStart' };
+    for (const p of m.pois) {
+      const known = p.known !== false;
+      const ic = hudArt(known ? glyph[p.type] : 'mSecret');
+      const gx = Math.max(1, Math.min(W - ic.width - 1, X(p.x) - Math.floor(ic.width / 2)));
+      const gy = Math.max(1, Math.min(H - ic.height - 1, Math.round(clamp01(p.y ?? defY[p.type]) * (H - 1)) - Math.floor(ic.height / 2)));
+      if (p.type === 'boss') f(gx - 1, 1, 1, H - 2, '#8a1424');
+      x.globalAlpha = !known ? 0.5 : p.done ? 0.4 : 1; x.drawImage(ic, gx, gy); x.globalAlpha = 1;
+    }
+    // you: a red pin with a pulse ring
+    const plx = X(m.player), ply = Math.round(clamp01(m.playerY ?? 0.5) * (H - 1));
+    const pr = 3 + Math.round((Math.sin(t * 5) * 0.5 + 0.5) * 2);
+    x.strokeStyle = '#c8202a'; x.globalAlpha = 0.5; x.beginPath(); x.arc(plx + 0.5, ply + 0.5, pr, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 1;
+    f(plx - 1, ply - 1, 3, 3, '#c8202a'); f(plx - 1, ply - 1, 1, 1, '#ff8a8a');
+    // a torn-edge vignette
+    for (let cx = 0; cx < W; cx += 2) { f(cx, 0, 1, 1 + ((cx * 7) % 3 === 0 ? 1 : 0), '#a88a58', 0.6); f(cx, H - 1 - ((cx * 5) % 3 === 0 ? 1 : 0), 1, 1, '#8a6a3a', 0.6); }
+    this.tex.needsUpdate = true;
+  }
+}
+
+// ------------------------------------------------------------------ the boss plaque
+class BossPlaque {
+  root = new THREE.Group();
+  private hp: THREE.Mesh; private chip: THREE.Mesh; private gems: THREE.Mesh[] = []; private gemOn: THREE.MeshStandardMaterial; private gemOff: THREE.MeshStandardMaterial;
+  private poise: THREE.Mesh;
+  W = 0;
+  constructor() {
+    this.hp = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1.6), new THREE.MeshStandardMaterial({ color: '#c8182a', roughness: 0.25, emissive: '#7a0a14', emissiveIntensity: 0.5 }));
+    this.chip = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1.4), new THREE.MeshStandardMaterial({ color: '#ffe0b0', emissive: '#ffc880', emissiveIntensity: 0.6 }));
+    this.poise = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: '#ffd860', emissive: '#c89020', emissiveIntensity: 0.5 }));
+    this.gemOn = new THREE.MeshStandardMaterial({ color: '#ff5a4a', roughness: 0.12, flatShading: true, emissive: '#ff2a1a', emissiveIntensity: 0.9 });
+    this.gemOff = new THREE.MeshStandardMaterial({ color: '#3a1a1a', roughness: 0.3, flatShading: true });
+  }
+  layout(W: number) {
+    if (W === this.W) return; this.W = W;
+    for (const c of [...this.root.children]) this.root.remove(c);
+    const sh = new THREE.Shape(); const w = W + 20, h = 16, r = 6;
+    sh.moveTo(-w / 2 + r, -h / 2); sh.lineTo(w / 2 - r, -h / 2); sh.lineTo(w / 2, 0); sh.lineTo(w / 2 - r, h / 2); sh.lineTo(-w / 2 + r, h / 2); sh.lineTo(-w / 2, 0); sh.lineTo(-w / 2 + r, -h / 2);
+    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 3, bevelEnabled: true, bevelThickness: 1.2, bevelSize: 1.2, bevelSegments: 1 }), bronzeMat);
+    body.position.z = -2;
+    const groove = new THREE.Mesh(new THREE.BoxGeometry(W + 2, 7, 1), grooveMat); groove.position.z = 2.2;
+    this.root.add(body, groove, this.chip, this.hp, this.poise);
+    this.hp.position.z = 2.6; this.chip.position.z = 2.5; this.poise.position.set(0, -6.5, 2.6);
+    for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(4, 0), this.gemOn); g.position.set(sx * (W / 2 + 6), 0, 2.5); g.scale.z = 0.6; this.root.add(g); }
+    this.gems = [];
+  }
+  update(dt: number, shown: number, chip: number, flash: number, b: BossBar) {
+    const W = this.W;
+    const fw = Math.max(0.001, W * shown), cw = Math.max(0.001, W * chip);
+    this.hp.scale.x = fw; this.hp.position.x = -W / 2 + fw / 2; this.hp.visible = shown > 0.001;
+    this.chip.scale.x = Math.max(0.001, cw - fw); this.chip.position.x = -W / 2 + fw + (cw - fw) / 2; this.chip.visible = cw > fw + 0.5;
+    (this.hp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + flash * 1.5;
+    const po = clamp01(b.poise ?? 1); this.poise.scale.set(Math.max(0.001, W * po), 1, 1); this.poise.position.x = -W / 2 + (W * po) / 2; this.poise.visible = po < 0.999;
+    const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
+    while (this.gems.length < n) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(2.6, 0), this.gemOff); g.scale.z = 0.6; this.root.add(g); this.gems.push(g); }
+    this.gems.forEach((g, i) => { g.visible = i < n && n > 1; g.position.set((i - (n - 1) / 2) * 9, -10, 2.6); g.material = i < ph ? this.gemOn : this.gemOff; g.rotation.y += dt * (i < ph ? 1.4 : 0.2); });
+  }
+}
 
 export class Hud {
   ui = new PixelUI();
   get layer(): { scene: THREE.Scene; camera: THREE.Camera } { return this.ui.layer; }
+  stage = new UiStage();
   private t = 0;
   private prev: HudData | null = null;
+  private avatar = new BlobAvatar();
+  private avatarShadow = contactShadow(40, 9, 0.4);
+  private hearts: Heart3D[] = [];
   private heartBump: number[] = [];
-  private heartFlash = 0; private heartFlashAt = -1;
-  private stamShown = 1; private stamChip = 1; private stamChipHold = 0; private stamFull = 0;
+  private stamina = new Tube3D(64, 3.6, '#18c8a0');
+  private mana = new Tube3D(48, 3, '#4a5aff', true);
+  private flasks: Flask3D[] = [];
+  private counters: Record<'pearls' | 'keys' | 'bombs', { m: THREE.Object3D; p: THREE.Group }>;
+  private pouch = itemModel('cutpursePouch');
+  private scroll = new ScrollMap();
+  private boss = new BossPlaque();
+  private cards: SkillCard3D[] = [];
+  private cardIds: string[] = [];
+  private ribbon = new THREE.Group();
+  private stamShown = 1; private stamChip = 1; private stamChipHold = 0;
   private manaShown = 0;
   private bossShown = 1; private bossChip = 1; private bossChipHold = 0; private bossFlash = 0; private bossIn = 0; private bossName = '';
   private pop: Record<Counter, number> = { pearls: 0, keys: 0, bombs: 0, pack: 0, hp: 0 };
   private parryFlash = 0;
-  private prevCd: number[] = [];
-  private slotFlash: number[] = [];
-  private cards: Card[] = [];
+  private cardsT: Card[] = [];
+
+  constructor() {
+    const S = this.stage;
+    S.ui.add(this.avatar.root, this.avatarShadow);
+    this.avatar.root.scale.setScalar(25);
+    this.avatarShadow.rotation.x = -1.2;
+    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon);
+    this.pouch.scale.multiplyScalar(13);
+    const mk = (name: string, s: number) => { const m = hudModel(name); m.scale.setScalar(s); S.ui.add(m); const p = plaque(22, 11); S.ui.add(p); return { m, p }; };
+    this.counters = { pearls: mk('pearlCoin', 11), keys: mk('key', 13), bombs: mk('bomb', 13) };
+    // the pickup streak ribbon: a dark band with gold edges (3D so the item model sits on it)
+    const band = new THREE.Mesh(new THREE.PlaneGeometry(1, 40), new THREE.MeshBasicMaterial({ color: '#06080e', transparent: true, opacity: 0.78, toneMapped: false }));
+    const edgeT = new THREE.Mesh(new THREE.BoxGeometry(1, 1.4, 1), brassMat); edgeT.position.y = 20;
+    const edgeB = new THREE.Mesh(new THREE.BoxGeometry(1, 1.4, 1), brassMat); edgeB.position.y = -20;
+    this.ribbon.add(band, edgeT, edgeB); this.ribbon.visible = false; this.ribbon.position.z = -20;
+  }
 
   resize(w: number, h: number, pr: number) { this.ui.resize(w, h, pr); }
 
   /** a centred title card (floor / area names) */
-  title(title: string, sub = '', color = C.white, life = 3) { this.cards = this.cards.filter((c) => c.icon); this.cards.push({ title, sub, t: 0, life, color }); }
-  /** an item pickup streak: icon + name + one line (defaults from ITEMS) */
+  title(title: string, sub = '', color = C.white, life = 3) { this.cardsT = this.cardsT.filter((c) => c.icon); this.cardsT.push({ title, sub, t: 0, life, color }); }
+  /** an item pickup streak: the item's model turning on a ribbon, name + one line (defaults from ITEMS) */
   pickup(itemId: string, name?: string, sub?: string) {
     const d = ITEMS[itemId];
-    this.cards = this.cards.filter((c) => !c.icon);
-    this.cards.push({ title: name ?? d?.name ?? itemId, sub: sub ?? d?.desc ?? '', icon: itemId, t: 0, life: 3.2, color: '#fff2c8' });
+    for (const c of this.cardsT) if (c.model) c.model.removeFromParent();
+    this.cardsT = this.cardsT.filter((c) => !c.icon);
+    const model = itemModel(itemId);
+    this.stage.ui.add(model);
+    this.cardsT.push({ title: name ?? d?.name ?? itemId, sub: sub ?? d?.desc ?? '', icon: itemId, t: 0, life: 3.2, color: '#fff2c8', model });
   }
   /** bounce / flash a counter */
   flash(what: Counter) { this.pop[what] = 1; }
@@ -128,15 +391,17 @@ export class Hud {
   /** draw into any PixelUI between its begin() and end() */
   drawInto(ui: PixelUI, dt: number, s: HudData) {
     this.t += dt;
+    this.stage.attach(ui);
     this.animate(dt, s);
-    if (!s.hidden) {
-      let y = this.hearts(ui, 6, 6, s);
-      y = this.bars(ui, 7, y + 3, s);
-      y = this.flasks(ui, 7, y + 3, s);
-      this.counters(ui, 7, y + 4, s);
-      if (s.strip) this.strip(ui, s.strip);
-      if (s.boss && s.boss.visible !== false) this.bossBar(ui, s.boss);
-      if (s.skills) this.skillRow(ui, s.skills);
+    const on = !s.hidden;
+    for (const o of this.stage.ui.children) o.visible = on || o === this.ribbon;
+    if (on) {
+      this.healthRow(ui, dt, s);
+      const y = this.bars(ui, dt, s);
+      this.counterCol(ui, dt, s, y);
+      this.strip(ui, s.strip ?? null);
+      this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null);
+      this.hand(ui, dt, s.skills ?? null);
     }
     this.drawCards(ui, dt);
     this.prev = { ...s, combat: s.combat ? { ...s.combat } : s.combat };
@@ -145,37 +410,24 @@ export class Hud {
   // ---------------------------------------------------------------- change detection / easing
   private animate(dt: number, s: HudData) {
     const p = this.prev;
-    const n = Math.ceil(s.maxHp / 2) + Math.ceil((s.soul ?? 0) / 2);
-    while (this.heartBump.length < n) this.heartBump.push(0);
     if (p) {
       const tot = s.hp + (s.soul ?? 0), ptot = p.hp + (p.soul ?? 0);
-      if (tot < ptot) {
-        this.heartFlash = 1;
-        this.heartFlashAt = s.hp < p.hp ? Math.floor(Math.max(0, s.hp) / 2) : Math.ceil(s.maxHp / 2) + Math.floor((s.soul ?? 0) / 2);
-        if (this.heartBump[this.heartFlashAt] !== undefined) this.heartBump[this.heartFlashAt] = 1;
-      } else if (s.hp > p.hp) {
-        for (let i = Math.floor(p.hp / 2); i < Math.ceil(s.hp / 2); i++) if (this.heartBump[i] !== undefined) this.heartBump[i] = 1;
-      }
+      if (tot < ptot) { this.avatar.hurt(); const i = Math.floor(Math.max(0, s.hp) / 2); this.heartBump[i] = 1; }
+      else if (s.hp > p.hp) { this.avatar.heal(); for (let i = Math.floor(p.hp / 2); i < Math.ceil(s.hp / 2); i++) this.heartBump[i] = 1; }
       for (const k of ['pearls', 'keys', 'bombs'] as const) if (s[k] !== p[k]) this.pop[k] = 1;
       if (s.pack && p.pack && s.pack.used !== p.pack.used) this.pop.pack = Math.max(this.pop.pack, 0.6);
       if (s.combat?.lastParry && s.combat.lastParryAge < (p.combat?.lastParryAge ?? 99)) this.parryFlash = s.combat.lastParry === 'perfect' ? 1 : 0.5;
     }
-    if (s.skills) s.skills.slots.forEach((sl, i) => { const cd = sl?.cd ?? 0; if ((this.prevCd[i] ?? 0) > 0 && cd <= 0) this.slotFlash[i] = 1; this.prevCd[i] = cd; this.slotFlash[i] = Math.max(0, (this.slotFlash[i] ?? 0) - dt * 3); });
-    for (let i = 0; i < this.heartBump.length; i++) this.heartBump[i] = Math.max(0, this.heartBump[i] - dt * 3);
-    this.heartFlash = Math.max(0, this.heartFlash - dt * 4);
+    for (let i = 0; i < this.heartBump.length; i++) this.heartBump[i] = Math.max(0, (this.heartBump[i] ?? 0) - dt * 3);
     for (const k of Object.keys(this.pop) as Counter[]) this.pop[k] = Math.max(0, this.pop[k] - dt * 3.5);
     this.parryFlash = Math.max(0, this.parryFlash - dt * 3);
-    // stamina: the fill drops at once, a pale chip lingers where it was, then drains after it
     const c = s.combat;
     const st = c && c.staminaMax > 0 ? clamp01(c.stamina / c.staminaMax) : 1;
     if (st < this.stamShown - 0.002) { this.stamChip = Math.max(this.stamChip, this.stamShown); this.stamChipHold = 0.4; this.stamShown = st; }
     else this.stamShown = lerp(this.stamShown, st, 1 - Math.exp(-dt * 12));
     if (this.stamChipHold > 0) this.stamChipHold -= dt; else this.stamChip = Math.max(this.stamShown, this.stamChip - dt * 0.8);
-    if (st >= 0.999 && p?.combat && p.combat.staminaMax > 0 && p.combat.stamina / p.combat.staminaMax < 0.999) this.stamFull = 1;
-    this.stamFull = Math.max(0, this.stamFull - dt * 3);
     const mn = s.maxMana ? clamp01((s.mana ?? 0) / s.maxMana) : 0;
     this.manaShown = lerp(this.manaShown, mn, 1 - Math.exp(-dt * 10));
-    // boss
     const b = s.boss && s.boss.visible !== false ? s.boss : null;
     if (b) {
       if (b.name !== this.bossName) { this.bossName = b.name; this.bossIn = 0; this.bossShown = this.bossChip = 1; }
@@ -188,275 +440,167 @@ export class Hud {
     } else { this.bossName = ''; this.bossIn = 0; }
   }
 
-  // ---------------------------------------------------------------- top left
-  /** hearts; returns the y below them */
-  private hearts(ui: PixelUI, x0: number, y0: number, s: HudData): number {
-    const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2);
-    const per = 10, W = 14, H = 13, total = red + soul;
+  // ---------------------------------------------------------------- top left: the blobfish + jelly hearts
+  private healthRow(_ui: PixelUI, dt: number, s: HudData) {
+    const S = this.stage;
+    const frac = s.maxHp > 0 ? clamp01(s.hp / s.maxHp) : 0;
+    this.avatar.update(dt, frac, s.hp > 0 && s.hp <= 2);
+    S.put(this.avatar.root, 26, 30, 20);
+    S.put(this.avatarShadow, 26, 47, -5);
+    const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2), total = red + soul;
+    while (this.hearts.length < total) { const h = new Heart3D(); h.root.scale.setScalar(12); S.ui.add(h.root); this.hearts.push(h); }
     const low = s.hp > 0 && s.hp <= 2;
-    const lastRed = Math.ceil(s.hp / 2) - 1;
-    for (let i = 0; i < total; i++) {
-      const cx = x0 + (i % per) * W, cy = y0 + Math.floor(i / per) * H;
-      let name: string;
-      if (i < red) { const v = s.hp - i * 2; name = v >= 2 ? 'heart' : v === 1 ? 'heartHalf' : 'heartEmpty'; }
-      else { const v = (s.soul ?? 0) - (i - red) * 2; name = v >= 2 ? 'heartSoul' : 'heartSoulHalf'; }
-      const b = this.heartBump[i] ?? 0;
-      const beat = low && i === lastRed ? Math.max(0, Math.sin(this.t * 7.5)) ** 8 : 0;
-      const dy = -Math.round(Math.sin(b * Math.PI) * 3);
-      const shake = i === this.heartFlashAt && this.heartFlash > 0 ? Math.round(Math.sin(this.t * 90) * this.heartFlash * 1.5) : 0;
-      ui.img(hudArt(name, '#00000070'), cx + 1 + shake, cy + 1 + dy);
-      if (beat > 0.4) { ui.img(hudArt(name, '#ff4a5a'), cx - 1 + shake, cy + dy, { alpha: 0.5 }); ui.img(hudArt(name, '#ff4a5a'), cx + 1 + shake, cy + dy, { alpha: 0.5 }); }
-      ui.img(hudArt(name), cx + shake, cy + dy);
-      if (i === this.heartFlashAt && this.heartFlash > 0.45) ui.img(hudArt(name, '#ffffff'), cx + shake, cy + dy, { alpha: 0.9 });
-    }
-    return y0 + Math.max(1, Math.ceil(total / per)) * H;
+    this.hearts.forEach((h, i) => {
+      h.root.visible = i < total;
+      if (i >= total) return;
+      let l: THREE.Material, r: THREE.Material;
+      if (i < red) { const v = s.hp - i * 2; l = v >= 1 ? jelly : jellyEmpty; r = v >= 2 ? jelly : jellyEmpty; }
+      else { const v = (s.soul ?? 0) - (i - red) * 2; l = v >= 1 ? jellySoul : jellyEmpty; r = v >= 2 ? jellySoul : jellyEmpty; }
+      h.set(l, r);
+      const bump = this.heartBump[i] ?? 0;
+      const beat = low && i === Math.ceil(s.hp / 2) - 1 ? Math.max(0, Math.sin(this.t * 7.5)) ** 8 * 0.25 : 0;
+      const wob = Math.sin(this.t * 2.4 + i * 0.7);
+      h.root.scale.set(12 * (1 + beat + bump * 0.3), 12 * (1 + beat - bump * 0.15 + wob * 0.02), 12);
+      h.root.rotation.set(0, Math.sin(this.t * 1.3 + i) * 0.25, wob * 0.06);
+      S.put(h.root, 58 + (i % 10) * 14, 14 + Math.floor(i / 10) * 14 - Math.sin(bump * Math.PI) * 4, 10);
+    });
   }
 
-  /** a framed bar with a 1 px top shine; returns the y below it */
-  private bar(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, chip: number, ramp: [string, string, string, string]) {
-    ui.fill(x + 1, y + 1, w, h, '#00000066');
-    ui.fill(x, y, w, h, '#0a0c14');
-    ui.fill(x + 1, y + 1, w - 2, h - 2, '#221c26');
-    const iw = w - 2, fw = Math.round(iw * clamp01(v)), cw = Math.round(iw * clamp01(chip));
-    if (cw > fw) ui.fill(x + 1 + fw, y + 1, cw - fw, h - 2, '#fff0c8', 0.9);
-    if (fw > 0) {
-      ui.fill(x + 1, y + 1, fw, h - 2, ramp[1]);
-      ui.fill(x + 1, y + 1, fw, 1, ramp[2]);
-      if (h > 4) ui.fill(x + 1, y + h - 2, fw, 1, ramp[0]);
-      ui.fill(x + 2, y + 1, Math.max(0, Math.min(fw - 2, 2)), 1, ramp[3]);
-    }
-    for (let i = 12; i < iw; i += 12) ui.fill(x + 1 + i, y + 2, 1, h - 4, '#00000050');
-    return y + h;
-  }
-
-  private bars(ui: PixelUI, x: number, y: number, s: HudData): number {
-    const c = s.combat;
-    let yy = y;
+  private bars(ui: PixelUI, dt: number, s: HudData): number {
+    const S = this.stage, c = s.combat;
+    let y = 32 + Math.floor(Math.max(0, Math.ceil(s.maxHp / 2) + Math.ceil((s.soul ?? 0) / 2) - 1) / 10) * 14;
+    this.stamina.root.visible = !!c && c.staminaMax > 0;
     if (c && c.staminaMax > 0) {
-      const sw = Math.round(36 + Math.min(64, c.staminaMax * 0.5));
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
-      const ramp: [string, string, string, string] = broken ? ['#6a0a10', '#d0302a', '#ff8a6a', '#ffffff']
-        : c.staminaDelay > 0 ? ['#6a4a08', '#c89a28', '#f0d060', '#ffffff'] : ['#235c10', '#62b828', '#b0ec5c', '#ffffff'];
-      ui.img(hudArt('stamLeaf'), x - 1, yy);
-      this.bar(ui, x + 8, yy + 1, sw, 6, this.stamShown, this.stamChip, ramp);
-      if (this.stamFull > 0) ui.fill(x + 9, yy + 2, sw - 2, 4, '#ffffff', this.stamFull * 0.65);
-      if (c.guard === 'riposte') ui.rect(x + 7, yy, sw + 2, 8, Math.sin(this.t * 16) > 0 ? '#ffe070' : '#ff9a2a');
-      if (this.parryFlash > 0) ui.rect(x + 7, yy, sw + 2, 8, '#ffffff');
-      yy += 8;
+      const col = broken ? '#ff3a2a' : c.staminaDelay > 0 ? '#e8a818' : this.parryFlash > 0 ? '#ffffff' : '#18c8a0';
+      this.stamina.update(this.t, this.stamShown, this.stamChip, col);
+      S.put(this.stamina.root, 56 + 32, y, 6);
+      if (c.guard === 'riposte') this.stamina.root.rotation.x = Math.sin(this.t * 18) * 0.2; else this.stamina.root.rotation.x = 0;
+      y += 10;
     }
-    if (s.maxMana) {
-      const mw = Math.round(30 + Math.min(84, s.maxMana * 0.6));
-      ui.img(hudArt('manaGem'), x, yy + 2);
-      this.bar(ui, x + 8, yy + 3, mw, 5, this.manaShown, this.manaShown, ['#1a2a8a', '#3a6ae8', '#8ac0ff', '#ffffff']);
-      const gx = ((this.t * 36) % (mw + 50)) - 25;
-      if (gx > 0 && gx < (mw - 3) * this.manaShown) ui.fill(x + 9 + Math.round(gx), yy + 4, 2, 1, '#ffffff', 0.7);
-      yy += 9;
-    }
-    return yy;
+    this.mana.root.visible = !!s.maxMana;
+    if (s.maxMana) { this.mana.update(this.t, this.manaShown, this.manaShown); S.put(this.mana.root, 56 + 24, y, 6); y += 10; }
+    const n = c?.flasksMax ?? 0;
+    while (this.flasks.length < n) { const f = new Flask3D(); f.root.scale.setScalar(16); S.ui.add(f.root); this.flasks.push(f); }
+    this.flasks.forEach((f, i) => {
+      f.root.visible = i < n;
+      if (i >= n || !c) return;
+      const drinking = c.drinking > 0 && i === c.flasks;
+      f.update(dt, i < c.flasks ? 1 : drinking ? 1 - c.drinking : 0);
+      S.put(f.root, 61 + i * 14, y + 7, 8);
+    });
+    void ui;
+    return y + (n ? 20 : 4);
   }
 
-  private flasks(ui: PixelUI, x: number, y: number, s: HudData): number {
-    const c = s.combat;
-    if (!c || !c.flasksMax) return y;
-    for (let i = 0; i < c.flasksMax; i++) {
-      const full = i < c.flasks;
-      const drinkingThis = c.drinking > 0 && i === c.flasks; // the charge being drunk (already spent)
-      const n = full ? 'flask' : 'flaskEmpty';
-      const fx = x + i * 10;
-      ui.img(hudArt(n, '#00000066'), fx + 1, y + 1);
-      ui.img(hudArt(n), fx, y);
-      if (drinkingThis) {
-        // the liquid level drops as it's drunk
-        const lvl = Math.round((1 - c.drinking) * 6);
-        if (lvl > 0) ui.fill(fx + 2, y + 10 - lvl, 4, lvl, '#5cb830', 0.9);
-        ui.rect(fx - 1, y - 1, 10, 14, '#b8f070');
-      }
-    }
-    return y + 12;
-  }
-
-  private counters(ui: PixelUI, x: number, y: number, s: HudData) {
-    const rows: [Exclude<Counter, 'pack' | 'hp'>, string][] = [['pearls', 'pearl'], ['keys', 'key'], ['bombs', 'bomb']];
-    let yy = y;
-    const icon = (art: string, k: Counter, yy2: number) => {
-      const ic = hudArt(art), pop = this.pop[k];
-      const ix = x + Math.round((12 - ic.width) / 2), iy = yy2 + Math.round((14 - ic.height) / 2) - Math.round(Math.sin(pop * Math.PI) * 2);
-      ui.img(hudArt(art, '#00000066'), ix + 1, iy + 1);
-      ui.img(ic, ix, iy);
-    };
-    for (const [k, art] of rows) {
-      icon(art, k, yy);
+  private counterCol(ui: PixelUI, dt: number, s: HudData, y0: number) {
+    const S = this.stage;
+    let y = Math.max(y0, 66);
+    for (const k of ['pearls', 'keys', 'bombs'] as const) {
+      const { m, p } = this.counters[k];
       const pop = this.pop[k];
+      m.rotation.y = Math.sin(this.t * 1.2 + y) * 0.6 + pop * Math.PI * 2;
+      m.rotation.x = 0.15;
+      S.put(m, 14, y - Math.sin(pop * Math.PI) * 3, 12);
+      S.put(p, 36, y, 0);
       const v = String(Math.max(0, Math.min(99, s[k]))).padStart(2, '0');
-      ui.text(v, x + 15, yy + 2 - Math.round(Math.sin(pop * Math.PI) * 2), { font: 'body', color: pop > 0.25 ? '#fff6b0' : C.white, outline: '#0a0810' });
-      yy += 15;
+      ui.text(v, 36, y - 5 - Math.round(Math.sin(pop * Math.PI) * 2), { font: 'body', color: pop > 0.25 ? '#fff6b0' : '#fff0d0', outline: '#2a1606', align: 'center' });
+      y += 17;
     }
+    this.pouch.visible = !!s.pack;
     if (s.pack) {
-      icon('pack', 'pack', yy);
+      this.pouch.rotation.set(0.15, Math.sin(this.t * 0.8) * 0.4, Math.sin(this.t * 60) * 0.1 * this.pop.pack);
+      S.put(this.pouch, 14, y, 12);
       const full = s.pack.full || s.pack.used >= s.pack.total;
-      const shake = full && this.pop.pack > 0 ? Math.round(Math.sin(this.t * 70) * 2) : 0;
-      ui.text(`${s.pack.used}/${s.pack.total}`, x + 15 + shake, yy + 4, { font: 'small', color: full ? '#ff6a5a' : '#d8d0c0', outline: '#0a0810' });
+      ui.text(`${s.pack.used}/${s.pack.total}`, 26, y - 3, { font: 'small', color: full ? '#ff6a5a' : '#f0e6d0', outline: '#140a04' });
     }
+    void dt;
   }
 
-  // ---------------------------------------------------------------- top right: the strip minimap
-  private strip(ui: PixelUI, m: StripMap) {
-    const IW = Math.max(150, Math.min(240, Math.round(ui.w * 0.3))), IH = 28;
-    const PW = IW + 6, PH = IH + 6;
-    const px = ui.w - PW - 6, py = 16;
-    const ix = px + 3, iy = py + 3;
-    const L = Math.max(1e-6, m.length);
-    const X = (v: number) => ix + Math.round(clamp01(v / L) * (IW - 1));
-    // frame: brass rim around dark glass
-    ui.fill(px + 1, py + 1, PW, PH, '#00000070');
-    ui.fill(px, py, PW, PH, '#1e1206');
-    ui.fill(px + 1, py + 1, PW - 2, PH - 2, '#b07c34');
-    ui.fill(px + 1, py + 1, PW - 2, 1, '#f0c870');
-    ui.fill(px + 2, py + 2, PW - 4, PH - 4, '#3a2410');
-    // water column: lit near the top, deep at the bottom
-    const water = ['#3a8ab8', '#2e74a4', '#25608e', '#1d4e78', '#163e64', '#103052'];
-    for (let r = 0; r < IH; r++) ui.fill(ix, iy + r, IW, 1, water[Math.min(water.length - 1, Math.floor((r / IH) * water.length))]);
-    // upper lane hint: a lighter band along the top where the level has one
-    for (const ln of m.lanes ?? []) if (ln.kind === 'upper') { const a = X(ln.x0), b = X(ln.x1); ui.fill(a, iy + 1, b - a + 1, 6, '#6ac0e0'); ui.fill(a, iy + 7, b - a + 1, 1, '#2a6a98'); }
-    // seabed + caves
-    const sb = m.seabed ?? [0.72];
-    const bedAt = (cx: number) => { const t = clamp01((cx - ix) / Math.max(1, IW - 1)) * (sb.length - 1); const i = Math.floor(t), f = t - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], f); };
-    for (let cx = ix; cx < ix + IW; cx++) {
-      const by = iy + Math.round(clamp01(bedAt(cx)) * (IH - 1));
-      ui.fill(cx, by, 1, iy + IH - by, '#c8a868');
-      ui.fill(cx, by, 1, 1, '#f0d8a0');
-      if (by + 2 < iy + IH) ui.fill(cx, by + 2, 1, iy + IH - by - 2, '#7a5a34');
-    }
-    for (const ln of m.lanes ?? []) if (ln.kind === 'cave') {
-      const a = X(ln.x0), b = X(ln.x1);
-      for (let cx = a; cx <= b; cx++) {
-        const by = iy + Math.round(clamp01(bedAt(cx)) * (IH - 1));
-        const top = by + 3, bot = iy + IH - 2;
-        if (bot > top) { ui.fill(cx, top, 1, bot - top, '#3a2a22'); ui.fill(cx, Math.round((top + bot) / 2), 1, 2, '#140c0a'); }
-      }
-    }
-    // fog over unexplored stretches (dark, with a dotted edge)
-    const spans = [...m.explored].sort((a, b) => a[0] - b[0]);
-    let cur = 0;
-    const fog = (a: number, b: number) => { if (b <= a) return; const xa = X(a), xb = X(b); ui.fill(xa, iy, xb - xa + 1, IH, '#060a12', 0.78); for (let yy = iy; yy < iy + IH; yy += 2) { ui.fill(xa, yy, 1, 1, '#3a4a5a'); ui.fill(xb, yy, 1, 1, '#3a4a5a'); } };
-    for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
-    if (cur < L) fog(cur, L);
-    // POIs
-    const defY: Record<PoiType, number> = { treasure: 0.62, shop: 0.5, post: 0.45, challenge: 0.5, secret: 0.8, boss: 0.5, arena: 0.5, start: 0.5 };
-    const glyph: Record<PoiType, string> = { treasure: 'mTreasure', shop: 'mShop', post: 'mPost', challenge: 'mChallenge', secret: 'mSecret', boss: 'mBoss', arena: 'mArena', start: 'mStart' };
-    for (const p of m.pois) {
-      const known = p.known !== false;
-      const ic = hudArt(known ? glyph[p.type] : 'mSecret');
-      const gx = Math.max(ix, Math.min(ix + IW - ic.width, X(p.x) - Math.floor(ic.width / 2)));
-      const gy = Math.max(iy, Math.min(iy + IH - ic.height, iy + Math.round(clamp01(p.y ?? defY[p.type]) * (IH - 1)) - Math.floor(ic.height / 2)));
-      if (p.type === 'boss') { ui.fill(gx - 1, iy, 1, IH, '#8a1424'); }
-      ui.img(ic, gx, gy, { alpha: !known ? 0.55 : p.done ? 0.45 : 1 });
-    }
-    // the player: a pink dot + a caret on the frame above it
-    const plx = X(m.player), ply = iy + Math.round(clamp01(m.playerY ?? 0.5) * (IH - 1));
-    const on = Math.sin(this.t * 6) > -0.4;
-    ui.fill(plx - 2, ply - 2, 5, 5, '#2a0a18');
-    ui.fill(plx - 1, ply - 1, 3, 3, on ? '#ffb0c8' : '#e87aa0');
-    ui.fill(plx - 1, ply - 1, 1, 1, '#ffffff');
-    ui.fill(plx - 2, py - 3, 5, 1, '#ffd0e0'); ui.fill(plx - 1, py - 2, 3, 1, '#ffd0e0'); ui.fill(plx, py - 1, 1, 1, '#ffd0e0');
-    // rivets
-    for (const [cx, cy] of [[px + 1, py + 1], [px + PW - 2, py + 1], [px + 1, py + PH - 2], [px + PW - 2, py + PH - 2]]) ui.fill(cx, cy, 1, 1, '#fff4c0');
-    // labels: area name above (left), floor pips + FLOOR n/m below
-    if (m.name) ui.text(m.name.toUpperCase(), px + 1, py - 13, { font: 'small', color: '#f0e6d0', outline: C.ink });
+  // ---------------------------------------------------------------- top right: the parchment strip map
+  private strip(ui: PixelUI, m: StripMap | null) {
+    this.scroll.root.visible = !!m;
+    if (!m) return;
+    const W = Math.max(150, Math.min(240, Math.round(ui.w * 0.3))), H = 30;
+    this.scroll.layout(W, H);
+    this.scroll.draw(m, this.t);
+    const cx = ui.w - W / 2 - 14, cy = 26 + H / 2;
+    this.stage.put(this.scroll.root, cx, cy, 0);
+    this.scroll.root.rotation.x = -0.12;
+    if (m.name) ui.text(m.name.toUpperCase(), cx - W / 2, cy - H / 2 - 13, { font: 'small', color: '#f0e6d0', outline: C.ink });
     const fl = `FLOOR ${m.floor}/${m.floors}`;
     const tw = ui.measure(fl, 'small');
-    ui.text(fl, px + PW - 1, py + PH + 3, { font: 'small', color: '#e8e0d0', outline: C.ink, align: 'right' });
-    for (let i = 0; i < m.floors; i++) ui.img(hudArt(i < m.floor ? 'pip' : 'pipOff'), px + PW - tw - 8 - (m.floors - i) * 7, py + PH + 3);
+    ui.text(fl, cx + W / 2, cy + H / 2 + 6, { font: 'small', color: '#f0e6d0', outline: C.ink, align: 'right' });
+    for (let i = 0; i < m.floors; i++) ui.img(hudArt(i < m.floor ? 'pip' : 'pipOff'), cx + W / 2 - tw - 8 - (m.floors - i) * 7, cy + H / 2 + 6);
   }
 
-  // ---------------------------------------------------------------- bottom centre: boss bar
-  private bossBar(ui: PixelUI, b: BossBar) {
+  // ---------------------------------------------------------------- bottom centre: the boss plaque
+  private bossBar(ui: PixelUI, dt: number, b: BossBar | null) {
+    this.boss.root.visible = !!b;
+    if (!b) return;
     const ease = 1 - (1 - this.bossIn) ** 3;
-    const W = Math.min(300, Math.round(ui.w * 0.56)), H = 9;
-    const x = Math.round((ui.w - W) / 2), y = Math.round(ui.h - 24 + (1 - ease) * 34);
-    const name = b.name.toUpperCase();
-    ui.text(name, ui.w / 2, y - 16, { font: 'title', color: '#ffe8d0', color2: '#ff9a7a', outline: '#1a0606', align: 'center', alpha: ease });
-    if (b.title) {
-      const nw = ui.measure(name, 'title');
-      ui.text(b.title, ui.w / 2 + nw / 2 + 6, y - 12, { font: 'small', color: '#c8b8a8', outline: '#1a0606', alpha: ease });
-    }
-    // frame: dark iron, bronze rim, gold end caps
-    ui.fill(x - 3, y - 2, W + 6, H + 6, '#00000077');
-    ui.fill(x - 3, y - 3, W + 6, H + 6, '#1a0e0a');
-    ui.fill(x - 2, y - 2, W + 4, H + 4, '#6a4a2a');
-    ui.fill(x - 2, y - 2, W + 4, 1, '#c89a5a');
-    ui.fill(x - 1, y - 1, W + 2, H + 2, '#140a0a');
-    const fw = Math.round(W * this.bossShown), cw = Math.round(W * this.bossChip);
-    ui.fill(x, y, W, H, '#2a0c10');
-    if (cw > fw) ui.fill(x + fw, y, cw - fw, H, '#ffd8a0');
-    if (fw > 0) {
-      ui.fill(x, y, fw, H, '#b8182a');
-      ui.fill(x, y, fw, 2, '#ff5a4a');
-      ui.fill(x, y + 2, fw, 1, '#e8303a');
-      ui.fill(x, y + H - 2, fw, 2, '#7a0a1a');
-      if (this.bossFlash > 0) ui.fill(x, y, fw, H, '#ffffff', Math.min(0.6, this.bossFlash * 0.6));
-    }
-    // poise: a thin gold sliver under the bar
-    if (b.poise !== undefined && b.poise < 0.999) ui.fill(x, y + H + 1, Math.round(W * clamp01(b.poise)), 1, '#ffd860');
-    const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
-    for (let i = 1; i < n; i++) { const nx = x + Math.round(W * (1 - i / n)); ui.fill(nx, y - 1, 1, H + 2, '#1a0606'); ui.fill(nx + 1, y, 1, H, '#ff8a7a', 0.5); }
-    for (const cx of [x - 6, x + W + 1]) { ui.fill(cx, y - 4, 5, H + 8, '#3a1e06'); ui.fill(cx + 1, y - 3, 3, H + 6, '#e0a830'); ui.fill(cx + 1, y - 3, 1, H + 6, '#fff0a0'); ui.fill(cx + 3, y - 3, 1, H + 6, '#8a5a10'); }
-    const sk = hudArt('skull');
-    ui.img(sk, x - 9 - sk.width + 2, y + Math.round((H - sk.height) / 2));
-    if (n > 1) { const pw = n * 7 - 2, px0 = Math.round(ui.w / 2 - pw / 2); for (let i = 0; i < n; i++) ui.img(hudArt(i < ph ? 'pip' : 'pipOff'), px0 + i * 7, y + H + 4); }
+    const W = Math.min(260, Math.round(ui.w * 0.5));
+    this.boss.layout(W);
+    this.boss.update(dt, this.bossShown, this.bossChip, this.bossFlash, b);
+    const y = ui.h - 26 + (1 - ease) * 40;
+    this.stage.put(this.boss.root, ui.w / 2, y, 0);
+    this.boss.root.rotation.x = -0.25 + Math.sin(this.t * 0.7) * 0.02;
+    ui.text(b.name.toUpperCase(), ui.w / 2, y - 24, { font: 'title', color: '#ffe8d0', color2: '#ff9a7a', outline: '#1a0606', align: 'center', alpha: ease });
+    if (b.title) ui.text(b.title, ui.w / 2, y - 34, { font: 'small', color: '#c8b8a8', outline: '#1a0606', align: 'center', alpha: ease });
   }
 
-  // ---------------------------------------------------------------- bottom left: skill slots
-  private skillRow(ui: PixelUI, s: SkillHudState) {
-    const S = 26, gap = 4, x0 = 8, y0 = ui.h - S - 8;
-    s.slots.forEach((sl, i) => {
-      const x = x0 + i * (S + gap), sel = i === s.sel && !!sl;
-      const y = y0 - (sel ? 2 : 0);
-      ui.fill(x + 1, y + 1, S, S, '#00000066');
-      ui.fill(x, y, S, S, '#0a0610');
-      ui.fill(x + 1, y + 1, S - 2, S - 2, sel ? '#f0c040' : '#8a6a3a');
-      ui.fill(x + 1, y + 1, S - 2, 1, sel ? '#fff2a0' : '#c8a060'); ui.fill(x + 1, y + 1, 1, S - 2, sel ? '#fff2a0' : '#c8a060');
-      ui.fill(x + 1, y + S - 2, S - 2, 1, sel ? '#a06a10' : '#4a3418'); ui.fill(x + S - 2, y + 1, 1, S - 2, sel ? '#a06a10' : '#4a3418');
-      ui.fill(x + 3, y + 3, S - 6, S - 6, '#1c2230');
-      ui.fill(x + 3, y + 3, S - 6, 1, '#0c1018');
-      if (sl) {
-        const it = skillItem(sl.id);
-        if (it) ui.item(it.id, x + 3, y + 3, S - 6, S - 6);
-        else ui.fill(x + 8, y + 8, S - 16, S - 16, sl.color);
-        const k = sl.cdMax > 0 ? clamp01(sl.cd / sl.cdMax) : 0;
-        if (k > 0) {
-          const hh = Math.ceil((S - 6) * k);
-          ui.fill(x + 3, y + 3, S - 6, hh, '#060810', 0.78);
-          ui.fill(x + 3, y + 3 + hh, S - 6, 1, '#8a9ab8');
-          ui.text(String(Math.ceil(sl.cd)), x + S / 2, y + S / 2 - 5, { font: 'body', color: '#ffffff', outline: '#06080e', align: 'center' });
-        } else if (sl.mana > s.mana) ui.fill(x + 3, y + 3, S - 6, S - 6, '#14286a', 0.55);
-        if ((this.slotFlash[i] ?? 0) > 0) ui.fill(x + 3, y + 3, S - 6, S - 6, '#ffffff', this.slotFlash[i] * 0.8);
-        if (sl.mana > 0) { ui.img(hudArt('manaGem'), x + S - 7, y + S - 8, { alpha: sl.mana > s.mana ? 0.4 : 1 }); }
-      }
-      // key plate
-      ui.fill(x - 2, y - 3, 9, 10, '#0a0610');
-      ui.fill(x - 1, y - 2, 7, 8, sel ? '#fff2a0' : '#d8c8a0');
-      ui.text(String(i + 1), x + 2.5, y - 1, { font: 'small', color: '#2a1a0a', shadow: null, align: 'center' });
+  // ---------------------------------------------------------------- bottom left: the hand of skill cards
+  private hand(ui: PixelUI, dt: number, sk: SkillHudState | null) {
+    const ids = (sk?.slots ?? []).map((x) => x?.id ?? '');
+    if (ids.join('|') !== this.cardIds.join('|')) {
+      for (const c of this.cards) c.root.removeFromParent();
+      this.cards = ids.map((id) => (id ? new SkillCard3D(id, { w: 36 }) : null)).filter((c): c is SkillCard3D => !!c);
+      for (const c of this.cards) this.stage.ui.add(c.root);
+      this.cardIds = ids;
+    }
+    if (!sk) return;
+    let k = 0;
+    sk.slots.forEach((sl, i) => {
+      if (!sl) return;
+      const c = this.cards[k++]; if (!c) return;
+      const x = 26 + i * 40, y = ui.h - 34;
+      const hov = ui.hover(x - c.w / 2, y - c.h / 2, c.w, c.h) ? 1 : 0;
+      const cd = sl.cdMax > 0 ? clamp01(sl.cd / sl.cdMax) : 0;
+      c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / (c.w / 2) : 0, my: hov ? (ui.my - y) / (c.h / 2) : 0, cd, ready: cd <= 0 && sl.mana <= sk.mana, selected: i === sk.sel });
+      this.stage.put(c.root, x, y, 30);
+      c.root.rotation.z = (i - 1.5) * -0.06;
+      // the key number on the frame, the cooldown seconds over the art
+      ui.text(String(i + 1), x - c.w / 2 + 4, y - c.h / 2 + 1 - (i === sk.sel ? 5 : 0), { font: 'body', color: '#fff2c8', outline: '#1a0c04' });
+      if (cd > 0) ui.text(String(Math.ceil(sl.cd)), x, y - 8, { font: 'title', color: '#ffffff', outline: '#06080e', align: 'center' });
     });
   }
 
   // ---------------------------------------------------------------- title cards / pickup streaks
   private drawCards(ui: PixelUI, dt: number) {
-    for (const c of this.cards) c.t += dt;
-    this.cards = this.cards.filter((c) => c.t < c.life);
-    for (const c of this.cards) {
+    for (const c of this.cardsT) c.t += dt;
+    for (const c of this.cardsT) if (c.t >= c.life && c.model) c.model.removeFromParent();
+    this.cardsT = this.cardsT.filter((c) => c.t < c.life);
+    this.ribbon.visible = false;
+    for (const c of this.cardsT) {
       const a = clamp01(Math.min(c.t * 5, (c.life - c.t) * 2.5));
       const slide = Math.round((1 - Math.min(1, c.t * 5)) ** 2 * 14);
       if (c.icon) {
-        const y = Math.round(ui.h * 0.22);
+        const y = Math.round(ui.h * 0.24);
         const sub = c.sub.length > 64 ? c.sub.slice(0, 62) + '…' : c.sub;
         const tw = Math.max(ui.measure(c.title, 'title'), ui.measure(sub, 'small'));
-        const w = Math.min(ui.w - 20, tw + 58), x = Math.round((ui.w - w) / 2);
-        ui.fill(x, y, w, 40, '#06080e', 0.75 * a);
-        ui.fill(x, y, w, 1, '#ffd860', 0.85 * a); ui.fill(x, y + 39, w, 1, '#ffd860', 0.85 * a);
-        ui.item(c.icon, x + 5, y + 4, 32, 32, 1, a);
-        ui.text(c.title, x + 44 - slide, y + 8, { font: 'title', color: c.color, outline: '#1a0e04', alpha: a });
-        if (sub) ui.text(sub, x + 44 + slide, y + 25, { font: 'small', color: '#d8d0c0', alpha: a });
+        const w = Math.min(ui.w - 20, tw + 64), x = Math.round((ui.w - w) / 2);
+        this.ribbon.visible = true;
+        this.ribbon.scale.set(w, 1, 1);
+        this.ribbon.children.forEach((ch) => { const m = (ch as THREE.Mesh).material as THREE.Material; m.opacity = a * 0.8; m.transparent = true; });
+        this.stage.put(this.ribbon, ui.w / 2, y + 20, -30);
+        if (c.model) {
+          const sc = 28 * Math.min(1, c.t * 4);
+          c.model.scale.setScalar(sc);
+          c.model.rotation.set(0.25, this.t * 2.2, Math.sin(this.t * 3) * 0.1);
+          this.stage.put(c.model, x + 22, y + 20, 30);
+        }
+        ui.text(c.title, x + 46 - slide, y + 9, { font: 'title', color: c.color, outline: '#1a0e04', alpha: a });
+        if (sub) ui.text(sub, x + 46 + slide, y + 26, { font: 'small', color: '#d8d0c0', alpha: a });
       } else {
         const y = Math.round(ui.h * 0.3);
         ui.text(c.title, ui.w / 2, y - slide, { font: 'big', color: c.color, color2: '#ffc860', outline: '#140a04', align: 'center', alpha: a });

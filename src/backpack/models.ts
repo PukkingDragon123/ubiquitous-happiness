@@ -549,6 +549,9 @@ function template(id: string): THREE.Object3D {
     // no bespoke model yet: the hand-painted icon extruded into chunky voxels (0.5 m per cell -> 1 unit per cell)
     const v = voxelMesh(d, 1, paintIconAt(d, 1, 32));
     v.scale.multiplyScalar(2);
+    // drop the world twinkle sprites (they are screen-sized; on the UI stage they would blow up)
+    const sprites: THREE.Object3D[] = []; v.traverse((o) => { if ((o as THREE.Sprite).isSprite) sprites.push(o); });
+    for (const o of sprites) o.removeFromParent();
     raw = new THREE.Group(); raw.add(v);
   } else { const b = new B(); b.add(new THREE.BoxGeometry(0.5, 0.5, 0.5), mFlat('#8a7050')); raw = b.g; }
   t = fit(raw, cw, ch, fn ? 0.9 : 1);

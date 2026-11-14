@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { ITEM_LIST, RARITY_COLOR, getItem } from '../game/items';
-import { paintIconAt } from '../backpack/icons';
+import { iconAt } from '../backpack/icons';
 import { ICON_ART } from '../backpack/iconArt';
 import { drawText } from '../ui/pixel/font';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
@@ -13,12 +13,55 @@ import { icon, ICON_NAMES } from '../ui/pixel/art';
 import { itemIcon } from '../game/items';
 import { cosmeticIcon, COSMETIC_ICON_IDS } from '../cosmetics/icons';
 import { medal, MEDAL_EMBLEMS } from '../achievements/medals';
+import { PixelUI } from '../ui/pixel/ui';
+import { UiStage } from '../ui/obj/stage';
+import { itemModel, hudModel, HUD_MODEL_NAMES } from '../backpack/models';
 
 const BG: Record<string, [string, string]> = { slate: ['#232836', '#2a3040'], leather: ['#5a3420', '#6a3e26'], light: ['#d8d0c0', '#e4dccc'] };
+
+/** ?preview=icons&set=models: every item as its lit 3D model, turning, on the UI stage (&rot=0 freezes them) */
+function modelsScreen(game: Game, q: URLSearchParams): Screen {
+  const ui = new PixelUI();
+  const st = new UiStage();
+  const ids = q.get('ids')?.split(',');
+  const list = ids ? ITEM_LIST.filter((d) => ids.includes(d.id)) : ITEM_LIST.slice(Number(q.get('from') || 0), Number(q.get('from') || 0) + Number(q.get('n') || 999));
+  const models = list.map((d) => ({ d, m: itemModel(d.id) }));
+  const extra = HUD_MODEL_NAMES.map((n) => ({ n, m: hudModel(n) }));
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(q.get('bg') === 'light' ? '#c8b89a' : '#1c2230');
+  const rot = q.get('rot') !== '0';
+  let t = 0;
+  return {
+    name: 'models', scene, camera: new THREE.PerspectiveCamera(), underwater: false, overlays: [ui.layer],
+    enter() {}, exit() {},
+    resize(w, h) { ui.resize(w, h, game.renderer.getPixelRatio()); },
+    update(dt) {
+      t += dt;
+      ui.begin(game.input, dt);
+      st.attach(ui);
+      const cell = Number(q.get('cell') || 30);
+      let x = 6, y = 6, rowH = 0;
+      for (const { d, m } of models) {
+        const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
+        const w = Math.max(cw * cell, 54), h = ch * cell + 10;
+        if (x + w > ui.w - 4) { x = 6; y += rowH + 2; rowH = 0; }
+        ui.fill(x, y, w - 2, h, '#000000', 0.18);
+        m.scale.setScalar(cell);
+        m.rotation.set(0.25, rot ? Math.sin(t * 0.8 + x * 0.05) * 0.6 - 0.25 : -0.3, 0);
+        st.put(m, x + (w - 2) / 2, y + (ch * cell) / 2 + 1, 40);
+        ui.text(d.id, x + 2, y + h - 9, { font: 'small', color: m.userData.bespoke ? '#e8e0d0' : '#ff8a6a' });
+        x += w; rowH = Math.max(rowH, h);
+      }
+      y += rowH + 6; x = 6;
+      for (const { n, m } of extra) { m.scale.setScalar(cell); m.rotation.set(0.2, rot ? t : 0, 0); st.put(m, x + 25, y + cell / 2 + 2, 40); ui.text(n, x + 2, y + cell + 4, { font: 'small', color: '#e8e0d0' }); x += 56; }
+      ui.end();
+    },
+  };
+}
 
 export default function make(game: Game): Screen {
   const q = new URLSearchParams(location.search);
   const set = q.get('set') || 'all';
+  if (set === 'models') return modelsScreen(game, q);
   const cols = Number(q.get('cols') || 8);
   const bg = BG[q.get('bg') || 'slate'] ?? BG.slate;
   const from = Number(q.get('from') || 0), cnt = Number(q.get('n') || 999);
@@ -40,7 +83,7 @@ export default function make(game: Game): Screen {
     // flow layout: each tile holds the 1x icon and its 3x copy
     let cx = 10, rowH = 0, k = 0;
     for (const d of items) {
-      const ic = paintIconAt(getItem(d.id), 1, 32) ?? itemIcon(d.id);
+      const ic = itemIcon(d.id);
       const ic3 = big(ic, 3);
       const tw = Math.max(150, ic.width + ic3.width + 16), th = ic3.height + 20;
       if (cx + tw > W - 6) { cx = 10; y += rowH + 2; rowH = 0; }
@@ -58,7 +101,7 @@ export default function make(game: Game): Screen {
     head('SMALL SIZES  (the same designs re-rasterised: 16 px and 24 px per cell, 1x and 2x)');
     let cx = 10, rowH = 0;
     for (const d of items) {
-      const a = paintIconAt(getItem(d.id), 1, 16), b = paintIconAt(getItem(d.id), 1, 24);
+      const a = iconAt(getItem(d.id), 1, 16), b = iconAt(getItem(d.id), 1, 24);
       if (!a || !b) continue;
       const w = a.width + b.width + a.width * 2 + 24;
       if (cx + w > W - 10) { cx = 10; y += rowH + 4; rowH = 0; }

@@ -143,7 +143,7 @@ export interface GateModel {
 
 function barMat(area: string): THREE.MeshStandardMaterial {
   switch (area) {
-    case 'kelp': return M('bar.kelp', kelpPage, { rough: 0.9 });
+    case 'kelp': return M('bar.kelp', kelpPage, { rough: 0.9, emissive: '#3a3a10', emissiveK: 0.35 });
     case 'graveyard': return M('bar.iron', ironPage, { rough: 0.75, metal: 0.25 });
     case 'arctic': return M('bar.ice', icePage, { rough: 0.35, emissive: '#2a6a9a', emissiveK: 0.25 });
     case 'abyss': return M('bar.bone', bonePage, { rough: 0.8, emissive: '#1a3a5a', emissiveK: 0.15 });

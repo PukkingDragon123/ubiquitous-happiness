@@ -10,6 +10,7 @@ import { EMIT_MASK } from './voxel';
 import { ICON_ART, type IconDesign } from './iconArt';
 import { Pix } from './pix';
 import { R } from './ramps';
+import { modelIcon } from '../ui/obj/studio';
 
 const RARITY_RAMP: Record<string, typeof R.cloth> = { common: R.cloth, uncommon: R.green, rare: R.blue, epic: R.violet, legendary: R.gold };
 
@@ -24,9 +25,22 @@ function fallbackDesign(d: ItemDef): IconDesign {
   } };
 }
 
-/** the 32-px-per-cell icon canvas for an item */
+/**
+ * the 32-px-per-cell icon canvas for an item: PHOTOGRAPHED from its 3D model in the studio (src/ui/obj/studio.ts)
+ * with a pixel finish; the painted design is the fallback when no GL context is available
+ */
 export function paintIcon(d: ItemDef, level = 1): HTMLCanvasElement {
-  return paintIconAt(d, level, 32)!;
+  return iconAt(d, level, 32);
+}
+/** model-rendered icon at `cell` px per cell (painted fallback), with merge-level pips */
+export function iconAt(d: ItemDef, level = 1, cell = 32): HTMLCanvasElement {
+  const m = modelIcon(d.id, cell, 1);
+  if (!m) return paintIconAt(d, level, cell);
+  if (level <= 1) return m;
+  const c = document.createElement('canvas'); c.width = m.width; c.height = m.height;
+  c.getContext('2d')!.drawImage(m, 0, 0);
+  levelPips(c, level, cell);
+  return c;
 }
 
 /**

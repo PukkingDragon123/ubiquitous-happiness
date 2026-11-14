@@ -109,7 +109,7 @@ export class TitleScreen implements Screen {
     POST.uFade.value = 1; POST.uLetterbox.value = 1;
     this.fadeIn = 1;
     const s = this.set.signAt;
-    this.rest.set(s.x - 2.45, floorAt(s.x - 2.45, 0) + 2.25, 0.4);
+    this.rest.set(s.x - 3.35, floorAt(s.x - 3.35, 0) + 1.95, 0.4);
     this.hx = this.rest.x - (d.quick ? 13 : 30); this.hy = this.rest.y + 1.4; this.vx = 3.6;
     this.phase = 'travel'; this.phaseT = 0; this.t = 0;
     this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false;
@@ -225,7 +225,13 @@ export class TitleScreen implements Screen {
       this.ray.setFromCamera(new THREE.Vector2(input.mouse.nx, input.mouse.ny), this.camera);
       over = sign.pick(this.ray);
     }
-    if (over) { this.kbdSel = null; ui.cursor = sign.boards[over].enabled ? 'point' : 'arrow'; }
+    // the mouse takes over from the keys only when it moves (a resting cursor over a board doesn't steal the choice)
+    const moved = Math.abs(ui.mx - this.lastM[0]) + Math.abs(ui.my - this.lastM[1]) > 0;
+    this.lastM = [ui.mx, ui.my];
+    if (over && (moved || !this.kbdSel)) this.kbdSel = null;
+    if (over) ui.cursor = sign.boards[over].enabled ? 'point' : 'arrow';
+    if (ui.pressed && over) this.kbdSel = null;
+    else if (this.kbdSel && !moved) over = null;
     // keys
     const step = (id: BoardId) => { if (sign.boards[id].enabled) { this.kbdSel = id; audio.play('k_tick1', { vol: 0.2, dry: true }); } };
     if (input.keyHit('ArrowRight') || input.keyHit('KeyD')) step('new');
@@ -248,6 +254,7 @@ export class TitleScreen implements Screen {
     else if ((input.keyHit('Enter') || input.keyHit('Space')) && !this.kbdSel && this.phaseT > 0.2) this.kbdSel = 'new';
   }
   private lastHotSfx: BoardId | null = null;
+  private lastM: [number, number] = [-1, -1];
 
   private activate(id: BoardId) {
     const sign = this.set.sign, b = sign.boards[id];
@@ -278,7 +285,7 @@ export class TitleScreen implements Screen {
     const k = this.phase === 'idle' || this.leaving ? 1 : clamp01(1 - (togo - 1) / 9);
     const ks = k * k * (3 - 2 * k);
     // travel: just ahead of the fish, close; arrival: the sign and the fish together, wider
-    const tx = THREE.MathUtils.lerp(this.hx + 1.6, s.x - 0.5, ks), ty = THREE.MathUtils.lerp(this.hy + 0.45, s.y + 2.85, ks);
+    const tx = THREE.MathUtils.lerp(this.hx + 1.6, s.x - 0.75, ks), ty = THREE.MathUtils.lerp(this.hy + 0.45, s.y + 3.05, ks);
     const dist = THREE.MathUtils.lerp(7.6, 10.6, ks);
     const lx = this.leaving ? (this.hx - tx) * clamp01(this.leaving.t - 0.3) * 0.35 : 0;
     const t = this.t;

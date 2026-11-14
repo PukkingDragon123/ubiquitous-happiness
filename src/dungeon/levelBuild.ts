@@ -158,7 +158,7 @@ export class LevelBuild {
     const silt = new THREE.Color(a.pal.silt);
     sand.onPuff = (x, y, k) => {
       const n = Math.round(3 + k * 7);
-      world.fx.emit('ink', x, y + 0.1, { n, spread: 0.25 + k * 0.25, vy: 0.25 + k * 0.2, speed: 0.4 + k * 0.6, life: 2.2 + k, size: 0.35 + k * 0.15, size1: 0.9 + k * 0.6, color: silt, alpha: 0.5, grav: 0.05, drag: 2.2 });
+      world.fx.emit('silt', x, y + 0.1, { n, spread: 0.25 + k * 0.25, vy: 0.25 + k * 0.2, speed: 0.4 + k * 0.6, life: 2.2 + k, size: 0.35 + k * 0.15, size1: 0.9 + k * 0.6, color: silt, alpha: 0.5, grav: 0.05, drag: 2.2 });
     };
     sand.onSpray = (x, y, k) => { world.fx.debrisBurst(x, y, Math.round(6 + k * 8), a.pal.sand[2], 3 + k * 2, 0.05); };
     this.onBoom = (d) => { if (typeof d.x === 'number' && typeof d.y === 'number') this.impact(d.x, d.y, (d.r as number) ?? 1.6, (d.k as number) ?? 1); };
@@ -187,8 +187,8 @@ export class LevelBuild {
       const n = Math.max(2, Math.round(L / 2.6));
       for (let i = 0; i < n; i++) {
         const cx = b.x0 + (i + 0.5) * (L / n);
-        for (const z of [-1.6, 0.2, 1.7]) {
-          scen.addRock(r.pick(shapes('slab')), cx + r.range(-0.4, 0.4), b.y0 - 0.15, z + r.range(-0.3, 0.3), L / n * 0.75 + 0.4, H * 1.12, 1.2, r.range(-0.3, 0.3), { tilt: 0.12, topK: 1.1 });
+        for (const z of [-1.7, 0.1, 1.3]) {
+          scen.addRock(r.pick(shapes('slab')), cx + r.range(-0.4, 0.4), b.y0 - 0.15, z + r.range(-0.2, 0.2), L / n * 0.75 + 0.4, H * 1.12, z > 1 ? 0.9 : 1.2, r.range(-0.3, 0.3), { tilt: 0.12, topK: 1.1 });
         }
         if (r.chance(0.6)) scen.addRock(r.pick(shapes('boulder')), cx + r.range(-0.8, 0.8), b.y1 - 0.3, r.range(-1.4, 0.3), r.range(0.5, 0.9), r.range(0.4, 0.8), r.range(0.5, 0.9), r.range(0, 6), { tilt: 0.5 });
       }

@@ -23,7 +23,7 @@ import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
 import { drawText, measure, wrap, lineH, capH, type FontName, type TextOpts } from './font';
 import { skin, btnSkin, PAD, BTN, LIP, type SkinKind, type BtnStyle, type BtnState } from './skins';
 import { icon, keycap, cursorArt, type CursorName } from './art';
-import { paintIconAt } from '../../backpack/icons';
+import { iconAt } from '../../backpack/icons';
 
 export type TipLine = string | { text: string; color?: string; font?: FontName; icon?: HTMLCanvasElement; gap?: number };
 
@@ -101,7 +101,7 @@ export function itemIconBox(id: string, w: number, h = w, level = 1): HTMLCanvas
   const d = getItem(id);
   const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
   const cell = Math.floor(Math.min(w / cw, h / ch));
-  const v3 = cell >= 8 && cell !== 32 ? paintIconAt(d, level, cell) : null;
+  const v3 = cell >= 8 && cell !== 32 ? iconAt(d, level, cell) : null;
   if (v3) {
     const out = document.createElement('canvas'); out.width = w; out.height = h;
     out.getContext('2d')!.drawImage(v3, Math.floor((w - v3.width) / 2), Math.floor((h - v3.height) / 2));

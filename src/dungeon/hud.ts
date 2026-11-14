@@ -81,7 +81,7 @@ export class DungeonHud {
     });
     if (!m.items.length) ui.text('YOUR PACK IS EMPTY', x + w / 2, y + 40, { font: 'small', color: '#6a5a4a', align: 'center' });
     const by = y + h - 26;
-    if (ui.button('mail:send', `SEND ${m.picked.size} HOME`, x + 12, by, w / 2 - 16, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
+    if (ui.button('mail:send', `SEND ${m.picked.size}`, x + 12, by, w / 2 - 16, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
     if (ui.button('mail:close', 'DONE', x + w / 2 + 4, by, w / 2 - 16, 18, { style: 'wood', key: 'Escape' })) out = 'mail:close';
     return out;
   }

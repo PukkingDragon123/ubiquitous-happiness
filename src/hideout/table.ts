@@ -22,7 +22,8 @@ import { Px } from '../gfx/px';
 import { hash2, damp, clamp01 } from '../core/math';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
 import { MASTERY, MAX_MASTERY, masteryMods, AREAS, floorsAt } from './mastery';
-import { ITEMS, getItem, GRID, fits, instCells, findSpot, stackCap, shapeSize, itemMesh, type Rarity } from '../game/items';
+import { ITEMS, getItem, GRID, fits, instCells, findSpot, stackCap, shapeSize, type Rarity } from '../game/items';
+import { itemModel } from '../backpack/models';
 import type { ItemInst } from '../game/run';
 import type { PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
@@ -129,7 +130,7 @@ function paintChart(mastery: number, start: string, hover: number): HTMLCanvasEl
   // hand-lettered labels: the depth names along the bottom, floor numbers by the pins, the title
   AREAS.forEach((a, i) => {
     const locked = a.minMastery > mastery;
-    const name = a.name.toUpperCase().replace('SHIPWRECK ', '').replace('THE ', '');
+    const name = ({ reef: 'REEF', kelp: 'KELP', graveyard: 'WRECKS', arctic: 'ICE', abyss: 'ABYSS' } as Record<string, string>)[a.id] ?? a.name.toUpperCase();
     drawText(ctx, name, zc(i), CH - 26, { font: 'small', color: locked ? '#6a6058' : '#3a2614', align: 'center' });
     if (locked) drawText(ctx, `M${a.minMastery}`, zc(i), CH - 38, { font: 'small', color: '#7a2a1a', align: 'center' });
   });
@@ -214,9 +215,9 @@ export class PlanningTable {
   private nextMatUid = -1;
   private dropT = new Map<number, number>();
   private tag = new Tag('paper', 170);
-  private card = new TableCard('paper', 118, 0.0027);
-  private emptyNote = new TableCard('paper', 150, 0.0027);
-  private plaque = new TableCard('brass', 400, 0.0024);
+  private card = new TableCard('paper', 112, 0.0033);
+  private emptyNote = new TableCard('paper', 150, 0.0033);
+  private plaque = new TableCard('brass', 400, 0.0031);
   private items = new THREE.Group();
   private models = new Map<string, THREE.Group>();
   private counts = new Map<number, THREE.Texture>();
@@ -314,7 +315,7 @@ export class PlanningTable {
       g.add(a); this.arrows.push(a);
     }
     // the mastery note beside the dial, a note for an empty stash, the engraved plaque of controls
-    this.card.mesh.position.set(DIAL.x + DIAL.r + 0.26, 0.004, DIAL.z - 0.02); this.card.mesh.rotation.y = 0.04; g.add(this.card.mesh);
+    this.card.mesh.position.set(DIAL.x + DIAL.r + 0.27, 0.004, DIAL.z - 0.01); this.card.mesh.rotation.y = 0.04; g.add(this.card.mesh);
     this.emptyNote.set([{ text: 'The stash is empty.', color: '#2a1808' }, { text: 'Mail loot home on runs.', color: '#5a4a3a' }]);
     this.emptyNote.mesh.position.set(TRAY.x, 0.032, TRAY.z); g.add(this.emptyNote.mesh);
     this.plaque.set([{ text: 'DRAG TO PACK', key: 'R', color: '#2a1404' }]);
@@ -547,14 +548,15 @@ export class PlanningTable {
   close() { this.tag.hide(); this.drag = null; }
 
   // ---------------------------------------------------------------- the 3D items
-  /** a flat-lying item model (itemMesh: the icon extruded into voxels), centred on its footprint, base at y = 0 */
+  /** a flat-lying item model, centred on its footprint, base at y = 0 */
   private model(key: string, id: string, level: number): THREE.Group {
     let g = this.models.get(key);
     if (g && g.userData.id === id && g.userData.level === level) return g;
     if (g) g.removeFromParent();
     g = new THREE.Group();
     const inner = new THREE.Group();
-    const m = itemMesh(id, level);
+    // agent L's item models: dense textured low-poly objects, 1 unit per cell, facing +Z -> lying face up here
+    const m = itemModel(id);
     m.rotation.x = -Math.PI / 2;
     inner.add(m);
     inner.updateMatrixWorld(true);

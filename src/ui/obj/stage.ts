@@ -32,6 +32,23 @@ export class UiStage {
     this.root.add(this.ui);
   }
 
+  /** a standalone overlay (scene + device-px camera) for screens that need 2D UNDER and OVER the models:
+   *  overlays: [bgUi.layer, stage.layer, fgUi.layer], then stage.follow(bgUi) each frame */
+  private ownScene: THREE.Scene | null = null;
+  private ownCam: THREE.OrthographicCamera | null = null;
+  get layer(): { scene: THREE.Scene; camera: THREE.Camera } {
+    if (!this.ownScene) { this.ownScene = new THREE.Scene(); this.ownCam = new THREE.OrthographicCamera(0, 1, 1, 0, -4000, 4000); }
+    return { scene: this.ownScene, camera: this.ownCam! };
+  }
+  follow(ui: PixelUI) {
+    const L = this.layer;
+    if (this.root.parent !== L.scene) L.scene.add(this.root);
+    const [dw, dh] = ui.deviceSize, cam = this.ownCam!;
+    if (cam.right !== dw || cam.top !== dh) { cam.left = 0; cam.right = dw; cam.top = dh; cam.bottom = 0; cam.updateProjectionMatrix(); }
+    this.root.position.set(0, dh, 0);
+    this.root.scale.set(ui.scale, ui.scale, ui.scale);
+  }
+
   /** keep the stage inside this PixelUI's layer and in its pixel space */
   attach(ui: PixelUI) {
     if (this.root.parent !== ui.layer.scene) ui.layer.scene.add(this.root);
