@@ -66,3 +66,11 @@ flat-shaded, matte, dense realistic clean textures, no noise/dither speckle.
 Own static build + preview server per agent; software GL is slow (use `&lq=1`, long waits, console-driven state);
 mouse-test every clickable thing with instant clicks; keep `npx tsc --noEmit -p .` green; never commit (lead commits);
 don't edit other owners' files — ask the lead.
+
+## Descent (user direction: "go deeper and deeper")
+Descent is the spine of the run. Each floor slopes down as you travel (terraces, drop-offs, shafts; ~25–40 m per
+floor) and floors connect through physical vertical descents with a depth stamp ("-120 m · KELP CATHEDRAL"). The look
+is interpolated by real depth (sunlit → twilight → midnight; deeper = darker, bluer, more bioluminescence; the player
+carries a light). Danger and reward scale with metres. After the abyss boss: surface (victory, keep the pack) or go
+deeper into endless procedurally remixed **Hadal** floors, with a rope point to surface every few floors. A brass
+**depth gauge** object sits in the HUD; max depth is a META record.

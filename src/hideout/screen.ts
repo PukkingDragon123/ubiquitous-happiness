@@ -303,7 +303,7 @@ export class HideoutScreen implements Screen {
     if (prev === m) return;
     if (prev === 'build') { this.build.exit(); Object.assign(this.rig.user, { yaw: FOLLOW.yaw, pitch: FOLLOW.pitch, dist: FOLLOW.dist, fov: FOLLOW.fov }); }
     if (prev === 'stash') { const s = this.furn.byBp('storage'); if (s) this.furn.setOpen(s, 0); audio.play('wood_close2', { vol: 0.4 }); }
-    if (prev === 'wardrobe') { this.wardPreview(null); this.nooks.spots.mirror.obj.visible = true; }
+    if (prev === 'wardrobe') { this.wardPreview(null); this.nooks.spots.mirror.obj.visible = true; for (const it of this.furn.items.values()) it.obj.visible = true; }
     if (prev === 'sit') this.hero.play?.('hop');
     if (prev === 'table') { this.hero.root.visible = true; this.table.close(); }
     this.mode = m; this.modeT = 0;
@@ -563,7 +563,16 @@ export class HideoutScreen implements Screen {
     const fr = new THREE.Vector3().subVectors(sp.face, sp.stand).setY(0).normalize();
     const yaw = Math.atan2(fr.x, fr.z) + 0.3;
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.5, hp.z).addScaledVector(side, -0.75), yaw, pitch: 0.4, dist: 3.8, fov: 32 };
+    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.5, hp.z).addScaledVector(side, -0.75), yaw, pitch: 0.4, dist: 4.8, fov: 30 };
+    // anything standing between the glass and the hero steps out of the shot
+    const cam = this.camera.position;
+    for (const it of this.furn.items.values()) {
+      const o = it.obj.position;
+      const ax = hp.x - cam.x, az = hp.z - cam.z, L2 = ax * ax + az * az || 1;
+      const k = ((o.x - cam.x) * ax + (o.z - cam.z) * az) / L2;
+      const px = cam.x + ax * k - o.x, pz = cam.z + az * k - o.z;
+      it.obj.visible = !(k > 0 && k < 0.92 && px * px + pz * pz < 0.8);
+    }
     const close = this.ward.draw(ui, 8, Math.round((ui.h - 242) / 2), dt);
     if (this.ward.hover !== this.wardHover) { this.wardHover = this.ward.hover; this.wardPreview(this.wardHover); }
     if (this.ward.equipped) { this.wardHover = null; this.wardPreview(null); this.hero.play?.('gear'); this.nooks.glint(); }

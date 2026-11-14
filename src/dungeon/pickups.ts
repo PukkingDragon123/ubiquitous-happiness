@@ -7,14 +7,16 @@
 //   world.add(new Pickup('item', x, y, { id: 'copperOre' }))
 import * as THREE from 'three';
 import type { Entity, World, Team } from '../game/types';
-import { itemMesh, getItem, RARITY_COLOR } from '../game/items';
+import { getItem, RARITY_COLOR } from '../game/items';
 
 /**
  * THE one place a world-side item object is made (pickups, pedestals, shop stands). Agent L's detailed textured
  * itemModel(id) replaces the voxel extrusion here when it lands: swap this body for `return itemModel(id, level)`.
  * The object is centred, ~0.5 m per grid cell; callers own its transform, never its geometry (it may be cached).
  */
-export function itemObject(id: string, level = 1): THREE.Object3D { return itemMesh(id, level); }
+/** every item shown in the world: its detailed 3D model (agent L's src/backpack/models.ts), 0.5 m per cell */
+import { itemModel } from '../backpack/models';
+export function itemObject(id: string, level = 1): THREE.Object3D { void level; return itemModel(id, { cell: 0.5 }); }
 import { keyModel, bombModel, pearlModel, heartModel, disposeModel } from './models';
 
 export type PickKind = 'pearl' | 'heart' | 'key' | 'bomb' | 'item';

@@ -42,6 +42,7 @@ function M(key: string, o: MO | (() => MO)): THREE.MeshStandardMaterial {
       side: v.side ?? THREE.FrontSide, transparent: v.opacity !== undefined, opacity: v.opacity ?? 1,
     });
     if (v.emissive) { m.emissive = new THREE.Color(v.emissive); m.emissiveIntensity = v.emissiveK ?? 0.6; if (v.map) m.emissiveMap = v.map; }
+    m.userData.shared = true;
     matCache.set(key, m);
   }
   return m;
