@@ -11,13 +11,14 @@
 //   const lvl = new LevelBuild(world, plan);  lvl.bind(world);  each frame lvl.update(dt, camX);  lvl.dispose()
 import * as THREE from 'three';
 import type { World, Entity } from '../game/types';
-import { areaDef, type AreaDef } from '../area/defs';
+import type { AreaDef } from '../area/defs';
+import { biomeDef } from './biomes';
 import type { Shape } from '../area/shape';
 import { SEAM_Z } from '../area/shape';
 import { Scenery } from '../area/scenery';
 import { buildLandmarks, dressRocks, dressJunk, foregroundFrame } from '../area/landmarks';
 import { Detail } from '../area/detail';
-import { MailBuoy } from '../area/manatee';
+import { Manatee } from '../area/manatee';
 import { SandField } from '../world/sand';
 import { ENV } from '../world/mats';
 import { MEADOW, meadowLook } from '../world/meadow';
@@ -30,7 +31,8 @@ import { fbm, smooth, damp } from '../core/math';
 import type { LampHandle } from '../gfx/lighting';
 import { LevelTerrain } from './terrain';
 import { ArenaGate, CrackedLid } from './gates';
-import { bedAt, sandAt, type LevelPlan } from './level';
+import { bedAt, sandAt, shelfAt, depthOf, type LevelPlan } from './level';
+import { grateModel, ropeModel, postBox, disposeModel } from './models';
 
 type Rig = { lamp(x: number, y: number, z: number, color: string, intensity?: number, distance?: number): LampHandle | null } | null;
 
@@ -41,17 +43,20 @@ function levelShape(a: AreaDef, plan: LevelPlan, hallX: number, galleonX: number
   const edge = (x: number) => smooth(6, -16, x) * 16 + smooth(plan.W - 6, plan.W + 16, x) * 16;
   const back = (x: number, z: number) => {
     // the seam follows the strip; caves and pits don't show behind (the seabed behind stays at the floor level)
-    const seam = Math.max(bed(x), plan.base - 1.2) + sand0(x);
+    const sh = shelfAt(plan, x);
+    const seam = Math.max(bed(x), sh - 1.2) + sand0(x);
     const k = smooth(SEAM_Z, -16, z);
     const rise = smooth(-6, -48, z);
-    let b = plan.base + a.backRise * rise * (0.55 + 0.9 * fbm(x * 0.018, z * 0.03, 3, s + 31));
+    // the background follows the terraces (a little smoothed, so the far seabed reads as one long slope down)
+    const shB = (shelfAt(plan, x - 6) + sh + shelfAt(plan, x + 6)) / 3;
+    let b = shB + a.backRise * rise * (0.55 + 0.9 * fbm(x * 0.018, z * 0.03, 3, s + 31));
     b += (fbm(x * 0.07, z * 0.09, 3, s + 32) - 0.5) * 1.6 * (1 - rise * 0.5);
     b += Math.max(0, fbm(x * 0.025, z * 0.04, 3, s + 33) - 0.55) * 16 * smooth(-12, -36, z);
     if (a.id === 'abyss') b -= smooth(-14, -40, z) * 10;
     if (a.id === 'graveyard') b += Math.max(0, fbm(x * 0.05, z * 0.05, 2, s + 34) - 0.6) * 4;
     b += edge(x) * 1.3;
     let h = seam * (1 - k) + b * k;
-    const cap = a.ice ? -4.5 : -3.2;
+    const cap = Math.min(a.ice ? -4.5 : -3.2, plan.top - 1.5);
     if (h > cap - 2) h = cap - 2 * Math.exp(-(h - (cap - 2)) / 2);
     return h;
   };
@@ -68,7 +73,16 @@ export class LevelBuild {
   terrain: LevelTerrain;
   detail: Detail;
   snow: MarineSnow;
-  mailbox: MailBuoy | null = null;
+  /** the post office's manatee (waits by her pillar box on a shelf) */
+  manatee: Manatee | null = null;
+  postX = 0; postY = 0;
+  /** the exit pit's grate (opens when the boss falls) and the surface rope (final floors) */
+  exitOpen = false;
+  grate: { root: THREE.Group; leaves: THREE.Group[] } | null = null;
+  rope: { root: THREE.Group; lamp: THREE.Mesh } | null = null;
+  /** additive god-ray sheets from the landmarks: dimmed with depth */
+  shafts: THREE.Mesh[] = [];
+  private grateA = 0;
   gates = new Map<number, ArenaGate[]>();
   lids = new Map<number, CrackedLid>();
   owned: Entity[] = [];
@@ -81,7 +95,7 @@ export class LevelBuild {
 
   constructor(public world: World, public plan: LevelPlan, o: LevelOptsB = {}) {
     const t0 = performance.now();
-    const a = this.a = areaDef(plan.area);
+    const a = this.a = biomeDef(plan.area);
     const r = new Rng(plan.seed ^ 0x1e7e1);
     // hero set pieces go in a quiet travel stretch, away from the arenas and POIs
     const busy = (x: number, pad: number) => plan.flats.some(([x0, x1]) => x > x0 - pad && x < x1 + pad);
@@ -103,28 +117,48 @@ export class LevelBuild {
       else if (p.kind === 'start') scen.reserved.push({ x: p.x, r: 4, z0: -1.5, z1: 3 });
     }
     for (const b of plan.solids) scen.reserved.push({ x: (b.x0 + b.x1) / 2, r: (b.x1 - b.x0) / 2 + 1.5, z0: -1.8, z1: 1.8 });
+    for (const st of plan.steps) scen.reserved.push({ x: (st.x0 + st.x1) / 2, r: (st.x1 - st.x0) / 2 + 1.2, z0: -0.5, z1: 0.4 });
+    scen.reserved.push({ x: (plan.exit.x0 + plan.exit.x1) / 2, r: 4, z0: -2, z1: 2 });
     for (const d of plan.dips) if (d.depth > 4) scen.reserved.push({ x: (d.x0 + d.x1) / 2, r: (d.x1 - d.x0) / 2, z0: -1.2, z1: 1.2 });
     scen.build();
     if (!o.light) buildLandmarks(scen, this.group, world);
     else { dressRocks(scen); dressJunk(scen, world); foregroundFrame(scen); }
-    terrain.ceiling = a.ice ? terrain.ceiling : null;
+    // the first floor opens to the surface (or its ice); deeper floors have dark water overhead and a hard top
+    const deep = plan.top < -2.9;
+    terrain.ceiling = deep ? () => plan.top : a.ice ? terrain.ceiling : null;
     this.buildBodies(r);
-    // the post office: the mail buoy and its manatee paint into the scenery's prop atlas, so before finish()
+    // the post office: the manatee paints into the scenery's prop atlas, so she's built before finish()
     const post = plan.pois.find((p) => p.kind === 'post');
     if (post) {
-      const mb = this.mailbox = new MailBuoy(a, scen, post.x, world);
-      // she keeps office hours: already waiting under the buoy, and never leaves
-      mb.window = 1e6; mb.interval = 6; mb.eta = 1e6;
-      mb.manatee.arrive(post.x + 3, post.x); mb.manatee.state = 'waiting'; mb.waitLeft = 1e6;
-      mb.manatee.x = post.x - 1.6; mb.manatee.y = -2.8;
-      this.owned.push(mb);
+      this.postX = post.x; this.postY = sand.heightAt(post.x);
+      const m = this.manatee = new Manatee(scen);
+      m.arrive(post.x + 3, post.x); m.state = 'waiting';
+      m.x = post.x + 1.2; m.y = this.postY + 4.2;
     }
     this.detail = new Detail(scen, world, plan.seed);
     scen.finish();
     this.group.name = `level:${a.id}:${plan.n}`;
     this.group.add(scen.group, this.detail.group);
     this.flushRoof();
-    if (this.mailbox) this.group.add(this.mailbox.obj);
+    if (this.manatee) {
+      this.group.add(this.manatee.root);
+      const box = postBox(); box.position.set(this.postX - 3.4, this.postY - 0.05, -0.9); box.scale.setScalar(1.35);
+      this.group.add(box); this.props3d.push(box);
+    }
+    // the exit pit's grate and, on a floor that ends the planned run, the rope up to the surface
+    const ex = plan.exit;
+    this.grate = grateModel(ex.x1 - ex.x0 + 0.8);
+    this.grate.root.position.set((ex.x0 + ex.x1) / 2, ex.top - 0.2, 0);
+    this.group.add(this.grate.root);
+    terrain.addBody({ x0: ex.x0 - 0.8, x1: ex.x1 + 0.8, y0: ex.top - 0.7, y1: ex.top + 0.25, r: 0.1, on: () => !this.exitOpen, tag: 'grate' });
+    if (plan.ropeX !== null) {
+      const fl = sand.heightAt(plan.ropeX), h = plan.top + 6 - fl;
+      this.rope = ropeModel(h);
+      this.rope.root.position.set(plan.ropeX, fl + 1.2, -0.3);
+      this.group.add(this.rope.root);
+    }
+    // god-ray sheets (landmark shafts): remembered so the depth can dim them
+    this.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending && !(m.material as THREE.Material).userData.shared) this.shafts.push(m); });
     // gates + lids
     const sandCol = a.pal.sand[2];
     for (const ar of plan.arenas) {
@@ -145,7 +179,9 @@ export class LevelBuild {
       this.group.add(lid.group);
       this.lids.set(p.id, lid);
     }
-    this.snow = new MarineSnow(a.snow, a.snowCol);
+    // marine snow thickens with depth
+    const dep = depthOf(plan, plan.base);
+    this.snow = new MarineSnow(a.snow * (1 + Math.min(2.2, dep / 120)), a.snowCol);
     this.group.add(this.snow.points);
     this.snow.setScale(world.game.h * Math.min(devicePixelRatio || 1, 1.5), world.camera.fov);
     // swords cut the seaweed
@@ -170,6 +206,16 @@ export class LevelBuild {
     const scen = this.scen, T = this.terrain, plan = this.plan;
     const shapes = (k: 'boulder' | 'bigboulder' | 'slab' | 'spire') => scen.shapes(k);
     for (const b of plan.solids) {
+      if (b.kind === 'grate') continue;
+      if (b.kind === 'wall') {
+        // the entry shaft's side: a column of big boulders, front to back
+        T.addBody({ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, r: 0.6, on: () => true, tag: 'wall' });
+        for (let y = b.y0 - 1; y < b.y1; y += r.range(1.8, 2.6)) for (const z of [-3.2, -0.8, 1.6]) {
+          const R = (b.x1 - b.x0) / 2 + r.range(0.3, 0.9);
+          scen.addRock(r.pick(shapes('bigboulder')), (b.x0 + b.x1) / 2 + r.range(-0.4, 0.4), y, z + r.range(-0.4, 0.4), R, r.range(2.2, 3), z > 1 ? 1.1 : 1.6, r.range(0, 6), { tilt: 0.25, tint: z > 1 ? 0.6 : undefined });
+        }
+        continue;
+      }
       if (b.kind === 'cracked') {
         // just the rims of the pit; the lid itself is a CrackedLid
         for (const ex of [b.x0 - 0.6, b.x1 + 0.6]) scen.addRock(r.pick(shapes('boulder')), ex, plan.base - 1.6, r.range(-1, 0.6), 1.1, 1.8, 1.3, r.range(0, 6), { tilt: 0.3 });
@@ -192,6 +238,7 @@ export class LevelBuild {
         }
         if (r.chance(0.6)) scen.addRock(r.pick(shapes('boulder')), cx + r.range(-0.8, 0.8), b.y1 - 0.3, r.range(-1.4, 0.3), r.range(0.5, 0.9), r.range(0.4, 0.8), r.range(0.5, 0.9), r.range(0, 6), { tilt: 0.5 });
       }
+      if (b.kind === 'lip') continue; // the overhang of a shaft: anchored to the cliff it overhangs
       if (b.kind === 'ledge') {
         // a ledge grows off a pillar behind the play plane, so it doesn't float
         const px = r.chance(0.5) ? b.x0 + 1.5 : b.x1 - 1.5, fl = this.sand.bedAt(px);
@@ -212,6 +259,9 @@ export class LevelBuild {
     }
   }
 
+  private props3d: THREE.Object3D[] = [];
+  /** the boss is down: the grate swings open over the pit */
+  openExit() { this.exitOpen = true; }
   private roof = new Soup();
   /** a stalactite hanging from y = top (a flipped spire), into the level's own soup */
   private hang(r: Rng, x: number, top: number, z: number, rad: number, L: number) {
@@ -245,7 +295,8 @@ export class LevelBuild {
   setLighting(rig: Rig) {
     for (const l of this.glowLamps) l.release();
     this.glowLamps.length = 0;
-    const n = this.a.glow ? 3 : this.scen.glowPts.length ? 1 : 0;
+    const deep = depthOf(this.plan, this.plan.base) > 150;
+    const n = this.a.glow || deep ? 3 : this.scen.glowPts.length ? 1 : 0;
     if (rig) for (let i = 0; i < n; i++) { const l = rig.lamp(0, -999, 0, '#5af0ff', 0, 7); if (l) this.glowLamps.push(l); }
   }
 
@@ -278,6 +329,20 @@ export class LevelBuild {
     this.detail.update(dt, camX);
     this.snow.update(camX, p.y, t);
     for (const gs of this.gates.values()) for (const g of gs) g.update(dt);
+    // the manatee keeps office hours by her post box (well clear of the ceiling)
+    const m = this.manatee;
+    if (m) {
+      m.update(dt, w, this.postX + 1.6, this.postY + 6.8);
+      m.state = 'waiting';
+      m.y = Math.max(this.postY + 2.6, Math.min(m.y, Math.min(this.plan.top - 1.6, this.postY + 6)));
+      m.root.position.y = m.y;
+    }
+    if (this.grate) {
+      this.grateA += ((this.exitOpen ? 1 : 0) - this.grateA) * (1 - Math.exp(-dt * 2.2));
+      const [l, r] = this.grate.leaves;
+      l.rotation.z = -this.grateA * 1.7; r.rotation.z = this.grateA * 1.7;
+    }
+    if (this.rope) { this.rope.root.rotation.z = Math.sin(t * 0.7) * 0.02; const k = 0.75 + Math.sin(t * 3) * 0.25; (this.rope.lamp.material as THREE.MeshBasicMaterial).color.setRGB(2.4 * k, 2.0 * k, 1.3 * k); }
     if (this.glowLamps.length) {
       let nn = 0;
       const near = this.near;
@@ -303,7 +368,10 @@ export class LevelBuild {
     for (const gs of this.gates.values()) for (const g of gs) g.dispose();
     for (const lid of this.lids.values()) lid.dispose();
     for (const e of this.owned) e.alive = false;
-    this.mailbox?.dispose();
+    this.manatee?.dispose();
+    for (const o of this.props3d) disposeModel(o);
+    if (this.grate) disposeModel(this.grate.root);
+    if (this.rope) disposeModel(this.rope.root);
     this.roofGeo?.dispose();
     this.detail.dispose();
     this.scen.sim.dispose();
