@@ -45,7 +45,10 @@ export class Toasts {
   private draw(achId: string, reward: string, t: number) {
     const ui = this.ui;
     const a = ACH[achId], cd = COSMETIC[reward];
-    const W = Math.min(ui.w - 12, 248), H = 36;
+    // size the banner to its text (the full cosmetic name must fit; never truncate)
+    const label = `${(a?.name ?? 'ACHIEVEMENT').toUpperCase()} COMPLETE`, unlock = `UNLOCKED: ${(cd?.name ?? reward).toUpperCase()}`;
+    const need = Math.max(ui.measure(label, 'small'), ui.measure(unlock, 'body')) + 38 + 36;
+    const W = Math.min(ui.w - 40, Math.max(220, Math.ceil(need))), H = 36;
     const k = t < IN ? easeOutBack(t / IN, 1.6) : t > IN + HOLD ? 1 - (t - IN - HOLD) / OUT : 1;
     const x = Math.round((ui.w - W) / 2), y = Math.round(-H - 8 + (H + 18) * Math.max(0, k));
     const ctx = ui.ctx;
@@ -80,9 +83,7 @@ export class Toasts {
       if (Math.sin(ph) > 0.4) { const tx = x + 4 + [2, 26, 30, 8][i], ty = y + [2, 4, 26, 30][i]; ui.fill(tx, ty - 1, 1, 3, '#fff6c0'); ui.fill(tx - 1, ty, 3, 1, '#fff6c0'); }
     }
     const tx = x + 38;
-    ui.text(`${(a?.name ?? 'ACHIEVEMENT').toUpperCase()} COMPLETE`, tx, y + 7, { font: 'small', color: '#ffe07a', outline: '#1a0c04' });
-    let name = `COSMETIC UNLOCKED: ${(cd?.name ?? reward).toUpperCase()}`;
-    while (ui.measure(name, 'body') > ix - tx - 4 && name.length > 8) name = name.slice(0, -2) + '.';
-    ui.text(name, tx, y + 19, { font: 'body', color: '#ffffff', color2: '#cfe6ff', outline: '#000814' });
+    ui.text(label, tx, y + 7, { font: 'small', color: '#ffe07a', outline: '#1a0c04' });
+    ui.text(unlock, tx, y + 19, { font: 'body', color: '#ffffff', color2: '#cfe6ff', outline: '#000814' });
   }
 }
