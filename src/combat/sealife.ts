@@ -199,7 +199,9 @@ export class CombatMoray extends Foe {
   /** move the den to the nearest wall / floor point to (x, y): the arena's walls, or the level's rock */
   placeDen(w: World, x: number, y: number) {
     const a = this.arena;
-    if (!a) {
+    // the level's own rock if there is some close by (also inside an arena lock), else the arena's walls
+    const nearRock = Math.abs(w.terrain.sdf(x, y)) < 2.5;
+    if (!a || nearRock) {
       // walk down the terrain gradient onto the nearest rock surface; lunge out along its normal
       let px = x, py = y;
       for (let i = 0; i < 24; i++) { const d = w.terrain.sdf(px, py); if (Math.abs(d) < 0.05) break; const n = w.terrain.normal(px, py); px -= n.x * d; py -= n.y * d; }
@@ -210,7 +212,7 @@ export class CombatMoray extends Foe {
       this.denX = px - n.x * 0.1; this.denY = py - n.y * 0.1; this.dirX = ax / l; this.dirY = ay / l;
       this.facing = this.dirX >= 0 ? 1 : -1; this.yaw = this.facing > 0 ? 0 : -Math.PI;
       this.ext = 0; this.extT = 0.35;
-      this.home = { x: this.denX, y: this.denY };
+      if (!a) this.home = { x: this.denX, y: this.denY };
       return;
     }
     const dl = x - a.x0, dr = a.x1 - x, df = y - a.floor;

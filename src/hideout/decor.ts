@@ -368,7 +368,7 @@ export class Decor {
       this.put([8, 6], k2.build());
     }
     // coral pot plants
-    for (const [cell, col] of [[[1, 4], '#e8603a'], [[0, 7], '#c84a9a']] as const) {
+    for (const [cell, col] of [[[1, 4], '#e8603a'], [[6, 7], '#c84a9a']] as const) {
       const k = new Kit();
       k.lathe(MAT.plain('#a8542e/0.85'), [[0.001, 0], [0.16, 0], [0.2, 0.28], [0.23, 0.3], [0.23, 0.35], [0.001, 0.33]], 0, 0, 0, { seg: 7 });
       const cm = MAT.plain(`${col}/0.7`);

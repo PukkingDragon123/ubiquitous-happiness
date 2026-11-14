@@ -772,8 +772,10 @@ export class DungeonScreen implements Screen {
     }
     // the way down
     const h = this.hatch;
+    // the open hatch pulls: a cold current sucks the blobfish in when it swims close
+    if (h?.active && Math.abs(p.x - h.x) < 3 && p.y < h.y + 3.5) p.applyForce((h.x - p.x) * 14, -16);
     if (h?.active && Math.abs(p.x - h.x) < 1.7 && p.y < h.y + 2.4) {
-      if (E || p.y < h.y + 0.9) this.descend();
+      if (E || p.y < h.y + 1.1) this.descend();
       return { key: 'E', label: this.floorIdx >= this.floors.length - 1 ? 'SWIM HOME' : 'DIVE DEEPER', at: this.anchor(h.x, h.y + 2.1) };
     }
     // a refused pickup nearby

@@ -45,6 +45,7 @@ import { Nooks, type FixedId } from './nooks';
 import { PlanningTable, type TableConfig } from './table';
 import { HubPlayer } from './player';
 import { Life } from './life';
+import { Tag } from './tag';
 import { COSMETIC } from '../cosmetics';
 import type { CosmeticRig } from '../cosmetics/rig';
 
@@ -110,7 +111,10 @@ export class HideoutScreen implements Screen {
   private moved = false;
   private wardHover: string | null = null;
   private arriveT = -1;
+  /** after popping in through the hatch the camera starts close (the chalkboard by the hatch reads), then eases out */
+  private zoomOutT = -1;
   private v = new THREE.Vector3();
+  private promptTag = new Tag('wood', 120);
 
   constructor(private game: Game, private opts: HideoutOpts) {
     ensureLayout();
@@ -132,7 +136,7 @@ export class HideoutScreen implements Screen {
     this.scene.add(this.hero.root, ...(this.hero.extras ?? []));
     this.player = new HubPlayer(this.hero, () => this.furn.occupancy().obj);
     this.life = new Life((x, z, r) => this.player.standAt(x, z, r));
-    this.scene.add(this.life.group);
+    this.scene.add(this.life.group, this.promptTag.mesh);
     this.table = new PlanningTable(this.nooks);
     this.table.onClose = () => this.setMode('free');
     this.table.onDive = (cfg) => this.dive(cfg);
@@ -258,7 +262,7 @@ export class HideoutScreen implements Screen {
     this.rig.shot = null; this.rig.k = 4.5;
     Object.assign(this.rig.user, { yaw: FOLLOW.yaw, pitch: FOLLOW.pitch, dist: FOLLOW.dist, fov: FOLLOW.fov });
     const view = d.view ?? new URLSearchParams(location.search).get('view') ?? '';
-    if (d.arrive) this.placeHero('hatch'); else this.placeHero('centre');
+    if (d.arrive) { this.placeHero('hatch'); this.rig.user.dist = 8.5; this.zoomOutT = 3.5; } else { this.placeHero('centre'); this.zoomOutT = -1; }
     this.rig.user.target.copy(this.hero.root.position).setY(this.hero.root.position.y + 0.75);
     this.rig.snap();
     if (view !== 'cinematic') audio.music(RECORDS[this.record], 2);
@@ -301,7 +305,7 @@ export class HideoutScreen implements Screen {
     if (prev === 'stash') { const s = this.furn.byBp('storage'); if (s) this.furn.setOpen(s, 0); audio.play('wood_close2', { vol: 0.4 }); }
     if (prev === 'wardrobe') { this.wardPreview(null); this.nooks.spots.mirror.obj.visible = true; }
     if (prev === 'sit') this.hero.play?.('hop');
-    if (prev === 'table') this.hero.root.visible = true;
+    if (prev === 'table') { this.hero.root.visible = true; this.table.close(); }
     this.mode = m; this.modeT = 0;
     this.player.stop();
     this.rig.shot = null; this.rig.k = 3.2;
@@ -396,6 +400,7 @@ export class HideoutScreen implements Screen {
     switch (this.mode) {
       case 'free': this.freeMode(dt, live); break;
       case 'sit': this.freeMode(dt, live); break;
+      default: this.promptTag.hide();
       case 'build': if (this.build.ui(ui, input)) this.setMode('free'); break;
       case 'stash': if (this.stash.draw(ui)) this.setMode('free'); this.stationShot('storage', 1.6, 0.55, 3.6, 0.6); break;
       case 'workshop': if (this.work.draw(ui, dt)) this.setMode('free'); this.stationShot('workbench', 1.8, 0.35, 3.8, 0.6); break;
@@ -410,7 +415,7 @@ export class HideoutScreen implements Screen {
       case 'table': {
         // the hero is the one bent over the table: out of the shot once the camera has swooped down
         this.hero.root.visible = this.modeT < 0.45;
-        if (live) this.table.update(dt, ui, input, this.camera, this.ray);
+        if (live) this.table.update(dt, ui, input, this.camera, this.ray, this.game.post.h);
         break;
       }
       case 'tv': if (this.modeT > 1.05) { this.mode = 'free'; this.rig.shot = null; this.opts.onPrologue?.(); ui.end(); return; } break;
@@ -426,6 +431,7 @@ export class HideoutScreen implements Screen {
       const ut = this.rig.user.target;
       ut.x = damp(ut.x, p.x * 0.72, 5, dt); ut.y = damp(ut.y, p.y + 0.75, 5, dt); ut.z = damp(ut.z, p.z * 0.72 + 0.2, 5, dt);
     }
+    if (this.zoomOutT > 0) { this.zoomOutT -= dt; if (this.zoomOutT <= 0 || this.player.move > 0.2) { this.zoomOutT = -1; this.rig.user.dist = FOLLOW.dist; } }
     const camFree = this.mode === 'free' || this.mode === 'sit' || this.mode === 'build';
     if (camFree && live) this.rig.controls(input, dt, { allowPan: this.mode === 'build', overUI: ui.mouseOnUI || ui.uiOwnsDrag, keys: this.mode === 'build' });
     this.rig.update(dt);
@@ -496,9 +502,9 @@ export class HideoutScreen implements Screen {
       this.hoverSt = this.pickStation();
       if (this.hoverSt) ui.cursor = 'point';
     }
-    // prompt: the station in reach gets a keycap + its word; a hovered one far away gets a quieter label
-    if (this.near) this.prompt(this.near, true);
-    if (this.hoverSt && this.hoverSt !== this.near) this.prompt(this.hoverSt, false);
+    // prompt: a little wooden tag over the station in reach (its key + word), or over the one under the mouse
+    const pst = this.near ?? this.hoverSt;
+    if (pst) this.prompt(pst, pst === this.near); else this.promptTag.hide();
     if (!live) return;
     if (this.arriveT < 0 && this.mode === 'free') {
       if (this.near && (input.keyHit('KeyE') || input.keyHit('Space') || input.keyHit('Enter'))) this.useStation(this.near);
@@ -518,37 +524,16 @@ export class HideoutScreen implements Screen {
       if (input.keyHit('Tab') || input.keyHit('KeyI')) this.setMode('stash');
       if (input.keyHit('Escape')) this.setMode('pause');
     } else if (this.mode === 'sit' && (input.keyHit('Escape') || input.keyHit('KeyE'))) { this.setMode('free'); const st = this.stations.find((q) => q.id === 'sofa')?.stand(); if (st) this.hero.root.position.set(st.x, 0, st.z); }
-    // control hints, bottom left, until you have walked about a bit
     this.hintT += _dt;
-    const a = this.moved ? Math.max(0, 1 - (this.hintT - 6) * 0.5) : 1;
-    if (a > 0 && this.mode === 'free') {
-      let hx = 8;
-      const hy = ui.h - 16;
-      hx += ui.hint('WASD', 'move', hx, hy, { color: '#e8dcc0' });
-      hx += ui.hint('E', 'use', hx, hy, { color: '#e8dcc0' });
-      hx += ui.hint('RMB', 'turn', hx, hy, { color: '#e8dcc0' });
-      ui.hint('ESC', 'menu', hx, hy, { color: '#e8dcc0' });
-    }
-    if (this.mode === 'sit') ui.hint('WASD', 'get up', 8, ui.h - 16, { color: '#e8dcc0' });
   }
 
-  /** a small, tasteful prompt over a station: [E] WORD (in reach) or just the word (hovered from afar) */
+  /** a small painted wooden tag over a station: [E] WORD in reach, just the word when hovered from afar */
   private prompt(s: Station, inReach: boolean) {
-    const ui = this.ui;
-    const b = this.stationBox(s); if (!b) return;
-    const top = new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y + 0.25, s.id === 'trophy' ? 2.4 : 9), (b.min.z + b.max.z) / 2);
-    if (s.id === 'crab') top.y = b.max.y + 0.3;
-    const p = this.toUi(top); if (!p) return;
-    const bob = Math.round(Math.sin(this.t * 4) * 1.5);
-    const tw = ui.measure(s.label, 'small');
-    const kw = inReach ? 12 : 0;
-    const w = tw + kw + 8, x = Math.round(p[0] - w / 2), y = Math.round(p[1] - 14 + bob);
-    ui.fill(x, y, w, 13, '#120a06', inReach ? 0.78 : 0.55);
-    ui.rect(x, y, w, 13, inReach ? '#f0c040' : '#8a7a60');
-    if (inReach) ui.keycap('E', x + 2, y + 1);
-    ui.text(s.label, x + 4 + kw, y + 3, { font: 'small', color: inReach ? '#fff4d8' : '#d8ccb0' });
-    ui.fill(Math.round(p[0]) - 1, y + 13, 3, 2, inReach ? '#f0c040' : '#8a7a60');
-    ui.mark('st:' + s.id, x, y, w, 13);
+    const b = this.stationBox(s); if (!b) { this.promptTag.hide(); return; }
+    const top = new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y + 0.15, s.id === 'trophy' ? 2.4 : 9), (b.min.z + b.max.z) / 2);
+    if (s.id === 'crab') top.y = b.max.y + 0.25;
+    this.promptTag.show([{ text: s.label, key: inReach ? 'E' : undefined, color: inReach ? '#fff0c8' : '#d8c8a8' }]);
+    this.promptTag.place(this.camera, top, this.game.post.h, [0, -4 + Math.round(Math.sin(this.t * 4) * 1.5)], this.game.dt);
   }
 
   private stationShot(bp: string, lift: number, pitch: number, dist: number, side: number) {

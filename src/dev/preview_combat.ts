@@ -124,7 +124,7 @@ class CombatPreview extends MockScreen {
       moves: [] as string[],
       /** game-time key script (software GL frames are slow): [[t, code, holdSec], ...] relative to now */
       script: (steps: [number, string, number?][]) => { const t0 = self.world.time; for (const [t, code, hold] of steps) self.keyQ.push({ at: t0 + t, code, hold: hold ?? 0.05, down: false }); },
-      entities: () => self.world.entities.filter((e) => e.team === 'enemy').map((e) => ({ kind: e.kind, x: +e.x.toFixed(2), y: +e.y.toFixed(2), hp: e.hp })),
+      entities: () => self.world.entities.filter((e) => e.team === 'enemy').map((e) => { const r = e as unknown as { aware?: boolean; returning?: boolean }; return { kind: e.kind, x: +e.x.toFixed(2), y: +e.y.toFixed(2), hp: e.hp, aware: r.aware, returning: r.returning }; }),
     };
   }
 

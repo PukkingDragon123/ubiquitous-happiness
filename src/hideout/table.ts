@@ -22,11 +22,12 @@ import { Px } from '../gfx/px';
 import { hash2, damp, clamp01 } from '../core/math';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
 import { MASTERY, MAX_MASTERY, masteryMods, AREAS, floorsAt } from './mastery';
-import { ITEMS, getItem, GRID, fits, instCells, findSpot, stackCap, RARITY_COLOR } from '../game/items';
+import { ITEMS, getItem, GRID, fits, instCells, findSpot, stackCap, shapeSize, itemMesh, type Rarity } from '../game/items';
 import type { ItemInst } from '../game/run';
-import type { PixelUI, TipLine } from '../ui/pixel/ui';
+import type { PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
-import { drawText, wrap } from '../ui/pixel/font';
+import { drawText } from '../ui/pixel/font';
+import { Tag, TableCard, paintTag, type TagLine } from './tag';
 import { audio } from '../audio/audio';
 import { wantedPage, type Nooks, TABLE } from './nooks';
 import type { Shot } from './camera';
@@ -177,7 +178,10 @@ const DIAL = { x: -1.0, z: 0.4, r: 0.17 };
 const TRAY = { x: 0.4, z: 0.42, w: 1.0, d: 0.34 };
 const LEVER = { x: 1.08, z: 0.36 };
 
-interface Drag { it: ItemInst; from: 'tray' | 'bag'; sx: number; sy: number; moved: boolean; rot: number }
+interface Drag { it: ItemInst; from: 'tray' | 'bag'; sx: number; sy: number; moved: boolean; rot: number; key: string }
+/** what an item model on the table stands for */
+interface Slot { id: string; level?: number; n?: number; from: 'tray' | 'bag'; inst: ItemInst }
+const RARITY_INK: Partial<Record<Rarity, string>> = { common: '#2a1808', uncommon: '#1a5a1a', rare: '#1a3a8a', epic: '#6a1a8a', legendary: '#8a4a04' };
 
 export class PlanningTable {
   mastery = 0;
@@ -209,8 +213,15 @@ export class PlanningTable {
   private trayPage = 0;
   private nextMatUid = -1;
   private dropT = new Map<number, number>();
-  private v = new THREE.Vector3();
-  private hoverLever = false;
+  private tag = new Tag('paper', 170);
+  private card = new TableCard('paper', 118, 0.0027);
+  private emptyNote = new TableCard('paper', 150, 0.0027);
+  private plaque = new TableCard('brass', 400, 0.0024);
+  private items = new THREE.Group();
+  private models = new Map<string, THREE.Group>();
+  private counts = new Map<number, THREE.Texture>();
+  private cellHi: THREE.Mesh[] = [];
+  private arrows: THREE.Object3D[] = [];
 
   constructor(private nooks: Nooks) {
     const g = new THREE.Group();
@@ -289,6 +300,26 @@ export class PlanningTable {
     lk.cyl(MAT.metal('grey'), 0.05, 0.05, 0.12, 0, 0, 0, { rz: Math.PI / 2, seg: 8 });
     this.leverMesh.add(lk.build());
     this.leverMesh.traverse((o) => { o.userData.lever = true; });
+    // the item models (stash on the tray, the pack in the bag), drag highlights, the tray's page knobs
+    g.add(this.items);
+    for (let i = 0; i < 9; i++) {
+      const c = new THREE.Mesh(new THREE.PlaneGeometry(BAG.grid / GRID - 0.008, BAG.grid / GRID - 0.008).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#4aff6a', transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false }));
+      c.visible = false; g.add(c); this.cellHi.push(c);
+    }
+    for (const dir of [-1, 1]) {
+      const kn = new Kit();
+      kn.cyl(MAT.brass(), 0.035, 0.04, 0.05, 0, 0.025, 0, { seg: 8 });
+      kn.add(MAT.plain('#2a1404/0.5'), new THREE.ConeGeometry(0.02, 0.04, 3), dir * 0.004, 0.055, 0, { rz: -dir * Math.PI / 2 });
+      const a = kn.build(); a.position.set(TRAY.x + dir * (TRAY.w / 2 + 0.05), 0, TRAY.z); a.traverse((o) => { o.userData.arrow = dir; }); a.userData.arrow = dir;
+      g.add(a); this.arrows.push(a);
+    }
+    // the mastery note beside the dial, a note for an empty stash, the engraved plaque of controls
+    this.card.mesh.position.set(DIAL.x + DIAL.r + 0.26, 0.004, DIAL.z - 0.02); this.card.mesh.rotation.y = 0.04; g.add(this.card.mesh);
+    this.emptyNote.set([{ text: 'The stash is empty.', color: '#2a1808' }, { text: 'Mail loot home on runs.', color: '#5a4a3a' }]);
+    this.emptyNote.mesh.position.set(TRAY.x, 0.032, TRAY.z); g.add(this.emptyNote.mesh);
+    this.plaque.set([{ text: 'DRAG TO PACK', key: 'R', color: '#2a1404' }]);
+    this.plaque.mesh.position.set(BAG.x, 0.004, BAG.z + BAG.d / 2 + 0.05); g.add(this.plaque.mesh);
+    nooks.group.add(this.tag.mesh);
   }
 
   /** open the table: last config, unlocked mastery, the pack restored from the stash */
@@ -404,37 +435,40 @@ export class PlanningTable {
   }
 
   // ---------------------------------------------------------------- frame
-  /** world -> ui px */
-  private toUi(p: THREE.Vector3, cam: THREE.Camera, ui: PixelUI): [number, number] {
-    const v = this.v.copy(p).project(cam);
-    return [((v.x * 0.5 + 0.5) * ui.w), ((-v.y * 0.5 + 0.5) * ui.h)];
-  }
   private local(x: number, y: number, z: number) { return this.g.localToWorld(new THREE.Vector3(x, y, z)); }
 
-  /** returns true while the table keeps the screen (false = closed) */
-  update(dt: number, ui: PixelUI, input: Input, cam: THREE.Camera, ray: THREE.Raycaster): void {
+  update(dt: number, ui: PixelUI, input: Input, cam: THREE.PerspectiveCamera, ray: THREE.Raycaster, internalH: number): void {
     this.t += dt;
     this.flash.t -= dt;
     for (const [k, v] of this.dropT) { if (v > 0.6) this.dropT.delete(k); else this.dropT.set(k, v + dt); }
     this.g.updateWorldMatrix(true, true);
     const busy = this.pulled >= 0;
-    // ---- 3D picks: the chart (start depth), the dial, the lever, the posters
-    let zone = -1, dialSide = 0, lever = false, poster = -1;
+    let tip: { lines: TagLine[]; at: THREE.Vector3 } | null = null;
+    // ---- 3D picks: the items (stash tray + pack), the chart (start depth), the dial, the lever, the posters
+    let zone = -1, dialSide = 0, lever = false, poster = -1, item: THREE.Object3D | null = null, arrow = 0;
+    let hitP: THREE.Vector3 | null = null;
     if (!busy && ui.inside && !ui.mouseOnUI && !this.drag?.moved) {
-      for (const h of ray.intersectObjects([this.chartMesh, this.dialMesh, this.leverMesh, ...this.posters.map((p) => p.m)], true)) {
+      const pickables = [this.chartMesh, this.dialMesh, this.leverMesh, ...this.posters.map((p) => p.m), ...this.models.values(), ...this.arrows];
+      for (const h of ray.intersectObjects(pickables, true)) {
+        let o: THREE.Object3D | null = h.object;
+        while (o && !o.userData.slot && o !== this.leverMesh && !o.userData.arrow && o.parent !== this.g && o !== this.nooks.board) o = o.parent;
+        hitP = h.point.clone();
+        if (h.object.userData.slot || o?.userData.slot) { item = o; break; }
+        if (o?.userData.arrow) { arrow = o.userData.arrow as number; break; }
         if (h.object === this.chartMesh && h.uv) { const x = h.uv.x * CW, z = zoneOf(x); if (z >= 0) zone = z; break; }
         if (h.object === this.dialMesh) { const lp = this.g.worldToLocal(h.point.clone()); dialSide = lp.x < DIAL.x ? -1 : 1; break; }
         if (h.object.userData.lever) { lever = true; break; }
         if (h.object.userData.poster !== undefined) { poster = h.object.userData.poster as number; break; }
+        break;
       }
     }
-    // the depths: hover highlights, click picks the start (if mastery allows)
+    // the depths: hover highlights the depth on the chart, click picks the start (if mastery allows)
     if (zone !== this.hoverZone) { this.hoverZone = zone; if (zone >= 0) audio.play('page1', { vol: 0.12, dry: true, rate: 1.6 }); }
     if (zone >= 0) {
       const a = AREAS[zone], locked = a.minMastery > this.mastery;
       ui.cursor = locked ? 'arrow' : 'point';
       const route = routeFor(this.mastery, a.id).map((id) => AREAS.find((q) => q.id === id)!.name.replace('The ', ''));
-      ui.tooltip([{ text: a.name, font: 'title' }, { text: a.desc, color: '#3a2810' }, locked ? { text: `needs mastery ${a.minMastery}`, color: '#a01a1a', gap: 2 } : { text: `${route.length} floors: ${route.join(' > ')}`, color: '#1a4a7a', gap: 2 }], { maxW: 190 });
+      tip = { at: hitP!, lines: [{ text: a.name, font: 'title' }, { text: a.desc, color: '#3a2810' }, locked ? { text: `needs mastery ${a.minMastery}`, color: '#a01a1a', gap: 2 } : { text: `${route.length} floors: ${route.join(' > ')}`, color: '#1a4a7a', gap: 2 }, ...(locked || a.id === this.start ? [] : [{ text: 'click: start here', color: '#5a4a3a' }])] };
       if (ui.pressed && !locked && a.id !== this.start) { this.start = a.id; audio.play('k_pluck2', { vol: 0.4, dry: true }); audio.play('page2', { vol: 0.3, dry: true }); }
       else if (ui.pressed && locked) audio.play('k_err1', { vol: 0.35, dry: true });
     }
@@ -445,23 +479,23 @@ export class PlanningTable {
       this.mastery = nm; audio.play('k_tick2', { vol: 0.4, dry: true, rate: 0.8 + nm * 0.05 }); audio.play('clank2', { vol: 0.15 });
       if ((AREAS.find((a) => a.id === this.start)?.minMastery ?? 0) > nm) this.start = 'reef';
     };
-    if (dialSide) { ui.cursor = 'point'; if (ui.pressed) setM(this.mastery + dialSide); if (ui.wheel) setM(this.mastery - Math.sign(ui.wheel)); }
+    if (dialSide) { ui.cursor = 'point'; if (ui.pressed) setM(this.mastery + dialSide); if (ui.wheel) setM(this.mastery - Math.sign(ui.wheel)); tip = { at: hitP!, lines: [{ text: dialSide > 0 ? 'turn up' : 'turn down', color: '#3a2810' }] }; }
     if (!busy && (input.keyHit('KeyD') || input.keyHit('ArrowRight'))) setM(this.mastery + 1);
     if (!busy && (input.keyHit('KeyA') || input.keyHit('ArrowLeft'))) setM(this.mastery - 1);
     this.needleA = damp(this.needleA, dialAngle(this.mastery), 12, dt);
     this.needle.rotation.y = -this.needleA;
     this.compassNeedle.rotation.y = Math.sin(this.t * 0.7) * 0.15 + Math.sin(this.t * 2.3) * 0.04;
-    // posters
+    // posters: the hovered one lifts off the cork a little
+    for (const p of this.posters) p.m.position.z = damp(p.m.position.z, p.i === poster ? 0.09 : 0.035, 10, dt);
     if (poster >= 0) {
       const n = META.nemeses[poster];
-      const tip: TipLine[] = n ? [{ text: n.name, font: 'title' }, { text: n.title, color: '#7a2a10' }, { text: `level ${n.level} · beat you ${n.kills}x · you beat them ${n.defeats}x`, color: '#3a2810', gap: 2 }, ...n.memories.slice(0, 3).map((m) => ({ text: '"' + m + '"', color: '#1a4a7a' }))]
+      const lines: TagLine[] = n ? [{ text: n.name, font: 'title' }, { text: n.title, color: '#7a2a10' }, { text: `level ${n.level} · beat you ${n.kills}x · beaten ${n.defeats}x`, color: '#3a2810', gap: 2 }, ...n.memories.slice(0, 3).map((m) => ({ text: '"' + m + '"', color: '#1a4a7a' }))]
         : [{ text: 'WANTED', font: 'title' }, { text: 'No grudges yet. Humans who beat you, or get away, end up pinned here.', color: '#3a2810' }];
-      if (n && !n.alive) tip.push({ text: 'DEFEATED', color: '#a01a1a', gap: 2 });
-      ui.tooltip(tip, { maxW: 180 });
+      if (n && !n.alive) lines.push({ text: 'DEFEATED', color: '#a01a1a', gap: 2 });
+      tip = { at: hitP!, lines };
     }
     // the lever
-    this.hoverLever = lever;
-    if (lever) { ui.cursor = 'point'; ui.tooltip([{ text: 'DIVE', font: 'title' }, { text: `${routeFor(this.mastery, this.start).length} floors from the ${AREAS.find((a) => a.id === this.start)?.name.toLowerCase()} · M${this.mastery}`, color: '#3a2810' }], { maxW: 170 }); }
+    if (lever) { ui.cursor = 'point'; tip = { at: hitP!, lines: [{ text: 'DIVE', font: 'title' }, { text: `${routeFor(this.mastery, this.start).length} floors from the ${AREAS.find((a) => a.id === this.start)?.name.replace('The ', '')} · M${this.mastery}`, color: '#3a2810' }, { text: `${this.pack.length} things packed`, color: '#5a4a3a' }] }; }
     if (!busy && ((lever && ui.pressed) || input.keyHit('Enter'))) this.pull();
     this.leverK = this.pulled >= 0 ? Math.min(1, this.leverK + dt * 4) : 0;
     if (this.pulled >= 0) {
@@ -470,171 +504,176 @@ export class PlanningTable {
     }
     this.leverMesh.rotation.x = -0.55 + this.leverK * 1.35 + (this.pulled < 0 && lever ? Math.sin(this.t * 10) * 0.02 : 0);
     this.leverMat.emissiveIntensity = damp(this.leverMat.emissiveIntensity, lever ? 0.7 : 0.08 + Math.max(0, Math.sin(this.t * 3)) * 0.12, 10, dt);
+    // the tray's page knobs
+    if (arrow) { ui.cursor = 'point'; if (ui.pressed) { this.trayPage = Math.max(0, this.trayPage + arrow); audio.play('k_tick2', { vol: 0.35, dry: true }); } }
     this.refresh();
-
-    // ---- 2D: the note card, the bag grid + items, the tray, drag & drop
-    this.noteCard(ui, cam);
-    const bag = this.bagRect(ui, cam);
-    const tray = this.trayRect(ui, cam);
-    this.drawBag(ui, bag, busy);
-    this.drawTray(ui, tray, busy);
-    this.dragDrop(ui, input, bag);
-    if (this.flash.t > 0) {
-      const w = ui.measure(this.flash.text, 'title') + 16;
-      ui.frame('dark', Math.round(bag.x + bag.cell * 2.5 - w / 2), Math.round(bag.y + bag.cell * 2) - 4, w, 20);
-      ui.text(this.flash.text, Math.round(bag.x + bag.cell * 2.5), Math.round(bag.y + bag.cell * 2), { font: 'title', color: '#ff6a5a', shadow: '#000', align: 'center' });
+    // ---- the stash laid out on the tray and the pack, as 3D models; hover, click, drag
+    this.layoutItems(dt, item);
+    if (item && !this.drag) {
+      const s = item.userData.slot as Slot;
+      ui.cursor = 'grab';
+      const d = getItem(s.id);
+      const lines: TagLine[] = [{ text: d.name + ((s.level ?? 1) > 1 ? ` +${(s.level ?? 1) - 1}` : ''), font: 'title', color: RARITY_INK[d.rarity] ?? '#2a1808' }, { text: `${d.rarity} ${d.kind}`.toUpperCase(), color: '#5a4a3a' }];
+      if (d.desc) lines.push({ text: d.desc, color: '#3a2810', gap: 2 });
+      if ((s.n ?? 1) > 1) lines.push({ text: `${s.n} in the ${s.from === 'bag' ? 'stack' : 'stash'}`, color: '#1a4a7a' });
+      lines.push({ text: s.from === 'bag' ? 'drag: move · click: unpack' : 'drag into the pack · click: pack', color: '#7a5a3a', gap: 2 });
+      tip = { at: item.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.08, 0)), lines };
+      if (ui.pressed) this.drag = { it: s.inst, from: s.from, sx: ui.mx, sy: ui.my, moved: false, rot: s.inst.rot, key: item.userData.key as string };
     }
-    // leaving: Esc / right click on nothing / S
-    const hx = 6;
-    let hxx = hx;
-    hxx += ui.hint('ESC', 'back', hxx, ui.h - 14, { color: '#e8dcc0' });
-    hxx += ui.hint('A', '', hxx, ui.h - 14, { color: '#e8dcc0' }) - 6;
-    hxx += ui.hint('D', 'mastery', hxx, ui.h - 14, { color: '#e8dcc0' });
-    ui.hint('ENTER', 'dive', hxx, ui.h - 14, { color: '#e8dcc0' });
-    if (!busy && !this.drag && (input.keyHit('Escape') || input.keyHit('KeyS') || input.keyHit('ArrowDown'))) this.onClose?.();
+    this.dragDrop(ui, input, ray);
+    if (this.flash.t > 0) tip = { at: this.local(BAG.x, 0.2, BAG.z), lines: [{ text: this.flash.text, font: 'title', color: '#a01a1a' }] };
+    // the floating paper note (every word on this table is painted on something)
+    if (tip && !this.drag?.moved) { this.tag.show(tip.lines); this.tag.place(cam, tip.at, internalH, [0, -14], dt); } else this.tag.hide();
+    // the mastery note card on the table
+    const ml = MASTERY[this.mastery];
+    const mods = masteryMods(this.mastery);
+    this.card.set([
+      { text: `MASTERY ${this.mastery}`, font: 'title', color: '#3a1a08' }, { text: ml.name.toUpperCase(), color: '#8a2a10' },
+      ...(mods.length ? mods.slice(-3) : [ml.mod]).map((m, i, a) => ({ text: '· ' + m, color: i === a.length - 1 ? '#2a1808' : '#5a4a3a', gap: i === 0 ? 2 : 0 })),
+      ...(this.mastery === META.masteryUnlocked && this.mastery < MAX_MASTERY ? [{ text: `win at M${this.mastery} to unlock M${this.mastery + 1}`, color: '#1a4a7a', gap: 2 }] : []),
+    ]);
+    if (!busy && !this.drag && (input.keyHit('Escape') || input.keyHit('KeyS') || input.keyHit('ArrowDown') || ui.rpressed)) this.onClose?.();
   }
 
   private pull() {
     if (this.pulled >= 0) return;
     this.pulled = 0;
+    this.tag.hide();
     audio.play('clank1', { vol: 0.55 }); audio.play('chain1', { vol: 0.35, delay: 0.1 }); audio.play('bell', { vol: 0.35, delay: 0.35 });
   }
   /** the lever has been pulled (the dive is under way) */
   get diving() { return this.pulled !== -1; }
+  /** leaving the table: the floating note goes */
+  close() { this.tag.hide(); this.drag = null; }
 
-  private noteCard(ui: PixelUI, cam: THREE.Camera) {
-    const [dx, dy] = this.toUi(this.local(DIAL.x, 0, DIAL.z), cam, ui);
-    const ml = MASTERY[this.mastery];
-    const mods = masteryMods(this.mastery);
-    const w = 112;
-    const lines = mods.length ? mods.slice(-3) : [ml.mod];
-    let h = 30;
-    for (const l of lines) h += wrap('· ' + l, 'small', w - 12).length * ui.lh('small');
-    const rr = this.toUi(this.local(DIAL.x + DIAL.r, 0, DIAL.z), cam, ui)[0] - dx;
-    const x = Math.round(Math.min(ui.w - w - 4, dx + Math.abs(rr) + 6)), y = Math.round(Math.max(4, Math.min(ui.h - h - 20, dy - Math.abs(rr) + 2)));
-    ui.frame('paper', x, y, w, h);
-    ui.fill(x + w / 2 - 2, y + 2, 4, 4, '#c8241c');
-    ui.text(`MASTERY ${this.mastery}`, x + 6, y + 6, { font: 'title', color: '#3a1a08' });
-    ui.text(ml.name.toUpperCase(), x + 6, y + 18, { font: 'small', color: '#8a2a10' });
-    let yy = y + 29;
-    for (const l of lines) yy += ui.textBox('· ' + l, x + 6, yy, w - 12, { font: 'small', color: l === ml.mod ? '#2a1808' : '#5a4a3a' });
-    if (mods.length > 3 && ui.hover(x, y, w, h)) ui.tooltip(mods.map((m) => '· ' + m), { maxW: 200 });
-    if (this.mastery === META.masteryUnlocked && this.mastery < MAX_MASTERY) ui.text(`win at M${this.mastery} to unlock M${this.mastery + 1}`, x + w / 2, y + h + 3, { font: 'small', color: '#e8dcc0', shadow: '#000', align: 'center' });
-    ui.block(x, y, w, h);
+  // ---------------------------------------------------------------- the 3D items
+  /** a flat-lying item model (itemMesh: the icon extruded into voxels), centred on its footprint, base at y = 0 */
+  private model(key: string, id: string, level: number): THREE.Group {
+    let g = this.models.get(key);
+    if (g && g.userData.id === id && g.userData.level === level) return g;
+    if (g) g.removeFromParent();
+    g = new THREE.Group();
+    const inner = new THREE.Group();
+    const m = itemMesh(id, level);
+    m.rotation.x = -Math.PI / 2;
+    inner.add(m);
+    inner.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(inner);
+    const c = box.getCenter(new THREE.Vector3());
+    m.position.set(-c.x, -box.min.y, -c.z);
+    g.add(inner);
+    g.userData = { key, id, level, size: Math.max(box.max.x - box.min.x, box.max.z - box.min.z) };
+    g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.userData.slotOwner = key; } });
+    this.models.set(key, g);
+    this.items.add(g);
+    return g;
+  }
+  private countTex(n: number): THREE.Texture {
+    let t = this.counts.get(n);
+    if (!t) { const cv = paintTag([{ text: String(n), color: '#2a1808' }], 'paper', 30, 2); t = new THREE.CanvasTexture(cv); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace; t.userData = { w: cv.width, h: cv.height }; this.counts.set(n, t); }
+    return t;
+  }
+  private setCount(g: THREE.Group, n: number, foot: number) {
+    let lbl = g.userData.lbl as THREE.Mesh | undefined;
+    if (n <= 1) { if (lbl) lbl.visible = false; return; }
+    if (!lbl) { lbl = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ toneMapped: false })); g.userData.lbl = lbl; this.items.add(lbl); }
+    const t = this.countTex(n);
+    (lbl.material as THREE.MeshBasicMaterial).map = t;
+    lbl.visible = true;
+    lbl.scale.set((t.userData.w as number) * 0.0026, 1, (t.userData.h as number) * 0.0026);
+    lbl.position.set(g.position.x + foot * 0.38, g.position.y + 0.035, g.position.z + foot * 0.36);
   }
 
-  private bagRect(ui: PixelUI, cam: THREE.Camera) {
-    const a = this.toUi(this.local(BAG.x - BAG.grid / 2, 0.122, BAG.z - BAG.grid / 2), cam, ui);
-    const b = this.toUi(this.local(BAG.x + BAG.grid / 2, 0.122, BAG.z + BAG.grid / 2), cam, ui);
-    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
-    const cell = Math.max(12, Math.floor(Math.min((x1 - x0) / GRID, (y1 - y0) / GRID)));
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    return { x: Math.round(cx - (cell * GRID) / 2), y: Math.round(cy - (cell * GRID) / 2), cell };
-  }
-  private trayRect(ui: PixelUI, cam: THREE.Camera) {
-    const a = this.toUi(this.local(TRAY.x - TRAY.w / 2 + 0.03, 0.03, TRAY.z - TRAY.d / 2 + 0.03), cam, ui);
-    const b = this.toUi(this.local(TRAY.x + TRAY.w / 2 - 0.03, 0.03, TRAY.z + TRAY.d / 2 - 0.03), cam, ui);
-    return { x: Math.round(Math.min(a[0], b[0])), y: Math.round(Math.min(a[1], b[1])), w: Math.round(Math.abs(b[0] - a[0])), h: Math.round(Math.abs(b[1] - a[1])) };
-  }
-
-  private drawBag(ui: PixelUI, b: { x: number; y: number; cell: number }, busy: boolean) {
-    const c = b.cell, gw = c * GRID;
-    // faint cell guides over the stitched leather
-    for (let j = 0; j < GRID; j++) for (let i = 0; i < GRID; i++) ui.rect(b.x + i * c, b.y + j * c, c, c, '#00000033');
+  /** the stash on the tray (paged) + the pack in the bag, as models; the hovered one lifts, a dropped one bounces */
+  private layoutItems(dt: number, hover: THREE.Object3D | null) {
+    const live = new Set<string>();
+    const s = BAG.grid / GRID;
     const drag = this.drag?.moved ? this.drag : null;
-    let hover: ItemInst | null = null;
     for (const it of this.pack) {
-      if (drag && drag.from === 'bag' && drag.it.uid === it.uid) continue;
+      const key = 'p' + it.uid;
+      const g = this.model(key, it.id, it.level ?? 1);
+      live.add(key);
       const cells = instCells(it);
       const xs = cells.map((q) => q[0]), ys = cells.map((q) => q[1]);
-      const minX = Math.min(...xs), minY = Math.min(...ys), maxX = Math.max(...xs), maxY = Math.max(...ys);
+      const cx = (Math.min(...xs) + Math.max(...xs) + 1) / 2, cy = (Math.min(...ys) + Math.max(...ys) + 1) / 2;
+      const sz = shapeSize(getItem(it.id).shape);
+      const foot = Math.max(sz.w, sz.h) * s;
+      g.scale.setScalar((foot * 0.92) / Math.max(0.01, g.userData.size as number));
+      g.rotation.y = -it.rot * Math.PI / 2;
       const dt0 = this.dropT.get(it.uid);
-      const bounce = dt0 !== undefined ? -Math.round(Math.sin(Math.min(1, dt0 / 0.3) * Math.PI) * 3) : 0;
-      const d = getItem(it.id);
-      for (const [cx, cy] of cells) ui.fill(b.x + cx * c + 1, b.y + cy * c + 1, c - 2, c - 2, RARITY_COLOR[d.rarity], 0.22);
-      ui.item(it.id, b.x + minX * c + 1, b.y + minY * c + 1 + bounce, (maxX - minX + 1) * c - 2, (maxY - minY + 1) * c - 2, it.level ?? 1);
-      if ((it.n ?? 1) > 1) ui.text(String(it.n), b.x + (maxX + 1) * c - 2, b.y + (maxY + 1) * c - 9, { font: 'small', color: '#ffffff', outline: '#000', align: 'right' });
-      if (!drag && !busy && cells.some(([cx, cy]) => ui.hover(b.x + cx * c, b.y + cy * c, c, c))) hover = it;
+      const bounce = dt0 !== undefined ? Math.sin(Math.min(1, dt0 / 0.3) * Math.PI) * 0.05 : 0;
+      const lift = hover === g ? 0.035 : 0;
+      if (!(drag && drag.key === key)) g.position.set(BAG.x - BAG.grid / 2 + cx * s, 0.124 + bounce + lift, BAG.z - BAG.grid / 2 + cy * s);
+      g.userData.slot = { id: it.id, level: it.level, n: it.n, from: 'bag', inst: it } as Slot;
+      this.setCount(g, it.n ?? 1, foot);
     }
-    ui.mark('tbl:bag', b.x, b.y, gw, gw);
-    if (hover) {
-      const h = hover as ItemInst;
-      ui.cursor = 'grab';
-      ui.tooltip(ui.itemTip(h.id, h.level ?? 1, [{ text: (h.n ?? 1) > 1 ? `x${h.n} · drag to move · click to unpack` : 'drag to move · click to unpack', font: 'small', color: '#7a2a1a', gap: 2 }]));
-      if (ui.pressed && !this.drag) this.drag = { it: h, from: 'bag', sx: ui.mx, sy: ui.my, moved: false, rot: h.rot };
-    }
-    if (ui.hover(b.x, b.y, gw, gw)) ui.block(b.x, b.y, gw, gw);
-    // the pack's fill: a tiny tally stitched under the bag
-    let used = 0; for (const it of this.pack) used += instCells(it).length;
-    ui.text(`${used}/${GRID * GRID}`, b.x + gw, b.y + gw + 3, { font: 'small', color: used >= GRID * GRID ? '#ff8a6a' : '#e8dcc0', shadow: '#000', align: 'right' });
+    // the tray: the stash entries of this page, one per tray cell
+    const list = this.trayEntries();
+    const cols = 8, rows = 2, per = cols * rows, cw = (TRAY.w - 0.06) / cols, ch = (TRAY.d - 0.06) / rows;
+    const pages = Math.max(1, Math.ceil(list.length / per));
+    this.trayPage = Math.min(this.trayPage, pages - 1);
+    this.arrows[0].visible = this.trayPage > 0; this.arrows[1].visible = this.trayPage < pages - 1;
+    list.slice(this.trayPage * per, this.trayPage * per + per).forEach((e, i) => {
+      const key = e.it ? 't' + e.it.uid : 'm' + e.id;
+      const g = this.model(key, e.id, e.it?.level ?? 1);
+      live.add(key);
+      const foot = Math.min(cw, ch) * 0.86;
+      g.scale.setScalar(foot / Math.max(0.01, g.userData.size as number));
+      g.rotation.y = 0;
+      const lift = hover === g ? 0.035 : 0;
+      if (!(drag && drag.key === key)) g.position.set(TRAY.x - TRAY.w / 2 + 0.03 + (i % cols + 0.5) * cw, 0.03 + lift, TRAY.z - TRAY.d / 2 + 0.03 + (Math.floor(i / cols) + 0.5) * ch);
+      g.userData.slot = { id: e.id, level: e.it?.level ?? 1, n: e.n, from: 'tray', inst: e.it ?? { uid: 0, id: e.id, gx: -1, gy: -1, rot: 0, level: 1, n: Math.min(e.n, stackCap(e.id)) } } as Slot;
+      this.setCount(g, e.kind === 'mat' ? e.n : 1, foot);
+    });
+    for (const [key, g] of this.models) if (!live.has(key)) { g.removeFromParent(); (g.userData.lbl as THREE.Mesh | undefined)?.removeFromParent(); this.models.delete(key); }
+    // the empty-stash note
+    this.emptyNote.mesh.visible = !list.length;
   }
 
-  /** the stash laid out in the tray: gear first, then materials with how many are left; paged */
+  /** the stash laid out in the tray: gear first, then materials with how many are left */
   private trayEntries(): { kind: 'gear' | 'mat'; it?: ItemInst; id: string; n: number }[] {
     const out: { kind: 'gear' | 'mat'; it?: ItemInst; id: string; n: number }[] = [];
     for (const s of META.stash) if (ITEMS[s.id] && !this.inPack(s.uid)) out.push({ kind: 'gear', it: s, id: s.id, n: 1 });
     for (const [id, n] of Object.entries(META.materials)) { const left = n - this.packedMat(id); if (ITEMS[id] && left > 0) out.push({ kind: 'mat', id, n: left }); }
     return out;
   }
-  private drawTray(ui: PixelUI, r: { x: number; y: number; w: number; h: number }, busy: boolean) {
-    const list = this.trayEntries();
-    const cell = 18, cols = Math.max(1, Math.floor((r.w - 4) / cell)), rows = Math.max(1, Math.floor((r.h - 2) / cell));
-    const per = cols * rows, pages = Math.max(1, Math.ceil(list.length / per));
-    this.trayPage = Math.min(this.trayPage, pages - 1);
-    const x0 = r.x + Math.floor((r.w - cols * cell) / 2), y0 = r.y + Math.floor((r.h - rows * cell) / 2);
-    if (!list.length) ui.textBox('The stash is empty. Mail loot home on runs.', r.x + 4, r.y + 4, r.w - 8, { font: 'small', color: '#e8dcc0', shadow: '#000' });
-    list.slice(this.trayPage * per, this.trayPage * per + per).forEach((e, i) => {
-      const x = x0 + (i % cols) * cell, y = y0 + Math.floor(i / cols) * cell;
-      const lifted = this.drag?.moved && this.drag.from === 'tray' && this.drag.it.id === e.id && (e.kind === 'mat' || this.drag.it.uid === e.it!.uid);
-      const over = !busy && !this.drag?.moved && ui.hover(x, y, cell - 1, cell - 1);
-      ui.fill(x, y, cell - 1, cell - 1, '#1a0e06', over ? 0.55 : 0.32);
-      if (over) ui.rect(x, y, cell - 1, cell - 1, '#fff0c0');
-      ui.item(e.id, x + 1, y + 1, cell - 3, cell - 3, e.it?.level ?? 1, lifted ? 0.35 : 1);
-      if (e.kind === 'mat') ui.text(String(e.n), x + cell - 2, y + cell - 9, { font: 'small', color: '#ffffff', outline: '#000', align: 'right' });
-      else if ((e.it!.level ?? 1) > 1) ui.text(`+${(e.it!.level ?? 1) - 1}`, x + cell - 2, y + 1, { font: 'small', color: '#8aff7a', outline: '#000', align: 'right' });
-      ui.mark('tbl:tray:' + e.id, x, y, cell - 1, cell - 1);
-      if (over) {
-        ui.cursor = 'grab';
-        ui.tooltip(ui.itemTip(e.id, e.it?.level ?? 1, [{ text: e.kind === 'mat' ? `${e.n} in the stash · click: pack ${Math.min(e.n, stackCap(e.id))} · drag: place` : 'click or drag into the backpack', font: 'small', color: '#1a4a7a', gap: 2 }]));
-        if (ui.pressed && !this.drag) this.drag = { it: e.it ? e.it : { uid: 0, id: e.id, gx: -1, gy: -1, rot: 0, level: 1, n: Math.min(e.n, stackCap(e.id)) }, from: 'tray', sx: ui.mx, sy: ui.my, moved: false, rot: 0 };
-      }
-    });
-    if (ui.hover(r.x, r.y, r.w, r.h)) ui.block(r.x, r.y, r.w, r.h);
-    if (pages > 1) {
-      if (this.trayPage > 0 && ui.iconButton('tbl:prev', 'left', r.x - 16, r.y + r.h / 2 - 7, { style: 'wood', size: 13 })) this.trayPage--;
-      if (this.trayPage < pages - 1 && ui.iconButton('tbl:next', 'right', r.x + r.w + 3, r.y + r.h / 2 - 7, { style: 'wood', size: 13 })) this.trayPage++;
-    }
-  }
 
-  private dragDrop(ui: PixelUI, input: Input, b: { x: number; y: number; cell: number }) {
+  /** the dragged model follows the mouse just above the table; the bag cells under it light green / red */
+  private dragDrop(ui: PixelUI, input: Input, ray: THREE.Raycaster) {
     const d = this.drag;
+    for (const c of this.cellHi) c.visible = false;
     if (!d) return;
     if (!d.moved && Math.hypot(ui.mx - d.sx, ui.my - d.sy) > 3) { d.moved = true; audio.play('k_pluck1', { vol: 0.35, dry: true }); }
     if (d.moved && (input.keyHit('KeyR') || ui.rpressed)) { d.rot = (d.rot + 1) % 4; audio.play('k_tick1', { vol: 0.25, dry: true }); }
-    const c = b.cell;
-    const gx = Math.floor((ui.mx - b.x) / c), gy = Math.floor((ui.my - b.y) / c);
-    const overBag = ui.mx >= b.x && ui.my >= b.y && ui.mx < b.x + c * GRID && ui.my < b.y + c * GRID;
+    // the mouse on the table plane (local)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(this.nooks.table.top.y + 0.13));
+    const hit = ray.ray.intersectPlane(plane, new THREE.Vector3());
+    const lp = hit ? this.g.worldToLocal(hit.clone()) : null;
+    const s = BAG.grid / GRID;
     const probe: ItemInst = { ...d.it, gx: -1, gy: -1, rot: d.rot };
+    const cells0 = instCells(probe, d.rot, 0, 0);
+    const pw = Math.max(...cells0.map((q) => q[0])) + 1, ph = Math.max(...cells0.map((q) => q[1])) + 1;
+    // the grab point is the shape's centre: its origin cell is offset by half the shape
+    const gx = lp ? Math.round((lp.x - (BAG.x - BAG.grid / 2)) / s - pw / 2) : -99, gy = lp ? Math.round((lp.z - (BAG.z - BAG.grid / 2)) / s - ph / 2) : -99;
+    const overBag = !!lp && Math.abs(lp.x - BAG.x) < BAG.w / 2 + 0.04 && Math.abs(lp.z - BAG.z) < BAG.d / 2 + 0.04;
     const others = this.pack.filter((p) => p.uid !== d.it.uid || d.from === 'tray');
-    // a material dropped onto a stack of the same kind tops it up
-    const stackTarget = overBag && stackCap(d.it.id) > 1 ? others.find((p) => p.id === d.it.id && p.uid < 0 && instCells(p).some(([x, y]) => x === gx && y === gy)) : undefined;
+    const stackTarget = overBag && stackCap(d.it.id) > 1 ? others.find((p) => p.id === d.it.id && p.uid < 0 && instCells(p).some(([x, y]) => x === gx + Math.floor(pw / 2) && y === gy + Math.floor(ph / 2))) : undefined;
     const ok = overBag && (!!stackTarget || fits(others, probe, gx, gy, d.rot));
-    if (d.moved) {
+    if (d.moved && lp) {
       ui.cursor = 'grab';
-      if (overBag) for (const [x, y] of instCells(probe, d.rot, gx, gy)) {
-        if (x < 0 || y < 0 || x >= GRID || y >= GRID) continue;
-        ui.fill(b.x + x * c + 1, b.y + y * c + 1, c - 2, c - 2, ok ? '#2aa84a' : '#a82a2a', 0.5);
-      }
-      const cells = instCells(probe, d.rot, 0, 0);
-      const w = (Math.max(...cells.map((q) => q[0])) - Math.min(...cells.map((q) => q[0])) + 1) * c, h = (Math.max(...cells.map((q) => q[1])) - Math.min(...cells.map((q) => q[1])) + 1) * c;
-      ui.fill(ui.mx - c / 2 + 2, ui.my - c / 2 + 3, w, h, '#000000', 0.4);
-      ui.item(d.it.id, ui.mx - c / 2, ui.my - c / 2, w, h, d.it.level ?? 1);
+      const g = this.models.get(d.key);
+      if (g) { g.position.set(lp.x, 0.16, lp.z); g.rotation.y = -d.rot * Math.PI / 2; }
+      if (overBag) instCells(probe, d.rot, gx, gy).forEach(([x, y], i) => {
+        const c = this.cellHi[i]; if (!c || x < 0 || y < 0 || x >= GRID || y >= GRID) return;
+        c.visible = true; c.position.set(BAG.x - BAG.grid / 2 + (x + 0.5) * s, 0.126, BAG.z - BAG.grid / 2 + (y + 0.5) * s);
+        (c.material as THREE.MeshBasicMaterial).color.set(ok ? '#4aff6a' : '#ff4a3a');
+      });
     }
     if (ui.released) {
       if (!d.moved) {
         // a click: unpack from the bag, or pack from the tray
         if (d.from === 'bag') { this.pack = this.pack.filter((p) => p.uid !== d.it.uid); audio.play('k_drop2', { vol: 0.3, dry: true }); }
-        else if (d.it.uid > 0 || (d.it.uid === 0 && stackCap(d.it.id) <= 1 && ITEMS[d.it.id]?.kind !== 'material')) this.addGear(d.it);
+        else if (d.it.uid > 0) this.addGear(d.it);
         else this.addMat(d.it.id, d.it.n ?? 1);
       } else if (ok) {
         if (d.from === 'bag') {
@@ -657,6 +696,8 @@ export class PlanningTable {
     else if (id === 'dial+') p = this.local(DIAL.x + DIAL.r * 0.6, 0.05, DIAL.z);
     else if (id === 'dial-') p = this.local(DIAL.x - DIAL.r * 0.6, 0.05, DIAL.z);
     else if (id.startsWith('zone:')) { const i = AREAS.findIndex((a) => a.id === id.slice(5)); const cx = (ZONE_X[i] + ZONE_X[i + 1]) / 2; p = this.local(CHART.x + (cx / CW - 0.5) * CHART.w, 0.01, CHART.z + 0.1); }
+    else if (id.startsWith('tray:')) { for (const g of this.models.values()) { const sl = g.userData.slot as Slot | undefined; if (sl && sl.from === 'tray' && sl.id === id.slice(5)) { p = g.getWorldPosition(new THREE.Vector3()); break; } } }
+    else if (id.startsWith('item:')) { for (const g of this.models.values()) { const sl = g.userData.slot as Slot | undefined; if (sl && sl.from === 'bag' && sl.id === id.slice(5)) { p = g.getWorldPosition(new THREE.Vector3()); break; } } }
     else if (id.startsWith('bag:')) { const [gx, gy] = id.slice(4).split(',').map(Number); const s = BAG.grid / GRID; p = this.local(BAG.x - BAG.grid / 2 + (gx + 0.5) * s, 0.122, BAG.z - BAG.grid / 2 + (gy + 0.5) * s); }
     if (!p) return null;
     const v = p.project(cam);

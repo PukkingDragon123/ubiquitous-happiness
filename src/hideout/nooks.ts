@@ -24,6 +24,7 @@ import { oceanFog } from './ocean';
 import { HALF_W, HALF_D, PORTHOLE, WINDOW_R, DOOR } from './room';
 import { GRID_W, GRID_D, FIXED_CELLS } from './blueprints';
 import { META } from '../meta/meta';
+import { paintTag } from './tag';
 
 export type FixedId = 'table' | 'hatch' | 'mirror' | 'trophy' | 'build' | 'bed';
 export interface Spot { obj: THREE.Object3D; stand: THREE.Vector3; face: THREE.Vector3 }
@@ -123,6 +124,7 @@ export class Nooks {
     this.buildEasel();
     this.buildHatchKelp();
     this.buildGlowPlants();
+    this.buildChalkboard();
     // ---- the cool light pouring through the round window, with a dusty shaft card
     this.windowLight = new THREE.SpotLight('#7ac8ff', 26, 9, 0.62, 0.7, 1.4);
     this.windowLight.position.set(PORTHOLE.x + 0.4, PORTHOLE.y + 0.9, PORTHOLE.z - 1.6);
@@ -393,6 +395,24 @@ export class Nooks {
     const g = k.build();
     this.group.add(g);
     this.spots.hatch = { obj: g, stand: new THREE.Vector3(-HALF_W + 1.05, 0, DOOR.z), face: new THREE.Vector3(DOOR.x, DOOR.y, DOOR.z) };
+  }
+
+  // ---------------------------------------------------------------- the chalkboard by the hatch (how to get about)
+  private buildChalkboard() {
+    const k = new Kit();
+    const wood = MAT.wood('drift');
+    // an A-frame sandwich board
+    for (const s of [-1, 1]) { k.box(wood, 0.05, 1.05, 0.05, s * 0.38, 0.5, 0.06, { rx: -0.16 }); k.box(wood, 0.05, 1.05, 0.05, s * 0.38, 0.5, -0.18, { rx: 0.16 }); }
+    k.box(wood, 0.7, 0.05, 0.05, 0, 1.0, -0.04);
+    k.box(wood, 0.82, 0.66, 0.04, 0, 0.62, 0.035, { rx: -0.16 });
+    const g = k.build();
+    const cv = paintTag([{ text: 'HOME RULES', font: 'title', color: '#f0e8d0' }, { text: 'walk', key: 'WASD', color: '#e8e8d8', gap: 2 }, { text: 'use', key: 'E', color: '#e8e8d8' }, { text: 'turn', key: 'RMB', color: '#e8e8d8' }, { text: 'menu', key: 'ESC', color: '#e8e8d8' }], 'slate', 120, 5);
+    const t = new THREE.CanvasTexture(cv); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace;
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(cv.width * 0.0058, cv.height * 0.0058), retro(new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 })));
+    face.position.set(0, 0.63, 0.06); face.rotation.x = -0.16;
+    g.add(face);
+    g.position.set(-4.35, 0, 3.45); g.rotation.y = Math.PI / 4;
+    this.group.add(g);
   }
 
   // ---------------------------------------------------------------- bioluminescence
