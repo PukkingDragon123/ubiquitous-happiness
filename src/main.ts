@@ -22,6 +22,8 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   builds: () => import('./dev/preview_builds'),
   retro: () => import('./dev/preview_retro'),
   blobstudio: () => import('./dev/preview_blobstudio'),
+  hud: () => import('./dev/preview_hud'),
+  icons: () => import('./dev/preview_icons'),
   run: () => import('./dev/preview_run'),
   intro: () => import('./dev/preview_intro'),
   combat: () => import('./dev/preview_combat'),

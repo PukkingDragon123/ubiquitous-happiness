@@ -15,17 +15,46 @@ import { Px } from '../gfx/px';
 
 export const HALF_W = GRID_W / 2, HALF_D = GRID_D / 2;
 export const WALL_H = 4.6;
-/** door centre (on the -x wall) and porthole centre (on the -z wall), world space */
+/** door centre (on the -x wall) and the big round window centre (on the -z wall), world space */
 export const DOOR = new THREE.Vector3(-HALF_W, 1.05, 2);
-export const PORTHOLE = new THREE.Vector3(0, 2.55, -HALF_D);
+export const PORTHOLE = new THREE.Vector3(0, 2.62, -HALF_D);
+export const WINDOW_R = 1.05;
+
+/**
+ * Nooks carved deep into the back walls (pockets pushed into the rock): the bed loft and the trophy niche in the
+ * north wall, the map room (the planning table) in the west wall. u = along the wall (world x on n, z on w),
+ * y0..y1 = the opening (arched: the top drops by `arch` toward the sides), depth = how far back.
+ */
+export interface Nook { id: 'loft' | 'trophy' | 'maproom'; side: 'n' | 'w'; u0: number; u1: number; y0: number; y1: number; arch: number; depth: number }
+export const NOOKS: Nook[] = [
+  { id: 'loft', side: 'n', u0: -4.45, u1: -1.55, y0: 0.55, y1: 3.0, arch: 0.55, depth: 2.5 },
+  { id: 'trophy', side: 'n', u0: 1.45, u1: 4.15, y0: 0.42, y1: 2.95, arch: 0.4, depth: 0.95 },
+  { id: 'maproom', side: 'w', u0: -3.65, u1: -0.55, y0: -0.4, y1: 3.1, arch: 0.6, depth: 2.6 },
+];
+/** how far a nook pushes the inner wall face back at (u, y): 0 outside, depth inside, eased at the edges */
+export function nookPush(side: 'n' | 'w' | 's' | 'e', u: number, y: number): number {
+  let best = 0;
+  for (const n of NOOKS) {
+    if (n.side !== side) continue;
+    const c = (n.u0 + n.u1) / 2, hw = (n.u1 - n.u0) / 2;
+    const ku = Math.abs(u - c) / hw;
+    if (ku >= 1) continue;
+    const top = n.y1 - n.arch * ku * ku;
+    if (y < n.y0 || y > top) continue;
+    best = Math.max(best, n.depth);
+  }
+  return best;
+}
 
 /** a thick, faceted rock wall slab: box -> displaced by world-space noise (continuous across faces) */
-function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSign: number, mat: THREE.Material, o: { H?: number; T?: number; carve?: { p: THREE.Vector3; r: number }[]; seed?: number } = {}): THREE.Mesh {
+function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSign: number, mat: THREE.Material, o: { H?: number; T?: number; carve?: { p: THREE.Vector3; r: number }[]; seed?: number; seg?: number; nook?: 'n' | 'w' } = {}): THREE.Mesh {
   const T = o.T ?? 1.8, H = o.H ?? WALL_H;
   const inner = alongX ? cz + inwardSign * T / 2 : cx + inwardSign * T / 2;
   const sx = alongX ? len : T, sz = alongX ? T : len;
-  // big facets: ~1.1 m quads, displaced by low-frequency noise so each face reads as a flat rock slab
-  const g = new THREE.BoxGeometry(sx, H + 0.6, sz, Math.max(1, Math.round(sx / 1.1)), Math.max(1, Math.round(H / 0.95)), Math.max(1, Math.round(sz / 1.1)));
+  // big facets: ~1.1 m quads (finer where nooks are carved), displaced by low-frequency noise so each face reads
+  // as a flat rock slab
+  const sg = o.seg ?? 1.1;
+  const g = new THREE.BoxGeometry(sx, H + 0.6, sz, Math.max(1, Math.round(sx / sg)), Math.max(1, Math.round(H / Math.min(0.95, sg))), Math.max(1, Math.round(sz / sg)));
   g.translate(cx, (H + 0.6) / 2 - 0.3, cz);
   const sd = o.seed ?? 0;
   const P = g.attributes.position as THREE.BufferAttribute;
@@ -48,6 +77,11 @@ function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSi
       const d = Math.hypot(u, v);
       const k = clamp01((d - c.r) / 0.9);
       if (k < 1) { const back = (onInner ? -inwardSign : inwardSign) * 0.35 * (1 - k); if (alongX) dz = dz * k + back; else dx = dx * k + back; }
+    }
+    // nooks: the inner face is pushed deep into the rock (the slab is thick enough to hold the pocket)
+    if (onInner && o.nook) {
+      const push = nookPush(o.nook, alongX ? x : z, y);
+      if (push > 0) { const tame = 0.35; if (alongX) { dz = dz * tame - inwardSign * push; dx *= tame; } else { dx = dx * tame - inwardSign * push; dz *= tame; } dy *= tame; }
     }
     P.setXYZ(i, x + dx, y + dy, z + dz);
   }
@@ -203,12 +237,12 @@ export class Room {
     // walls: one thick faceted slab per side, in a group that sinks below the floor when it would block the view
     // (it takes its fixtures, boulders and decorations with it); a low rubble rim always stays
     const sides: [number, number, number, boolean, number, [number, number]][] = [
-      [0, -HALF_D - 0.9, GRID_W + 3.6, true, 1, [0, -1]],   // 0 back right (-z)
-      [-HALF_W - 0.9, 0, GRID_D + 3.6, false, 1, [-1, 0]],  // 1 back left (-x)
+      [0, -HALF_D - 1.8, GRID_W + 3.6, true, 1, [0, -1]],   // 0 back right (-z): thick, the loft + trophy niche
+      [-HALF_W - 1.8, 0, GRID_D + 3.6, false, 1, [-1, 0]],  // 1 back left (-x): thick, the map room
       [0, HALF_D + 0.9, GRID_W + 3.6, true, -1, [0, 1]],    // 2 front left (+z)
       [HALF_W + 0.9, 0, GRID_D + 3.6, false, -1, [1, 0]],   // 3 front right (+x)
     ];
-    const carve = [{ p: DOOR, r: 1.05 }, { p: PORTHOLE, r: 0.8 }, ...MOUNTS];
+    const carve = [{ p: DOOR, r: 1.05 }, { p: PORTHOLE, r: WINDOW_R + 0.25 }, ...MOUNTS];
     const wallMat = MAT.rock();
     const SEG = 3;
     sides.forEach(([cx, cz, len, ax, inw, nrm], si) => {
@@ -216,12 +250,15 @@ export class Room {
         const off = (k - (SEG - 1) / 2) * (len / SEG);
         const sx = ax ? cx + off : cx, sz = ax ? cz : cz + off;
         const g = new THREE.Group();
-        g.add(rockSlab(sx, sz, len / SEG + 0.02, ax, inw, wallMat, { carve }));
+        const thick = si < 2;
+        g.add(rockSlab(sx, sz, len / SEG + 0.02, ax, inw, wallMat, thick ? { carve, T: 3.6, seg: 0.42, nook: si === 0 ? 'n' : 'w' } : { carve }));
         this.group.add(g);
         this.walls.push({ group: g, normal: new THREE.Vector2(nrm[0], nrm[1]), centre: new THREE.Vector2(Math.max(-1, Math.min(1, sx / HALF_W)), Math.max(-1, Math.min(1, sz / HALF_D))), up: 1, target: 1, lights: [] });
       }
-      const rim = rockSlab(ax ? cx : cx - inw * 0.25, ax ? cz - inw * 0.25 : cz, len - 0.4, ax, inw, wallMat, { H: 0.55, T: 1.3, seed: 40 + si });
-      this.group.add(rim);
+      if (si >= 2) {
+        const rim = rockSlab(ax ? cx : cx - inw * 0.25, ax ? cz - inw * 0.25 : cz, len - 0.4, ax, inw, wallMat, { H: 0.55, T: 1.3, seed: 40 + si });
+        this.group.add(rim);
+      }
     });
     const lens = [GRID_W + 3.6, GRID_D + 3.6, GRID_W + 3.6, GRID_D + 3.6];
     /** which wall segment a world xz belongs to (for boulders / fixtures / decorations) */
@@ -240,6 +277,7 @@ export class Room {
       const rx = (HALF_W + 2.4 + hash2(i, 2, 3) * 2.2) * Math.sign(Math.cos(a)) * Math.min(1, Math.abs(Math.cos(a)) * 1.6);
       const rz = (HALF_D + 2.4 + hash2(i, 3, 3) * 2.2) * Math.sign(Math.sin(a)) * Math.min(1, Math.abs(Math.sin(a)) * 1.6);
       if (rx < -HALF_W + 0.5 && rz > DOOR.z - 3.2) continue; // keep the outer hatch and the exterior camera clear
+      if (rx < -HALF_W - 0.5 || rz < -HALF_D - 0.5) continue; // the thick back walls hold the nooks: no boulders in them
       const r = 1.8 + hash2(i, 4, 3) * 2.2;
       const b = boulder(r, i, outM);
       b.position.set(rx, r * 0.3, rz);
@@ -299,12 +337,16 @@ export class Room {
     // porthole on the -z wall
     const port = new THREE.Group(); port.position.copy(PORTHOLE); port.position.z += 0.05;
     const kp = new Kit();
-    kp.add(MAT.brass(), new THREE.TorusGeometry(0.58, 0.1, 6, 16), 0, 0, 0.08);
-    for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; kp.sphere(MAT.brass(), 0.035, Math.cos(a) * 0.58, Math.sin(a) * 0.58, 0.18, { w: 5, h: 4 }); }
-    kp.cyl(MAT.dark(), 0.52, 0.52, 0.5, 0, 0, -0.2, { rx: Math.PI / 2, seg: 14, open: true });
+    const WR = WINDOW_R;
+    kp.add(MAT.brass(), new THREE.TorusGeometry(WR + 0.06, 0.13, 6, 20), 0, 0, 0.08);
+    for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; kp.sphere(MAT.brass(), 0.045, Math.cos(a) * (WR + 0.06), Math.sin(a) * (WR + 0.06), 0.2, { w: 5, h: 4 }); }
+    // the window's iron cross-bars and a deep throat through the rock
+    for (const r of [0, Math.PI / 2]) kp.box(MAT.metal('grey'), WR * 2, 0.06, 0.06, 0, 0, 0.1, { rz: r });
+    kp.add(MAT.brass(), new THREE.TorusGeometry(0.16, 0.04, 4, 10), 0, 0, 0.12);
+    kp.cyl(MAT.dark(), WR, WR, 1.2, 0, 0, -0.55, { rx: Math.PI / 2, seg: 16, open: true });
     port.add(kp.build());
     this.portMat = waterWindow('porthole');
-    const glass = new THREE.Mesh(new THREE.CircleGeometry(0.52, 18), this.portMat);
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(WR, 22), this.portMat);
     glass.position.z = 0.06;
     port.add(glass);
     segAt(PORTHOLE).group.add(port);
@@ -343,6 +385,7 @@ export class Room {
       const m = new THREE.Mesh(g, vine);
       const side = i % 4;
       const u = hash2(i, 2, 6) * 2 - 1;
+      if ((side === 0 && nookPush('n', u * HALF_W * 0.9, 2) > 0) || (side === 1 && nookPush('w', u * HALF_D * 0.9, 2) > 0)) continue;
       if (side === 0) m.position.set(u * HALF_W * 0.9, WALL_H + 0.1, -HALF_D + 0.3);
       else if (side === 2) m.position.set(u * HALF_W * 0.9, WALL_H + 0.1, HALF_D - 0.3);
       else { m.position.set(side === 1 ? -HALF_W + 0.3 : HALF_W - 0.3, WALL_H + 0.1, u * HALF_D * 0.9); m.rotation.y = Math.PI / 2; }

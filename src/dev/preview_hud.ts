@@ -3,7 +3,8 @@
 // sprite at 1x and 4x in the bottom-left (&sheet=0 hides it). &boss=0 hides the boss bar, &t=<sec> jumps ahead.
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
-import { Hud, type HudData, type MiniRoom } from '../ui/hud3';
+import { Hud, type HudData, type StripMap } from '../ui/hud3';
+import type { PlayerCombatHud } from '../combat/types';
 import { PixelUI } from '../ui/pixel/ui';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
 
@@ -20,18 +21,16 @@ function backdrop(): THREE.Texture {
   return t;
 }
 
-const ROOMS: MiniRoom[] = [
-  { x: 3, y: 2, type: 'start', state: 'cleared', doors: { r: true, u: true } },
-  { x: 4, y: 2, type: 'combat', state: 'cleared', doors: { l: true, r: true, d: true } },
-  { x: 5, y: 2, type: 'combat', state: 'visited', current: true, doors: { l: true, u: true } },
-  { x: 5, y: 1, type: 'treasure', state: 'unknown' },
-  { x: 4, y: 3, type: 'shop', state: 'cleared', doors: { u: true } },
-  { x: 3, y: 1, type: 'combat', state: 'cleared', w: 1, h: 1, doors: { d: true, l: true } },
-  { x: 1, y: 0, w: 2, h: 2, type: 'challenge', state: 'unknown' },
-  { x: 6, y: 2, type: 'boss', state: 'unknown' },
-  { x: 2, y: 2, type: 'post', state: 'unknown' },
-  { x: 4, y: 4, type: 'secret', state: 'unknown' },
-];
+const STRIP: StripMap = {
+  length: 340, explored: [[0, 150], [176, 196]], player: 128, playerY: 0.55,
+  lanes: [{ kind: 'upper', x0: 60, x1: 170 }, { kind: 'cave', x0: 120, x1: 230 }],
+  seabed: [0.7, 0.66, 0.74, 0.62, 0.58, 0.7, 0.76, 0.68, 0.6, 0.72, 0.7],
+  pois: [
+    { type: 'shop', x: 70 }, { type: 'arena', x: 100, done: true }, { type: 'treasure', x: 140, y: 0.82 },
+    { type: 'post', x: 186 }, { type: 'secret', x: 220, y: 0.85, known: false }, { type: 'challenge', x: 260 }, { type: 'boss', x: 336 },
+  ],
+  floor: 1, floors: 3, name: 'Sunlit Reef',
+};
 
 export default function make(game: Game): Screen {
   const q = new URLSearchParams(location.search);
@@ -42,7 +41,8 @@ export default function make(game: Game): Screen {
   const sheetUi = new PixelUI();
   const showSheet = q.get('sheet') !== '0';
   let t = Number(q.get('t') || 0);
-  const s: HudData = { hearts: 3, maxHearts: 5, soulHearts: 1, stamina: 100, maxStamina: 100, flasks: 2, maxFlasks: 3, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, rooms: ROOMS, floor: 'SUNLIT REEF  1-2', boss: null };
+  const combat: PlayerCombatHud = { stamina: 100, staminaMax: 100, staminaDelay: 0, flasks: 2, flasksMax: 3, drinking: 0, guard: 'idle', parryWindow: 0, lastParry: null, lastParryAge: 9, charge: 0, move: null, iframes: false };
+  const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null };
   return {
     name: 'hudpreview', scene, camera, underwater: false,
     overlays: [hud.layer, sheetUi.layer],
@@ -53,15 +53,18 @@ export default function make(game: Game): Screen {
       t += dt;
       // scripted beats
       const ph = t % 12;
-      s.hearts = ph < 3 ? 3 : ph < 5 ? 2.5 : ph < 7 ? 1 : 4;
-      s.stamina = Math.max(0, 100 - ((t * 37) % 140));
-      s.exhausted = s.stamina <= 0;
+      s.hp = ph < 3 ? 6 : ph < 5 ? 5 : ph < 7 ? 2 : 8;
+      combat.stamina = Math.max(0, 100 - ((t * 37) % 140));
+      combat.staminaDelay = combat.stamina < 40 ? 0.5 : 0;
+      combat.flasks = Math.floor(t / 4) % 4;
+      combat.drinking = (t % 4) / 4;
+      combat.guard = Math.floor(t / 3) % 4 === 1 ? 'riposte' : 'idle';
       s.mana = 30 + Math.sin(t) * 25;
-      s.pearls = 7 + Math.floor(t / 2) % 30;
+      s.pearls = 7 + (Math.floor(t / 2) % 30);
       s.keys = 1 + (Math.floor(t / 5) % 2);
-      s.bombs = 2;
-      s.flasks = Math.floor(t / 4) % 4;
-      s.boss = q.get('boss') === '0' ? null : { name: 'The Harpoon King', hp: 1000 - ((t * 60) % 1000), maxHp: 1000, phase: 1 + Math.floor(((t * 60) % 1000) / 340), phases: 3 };
+      s.pack = { used: 14 + (Math.floor(t / 3) % 12), total: 25 };
+      STRIP.player = 20 + ((t * 9) % 300);
+      s.boss = q.get('boss') === '0' ? null : { name: 'The Harpoon King', title: 'Terror of the Reef', hp: 1000 - ((t * 60) % 1000), max: 1000, phase: 1 + Math.floor(((t * 60) % 1000) / 340), phases: 3, poise: 0.6, visible: true };
       if (Math.floor(t / 6) !== Math.floor((t - dt) / 6)) hud.pickup('pearl');
       hud.draw(dt, s, game.input);
       sheetUi.begin(null, dt);

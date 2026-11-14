@@ -81,9 +81,9 @@ function carve(p: Px, H: Float32Array, k: Mask, cx: number, cy: number, s: numbe
     if (!p.inside(px, py)) continue;
     const h = (a: number, b: number) => (p.inside(a, b) ? H[b * p.w + a] : 0);
     const slope = (h(px + 1, py) - h(px - 1, py)) + (h(px, py + 1) - h(px, py - 1));
-    let c: RGB = slope > 0.15 ? P[2] : slope < -0.15 ? P[0] : P[1];
+    let c: RGB = slope > 0.55 ? P[2] : slope < -0.55 ? P[0] : P[1];
     const fx = Math.floor(x / s), fy = Math.floor(y / s);
-    if (hash2(fx, fy, (o.seed ?? 3) + 11) < (o.chip ?? 0.08)) c = mix(bare, c, 0.25);
+    if (hash2(fx >> 1, fy >> 1, (o.seed ?? 3) + 11) < (o.chip ?? 0.08)) c = mix(bare, c, 0.55);
     p.set(px, py, c);
   }
 }
@@ -157,15 +157,15 @@ function slabGeo(poly0: [number, number][], depth: number): THREE.BufferGeometry
 // ------------------------------------------------------------------ palettes
 const WOOD = ['#1c1610', '#33291c', '#4c3e2a', '#66563a', '#82704c'];
 const WOOD_DRY = ['#1e1c18', '#36322a', '#4e4a3e', '#686252', '#827c6a'];
-const CREAM: [string, string, string] = ['#8a6a3a', '#ecd8a4', '#fff6d6'];
-const RED: [string, string, string] = ['#4a0a0c', '#b8322a', '#f07050'];
-const GREY: [string, string, string] = ['#3a3834', '#77736a', '#9a968a'];
+const CREAM: [string, string, string] = ['#b89a64', '#ecd8a4', '#fff6d6'];
+const RED: [string, string, string] = ['#7a1a14', '#c43a2c', '#f07050'];
+const GREY: [string, string, string] = ['#5a5852', '#7a766c', '#9a968a'];
 
 // sizes (metres)
 const POST_H = 5.7, POST_W = 0.36;
 const PLANK = { w: 4.0, h: 1.36, y: 4.72, d: 0.15 };
 const BOARD_H = 0.62, BOARD_D = 0.11;
-const FONT_M = 0.0255; // metres per font pixel on the boards
+const FONT_M = 0.0158; // metres per font pixel on the boards (the big font, one texel per font pixel)
 
 interface Board {
   id: BoardId; pivot: THREE.Group; mats: THREE.MeshStandardMaterial[]; meshes: THREE.Object3D[];
@@ -218,8 +218,8 @@ export class Signpost {
     // a kelp strand spiralling up the post (no sway: it is wound tight), a couple of loose blades at the top
     const kelpLeaf = psxMat(KELP(), { rough: 0.8, side: THREE.DoubleSide, alphaTest: 0.5, sss: [0.8, 1, 0.4], sssK: 0.6 });
     const kk = new Kit();
-    for (let i = 0; i < 34; i++) {
-      const a = i * 0.55 + 0.6, y = 0.15 + i * 0.075;
+    for (let i = 0; i < 30; i++) {
+      const a = i * 0.55 + 0.6, y = i < 8 ? 0.12 + i * 0.07 : 1.62 + (i - 8) * 0.06;
       const r = POST_W * 0.62;
       const g = new THREE.PlaneGeometry(0.15, 0.3);
       const uv = g.attributes.uv as THREE.BufferAttribute;
@@ -234,7 +234,7 @@ export class Signpost {
     const pp = new Px(PW, PH), ph = new Float32Array(PW * PH);
     woodPage(pp, WOOD, { seed: 9, seams: [Math.round(PH * 0.52)], algae: 0.55 });
     const sub = textMask('REEL REBELLION', 'title', 1);
-    carve(pp, ph, sub, PW / 2, Math.round(PH * 0.76), 2, RED, { chip: 0.07, seed: 2 });
+    carve(pp, ph, sub, PW / 2, Math.round(PH * 0.76), 2, RED, { chip: 0.03, seed: 2 });
     // nail heads at the board ends
     for (const [nx, ny] of [[10, 12], [PW - 11, 12], [10, PH - 14], [PW - 11, PH - 14], [PW / 2 - 2, 8], [PW / 2 + 2, PH - 10]]) { pp.ellipse(nx, ny, 2.4, 2.4, '#3a3632'); pp.set(nx - 1, ny - 1, '#8a8478'); }
     const plankTex = pp.texture();
@@ -262,8 +262,8 @@ export class Signpost {
       let c = mix(fillTop, fillBot, Math.min(1, t * 1.15));
       const band = Math.floor(t * 4);
       if (band === 0 && fx % 7 === 3) c = mix(c, hex('#ffffff'), 0.4);
-      const chip = hash2(fx >> 1, fy >> 1, 31) < 0.08;
-      if (chip) c = chipC;
+      const chip = hash2(fx >> 1, fy >> 1, 31) < 0.05;
+      if (chip) c = mix(c, chipC, 0.45);
       if (hash2(fx, fy, 37) < 0.05) c = mix(c, hex('#4a6a2c'), 0.6); // algae specks
       const n = (c[0] << 16) | (c[1] << 8) | c[2];
       const depth = chip ? VD - 1 : VD;
@@ -287,14 +287,14 @@ export class Signpost {
       // in the board's own frame the arrow points along +x; mirrored for dir -1 (the page is mapped after mirroring)
       let poly: [number, number][] = [[-back, -h2], [len - tipL, -h2], [len - tipL + 0.02, -h2 - 0.07], [len, 0.02], [len - tipL + 0.02, h2 + 0.07], [len - tipL, h2], [-back, h2]];
       if (dir < 0) poly = poly.map(([x, yy]) => [-x, yy] as [number, number]).reverse();
-      const W = len + back, Wpx = Math.round((W / FONT_M) * 2), Hpx = Math.round(((BOARD_H + 0.14) / FONT_M) * 2);
+      const W = len + back, Wpx = Math.round(W / FONT_M), Hpx = Math.round((BOARD_H + 0.14) / FONT_M);
       const bp = new Px(Wpx, Hpx), bh = new Float32Array(Wpx * Hpx);
       woodPage(bp, enabled ? WOOD : WOOD_DRY, { seed: id === 'new' ? 21 : 33, seams: [], algae: enabled ? 0.45 : 0.7, grey: enabled ? 0 : 0.35 });
-      const mk = textMask(label, 'title', 1);
+      const mk = textMask(label, 'big', 0);
       // centre the text on the board's straight part (away from the point)
       const straight0 = dir > 0 ? back : tipL, straightW = len + back - tipL;
       const cxm = dir > 0 ? (straight0 + straightW / 2 - 0.0) : (tipL + straightW / 2);
-      carve(bp, bh, mk, Math.round((cxm / W) * Wpx), Math.round(Hpx / 2), 2, enabled ? CREAM : GREY, { chip: enabled ? 0.06 : 0.25, seed: id === 'new' ? 5 : 8 });
+      carve(bp, bh, mk, Math.round((cxm / W) * Wpx), Math.round(Hpx / 2), 1, enabled ? CREAM : GREY, { chip: enabled ? 0.03 : 0.2, seed: id === 'new' ? 5 : 8 });
       if (!enabled) {
         // silt and dust settled on the dead board: pale speckle heavier toward the top edge, a crust of grey sponge
         for (let yy = 0; yy < Hpx; yy++) for (let xx = 0; xx < Wpx; xx++) {
@@ -304,7 +304,7 @@ export class Signpost {
       }
       // the peg hole and a painted border stripe
       const pegX = dir > 0 ? Math.round((back / W) * Wpx) : Math.round(((W - back) / W) * Wpx);
-      bp.ellipse(pegX, Hpx / 2, 4, 4, '#14100a');
+      bp.ellipse(pegX, Hpx / 2, 3, 3, '#14100a');
       const tex = bp.texture();
       const nrm = Px.normalMap(Wpx, Hpx, (xx, yy) => bh[yy * Wpx + xx] * 2.2, 2.5);
       const front = psxMat(tex, { rough: 0.85, emissive: '#ff8a3a', emissiveK: 0, emissiveMap: tex });
@@ -330,18 +330,20 @@ export class Signpost {
     this.offResume = rbOff; this.onResume = rb;
 
     // ---- the carved gear (settings), nailed low on the post
-    const gearPivot = new THREE.Group(); gearPivot.position.set(0, 1.32, POST_W / 2 + 0.05); post.add(gearPivot);
+    const gearPivot = new THREE.Group(); gearPivot.position.set(0, 1.12, POST_W / 2 + 0.07); post.add(gearPivot);
     const gearPage = new Px(32, 32); woodPage(gearPage, WOOD, { seed: 13, algae: 0.2 });
     const gearTex = gearPage.texture({ repeat: true });
     const gearM = psxMat(gearTex, { rough: 0.85, emissive: '#ff9a4a', emissiveK: 0, emissiveMap: gearTex });
     const gk = new Kit();
-    gk.cyl(gearM, 0.26, 0.26, 0.08, 0, 0, 0, { rx: Math.PI / 2, seg: 10, d: 3 });
-    for (let i = 0; i < 9; i++) { const a = (i / 9) * TAU; gk.box(gearM, 0.11, 0.1, 0.08, Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0, { rz: a, d: 3, chamfer: 0.012 }); }
+    gk.cyl(gearM, 0.33, 0.33, 0.09, 0, 0, 0, { rx: Math.PI / 2, seg: 10, d: 3 });
+    for (let i = 0; i < 9; i++) { const a = (i / 9) * TAU; gk.box(gearM, 0.14, 0.13, 0.09, Math.cos(a) * 0.38, Math.sin(a) * 0.38, 0, { rz: a, d: 3, chamfer: 0.014 }); }
+    // spokes cut out of the wheel: dark holes between brass-capped spokes
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; gk.cyl(psxMat(null, { color: '#120c08', rough: 1 }), 0.07, 0.07, 0.1, Math.cos(a) * 0.19, Math.sin(a) * 0.19, 0.005, { rx: Math.PI / 2, seg: 6 }); }
     const gearMesh = gk.build();
     gearMesh.traverse((o) => { o.userData.board = 'gear'; });
     gearPivot.add(gearMesh);
     const hub = new THREE.Mesh(facet(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 6)), psxMat(BRASS(), { metal: 0.6, rough: 0.4 }));
-    hub.rotation.x = Math.PI / 2; hub.position.z = 0.03; gearPivot.add(hub);
+    hub.rotation.x = Math.PI / 2; hub.position.z = 0.04; hub.scale.setScalar(1.25); gearPivot.add(hub);
     const gb: Board = { id: 'gear', pivot: gearPivot, mats: [gearM], meshes: [gearMesh], ang: 0, vel: 0, glow: 0, enabled: true, dir: 0, tip: new THREE.Vector3(), rest: 0 };
     this.boards = { new: nb, resume: rb, gear: gb };
 

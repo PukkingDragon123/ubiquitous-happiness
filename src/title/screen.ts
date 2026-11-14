@@ -109,7 +109,7 @@ export class TitleScreen implements Screen {
     POST.uFade.value = 1; POST.uLetterbox.value = 1;
     this.fadeIn = 1;
     const s = this.set.signAt;
-    this.rest.set(s.x - 2.75, floorAt(s.x - 2.75, 0) + 1.3, 0);
+    this.rest.set(s.x - 2.35, floorAt(s.x - 2.35, 0) + 1.75, 0.3);
     this.hx = this.rest.x - (d.quick ? 13 : 30); this.hy = this.rest.y + 1.4; this.vx = 3.6;
     this.phase = 'travel'; this.phaseT = 0; this.t = 0;
     this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false;
@@ -184,7 +184,7 @@ export class TitleScreen implements Screen {
     }
     const yawGoal = this.leaving ? (this.leaving.dir > 0 ? 0 : Math.PI) : this.phase === 'idle' ? -0.5 : 0;
     this.yaw = damp(this.yaw, yawGoal, this.leaving ? 7 : 2.5, dt);
-    h.root.position.set(this.hx, this.hy, 0);
+    h.root.position.set(this.hx, this.hy, this.rest.z);
     h.root.rotation.y = this.yaw;
     h.root.rotation.z = this.phase === 'travel' ? Math.sin(this.t * 1.1) * 0.05 : 0;
     h.current.set(-Math.abs(this.vx) * 0.6, 0);

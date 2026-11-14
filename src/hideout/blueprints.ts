@@ -40,7 +40,7 @@ const B = (b: Blueprint) => b;
 const LIST: Blueprint[] = [
   // ---------------------------------------------------------------- core (the starting hideout)
   B({ id: 'tv', name: 'CRT Television', cat: 'core', size: [2, 1], core: true, unique: true, use: 'tv', cost: { copperOre: 4, glassLens: 2, rustyNail: 6 },
-    desc: 'A fat old tube TV on a fish crate. Click it to plan a run.' }),
+    desc: 'A fat old tube TV on a fish crate. Sit down and watch the nature channel.' }),
   B({ id: 'sofa', name: 'Squashy Sofa', cat: 'core', size: [2, 1], core: true, unique: true, use: 'sofa', cost: { kelp: 6, driftwood: 4, cork: 4 },
     desc: 'Mustard corduroy, sagging in exactly your shape.' }),
   B({ id: 'storage', name: 'Sea Chest', cat: 'core', size: [2, 1], core: true, unique: true, use: 'storage', cost: { driftwood: 6, rustyNail: 4, ironOre: 2 },
@@ -196,8 +196,10 @@ export function stationPerks(): { unlocks: string[]; perks: string[]; arch: Arch
 export const GRID_W = 10, GRID_D = 8;
 /** cells kept clear in front of the door (x = 0 wall) */
 export const DOOR_CELLS: [number, number][] = [[0, 5], [0, 6], [1, 5], [1, 6]];
-/** cells taken by fixed set dressing (the sea-vent stove in the back corner) */
-export const FIXED_CELLS: [number, number][] = [[0, 0]];
+/** cells taken by fixed set pieces (solid): the sea-vent stove, the wardrobe mirror, the blueprint easel */
+export const FIXED_CELLS: [number, number][] = [[0, 0], [9, 1], [9, 5]];
+/** cells kept walkable but unbuildable: the loft steps, the trophy niche, the map room's mouth */
+export const CLEAR_CELLS: [number, number][] = [[1, 0], [2, 0], [3, 0], [6, 0], [7, 0], [8, 0], [0, 1], [0, 2], [0, 3]];
 
 export function footprint(bp: Blueprint, rot: number): [number, number] { return rot % 2 ? [bp.size[1], bp.size[0]] : [bp.size[0], bp.size[1]]; }
 export function cellsOf(p: Placement): [number, number][] {
@@ -217,6 +219,7 @@ export function placementCentre(p: { bp: string; x: number; z: number; rot: numb
   return [cellX(p.x) + w / 2, cellZ(p.z) + d / 2];
 }
 
+/** the starting hideout: the sofa + CRT corner under the round window, the chest, the bench, the locker by the hatch */
 export function defaultLayout(): Placement[] {
   let uid = 1;
   const P = (bp: string, x: number, z: number, rot: number): Placement => ({ uid: uid++, bp, x, z, rot });
@@ -226,17 +229,41 @@ export function defaultLayout(): Placement[] {
     P('sofa', 4, 3, 2),
     P('coffeeTable', 6, 2, 0),
     P('lamp', 6, 3, 0),
-    P('storage', 0, 1, 1),
-    P('locker', 0, 3, 1),
-    P('workbench', 7, 0, 0),
+    P('storage', 2, 7, 2),
+    P('locker', 0, 4, 1),
+    P('workbench', 9, 2, 3),
     P('plant', 9, 0, 0),
-    P('bookshelf', 1, 0, 0),
     P('armchair', 7, 2, 3),
-    P('aquarium', 9, 3, 3),
+    P('aquarium', 7, 7, 2),
   ];
 }
+const LAYOUT_KEY = 'blobfish.hideout.v3';
+/** cells a placement may not use at all (fixed pieces, kept-clear walkways, the door for solid pieces) */
+function blockedCell(bp: Blueprint, x: number, z: number) {
+  const hit = (l: [number, number][]) => l.some(([a, b]) => a === x && b === z);
+  return hit(FIXED_CELLS) || (!bp.floor && (hit(CLEAR_CELLS) || hit(DOOR_CELLS)));
+}
 export function ensureLayout() {
-  if (!META.built.length) { META.built = defaultLayout(); saveMeta(); }
+  // v3 rebuilt the cave round its new nooks: lay the hideout out afresh once, keeping any extra pieces that still fit
+  let migrated = true;
+  try { migrated = localStorage.getItem(LAYOUT_KEY) === '1'; } catch { /* storage blocked */ }
+  if (!META.built.length || !migrated) {
+    const old = META.built;
+    const fresh = defaultLayout();
+    const taken = new Set<string>();
+    for (const p of fresh) for (const [x, z] of cellsOf(p)) if (!BLUEPRINTS[p.bp].floor) taken.add(x + ',' + z);
+    let uid = fresh.length + 1;
+    for (const p of old) {
+      const bp = BLUEPRINTS[p.bp];
+      if (!bp || fresh.some((q) => q.bp === p.bp && (bp.core || bp.unique))) continue;
+      const cells = cellsOf(p);
+      if (cells.some(([x, z]) => x < 0 || z < 0 || x >= GRID_W || z >= GRID_D || blockedCell(bp, x, z) || (!bp.floor && taken.has(x + ',' + z)))) continue;
+      if (!bp.floor) for (const [x, z] of cells) taken.add(x + ',' + z);
+      fresh.push({ ...p, uid: uid++ });
+    }
+    META.built = fresh; saveMeta();
+    try { localStorage.setItem(LAYOUT_KEY, '1'); } catch { /* storage blocked */ }
+  }
   // core furniture must always exist (older saves)
   for (const p of defaultLayout()) if (BLUEPRINTS[p.bp].core && !META.built.some((q) => q.bp === p.bp)) META.built.push({ ...p, uid: nextUid() });
 }

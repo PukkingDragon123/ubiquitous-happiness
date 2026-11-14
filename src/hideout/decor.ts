@@ -15,6 +15,7 @@ import { Px, hex } from '../gfx/px';
 import { retro } from '../gfx/retro';
 import { hash2 } from '../core/math';
 import type { Motes } from './ocean';
+import { nookPush } from './room';
 
 const HW = GRID_W / 2, HD = GRID_D / 2;
 type Side = 'n' | 'w' | 's' | 'e';
@@ -32,24 +33,20 @@ function wallAt(side: Side, u: number, y: number, off = 0.06): { p: THREE.Vector
 
 interface Mount { side: Side; u: number; y: number; r: number; kind: string }
 const M: Mount[] = [
-  { side: 'n', u: -3.2, y: 2.75, r: 0.95, kind: 'wanted' },
-  { side: 'n', u: 3.1, y: 2.85, r: 1.15, kind: 'trophies' },
-  { side: 'n', u: -1.3, y: 2.25, r: 0.35, kind: 'sconce' },
-  { side: 'n', u: 1.3, y: 2.25, r: 0.35, kind: 'sconce' },
-  { side: 'n', u: -2.6, y: 3.75, r: 0.8, kind: 'net' },
-  { side: 'n', u: 4.55, y: 1.5, r: 0.35, kind: 'crack' },
-  { side: 'n', u: -1.65, y: 0.32, r: 0.25, kind: 'socket' },
-  { side: 'n', u: -4.1, y: 2.85, r: 0.25, kind: 'ring' },
-  { side: 'w', u: -1.9, y: 1.9, r: 0.95, kind: 'jars' },
-  { side: 'w', u: -0.5, y: 2.65, r: 0.65, kind: 'kelpRack' },
+  { side: 'n', u: -1.35, y: 2.3, r: 0.35, kind: 'sconce' },
+  { side: 'n', u: 1.32, y: 2.3, r: 0.35, kind: 'sconce' },
+  { side: 'n', u: -2.9, y: 3.75, r: 0.8, kind: 'net' },
+  { side: 'n', u: 4.6, y: 1.5, r: 0.35, kind: 'crack' },
+  { side: 'n', u: -1.2, y: 0.32, r: 0.25, kind: 'socket' },
+  { side: 'n', u: 2.8, y: 3.6, r: 0.6, kind: 'kelpRack' },
   { side: 'w', u: 0.35, y: 2.25, r: 0.3, kind: 'sconce' },
   { side: 'w', u: 3.45, y: 1.75, r: 0.5, kind: 'photo' },
-  { side: 'w', u: -3.3, y: 2.85, r: 0.25, kind: 'ring' },
   { side: 'w', u: 3.4, y: 3.2, r: 0.35, kind: 'crack' },
-  { side: 's', u: -2.2, y: 2.4, r: 0.8, kind: 'wanted2' },
+  { side: 'w', u: -2.1, y: 3.75, r: 0.95, kind: 'jars' },
   { side: 's', u: 2.6, y: 3.3, r: 0.8, kind: 'net' },
+  { side: 's', u: -2.2, y: 2.4, r: 0.5, kind: 'rope' },
   { side: 'e', u: 0.2, y: 2.4, r: 0.6, kind: 'rope' },
-  { side: 'e', u: -2.4, y: 2.2, r: 0.35, kind: 'sconce' },
+  { side: 'e', u: -0.9, y: 2.25, r: 0.35, kind: 'sconce' },
 ];
 /** points the room flattens the rock behind (so mounted pieces sit flush) */
 export const MOUNTS = M.map((m) => ({ p: wallAt(m.side, m.u, m.y, 0).p, r: m.r }));
@@ -117,7 +114,6 @@ export class Decor {
     this.floorClutter();
     this.barnacles();
     this.dripping();
-    this.hammock();
   }
 
   /** a hammock slung across the back corner between two ring bolts, with a pillow; it sways */
@@ -353,7 +349,7 @@ export class Decor {
       };
       crate(0, 0, 0, 1, 0.1); crate(0.05, 0.48, -0.02, 0.85, -0.25); crate(0.12, 0.89, 0.05, 0.6, 0.4);
       k.box(MAT.plain('#e8e0c8/0.9'), 0.2, 0.002, 0.14, 0.02, 0.485, 0.31, { chamfer: 0 });
-      this.put([9, 1], k.build());
+      this.put([1, 7], k.build());
     }
     // a pile of coins, a pearl and a gem
     {
@@ -363,7 +359,7 @@ export class Decor {
       for (let i = 0; i < 12; i++) { const a = hash2(i, 1, 4) * tau, r = 0.18 + hash2(i, 2, 4) * 0.25; k.cyl(gold, 0.045, 0.045, 0.012, Math.cos(a) * r, 0.008 + (r < 0.25 ? 0.05 : 0), Math.sin(a) * r, { rx: hash2(i, 4, 4) * 0.5, seg: 7 }); }
       k.sphere(MAT.plain('#f8f0f8/0.15/0.3'), 0.05, 0.12, 0.17, 0.05, { w: 6, h: 4 });
       k.add(MAT.plain('#3ac86a/0.15/0.3'), new THREE.OctahedronGeometry(0.06, 0), -0.1, 0.17, 0.0);
-      this.put([3, 0], k.build());
+      this.put([8, 5], k.build());
       const k2 = new Kit();
       for (let i = 0; i < 7; i++) { const a = hash2(i, 7, 4) * tau, r = hash2(i, 8, 4) * 0.35; k2.cyl(gold, 0.045, 0.045, 0.012, Math.cos(a) * r, 0.008, Math.sin(a) * r, { seg: 7 }); }
       // a human boot lying on its side
@@ -372,7 +368,7 @@ export class Decor {
       this.put([8, 6], k2.build());
     }
     // coral pot plants
-    for (const [cell, col] of [[[6, 0], '#e8603a'], [[0, 7], '#c84a9a']] as const) {
+    for (const [cell, col] of [[[1, 4], '#e8603a'], [[0, 7], '#c84a9a']] as const) {
       const k = new Kit();
       k.lathe(MAT.plain('#a8542e/0.85'), [[0.001, 0], [0.16, 0], [0.2, 0.28], [0.23, 0.3], [0.23, 0.35], [0.001, 0.33]], 0, 0, 0, { seg: 7 });
       const cm = MAT.plain(`${col}/0.7`);
@@ -390,7 +386,7 @@ export class Decor {
       for (const y of [0.08, 0.3, 0.52]) k.add(MAT.plain('#3a3632/0.5/0.6'), new THREE.TorusGeometry(y === 0.3 ? 0.28 : 0.255, 0.012, 3, 8), 0, y, 0, { rx: Math.PI / 2 });
       for (let i = 0; i < 3; i++) { k.cyl(MAT.plain(['#2a3a4a', '#4a2a2a', '#2a4a2a'][i] + '/0.4/0.2'), 0.012, 0.02, 1.7, (i - 1) * 0.08, 1.2, -0.05 + i * 0.04, { rz: 0.12 * (i - 1), rx: -0.15, seg: 5 }); }
       k.cyl(MAT.plain('#b8b8c0/0.3/0.8'), 0.05, 0.05, 0.05, 0.1, 0.75, 0.12, { rx: Math.PI / 2, seg: 7 });
-      this.put([9, 2], k.build());
+      this.put([3, 4], k.build());
     }
     // a bucket of mussels and a green tackle box
     {
@@ -400,7 +396,7 @@ export class Decor {
       k.add(MAT.plain('#5a5652/0.4/0.8'), new THREE.TorusGeometry(0.18, 0.01, 3, 8, Math.PI), -0.15, 0.32, -0.1);
       k.box(MAT.metal('green'), 0.42, 0.2, 0.24, 0.18, 0.1, 0.18, { ry: 0.3 });
       k.box(MAT.plain('#c8c8d0/0.3/0.8'), 0.16, 0.03, 0.03, 0.18, 0.215, 0.18, { ry: 0.3 });
-      this.put([9, 5], k.build());
+      this.put([4, 7], k.build());
     }
     // magazines, a mug and a dropped sock by the sofa
     {
@@ -408,7 +404,7 @@ export class Decor {
       for (let i = 0; i < 4; i++) k.box(MAT.plain(['#c84a3a', '#3a8ac8', '#e8c040', '#5a3a8a'][i] + '/0.8'), 0.26, 0.012, 0.34, 0.05 * i, 0.006 + i * 0.012, -0.03 * i, { ry: i * 0.35, chamfer: 0 });
       k.cyl(MAT.plain('#e8e0d0/0.3'), 0.045, 0.04, 0.09, 0.3, 0.045, 0.2, { seg: 7 });
       k.box(MAT.knit('#3a8a5a/#e8d8b0'), 0.22, 0.03, 0.08, -0.25, 0.015, 0.25, { ry: 0.8 });
-      this.put([3, 4], k.build());
+      this.put([3, 5], k.build());
     }
     // a bubble vent in the floor
     {
@@ -433,6 +429,7 @@ export class Decor {
       const x = side === 0 || side === 2 ? u : side === 1 ? -HW - inset : HW + inset;
       const z = side === 1 || side === 3 ? u : side === 0 ? -HD - inset : HD + inset;
       const y = 0.36 + hash2(i, 3, 8) * 0.15;
+      if ((side === 0 && nookPush('n', x, 1) > 0) || (side === 1 && nookPush('w', z, 1) > 0)) continue;
       if (i % 5 === 0) {
         // a little sponge cluster
         const c = MAT.plain(`${sponge[i % 3]}/0.95`);
