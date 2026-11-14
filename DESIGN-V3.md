@@ -17,7 +17,12 @@ flat-shaded, matte, dense realistic clean textures, no noise/dither speckle.
    interacts (E / click) with stations: the **Dive Hatch + Planning Table** (run config: route map, mastery, loadout
    packing — a really cool, detailed diegetic UI), stash chest, workbench, wardrobe mirror (cosmetics), trophy shelf
    (achievements), sofa/TV, bed. Build mode stays.
-3. **Run** = Isaac-style **floors** (`src/dungeon`). Floors follow the areas: reef → kelp → graveyard → arctic →
+3. **Run** (correction: *not* Isaac rooms — a **continuous 2D side-scrolling ocean** per floor, Dead Cells-like;
+   Isaac only for the loop: fight → loot → gear up → boss). Each floor is one long level (~250–400 m) with an upper
+   water lane, the seabed, caves and branches; encounters are beat-'em-up **arena locks** (gates rise, enemies spawn,
+   gates drop on clear) plus roaming groups; POIs along the way (treasure, Mr. Crab, post office, challenge, secret
+   walls, the boss arena at the end); a horizontal **strip minimap**. The original room-grid notes below are superseded:
+   Isaac-style **floors** (`src/dungeon`). Floors follow the areas: reef → kelp → graveyard → arctic →
    abyss (mastery 0 = 3 floors; more with mastery). Each floor is a grid of ~10–14 **rooms** with a pixel minimap:
    start, combat (most), treasure (pedestal / chest, needs a key), **Mr. Crab's shop**, **post office** (the manatee:
    mail items home), challenge (mini-boss), secret (bomb a cracked wall), **boss**. Side-view 2.5D arenas (~24x12 m)
