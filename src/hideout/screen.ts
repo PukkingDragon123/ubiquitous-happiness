@@ -563,7 +563,7 @@ export class HideoutScreen implements Screen {
     const fr = new THREE.Vector3().subVectors(sp.face, sp.stand).setY(0).normalize();
     const yaw = Math.atan2(fr.x, fr.z) + 0.3;
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.5, hp.z).addScaledVector(side, -0.75), yaw, pitch: 0.4, dist: 4.8, fov: 30 };
+    this.rig.shot = { target: new THREE.Vector3(hp.x, hp.y + 0.62, hp.z).addScaledVector(side, -0.8), yaw, pitch: 0.16, dist: 4.6, fov: 30 };
     // anything standing between the glass and the hero steps out of the shot
     const cam = this.camera.position;
     for (const it of this.furn.items.values()) {

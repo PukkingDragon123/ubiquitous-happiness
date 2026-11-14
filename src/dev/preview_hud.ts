@@ -7,6 +7,8 @@ import { Hud, type HudData, type StripMap } from '../ui/hud3';
 import type { PlayerCombatHud } from '../combat/types';
 import { PixelUI } from '../ui/pixel/ui';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
+import { UiStage } from '../ui/obj/stage';
+import { SkillCard3D } from '../ui/obj/cards';
 
 function backdrop(): THREE.Texture {
   // a stand-in for a lit reef room: bands of sand, rock and kelp-green with bright speckles (busy on purpose)
@@ -40,6 +42,11 @@ export default function make(game: Game): Screen {
   const hud = new Hud();
   const sheetUi = new PixelUI();
   const showSheet = q.get('sheet') !== '0';
+  // &cards=1: three full-size interactive skill cards (menus: hideout, rewards, shop); click one to fold out its ledger
+  const showCards = q.get('cards') === '1';
+  const cardStage = new UiStage();
+  const big = showCards ? ['manaBolt', 'frostNova', 'chainZap'].map((id) => new SkillCard3D(id, { w: 120 })) : [];
+  let open = -1;
   let t = Number(q.get('t') || 0);
   const combat: PlayerCombatHud = { stamina: 100, staminaMax: 100, staminaDelay: 0, flasks: 2, flasksMax: 3, drinking: 0, guard: 'idle', parryWindow: 0, lastParry: null, lastParryAge: 9, charge: 0, move: null, iframes: false };
   const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null,
@@ -61,6 +68,7 @@ export default function make(game: Game): Screen {
       combat.drinking = (t % 4) / 4;
       combat.guard = Math.floor(t / 3) % 4 === 1 ? 'riposte' : 'idle';
       s.mana = 30 + Math.sin(t) * 25;
+      s.depth = { m: 40 + ((t * 9) % 220), record: 230, floorMax: 300 };
       if (s.skills?.slots[1]) s.skills.slots[1].cd = Math.max(0, 6 - (t % 8));
       s.pearls = 7 + (Math.floor(t / 2) % 30);
       s.keys = 1 + (Math.floor(t / 5) % 2);
@@ -69,7 +77,17 @@ export default function make(game: Game): Screen {
       s.boss = q.get('boss') === '0' ? null : { name: 'The Harpoon King', title: 'Terror of the Reef', hp: 1000 - ((t * 60) % 1000), max: 1000, phase: 1 + Math.floor(((t * 60) % 1000) / 340), phases: 3, poise: 0.6, visible: true };
       if (Math.floor(t / 6) !== Math.floor((t - dt) / 6)) hud.pickup('pearl');
       hud.draw(dt, s, game.input);
-      sheetUi.begin(null, dt);
+      sheetUi.begin(game.input, dt);
+      if (showCards) {
+        cardStage.attach(sheetUi);
+        big.forEach((c, i) => {
+          const x = sheetUi.w / 2 + (i - 1) * 150 - (open >= 0 ? 60 : 0), y = sheetUi.h / 2 + 10;
+          const hov = sheetUi.hover(x - c.w / 2, y - c.h / 2, c.w, c.h) ? 1 : 0;
+          if (hov && sheetUi.pressed) open = open === i ? -1 : i;
+          c.update(dt, { hover: hov, mx: hov ? (sheetUi.mx - x) / (c.w / 2) : 0, my: hov ? (sheetUi.my - y) / (c.h / 2) : 0, cd: i === 1 ? ((t * 0.2) % 1) : 0, ledger: open === i, selected: open === i });
+          cardStage.put(c.root, x, y, 200 + (open === i ? 100 : 0));
+        });
+      }
       if (showSheet) {
         let x = 6, y = sheetUi.h - 120;
         sheetUi.fill(2, y - 4, Math.min(sheetUi.w - 4, 420), 92, '#000000', 0.55);

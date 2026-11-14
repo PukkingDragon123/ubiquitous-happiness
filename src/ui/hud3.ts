@@ -31,6 +31,8 @@ import { BlobAvatar } from './obj/blobAvatar';
 import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
+import { audio } from '../audio/audio';
+import { drawText } from './pixel/font';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -80,6 +82,8 @@ export interface HudData {
   boss?: BossBar | null;
   /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
   skills?: SkillHudState | null;
+  /** the diving depth gauge: metres now, the deepest ever (red marker); floorMax = the dial's full scale */
+  depth?: { m: number; record: number; floorMax?: number } | null;
   /** hide everything but title cards (cutscenes) */
   hidden?: boolean;
 }
@@ -322,6 +326,77 @@ class BossPlaque {
   }
 }
 
+// ------------------------------------------------------------------ the brass diving depth gauge
+class DepthGauge {
+  root = new THREE.Group();
+  private face: THREE.Mesh; private faceCv = document.createElement('canvas'); private faceTex: THREE.CanvasTexture;
+  private needle = new THREE.Group(); private rec = new THREE.Group(); private glint: THREE.Mesh;
+  private ang = 0; private angV = 0; private scaleMax = 0; private lastTen = -1; private prevM = 0;
+  readonly R = 24;
+  constructor() {
+    const R = this.R;
+    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R + 1.5, 3, 6, 28), brassMat);
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3, R + 3, 5, 28), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -3;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const b = new THREE.Mesh(new THREE.SphereGeometry(1.1, 6, 4), brassMat); b.position.set(Math.cos(a) * (R + 1.5), Math.sin(a) * (R + 1.5), 2.6); this.root.add(b); }
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(0, R + 6, 0);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(3.4, 1.1, 4, 10), brassMat); ring.position.set(0, R + 11, 0);
+    this.faceCv.width = this.faceCv.height = R * 2;
+    this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace;
+    this.face = new THREE.Mesh(new THREE.CircleGeometry(R, 28), new THREE.MeshStandardMaterial({ map: this.faceTex, roughness: 0.7 }));
+    this.face.position.z = 0.5;
+    // the needle: a black arrow with a red tip, a brass hub
+    const nm = new THREE.MeshStandardMaterial({ color: '#141418', roughness: 0.5, flatShading: true });
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.4, R * 0.82, 0.8), nm); shaft.position.y = R * 0.32;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(1.6, 5, 4), new THREE.MeshStandardMaterial({ color: '#d02020', roughness: 0.4, flatShading: true })); tip.position.y = R * 0.76;
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(2.4, 5, 0.8), nm); tail.position.y = -3.5;
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 2, 10), brassMat); hub.rotation.x = Math.PI / 2;
+    this.needle.add(shaft, tip, tail, hub); this.needle.position.z = 2.2;
+    // the record marker: a little red flag on the rim
+    const rm = new THREE.Mesh(new THREE.ConeGeometry(2, 4.5, 3), new THREE.MeshStandardMaterial({ color: '#e83030', emissive: '#801010', emissiveIntensity: 0.5, flatShading: true }));
+    rm.position.y = R - 2.5; rm.rotation.z = Math.PI; this.rec.add(rm); this.rec.position.z = 1.4;
+    // the glass cover with a moving glint
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(R, 20, 6, 0, Math.PI * 2, 0, Math.PI * 0.18), new THREE.MeshStandardMaterial({ color: '#e8f8ff', roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }));
+    glass.rotation.x = Math.PI / 2; glass.scale.set(1, 0.35, 1); glass.position.z = -R * 0.3 + 3;
+    this.glint = new THREE.Mesh(new THREE.PlaneGeometry(3, R * 1.1), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false }));
+    this.glint.position.set(-6, 4, 4.5); this.glint.rotation.z = -0.6;
+    this.root.add(back, bezel, crown, ring, this.face, this.rec, this.needle, glass, this.glint);
+  }
+  /** the engraved face: metre scale on a 270-degree sweep, major ticks with numbers, minor ticks */
+  private paintFace(max: number) {
+    const R = this.R, c = this.faceCv.getContext('2d')!, S = R * 2;
+    c.fillStyle = '#ece0c4'; c.fillRect(0, 0, S, S);
+    const g = c.createRadialGradient(R - 6, R - 8, 2, R, R, R); g.addColorStop(0, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(90,60,30,0.35)');
+    c.fillStyle = g; c.fillRect(0, 0, S, S);
+    const at = (k: number, r: number): [number, number] => { const a = (-135 + 270 * k) * Math.PI / 180; return [R + Math.sin(a) * r, R - Math.cos(a) * r]; };
+    const step = max <= 60 ? 5 : max <= 150 ? 10 : max <= 400 ? 25 : 50;
+    for (let v = 0; v <= max + 0.01; v += step / 5) {
+      const k = v / max, major = Math.abs(v / step - Math.round(v / step)) < 0.01;
+      const [x0, y0] = at(k, R - 2), [x1, y1] = at(k, R - (major ? 6 : 4));
+      c.strokeStyle = major ? '#1a1008' : '#6a5440'; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+    }
+    c.fillStyle = '#7a1414'; c.beginPath(); c.arc(R, R, R - 3, (-45) * Math.PI / 180, (45) * Math.PI / 180); c.arc(R, R, R - 5, (45) * Math.PI / 180, (-45) * Math.PI / 180, true); c.fill();
+    for (const k of [0, 1]) { const [x, y] = at(k, R - 9); drawText(c, String(Math.round(max * k)), x, y - 4, { font: 'small', color: '#1a1008', shadow: null, align: 'center' }); }
+    drawText(c, 'M', R, R - 12, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
+    this.faceTex.needsUpdate = true;
+  }
+  update(dt: number, t: number, d: { m: number; record: number; floorMax?: number }) {
+    const max = Math.max(10, d.floorMax ?? Math.ceil((Math.max(d.m, d.record) + 1) / 100) * 100);
+    if (max !== this.scaleMax) { this.scaleMax = max; this.paintFace(max); }
+    const toAng = (m: number) => (-135 + 270 * Math.max(0, Math.min(1, m / max))) * Math.PI / 180;
+    // the needle chases the depth on a spring, and wobbles while you sink
+    const sink = (d.m - this.prevM) / Math.max(1e-3, dt); this.prevM = d.m;
+    const target = toAng(d.m) + Math.sin(t * 23) * Math.min(0.06, Math.abs(sink) * 0.004);
+    this.angV += ((target - this.ang) * 90 - this.angV * 9) * dt;
+    this.ang += this.angV * dt;
+    this.needle.rotation.z = -this.ang;
+    this.rec.rotation.z = -toAng(d.record);
+    this.glint.position.x = -6 + Math.sin(t * 0.5) * 3;
+    const ten = Math.floor(d.m / 10);
+    if (this.lastTen >= 0 && ten !== this.lastTen && audio.has('k_tick1')) audio.play('k_tick1', { vol: 0.25, dry: true, rate: 0.7 + Math.min(1, d.m / 1000) * 0.6 });
+    this.lastTen = ten;
+  }
+}
+
 export class Hud {
   ui = new PixelUI();
   get layer(): { scene: THREE.Scene; camera: THREE.Camera } { return this.ui.layer; }
@@ -339,6 +414,8 @@ export class Hud {
   private pouch = itemModel('cutpursePouch');
   private scroll = new ScrollMap();
   private boss = new BossPlaque();
+  private gauge = new DepthGauge();
+  private gaugePlaque = plaque(34, 11);
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
   private ribbon = new THREE.Group();
@@ -354,7 +431,7 @@ export class Hud {
     S.ui.add(this.avatar.root, this.avatarShadow);
     this.avatar.root.scale.setScalar(25);
     this.avatarShadow.rotation.x = -1.2;
-    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon);
+    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque);
     this.pouch.scale.multiplyScalar(13);
     const mk = (name: string, s: number) => { const m = hudModel(name); m.scale.setScalar(s); S.ui.add(m); const p = plaque(22, 11); S.ui.add(p); return { m, p }; };
     this.counters = { pearls: mk('pearlCoin', 11), keys: mk('key', 13), bombs: mk('bomb', 13) };
@@ -400,6 +477,7 @@ export class Hud {
       const y = this.bars(ui, dt, s);
       this.counterCol(ui, dt, s, y);
       this.strip(ui, s.strip ?? null);
+      this.depthGauge(ui, dt, s.depth ?? null, !!s.strip);
       this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null);
       this.hand(ui, dt, s.skills ?? null);
     }
@@ -534,6 +612,18 @@ export class Hud {
     for (let i = 0; i < m.floors; i++) ui.img(hudArt(i < m.floor ? 'pip' : 'pipOff'), cx + W / 2 - tw - 8 - (m.floors - i) * 7, cy + H / 2 + 6);
   }
 
+  // ---------------------------------------------------------------- the depth gauge (under the strip map)
+  private depthGauge(ui: PixelUI, dt: number, d: HudData['depth'], hasStrip: boolean) {
+    this.gauge.root.visible = this.gaugePlaque.visible = !!d;
+    if (!d) return;
+    const x = ui.w - 40, y = hasStrip ? 102 : 40;
+    this.gauge.update(dt, this.t, d);
+    this.gauge.root.rotation.set(-0.08, -0.12 + Math.sin(this.t * 0.6) * 0.03, Math.sin(this.t * 1.1) * 0.02);
+    this.stage.put(this.gauge.root, x, y, 10);
+    this.stage.put(this.gaugePlaque, x, y + 36, 6);
+    ui.text(`${Math.floor(d.m)} M`, x, y + 31, { font: 'small', color: '#fff0d0', outline: '#2a1606', align: 'center' });
+  }
+
   // ---------------------------------------------------------------- bottom centre: the boss plaque
   private bossBar(ui: PixelUI, dt: number, b: BossBar | null) {
     this.boss.root.visible = !!b;
@@ -585,7 +675,7 @@ export class Hud {
       const a = clamp01(Math.min(c.t * 5, (c.life - c.t) * 2.5));
       const slide = Math.round((1 - Math.min(1, c.t * 5)) ** 2 * 14);
       if (c.icon) {
-        const y = Math.round(ui.h * 0.24);
+        const y = 52;
         const sub = c.sub.length > 64 ? c.sub.slice(0, 62) + '…' : c.sub;
         const tw = Math.max(ui.measure(c.title, 'title'), ui.measure(sub, 'small'));
         const w = Math.min(ui.w - 20, tw + 64), x = Math.round((ui.w - w) / 2);
@@ -602,9 +692,11 @@ export class Hud {
         ui.text(c.title, x + 46 - slide, y + 9, { font: 'title', color: c.color, outline: '#1a0e04', alpha: a });
         if (sub) ui.text(sub, x + 46 + slide, y + 26, { font: 'small', color: '#d8d0c0', alpha: a });
       } else {
-        const y = Math.round(ui.h * 0.3);
-        ui.text(c.title, ui.w / 2, y - slide, { font: 'big', color: c.color, color2: '#ffc860', outline: '#140a04', align: 'center', alpha: a });
-        if (c.sub) ui.text(c.sub, ui.w / 2, y + 30 + slide, { font: 'body', color: '#e8e0d0', outline: '#06080e', align: 'center', alpha: a });
+        // top centre, between the health corner and the strip map: never over the play area
+        const y = 10;
+        const big = ui.measure(c.title, 'big') < ui.w * 0.42;
+        ui.text(c.title, ui.w / 2, y - slide, { font: big ? 'big' : 'title', color: c.color, color2: '#ffc860', outline: '#140a04', align: 'center', alpha: a });
+        if (c.sub) ui.text(c.sub, ui.w / 2, y + (big ? 30 : 16) + slide, { font: 'small', color: '#e8e0d0', outline: '#06080e', align: 'center', alpha: a });
       }
     }
   }

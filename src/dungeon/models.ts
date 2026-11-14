@@ -427,3 +427,44 @@ export function postBox(): THREE.Group {
 /** a colour helper for others (pickup glints) */
 export const rgbOf = (c: string): RGB => hex(c);
 void Px;
+
+// ------------------------------------------------------------------ the exit pit's iron grate
+/** a heavy iron grate over a pit, centred on x = 0, lying at y = 0, w wide; returns the two leaves (pivots) */
+export function grateModel(w: number): { root: THREE.Group; leaves: THREE.Group[] } {
+  const root = new THREE.Group();
+  const iron = M('bar.iron', ironPage, { rough: 0.7, metal: 0.3 });
+  const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
+  const leaves: THREE.Group[] = [];
+  for (const s of [-1, 1]) {
+    const pivot = new THREE.Group(); pivot.position.x = s * w / 2;
+    const leaf = new THREE.Group();
+    for (let k = 0; k < 5; k++) { const bar = mesh(boxUV(new THREE.BoxGeometry(w / 2, 0.2, 0.2), 2), iron); bar.position.set(-s * w / 4, 0, -1.6 + k * 0.8); leaf.add(bar); }
+    for (const fx of [0.25, 0.5, 0.75]) { const cross = mesh(boxUV(new THREE.BoxGeometry(0.18, 0.24, 3.6), 2), iron); cross.position.set(-s * w / 2 * fx, 0.02, 0); leaf.add(cross); }
+    const ring = mesh(facet(new THREE.TorusGeometry(0.22, 0.05, 4, 8)), brass); ring.rotation.x = Math.PI / 2; ring.position.set(-s * (w / 2 - 0.5), 0.12, 1.2); leaf.add(ring);
+    pivot.add(leaf); root.add(pivot); leaves.push(pivot);
+  }
+  // a skull on the frame: down there is the boss's way out
+  const stone = M('frame.abyss', () => stonePage(AREA_STONE.abyss, 'abyss'), { rough: 0.9 });
+  for (const s of [-1, 1]) { const curb = mesh(chamferBox(0.7, 0.6, 4, 0.08), stone); curb.position.set(s * (w / 2 + 0.35), 0, 0); root.add(curb); }
+  return { root, leaves };
+}
+
+// ------------------------------------------------------------------ the rope to the surface
+/** a knotted rope hanging from high above down to y = 0, a brass float and a lantern at its end (height h) */
+export function ropeModel(h: number): { root: THREE.Group; lamp: THREE.Mesh } {
+  const root = new THREE.Group();
+  const rope = M('ropeTex', () => ctex('dg.rope', 16, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 16; x++) { const tw = ((x + y * 2) % 8) < 4; p.set(x, y, tone(T.rope, tw ? 2 : 1)); }
+    for (let y = 0; y < 32; y += 4) for (let x = 0; x < 16; x++) if ((x + y) % 8 === 0) p.set(x, y, tone(T.rope, 3));
+  }), { rough: 0.95 });
+  const line = mesh(lpCyl(0.07, h, 5, 0.07, Math.max(2, Math.round(h / 3))), rope); line.position.y = h / 2; root.add(line);
+  for (let y = 0.8; y < Math.min(h, 12); y += 1.6) { const knot = mesh(lpSphere(0.13, 0), rope); knot.position.y = y; root.add(knot); }
+  const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
+  const hook = mesh(facet(new THREE.TorusGeometry(0.22, 0.05, 4, 8, Math.PI * 1.4)), brass); hook.position.y = -0.1; hook.rotation.z = Math.PI * 0.8; root.add(hook);
+  const float = mesh(lpSphere(0.35, 1), M('buoyRed', () => null, { color: '#c8302a', rough: 0.6 })); float.position.y = 2.6; float.scale.y = 1.3; root.add(float);
+  const band = mesh(lpCyl(0.36, 0.14, 8), M('buoyWhite', () => null, { color: '#f0ece0', rough: 0.6 })); band.position.y = 2.6; root.add(band);
+  const lamp = new THREE.Mesh(lpSphere(0.16, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd890').multiplyScalar(2.4) }));
+  lamp.position.set(0.25, 1.5, 0.1); root.add(lamp);
+  for (const dy of [0.2, -0.2]) { const cap = mesh(lpCyl(0.14, 0.07, 6), brass); cap.position.set(0.25, 1.5 + dy, 0.1); root.add(cap); }
+  return { root, lamp };
+}

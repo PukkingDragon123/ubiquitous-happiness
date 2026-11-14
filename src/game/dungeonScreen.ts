@@ -376,7 +376,7 @@ export class DungeonScreen implements Screen {
     }
     this.after(0.5, () => this.hud.l.title(AREA_NAME(area).toUpperCase(), `FLOOR ${i + 1} OF ${this.floors.length}`));
     audio.play('jin_biome', { vol: 0.5 });
-    if (i === 0 && !save && META.runs <= 2) this.after(3, () => this.hint('SWIM RIGHT · ARENAS LOCK BEHIND YOU · LOOT GOES IN YOUR PACK [TAB] · BOMBS [G]', 7));
+    // (the long SWIM RIGHT · ARENAS LOCK ... text banner was removed: the HUD objects and anchored prompts teach it)
   }
 
   /** dev: start next to a POI / arena (?at=boss|shop|treasure|post|secret|challenge|arena) */
@@ -1116,7 +1116,7 @@ export class DungeonScreen implements Screen {
     this.dlg.update(dt, this.mail ? null : inp);
     const act = this.hud.draw(dt, this.hudState(prompt), inp, () => this.dlg.draw());
     if (act?.startsWith('mail:')) this.mailAction(act);
-    this.bar.visible = this.phase === 'play' && !this.mail;
+    this.bar.visible = false; // replaced by the HUD's hand of skill cards (HudData.skills)
     this.bar.update(dt, p.skillHud());
     // ---- death
     if (this.deadT >= 0) {
@@ -1182,6 +1182,8 @@ export class DungeonScreen implements Screen {
         pack: { used: cells.used, total: cells.total, full: cells.free <= 0 },
         strip: stripMap(this.plan, p.x, p.y, { floors: this.floors.length, revealAll: this.dev?.get('reveal') === '1' }),
         boss, hidden: this.phase === 'descend' || this.phase === 'done',
+        // the skills are a hand of 3D cards in L's HUD (the old 2D SkillBar overlay stays hidden)
+        skills: p.skillHud(),
       },
       prompt, paused: this.paused, mail: this.mail,
       where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()} · FLOOR ${this.floorIdx + 1}/${this.floors.length}`,
