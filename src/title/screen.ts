@@ -1,43 +1,35 @@
-// TitleScreen ('title'): the main menu as a cinematic hero shot. The blobfish stands on its ledge at the hideout's
-// mouth, toothpick planted, kasa tassels and scarf streaming in the current, the ocean opening out beyond. Letterbox,
-// a slow dolly / orbit with a handheld drift, music. The chunky BLOBFISH: REEL REBELLION logo, and the menu down the
-// left: NEW RUN (the camera swoops in and the run config panel opens; ENTER plays the hideout's gear-up + walk-out
-// cinematic), RESUME, HIDEOUT, WARDROBE (a turntable close-up), ACHIEVEMENTS, SETTINGS, PROLOGUE, CREDITS. The hero
-// reacts to whatever you hover: glances, raises the sword with a glint, tips the hat.
+// TitleScreen ('title'): no menu text at all. A letterboxed side-on travelling shot: the blobfish swims steadily
+// left to right through the layered ocean (travel.ts) and slows to a stop at an old underwater signpost
+// (sign.ts) whose plank carries the game's name. The only words are the ones carved on the sign:
+//   NEW GAME  (the arrow points on)          -> opts.onNew()     (the prologue the first time, else the hideout)
+//   RESUME    (the arrow points back home)   -> opts.onResume()  (greyed and dusty with no save)
+//   the carved gear on the post              -> settings (a pixel panel over the scene)
+// Hover a board: it warms, wobbles on its peg, the lantern brightens and the blobfish looks at it. Click (on the
+// press frame) / Enter: the blobfish turns and swims off the way the arrow points, fade, then the callback.
+// Keyboard: arrows pick a board (left = RESUME, right = NEW GAME, up / down cycle incl. the gear), Enter goes.
+// Click / Enter / Space during the swim skips ahead to the sign.
 //
-//   const t = new TitleScreen(game, { onNewRun, onResume, onHideout, onPrologue }); game.register(t);
-//   game.go('title', { page?: 'config' | 'wardrobe' | 'ach' | 'settings' | 'credits', quick?: true })
-//   (?page=wardrobe works too; window.title.menuPoint('wardrobe') gives a menu item's CSS-pixel centre for tests)
+//   const t = new TitleScreen(game, { onNew, onResume, hasSave }); game.register(t);
+//   game.go('title', { quick?: true })   (quick: a shorter swim in, for coming back from the hideout)
+//   window.title.boardPoint('new' | 'resume' | 'gear') -> CSS-pixel centre of a board (tests); title.skip()
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { POST } from '../gfx/post';
 import { UW } from '../gfx/shaders/underwater';
 import { SKY } from '../gfx/sky';
 import { SURF } from '../gfx/water/surface';
-import { META, type RunConfig } from '../meta/meta';
 import { PixelUI } from '../ui/pixel/ui';
 import { audio } from '../audio/audio';
-import { damp, clamp01, easeOutCubic } from '../core/math';
-import { HeroSet, TITLE_LOOK, HERO_YAW } from './scene';
-import { drawTitleLogo } from './logo';
-import { RunConfigPanel } from './runConfig';
-import { SettingsPanel, CreditsPanel } from './pages';
-import { WardrobePanel, WARD_W } from './wardrobe';
-import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
-import { ACHIEVEMENTS } from '../achievements';
-import { COSMETIC } from '../cosmetics';
+import { damp, clamp01 } from '../core/math';
+import { TravelSet, floorAt } from './travel';
+import type { BoardId } from './sign';
+import { SettingsPanel } from './pages';
 
 export interface TitleOpts {
-  /** ENTER on the run config: play the gear-up + walk-out cinematic, then start the run */
-  onNewRun: (cfg: RunConfig) => void;
-  onResume: () => void;
-  onHideout: () => void;
-  onPrologue?: () => void;
+  /** NEW GAME */ onNew: () => void;
+  /** RESUME (only reachable while hasSave()) */ onResume: () => void;
+  /** is there anything to resume (RESUME is greyed and dead otherwise) */ hasSave: () => boolean;
 }
-export type TitlePage = 'main' | 'config' | 'wardrobe' | 'ach' | 'settings' | 'credits';
-
-interface Item { id: string; label: string; desc: () => string; on: () => boolean }
-interface Shot { target: THREE.Vector3; dist: number; yaw: number; pitch: number; fov: number }
 
 /** uniforms the title changes and gives back on exit */
 const SAVED: Record<string, { value: unknown }>[] = [POST as unknown as Record<string, { value: unknown }>, UW as unknown as Record<string, { value: unknown }>, SKY as unknown as Record<string, { value: unknown }>, SURF as unknown as Record<string, { value: unknown }>];
@@ -61,66 +53,46 @@ function restore(snap: [string, unknown][][]) {
   });
 }
 
+type Phase = 'travel' | 'idle' | 'leave';
+const ORDER: BoardId[] = ['new', 'resume', 'gear'];
+
 export class TitleScreen implements Screen {
   name = 'title';
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
+  camera = new THREE.PerspectiveCamera(36, 1, 0.1, 400);
   ui = new PixelUI({ targetH: 300 });
   overlays: { scene: THREE.Scene; camera: THREE.Camera }[] = [this.ui.layer];
-  set: HeroSet;
-  page: TitlePage = 'main';
+  set = new TravelSet();
+  phase: Phase = 'travel';
   private t = 0;
-  private pageT = 0;
-  private sel = 0;
-  private hk: number[] = [];
-  private pressId: string | null = null;
-  private items: Item[];
-  private cfg = new RunConfigPanel();
+  private phaseT = 0;
+  private hx = 0;
+  private hy = 0;
+  private vx = 0;
+  /** where the hero comes to rest beside the sign */
+  private rest = new THREE.Vector3();
+  private hot: BoardId | null = null;
+  private kbdSel: BoardId | null = null;
+  private lastHot: BoardId | null = null;
+  private leaving: { id: BoardId; dir: number; t: number } | null = null;
   private settings = new SettingsPanel();
-  private credits = new CreditsPanel();
-  private ward = new WardrobePanel();
-  private achP = new AchievementsPanel();
-  private cur: Shot;
+  private settingsOpen = false;
   private snap: [string, unknown][][] | null = null;
-  private leaving: { fn: () => void; t: number } | null = null;
-  private fadeIn = 1;
-  private intro = 0;
   private ambience: ReturnType<typeof audio.loop> | null = null;
-  // hero reactions
-  private react = { id: '', t: 0 };
-  private swordK = 0;   // 0 planted .. 1 at the ready
-  private tilt = 0;
-  private glint = -1;
-  private spin = 0;
-  private spinV = 0;
-  private lastHover: string | null = null;
-  private v = new THREE.Vector3();
-  private dragX: number | null = null;
-  /** the keyboard has been used to move the selection (then the selection drives the reactions) */
-  private kbd = false;
+  private ray = new THREE.Raycaster();
+  private camPos = new THREE.Vector3();
+  private camLook = new THREE.Vector3();
+  private fadeIn = 1;
+  private yaw = 0;
 
   constructor(private game: Game, private opts: TitleOpts) {
-    this.set = new HeroSet();
     this.scene.add(this.set.group);
     this.scene.background = new THREE.Color('#06223a');
-    this.items = [
-      { id: 'new', label: 'NEW RUN', desc: () => 'Pick a loadout. Go hunting.', on: () => true },
-      { id: 'resume', label: 'RESUME', desc: () => { const r = META.activeRun; return r ? `Area ${r.areaIdx + 1} of 3 · ${r.wavesCleared} waves down · M${r.cfg.mastery}` : 'No run in progress.'; }, on: () => !!META.activeRun },
-      { id: 'hideout', label: 'HIDEOUT', desc: () => 'Home: build, stash, craft, nap.', on: () => true },
-      { id: 'wardrobe', label: 'WARDROBE', desc: () => 'Hats, skins, swords, scarves and trails.', on: () => true },
-      { id: 'ach', label: 'ACHIEVEMENTS', desc: () => `${META.achievements.unlocked.length} of ${ACHIEVEMENTS.length} · each one unlocks a cosmetic`, on: () => true },
-      { id: 'settings', label: 'SETTINGS', desc: () => 'Volume, motion blur, quality.', on: () => true },
-      { id: 'prologue', label: 'PROLOGUE', desc: () => 'Where it began. The bread.', on: () => !!this.opts.onPrologue },
-      { id: 'credits', label: 'CREDITS', desc: () => 'Who made the blobfish.', on: () => true },
-    ];
-    this.hk = this.items.map(() => 0);
-    this.cur = this.shot('main');
-    this.set.onWhale = () => audio.play('whale' + (1 + Math.floor(Math.random() * 3)), { vol: 0.35 });
     this.ui.drawCursor = true;
+    this.set.onWhale = () => audio.play('whale' + (1 + Math.floor(Math.random() * 3)), { vol: 0.3 });
     (window as unknown as { title: TitleScreen }).title = this;
   }
 
-  // ---------------------------------------------------------------- Screen
   get underwater() { return true; }
   resize(w: number, h: number) {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
@@ -129,27 +101,29 @@ export class TitleScreen implements Screen {
   }
 
   enter(data?: unknown) {
-    const d = (data ?? {}) as { page?: TitlePage; quick?: boolean };
+    const d = (data ?? {}) as { quick?: boolean };
     this.snap = snapshot();
-    this.set.light.applyLook(TITLE_LOOK);
-    this.set.light.setSun(HeroSet.SUN_AIR.clone());
+    this.set.applyLook();
+    this.set.light.setSun(new THREE.Vector3(-0.38, 0.62, -0.42));
     UW.uWaterY.value = 0;
-    POST.uFade.value = 1; POST.uLetterbox.value = 0.75;
-    this.fadeIn = 1; this.leaving = null;
-    this.t = 0; this.pageT = 0; this.intro = d.quick ? 9 : 0;
-    this.sel = 0; this.pressId = null; this.spin = 0; this.react = { id: '', t: 0 }; this.kbd = false;
-    const q = new URLSearchParams(location.search).get('page') as TitlePage | null;
-    this.go(d.page ?? q ?? 'main', true);
-    this.cur = this.shot(this.page);
-    if (!d.quick && this.page === 'main') {
-      // the opening: looking up at the boats' hulls against the bright surface, tilting down onto the hero
-      this.cur.target.set(this.set.H.x - 3, this.set.H.y + 7.5, this.set.H.z - 9); this.cur.dist = 3; this.cur.pitch = -0.2; this.cur.yaw = 0.15;
-    }
+    POST.uFade.value = 1; POST.uLetterbox.value = 1;
+    this.fadeIn = 1;
+    const s = this.set.signAt;
+    this.rest.set(s.x - 2.75, floorAt(s.x - 2.75, 0) + 1.3, 0);
+    this.hx = this.rest.x - (d.quick ? 13 : 30); this.hy = this.rest.y + 1.4; this.vx = 3.6;
+    this.phase = 'travel'; this.phaseT = 0; this.t = 0;
+    this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false;
+    this.yaw = 0;
+    this.set.sign.setEnabled('resume', this.opts.hasSave());
+    const h = this.set.hero;
+    h.root.position.set(this.hx, this.hy, 0); h.root.rotation.set(0, 0, 0);
+    h.play('swim'); h.setExpression('brave');
+    this.set.seedSnow(this.hx);
+    this.placeCamera(1, true);
     this.game.cursor = 'none';
     audio.music('mu_fjord', 2);
-    audio.setUnderwater(0.25);
-    this.ambience?.stop(); this.ambience = audio.loop('uw_amb1', 0.25);
-    this.set.hero.rig.preview = {}; this.set.hero.rig.sync();
+    audio.setUnderwater(0.3);
+    this.ambience?.stop(); this.ambience = audio.loop('uw_amb1', 0.28);
     this.game.post.cut?.();
   }
   exit() {
@@ -159,258 +133,167 @@ export class TitleScreen implements Screen {
     POST.uLetterbox.value = 0; POST.uFade.value = 0;
     audio.setUnderwater(0);
     this.game.cursor = 'normal';
-    this.set.hero.rig.preview = {}; this.set.hero.rig.apply();
-  }
-
-  /** switch page (and its camera shot) */
-  go(p: TitlePage, instant = false) {
-    this.page = p; this.pageT = 0;
-    if (p === 'config') this.cfg.open();
-    if (p === 'settings') this.settings.open();
-    if (p === 'credits') this.credits.open();
-    if (p === 'wardrobe') this.ward.open();
-    if (p === 'ach') this.achP.open();
-    if (p !== 'wardrobe') { this.set.hero.rig.preview = {}; this.set.hero.rig.sync(); }
-    if (instant) this.cur = this.shot(p);
-    if (!instant) audio.play(p === 'main' ? 'k_back2' : 'swish_a', { vol: 0.35, dry: true });
-  }
-
-  private leave(fn: () => void) {
-    if (this.leaving) return;
-    this.leaving = { fn, t: 0 };
-    audio.play('k_confirm3', { vol: 0.45, dry: true });
-  }
-
-  // ---------------------------------------------------------------- camera
-  /** a shot round the hero: `side` pushes the hero that many metres toward screen right (room for the UI) */
-  private shot(p: TitlePage): Shot {
-    const H = this.set.H, t = this.t;
-    const mk = (yaw: number, dist: number, pitch: number, fov: number, side: number, up: number, back = 0): Shot => {
-      const target = new THREE.Vector3(H.x - Math.cos(yaw) * side, H.y + up, H.z + Math.sin(yaw) * side - back);
-      return { target, dist, yaw, pitch, fov };
-    };
-    switch (p) {
-      case 'config': return mk(0.82, 3.7, 0.03, 36, 1.4, 0.42);
-      case 'wardrobe': return mk(0.3, 3.9, 0.06, 36, 1.2, 0.6);
-      case 'ach': return mk(0.34 + Math.sin(t * 0.05) * 0.06, 9.5, -0.02, 42, 0, 1.8, 1.5);
-      case 'settings': case 'credits': return mk(0.42 + Math.sin(t * 0.045) * 0.08, 4.8, -0.03, 38, 0.95, 0.5);
-      default: return mk(0.3 + Math.sin(t * 0.042) * 0.17, 4.7 + Math.sin(t * 0.05) * 0.4, -0.13 + Math.sin(t * 0.06) * 0.025, 38, 1.05 + Math.sin(t * 0.031) * 0.08, 0.62);
-    }
-  }
-  private updateCamera(dt: number) {
-    const goal = this.shot(this.page), c = this.cur;
-    const k = this.page === 'main' && this.intro < 5 ? 0.55 + this.intro * 0.1 : this.page === 'config' || this.page === 'wardrobe' ? 2.6 : 1.6;
-    c.target.x = damp(c.target.x, goal.target.x, k, dt); c.target.y = damp(c.target.y, goal.target.y, k, dt); c.target.z = damp(c.target.z, goal.target.z, k, dt);
-    c.dist = damp(c.dist, goal.dist, k, dt); c.yaw = damp(c.yaw, goal.yaw, k, dt); c.pitch = damp(c.pitch, goal.pitch, k, dt); c.fov = damp(c.fov, goal.fov, k, dt);
-    const t = this.t, cam = this.camera;
-    // a gentle handheld drift
-    const hx = (Math.sin(t * 0.61) + Math.sin(t * 1.37 + 1) * 0.5) * 0.018, hy = (Math.sin(t * 0.83 + 2) + Math.sin(t * 1.71) * 0.4) * 0.014;
-    cam.position.set(
-      c.target.x + Math.sin(c.yaw) * Math.cos(c.pitch) * c.dist + hx,
-      c.target.y + Math.sin(c.pitch) * c.dist + hy,
-      c.target.z + Math.cos(c.yaw) * Math.cos(c.pitch) * c.dist,
-    );
-    cam.lookAt(c.target.x + hx * 0.4, c.target.y + hy * 0.4, c.target.z);
-    cam.rotateZ(Math.sin(t * 0.37) * 0.006);
-    if (Math.abs(cam.fov - c.fov) > 0.01) { cam.fov = c.fov; cam.updateProjectionMatrix(); }
-    cam.updateMatrixWorld();
   }
 
   // ---------------------------------------------------------------- test hooks
-  /** CSS-pixel centre of a widget drawn last frame ('menu:new', 'cfg:enter', 'ward:tricorn', 'ach:butcher') */
-  uiPoint(id: string): [number, number] | null {
-    const r = this.ui.rects.get(id);
-    if (!r) return null;
-    const k = this.ui.scale / this.game.renderer.getPixelRatio();
-    return [(r[0] + r[2] / 2) * k, (r[1] + r[3] / 2) * k];
+  /** CSS-pixel centre of a board on screen (for click tests) */
+  boardPoint(id: BoardId): [number, number] {
+    const p = this.set.sign.boardWorld(id).project(this.camera);
+    return [Math.round((p.x * 0.5 + 0.5) * this.game.w), Math.round((-p.y * 0.5 + 0.5) * this.game.h)];
   }
-  menuPoint(id: string) { return this.uiPoint('menu:' + id); }
+  /** jump to the arrival (the board clicks then work) */
+  skip() { if (this.phase === 'travel') this.hx = Math.max(this.hx, this.rest.x - 0.05); }
 
   // ---------------------------------------------------------------- frame
   update(dt: number) {
-    this.t += dt; this.pageT += dt; this.intro += dt;
-    const ui = this.ui, input = this.game.input;
+    this.t += dt; this.phaseT += dt;
+    const input = this.game.input, ui = this.ui;
     this.game.cursor = 'none';
-    // fades
-    this.fadeIn = Math.max(0, this.fadeIn - dt * 0.9);
+    this.fadeIn = Math.max(0, this.fadeIn - dt * 0.8);
     let fade = this.fadeIn;
     if (this.leaving) {
-      this.leaving.t += dt;
-      fade = Math.max(fade, clamp01(this.leaving.t / 0.55));
-      if (this.leaving.t >= 0.6) { const fn = this.leaving.fn; this.leaving = null; fn(); return; }
+      const L = this.leaving;
+      L.t += dt;
+      fade = Math.max(fade, clamp01((L.t - 0.55) / 0.8));
+      if (L.t > 1.45) { this.leaving = null; const id = L.id; (id === 'new' ? this.opts.onNew : this.opts.onResume)(); return; }
     }
     POST.uFade.value = fade;
-    POST.uLetterbox.value = damp(POST.uLetterbox.value, this.page === 'main' ? 0.75 : 0.45, 3, dt);
+    POST.uLetterbox.value = damp(POST.uLetterbox.value, this.phase === 'idle' ? 0.7 : 1, 2, dt);
 
     ui.begin(this.leaving ? null : input, dt);
-    if (this.intro > 1.0) drawTitleLogo(ui, this.page === 'main' ? 12 : 12, this.page === 'main' ? 14 : -200, this.intro - 1.0);
-    switch (this.page) {
-      case 'main': this.menu(dt); break;
-      case 'config': {
-        const r = this.cfg.draw(ui, 10, Math.max(4, Math.round((ui.h - 214) / 2) - 4), dt);
-        if (r === 'back') this.go('main');
-        else if (r) { const cfg = r; this.leave(() => this.opts.onNewRun(cfg)); }
-        break;
-      }
-      case 'settings': if (this.settings.draw(ui, 14, Math.round((ui.h - 182) / 2), dt)) this.go('main'); break;
-      case 'credits': if (this.credits.draw(ui, 14, Math.round((ui.h - 190) / 2), dt)) this.go('main'); break;
-      case 'wardrobe': {
-        const close = this.ward.draw(ui, 8, Math.round((ui.h - 242) / 2), dt);
-        const want = this.ward.hover;
-        if (want !== this.lastHover) {
-          this.lastHover = want;
-          const c = want ? COSMETIC[want] : null;
-          this.set.hero.rig.preview = c ? { [c.slot]: c.id } : {};
-          this.set.hero.rig.apply();
-        }
-        if (this.ward.equipped) { this.set.hero.rig.preview = {}; this.set.hero.rig.apply(); this.set.hero.play('gearUp', true); this.lastHover = null; }
-        if (close) this.go('main');
-        // spin him: drag with either button away from the panel
-        const free = !ui.mouseOnUI && ui.mx > WARD_W + 12;
-        if ((ui.pressed && free) || ui.rpressed) this.dragX = ui.mx;
-        if (this.dragX !== null && (ui.down || ui.rdown)) { this.spinV = (ui.mx - this.dragX) * 0.06; this.spin += (ui.mx - this.dragX) * 0.03; this.dragX = ui.mx; ui.cursor = 'grab'; }
-        else this.dragX = null;
-        break;
-      }
-      case 'ach': if (this.achP.draw(ui, Math.round((ui.w - ACH_W) / 2), Math.max(4, Math.round((ui.h - ACH_H) / 2)), dt)) this.go('main'); break;
+    // ---- the hero swims in, then hangs about by the sign
+    const h = this.set.hero;
+    if (this.phase === 'travel') {
+      const togo = this.rest.x - this.hx;
+      // impatient players: any click / key during the swim jumps ahead to just short of the sign
+      if (this.phaseT > 0.3 && togo > 4 && (ui.pressed || input.keyHit('Enter') || input.keyHit('Space'))) { this.hx = this.rest.x - 4; this.placeCamera(1, true); }
+      this.vx = Math.min(3.6, togo * 0.85 + 0.12);
+      this.hx += this.vx * dt;
+      this.hy = damp(this.hy, this.rest.y + Math.sin(this.hx * 0.22) * 0.5 * clamp01(togo / 8) + 0.0, 2, dt);
+      if (togo < 0.04) { this.hx = this.rest.x; this.phase = 'idle'; this.phaseT = 0; h.play('idle'); audio.play('bubble2', { vol: 0.25 }); }
+    } else if (this.phase === 'idle' && !this.leaving) {
+      this.hx = damp(this.hx, this.rest.x, 2, dt);
+      this.hy = damp(this.hy, this.rest.y + Math.sin(this.t * 1.3) * 0.08, 3, dt);
     }
-    if (this.page !== 'main' && this.page !== 'config' && input.keyHit('Escape') && this.pageT > 0.1) this.go('main');
+    if (this.leaving) {
+      // turn and swim off the way the arrow points, accelerating
+      const L = this.leaving;
+      this.vx = damp(this.vx, L.dir * 6, 1.6, dt);
+      if (L.t > 0.25) this.hx += this.vx * dt;
+      this.hy += Math.sin(L.t * 3) * dt * 0.3 + (L.id === 'resume' ? -0.15 : 0.25) * dt;
+    }
+    const yawGoal = this.leaving ? (this.leaving.dir > 0 ? 0 : Math.PI) : this.phase === 'idle' ? -0.5 : 0;
+    this.yaw = damp(this.yaw, yawGoal, this.leaving ? 7 : 2.5, dt);
+    h.root.position.set(this.hx, this.hy, 0);
+    h.root.rotation.y = this.yaw;
+    h.root.rotation.z = this.phase === 'travel' ? Math.sin(this.t * 1.1) * 0.05 : 0;
+    h.current.set(-Math.abs(this.vx) * 0.6, 0);
+    h.update(dt, { t: this.t, move: this.phase === 'travel' || this.leaving ? Math.min(1, Math.abs(this.vx) / 3) : 0 });
+    if (this.phase === 'travel' && Math.random() < dt * 3) this.set.bubbles.emit(this.hx - 0.5, this.hy + 0.2, 0, { vy: 0.4, life: 2.5, size: 0.04 + Math.random() * 0.04 });
+
+    // ---- the sign: hover, keys, clicks
+    this.hot = null;
+    if (this.phase === 'idle' && !this.leaving) {
+      if (this.settingsOpen) {
+        const sw = 236, sh = 182;
+        if (this.settings.draw(ui, Math.round((ui.w - sw) / 2), Math.round((ui.h - sh) / 2), dt) || (input.keyHit('Escape'))) { this.settingsOpen = false; audio.play('k_back2', { vol: 0.35, dry: true }); }
+      } else this.interact(dt);
+    }
+    // the hero looks at whatever is hot
+    const look = this.hot ?? this.kbdSel;
+    if (this.phase === 'idle') h.lookAt(look ? this.set.sign.boardWorld(look) : this.set.sign.lanternWorld());
+    else h.lookAt(null);
+    if (look !== this.lastHot) {
+      this.lastHot = look;
+      if (look) h.setExpression(look === 'new' ? 'brave' : look === 'resume' ? 'happy' : 'focus');
+    }
+    this.set.sign.update(dt, this.t, this.leaving ? this.leaving.id : this.settingsOpen ? 'gear' : look);
+    const lp = this.set.sign.lanternWorld();
+    if (this.set.lamp) { this.set.lamp.set(lp.x, lp.y, lp.z); this.set.lamp.light.intensity = 3.2 * this.set.sign.lanternK; }
+    ui.drawCursor = this.phase === 'idle' && !this.leaving;
     ui.end();
 
-    this.heroLife(dt);
-    this.updateCamera(dt);
+    this.placeCamera(dt);
     this.set.update(dt, this.t, this.camera);
   }
 
-  // ---------------------------------------------------------------- the menu
-  private menu(dt: number) {
-    const ui = this.ui, inp = this.game.input;
-    const n = this.items.length, rowH = 16;
-    const x0 = 24, y0 = Math.max(108, Math.min(Math.round(ui.h * 0.42), ui.h - 30 - n * rowH - 14));
-    // impatient players: a click or Enter/Space during the opening skips straight to the ready menu
-    if (this.intro < 2.6 && !this.leaving && (ui.pressed || inp.keyHit('Enter') || inp.keyHit('Space'))) this.intro = 2.6;
-    const appear = this.intro - 1.5;
-    if (appear > 0 && !this.leaving) {
-      if (inp.keyHit('ArrowDown') || inp.keyHit('KeyS')) { this.sel = this.nextOn(this.sel, 1); this.kbd = true; audio.play('k_tick1', { vol: 0.2, dry: true }); }
-      if (inp.keyHit('ArrowUp') || inp.keyHit('KeyW')) { this.sel = this.nextOn(this.sel, -1); this.kbd = true; audio.play('k_tick1', { vol: 0.2, dry: true }); }
+  private interact(_dt: number) {
+    const ui = this.ui, input = this.game.input, sign = this.set.sign;
+    // mouse: ray against the boards
+    let over: BoardId | null = null;
+    if (ui.inside) {
+      this.ray.setFromCamera(new THREE.Vector2(input.mouse.nx, input.mouse.ny), this.camera);
+      over = sign.pick(this.ray);
     }
-    let hovered = -1;
-    this.items.forEach((it, i) => {
-      const y = y0 + i * rowH;
-      const k = clamp01((appear - i * 0.07) / 0.35);
-      if (k <= 0) return;
-      const slide = Math.round((1 - easeOutCubic(k)) * -120);
-      const on = it.on();
-      const w = 150;
-      const over = k >= 0.5 && ui.hover(x0 - 14, y - 3, w, rowH - 1);
-      ui.mark('menu:' + it.id, x0 - 14, y - 3, w, rowH - 1);
-      ui.block(x0 - 14, y - 3, w, rowH - 1);
-      if (over) { hovered = i; this.kbd = false; if (on) { this.sel = i; ui.cursor = 'point'; } }
-      if (over && ui.pressed && on) this.pressId = it.id;
-      const clicked = over && ui.released && this.pressId === it.id;
-      const hot = this.sel === i && on;
-      this.hk[i] = damp(this.hk[i], hot ? 1 : 0, 14, dt);
-      const h = this.hk[i];
-      const x = x0 + slide + Math.round(h * 7);
-      const tw = ui.measure(it.label, 'title');
-      // a slanted crimson ribbon sweeping in behind the hot item
-      if (h > 0.02) {
-        const bw = Math.round((tw + 34) * easeOutCubic(h));
-        for (let r = 0; r < 14; r++) {
-          const c = r === 0 ? '#f86a4a' : r === 13 ? '#3a0610' : r < 3 ? '#c8342c' : '#8a1a22';
-          ui.fill(x0 - 12 + slide + Math.round((13 - r) * 0.5), y - 3 + r, bw, 1, c, 0.92 * h);
-        }
-        ui.fill(x0 - 12 + slide + bw, y - 3, 2, 14, '#f0c040', h);
-        // the toothpick pointer sliding in
-        const px = x0 - 26 + slide + Math.round(h * 10);
-        ui.fill(px, y + 3, 10, 1, '#c49c62'); ui.fill(px, y + 4, 10, 1, '#74502e'); ui.fill(px + 10, y + 3, 2, 1, '#fff0c0');
-        ui.fill(px - 3, y + 2, 3, 4, '#94703e'); ui.fill(px - 5, y + 1, 2, 1, '#ff3b5c'); ui.fill(px - 5, y + 6, 2, 1, '#3bd1ff'); ui.fill(px - 6, y + 3, 1, 2, '#ffd23b');
-      }
-      const col = !on ? { color: '#5a5862', shadow: '#000' } : hot ? { color: '#fff6dc', color2: '#ffd060', outline: '#2a0408' } : { color: '#e4e0d8', color2: '#aca6a0', shadow: '#000' };
-      ui.text(it.label, x, y, { font: 'title', alpha: Math.min(1, k * 1.5), ...col });
-      if (clicked && on) this.activate(it.id);
-    });
-    if (ui.released) this.pressId = null;
-    if (appear > 0.6 && !this.leaving && (inp.keyHit('Enter') || inp.keyHit('Space'))) { const it = this.items[this.sel]; if (it.on()) this.activate(it.id); }
-    // the hot item's caption
-    const it = this.items[this.sel];
-    const a = clamp01(appear - 0.5);
-    if (a > 0) {
-      ui.fill(x0 - 12, y0 + n * rowH + 2, 168, 1, '#f0c040', 0.6 * a);
-      ui.text(it.desc(), x0 - 12, y0 + n * rowH + 6, { font: 'small', color: '#c8dce8', shadow: '#000', alpha: a });
+    if (over) { this.kbdSel = null; ui.cursor = sign.boards[over].enabled ? 'point' : 'arrow'; }
+    // keys
+    const step = (id: BoardId) => { if (sign.boards[id].enabled) { this.kbdSel = id; audio.play('k_tick1', { vol: 0.2, dry: true }); } };
+    if (input.keyHit('ArrowRight') || input.keyHit('KeyD')) step('new');
+    if (input.keyHit('ArrowLeft') || input.keyHit('KeyA')) step(this.opts.hasSave() ? 'resume' : 'new');
+    if (input.keyHit('ArrowDown') || input.keyHit('ArrowUp') || input.keyHit('KeyS') || input.keyHit('KeyW')) {
+      const d = input.keyHit('ArrowUp') || input.keyHit('KeyW') ? -1 : 1;
+      let i = Math.max(0, ORDER.indexOf(this.kbdSel ?? 'new'));
+      for (let k = 0; k < ORDER.length; k++) { i = (i + d + ORDER.length) % ORDER.length; if (sign.boards[ORDER[i]].enabled) break; }
+      step(ORDER[i]);
     }
-    // footer in the lower letterbox bar
-    if (appear > 0.4) {
-      const fy = ui.h - 13;
-      ui.text(`MASTERY ${META.masteryUnlocked}  ·  ${META.runs} RUNS  ·  ${META.wins} WINS  ·  ${META.achievements.unlocked.length}/${ACHIEVEMENTS.length} ACHIEVEMENTS`, 12, fy, { font: 'small', color: '#8a9ab0' });
-      let hx = ui.w - 128;
-      hx += ui.hint('W', '', hx, fy - 3, { color: '#a8b8d0' }) - 8;
-      hx += ui.hint('S', 'select', hx, fy - 3, { color: '#a8b8d0' });
-      ui.hint('ENTER', 'go', hx, fy - 3, { color: '#a8b8d0' });
+    this.hot = over;
+    const cur = over ?? this.kbdSel;
+    if (cur !== this.lastHotSfx) {
+      if (cur && sign.boards[cur].enabled) { sign.knock(cur, 0.5); audio.play('wood_knock1', { vol: 0.18, rate: 1.3 + Math.random() * 0.2 }); audio.play('rope_creak1', { vol: 0.12 }); }
+      this.lastHotSfx = cur;
     }
-    // the hero reacts to the hot item
-    const id = hovered >= 0 && this.items[hovered].on() ? this.items[hovered].id : this.kbd ? this.items[this.sel].id : '';
-    if (id !== this.react.id) { this.react = { id, t: 0 }; this.onReact(id); }
+    // clicks register on the press frame
+    if (ui.pressed && over) this.activate(over);
+    else if ((input.keyHit('Enter') || input.keyHit('Space')) && this.kbdSel) this.activate(this.kbdSel);
+    else if ((input.keyHit('Enter') || input.keyHit('Space')) && !this.kbdSel && this.phaseT > 0.2) this.kbdSel = 'new';
   }
-  private nextOn(i: number, d: number) { for (let k = 0; k < this.items.length; k++) { i = (i + d + this.items.length) % this.items.length; if (this.items[i].on()) return i; } return i; }
+  private lastHotSfx: BoardId | null = null;
 
-  private activate(id: string) {
-    if (this.leaving) return;
-    audio.play('k_select1', { vol: 0.45, dry: true });
-    switch (id) {
-      case 'new': this.go('config'); audio.play('sw_swish1', { vol: 0.4 }); break;
-      case 'resume': if (META.activeRun) this.leave(() => this.opts.onResume()); break;
-      case 'hideout': this.leave(() => this.opts.onHideout()); break;
-      case 'wardrobe': this.go('wardrobe'); break;
-      case 'ach': this.go('ach'); break;
-      case 'settings': this.go('settings'); break;
-      case 'prologue': this.leave(() => this.opts.onPrologue?.()); break;
-      case 'credits': this.go('credits'); break;
+  private activate(id: BoardId) {
+    const sign = this.set.sign, b = sign.boards[id];
+    if (!b.enabled) {
+      // the dead RESUME board: a dull knock, a puff of silt
+      sign.knock(id, 0.8);
+      audio.play('wood_knock1', { vol: 0.35, rate: 0.7 });
+      const p = sign.boardWorld(id);
+      for (let i = 0; i < 14; i++) this.set.bubbles.emit(p.x + (Math.random() - 0.5) * 2, p.y + Math.random() * 0.3, p.z + 0.2, { vy: 0.1, life: 2, size: 0.03 });
+      return;
     }
+    if (id === 'gear') { this.settingsOpen = true; this.settings.open(); sign.knock('gear', 1); audio.play('k_open1', { vol: 0.4, dry: true }); audio.play('wood_knock1', { vol: 0.25 }); return; }
+    sign.knock(id, 1.2);
+    audio.play('wood_knock1', { vol: 0.4 }); audio.play('k_confirm3', { vol: 0.4, dry: true });
+    audio.play('swish_a', { vol: 0.35, delay: 0.2 }); audio.play('bubbles_a', { vol: 0.35, delay: 0.3 });
+    this.set.hero.setExpression(id === 'new' ? 'brave' : 'happy');
+    this.set.hero.play('swim');
+    this.vx = 0;
+    this.leaving = { id, dir: b.dir || 1, t: 0 };
+    audio.music(null, 1.2);
   }
 
-  // ---------------------------------------------------------------- the hero
-  private onReact(id: string) {
-    const h = this.set.hero;
-    if (id === 'new') { this.glint = 0; audio.play('shimmer1', { vol: 0.3 }); }
-    if (id === 'wardrobe') audio.play('cloth1', { vol: 0.25 });
-    h.setExpression(id === 'new' ? 'brave' : id === 'prologue' ? 'sad' : id === 'ach' ? 'cheer' : id === 'credits' || id === 'hideout' ? 'happy' : id === 'resume' || id === 'settings' ? 'focus' : 'cool');
-  }
-  private heroLife(dt: number) {
-    const s = this.set, h = s.hero, m = h.model, H = s.H, t = this.t;
-    const page = this.page, id = page === 'main' ? this.react.id : page;
-    this.react.t += dt;
-    // where he looks: out to sea by default; at the camera, back at the hatch, or down, depending on the item
-    const cam = this.camera.position;
-    const look = id === 'hideout' ? this.v.set(H.x + 2.1, H.y + 0.8, H.z - 2) : id === 'prologue' ? this.v.set(H.x - 2, H.y - 2.5, H.z + 1) :
-      id === 'new' || id === 'resume' || id === 'settings' || id === 'credits' || id === 'wardrobe' || id === 'config' ? this.v.copy(cam) :
-      id === 'ach' ? this.v.set(H.x - 4, H.y + 4, H.z - 3) : this.v.set(H.x - 9 + Math.sin(t * 0.2) * 2, H.y + 0.6, H.z - 6 + Math.sin(t * 0.13) * 3);
-    h.lookAt(look);
-    // the sword: planted in the rock, raised to the ready for NEW RUN, with a glint running up the blade
-    const ready = id === 'new' || id === 'config' ? 1 : page === 'wardrobe' ? 0.75 : 0;
-    this.swordK = damp(this.swordK, ready, 6, dt);
-    m.weaponCtl = 'external';
-    const hand = m.handWorld(new THREE.Vector3());
-    h.root.worldToLocal(hand);
-    m.weaponZ = -Math.abs(hand.z) - 0.06;
-    m.weaponAng = -1.42 + Math.sin(t * 0.7) * 0.015 + this.swordK * (1.42 + 0.62 + Math.sin(t * 1.3) * 0.03);
-    if (this.glint >= 0) {
-      this.glint += dt;
-      const k = this.glint / 0.45;
-      if (k <= 1) { const tip = m.weaponTip(new THREE.Vector3()), piv = m.weaponPivot.getWorldPosition(new THREE.Vector3()); const p = piv.lerp(tip, k); s.fx.emit('sparkle', p.x, p.y, { z: p.z, n: 1, size: 0.16, life: 0.35, color: '#ffffff', add: true }); }
-      else this.glint = -1;
+  // ---------------------------------------------------------------- camera
+  /** tracking alongside the swim, settling into a wide shot of the sign and the hero as it slows */
+  private placeCamera(dt: number, snap = false) {
+    const s = this.set.signAt;
+    const togo = this.rest.x - this.hx;
+    const k = this.phase === 'idle' || this.leaving ? 1 : clamp01(1 - (togo - 1) / 9);
+    const ks = k * k * (3 - 2 * k);
+    // travel: just ahead of the fish, close; arrival: the sign and the fish together, wider
+    const tx = THREE.MathUtils.lerp(this.hx + 1.6, s.x - 0.35, ks), ty = THREE.MathUtils.lerp(this.hy + 0.55, s.y + 2.95, ks);
+    const dist = THREE.MathUtils.lerp(8.2, 11.2, ks);
+    const lx = this.leaving ? (this.hx - tx) * clamp01(this.leaving.t - 0.3) * 0.35 : 0;
+    const t = this.t;
+    const hx = (Math.sin(t * 0.61) + Math.sin(t * 1.37 + 1) * 0.5) * 0.03, hy = (Math.sin(t * 0.83 + 2) + Math.sin(t * 1.71) * 0.4) * 0.025;
+    const goalPos = new THREE.Vector3(tx + lx + hx, ty + 0.75 + hy, dist), goalLook = new THREE.Vector3(tx + lx, ty, -1.5);
+    if (snap) { this.camPos.copy(goalPos); this.camLook.copy(goalLook); }
+    else {
+      const kk = this.phase === 'travel' ? 4 : 2.2;
+      this.camPos.x = damp(this.camPos.x, goalPos.x, kk, dt); this.camPos.y = damp(this.camPos.y, goalPos.y, kk, dt); this.camPos.z = damp(this.camPos.z, goalPos.z, 1.6, dt);
+      this.camLook.x = damp(this.camLook.x, goalLook.x, kk, dt); this.camLook.y = damp(this.camLook.y, goalLook.y, kk, dt); this.camLook.z = goalLook.z;
     }
-    // the hat tips on WARDROBE (and nods when you equip)
-    const tiltGoal = id === 'wardrobe' && page === 'main' ? 0.24 + Math.sin(this.react.t * 6) * 0.04 * Math.max(0, 1 - this.react.t) : 0;
-    this.tilt = damp(this.tilt, tiltGoal, 8, dt);
-    const hat = m.parts.hat?.root.getObjectByName('hatTilt') ?? m.parts.hat?.root.getObjectByName('hatRig');
-    if (hat) { hat.userData.rz0 ??= hat.rotation.z; hat.rotation.z = (hat.userData.rz0 as number) + this.tilt; }
-    // turntable in the wardrobe, back to the hero pose elsewhere
-    if (page === 'wardrobe') { if (this.dragX === null) this.spin += dt * 0.35 + this.spinV * dt; this.spinV *= Math.exp(-dt * 3); }
-    else this.spin = damp(this.spin, Math.round(this.spin / (Math.PI * 2)) * Math.PI * 2, 3, dt);
-    h.root.rotation.y = HERO_YAW + (page === 'wardrobe' ? 0.45 : 0) + this.spin + Math.sin(t * 0.25) * 0.04;
-    h.update(dt, { t });
-    // the trail shows behind him in the wardrobe
-    if (page === 'wardrobe') { const tp = m.tail.getWorldPosition(new THREE.Vector3()); h.rig.trail(s.fx, tp.x, tp.y, tp.z, 1.6, dt * 0.5, true, 0.6); }
+    const cam = this.camera;
+    cam.position.copy(this.camPos);
+    cam.lookAt(this.camLook);
+    cam.rotateZ(Math.sin(t * 0.37) * 0.004);
+    cam.updateMatrixWorld();
   }
 }

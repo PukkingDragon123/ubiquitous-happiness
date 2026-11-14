@@ -6,6 +6,8 @@ import { hash2, fbm } from '../core/math';
 import type { ItemDef } from '../game/items';
 import { EMIT_MASK } from './voxel';
 import { BUILD_PAINT } from './iconsBuild';
+import { ICON_ART } from './iconArt';
+import { Pix } from './pix';
 
 type V2 = [number, number];
 
@@ -815,6 +817,8 @@ const SIZE = (d: ItemDef) => {
 };
 
 export function paintIcon(d: ItemDef, level = 1): HTMLCanvasElement {
+  const v3 = paintIconAt(d, level, 32);
+  if (v3) return v3;
   const { w, h } = SIZE(d);
   let seed = 0; for (const ch of d.id) seed = (seed * 31 + ch.charCodeAt(0)) | 0;
   const c = new Ic(w, h, Math.abs(seed) % 997);
@@ -843,4 +847,52 @@ function nearCell(cells: Set<string>, x: number, y: number): boolean {
     if ((dx === -1 && fx < 2) || (dx === 1 && fx > 30) || (dy === -1 && fy < 2) || (dy === 1 && fy > 30)) return true;
   }
   return false;
+}
+
+/**
+ * v3: paint an item from its ICON_ART design at `cell` px per grid cell (32 = the pack; 16 / 24 for lists and
+ * the HUD: the same design re-rasterised, so small icons stay crisp instead of being downsampled). The design
+ * is centred in the item's shape box (integer-upscaled when the shape is at least twice the design); cells
+ * outside an L-shape are cut before the outline so it wraps the cut. Returns null when the item has no v3 design.
+ */
+export function paintIconAt(d: ItemDef, level = 1, cell = 32): HTMLCanvasElement | null {
+  const art = ICON_ART[d.id];
+  if (!art) return null;
+  const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
+  const [dw, dh] = art.size ?? [cw, ch];
+  let fit = Math.min(cw / dw, ch / dh);
+  fit = fit >= 1 ? Math.max(1, Math.floor(fit)) : fit;
+  const K = (cell / 32) * fit;
+  const W = Math.round(cw * cell), H = Math.round(ch * cell);
+  const p = new Pix(W, H, K);
+  p.ox = Math.floor((W - dw * 32 * K) / 2) / K;
+  p.oy = Math.floor((H - dh * 32 * K) / 2) / K;
+  art.draw(p);
+  if (d.shape.length < cw * ch) {
+    const cells = new Set(d.shape.map(([x, y]) => x + ',' + y));
+    p.erase((x, y) => { const gx = (x + p.ox) * K, gy = (y + p.oy) * K; return !cells.has(Math.floor(gx / cell) + ',' + Math.floor(gy / cell)); });
+  }
+  const cv = p.render();
+  if (level > 1) levelPips(cv, level, cell);
+  if (cell === 32) {
+    let any = false; for (const v of p.emit) if (v) { any = true; break; }
+    if (any) EMIT_MASK.set(cv, p.emit);
+  }
+  return cv;
+}
+
+/** merge-level marks: small silver (2) / gold (3) diamonds in the bottom-left, plus a sparkle top-right */
+function levelPips(cv: HTMLCanvasElement, level: number, cell: number) {
+  const x = cv.getContext('2d')!;
+  const gold = level >= 3;
+  const fill = gold ? '#ffd040' : '#dceeff', out = gold ? '#4a2400' : '#16244a', hi = '#ffffff';
+  const s = cell >= 24 ? 1 : 0;
+  for (let k = 0; k < level; k++) {
+    const cx = 3 + s + k * (4 + s * 2), cy = cv.height - 3 - s;
+    const px = (dx: number, dy: number, c: string) => { x.fillStyle = c; x.fillRect(cx + dx, cy + dy, 1, 1); };
+    if (s) {
+      for (const [dx, dy] of [[0, -2], [-1, -1], [1, -1], [-2, 0], [2, 0], [-1, 1], [1, 1], [0, 2]]) px(dx, dy, out);
+      px(0, -1, hi); px(-1, 0, fill); px(0, 0, fill); px(1, 0, fill); px(0, 1, fill);
+    } else { px(0, -1, out); px(-1, 0, out); px(1, 0, out); px(0, 1, out); px(0, 0, fill); }
+  }
 }

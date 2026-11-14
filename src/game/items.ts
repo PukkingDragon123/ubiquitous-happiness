@@ -60,6 +60,8 @@ export interface ItemDef {
   skill?: string;
   /** what the blobfish wears while it's placed (src/player/gear.ts ids) */
   gear?: { weapon?: string; armor?: string; hat?: string; back?: string };
+  /** stack cap per placed instance (materials: STACK_DEFAULT unless set; gear never stacks) */
+  stack?: number;
 }
 
 export const RARITY_ORDER: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
@@ -83,11 +85,11 @@ const DEFS: ItemDef[] = [
     desc: 'Tiny lead pellets. Heavy for their size, like you.', stats: (s) => { s.reelResist += 0.02; } },
   { id: 'cork', name: 'Cork', kind: 'material', shape: [[0, 0]], rarity: 'common', maxLevel: 1, look: 'soft',
     desc: 'Floaty, squeaky, faintly of wine.', stats: (s) => { s.speed += 0.08; } },
-  { id: 'kelp', name: 'Kelp Frond', kind: 'material', shape: [[0, 0], [0, 1]], rarity: 'common', maxLevel: 1, thick: 0.6, look: 'soft',
+  { id: 'kelp', name: 'Kelp Frond', kind: 'material', shape: [[0, 0], [0, 1]], rarity: 'common', maxLevel: 1, stack: 3, thick: 0.6, look: 'soft',
     desc: 'Rubbery, salty, endlessly useful. Do not eat. Okay, a little.' },
-  { id: 'pearl', name: 'Pearl', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1, look: 'gem', tags: ['gem'],
-    desc: 'An oyster spent years on this. You spent one stab.', stats: (s) => { s.luck += 0.25; } },
-  { id: 'coralShard', name: 'Coral Shard', kind: 'material', shape: [[0, 0]], rarity: 'common', maxLevel: 1,
+  { id: 'pearl', name: 'Giant Pearl', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1, look: 'gem', tags: ['gem'],
+    desc: 'An oyster spent years on this. Too big to spend: Mr. Crab will not take it.', stats: (s) => { s.luck += 0.25; } },
+  { id: 'coralShard', name: 'Coral Shard', kind: 'material', shape: [[0, 0], [0, 1], [1, 1]], rarity: 'common', maxLevel: 1, stack: 3,
     desc: 'A snapped branch of fire coral. Polyps still waving.' },
   { id: 'seaGlass', name: 'Sea Glass', kind: 'material', shape: [[0, 0]], rarity: 'common', maxLevel: 1, look: 'glass', tags: ['gem'],
     desc: 'Bottle shards the sea sanded into candy.' },
@@ -111,11 +113,11 @@ const DEFS: ItemDef[] = [
     desc: 'Seawater that forgot how to slosh.', stats: (s) => { s.luck += 0.15; } },
   { id: 'ruby', name: 'Ruby', kind: 'material', shape: [[0, 0]], rarity: 'rare', maxLevel: 1, look: 'gem', tags: ['gem'],
     desc: 'Hot to the touch. Volcano-born, pocket-raised.', stats: (s) => { s.luck += 0.3; } },
-  { id: 'abyssCrystal', name: 'Abyssal Crystal', kind: 'material', shape: [[0, 0], [0, 1]], rarity: 'epic', maxLevel: 1, look: 'gem', tags: ['gem', 'mage'], glow: 1.4,
+  { id: 'abyssCrystal', name: 'Abyssal Crystal', kind: 'material', shape: [[0, 0], [0, 1]], rarity: 'epic', maxLevel: 1, stack: 2, look: 'gem', tags: ['gem', 'mage'], glow: 1.4,
     desc: 'It glows. It whispers. It is probably fine.', stats: (s) => { s.luck += 0.5; s.magnet += 0.3; } },
   { id: 'sharkTooth', name: 'Shark Tooth', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1,
     desc: 'Sharks lose thirty thousand of these. This one is yours now.' },
-  { id: 'driftwood', name: 'Driftwood', kind: 'material', shape: [[0, 0], [1, 0]], rarity: 'common', maxLevel: 1, look: 'wood',
+  { id: 'driftwood', name: 'Driftwood', kind: 'material', shape: [[0, 0], [1, 0]], rarity: 'common', maxLevel: 1, stack: 3, look: 'wood',
     desc: 'Sea-bleached and silky. Smells like a beach holiday.' },
   { id: 'glassLens', name: 'Cracked Lens', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1, look: 'glass',
     desc: 'Fell out of a fisherman\'s spectacles. He is squinting now.' },
@@ -228,7 +230,7 @@ const DEFS: ItemDef[] = [
   // ---------------------------------------------------------------- new materials (resource nodes, wave drops)
   { id: 'manaCrystal', name: 'Mana Crystal', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1, look: 'gem', tags: ['gem', 'mage'], glow: 0.9,
     desc: 'A shard of frozen moonlight. It hums in your fins.', stats: (s) => { s.maxMana += 3; } },
-  { id: 'scrap', name: 'Scrap Metal', kind: 'material', shape: [[0, 0]], rarity: 'common', maxLevel: 1, look: 'metal', tags: ['metal', 'tinkerer'],
+  { id: 'scrap', name: 'Scrap Metal', kind: 'material', shape: [[0, 0], [1, 0]], rarity: 'common', maxLevel: 1, look: 'metal', tags: ['metal', 'tinkerer'],
     desc: 'Bent bits of boat. A tinkerer sees a turret.' },
   { id: 'seashell', name: 'Seashell', kind: 'material', shape: [[0, 0]], rarity: 'common', maxLevel: 1, tags: ['water'],
     desc: 'A perfect little cockle. Somebody used to live here.' },
@@ -408,9 +410,12 @@ export function recipeFor(a: string, b: string): Recipe | null {
   return null;
 }
 
-/** what dropping b onto a makes: 'level' (same item levels up), a recipe result id, or null */
+/** what dropping b onto a makes: 'level' (same item levels up), a recipe result id, or null.
+ *  Stacks never fuse (a recipe would eat the whole stack) and same-id materials stack instead (see stackOnto). */
 export function tryMerge(a: ItemInst, b: ItemInst): string | 'level' | null {
   if (a.uid === b.uid) return null;
+  if ((a.n ?? 1) > 1 || (b.n ?? 1) > 1) return null;
+  if (a.id === b.id && stackCap(a.id) > 1) return null;
   const r = recipeFor(a.id, b.id);
   if (r) return r.out;
   if (a.id === b.id) {
@@ -431,6 +436,33 @@ export function mergeResult(a: ItemInst, b: ItemInst): { id: string; level: numb
 
 /** every recipe that uses this item, for hints */
 export function recipesWith(id: string): Recipe[] { return RECIPES.filter((r) => r.a === id || r.b === id); }
+
+// ------------------------------------------------------------------ stacks (v3: materials take pack space, same ones stack per cell group)
+/** default stack cap for materials without their own `stack` */
+export const STACK_DEFAULT = 5;
+/** how many of an item one placed instance can hold (1 = doesn't stack: gear, trinkets...) */
+export function stackCap(id: string): number {
+  const d = ITEMS[id];
+  if (!d || d.kind !== 'material') return 1;
+  return Math.max(1, d.stack ?? STACK_DEFAULT);
+}
+/** how many more of `id` the instance can take */
+export function stackRoom(a: ItemInst): number { return Math.max(0, stackCap(a.id) - (a.n ?? 1)); }
+/** move as much of stack b onto stack a as fits (same id); returns how many moved. b.n is reduced (0 = empty) */
+export function stackOnto(a: ItemInst, b: ItemInst): number {
+  if (a.uid === b.uid || a.id !== b.id) return 0;
+  const k = Math.min(stackRoom(a), b.n ?? 1);
+  if (k <= 0) return 0;
+  a.n = (a.n ?? 1) + k;
+  b.n = (b.n ?? 1) - k;
+  return k;
+}
+/** every item id in a list of instances, stacks expanded (for result cards / tallies) */
+export function expandIds(items: ItemInst[]): string[] {
+  const out: string[] = [];
+  for (const it of items) for (let k = 0; k < (it.n ?? 1); k++) out.push(it.id);
+  return out;
+}
 
 // ------------------------------------------------------------------ loot
 export type Pool = 'any' | 'loot' | 'shop' | 'boss' | 'material' | ItemKind | readonly string[] | ((d: ItemDef) => boolean);
@@ -741,8 +773,30 @@ const iconCache = new Map<string, HTMLCanvasElement>();
 export function itemIcon(id: string, level = 1): HTMLCanvasElement {
   const key = id + '|' + level;
   let c = iconCache.get(key);
-  if (!c) { c = paintIcon(getItem(id), level); iconCache.set(key, c); }
+  if (!c) { c = ICON_TILE[id] ? tiledIcon(getItem(id), level) : paintIcon(getItem(id), level); iconCache.set(key, c); }
   return c;
+}
+
+/**
+ * v3 gave some materials bigger shapes than their painters were drawn for (1 cell). Until the icon painter draws
+ * them at the new size, their 1-cell art is tiled into every cell of the new shape (a little heap: alternate
+ * cells mirrored). Remove an id here once src/backpack/icons.ts paints it natively at its shape.
+ */
+export const ICON_TILE: Record<string, true> = { coralShard: true, scrap: true };
+function tiledIcon(d: ItemDef, level: number): HTMLCanvasElement {
+  const one = paintIcon({ ...d, shape: [[0, 0]] }, level);
+  const { w, h } = shapeSize(d.shape);
+  const cv = document.createElement('canvas');
+  cv.width = w * 32; cv.height = h * 32;
+  const x = cv.getContext('2d')!;
+  x.imageSmoothingEnabled = false;
+  d.shape.forEach(([cx, cy], i) => {
+    x.save();
+    if (i % 2) { x.translate(cx * 32 + 32, cy * 32); x.scale(-1, 1); x.drawImage(one, 0, 0); }
+    else x.drawImage(one, cx * 32, cy * 32);
+    x.restore();
+  });
+  return cv;
 }
 
 /** metres per grid cell for itemMesh (world pickups use it as-is; the backpack scales it to its pockets) */

@@ -1,9 +1,9 @@
 // The player: a squishy, bouncy blobfish adventurer (v2: low-poly PS1 model with a painted face and build gear).
 //
-// Movement is Hungry-Shark-like free swimming (WASD / arrows), Space dashes, J / left mouse attacks toward the
-// mouse (blades: 3-hit combo, the third a spinning flourish; wands / staves: mana bolts; trident: a long thrust
-// combo; wrench: heavy bonks). Skills sit in slots 1-4 (keys 1-4); right mouse / K casts the selected slot and
-// Q / L cycles it. Mage skills spend mana (regenerates). Physics is a 2D soft body (softbody.ts): the body
+// Movement is Hungry-Shark-like free swimming (WASD / arrows). Combat is the souls-like moveset in
+// src/combat/moveset.ts (blob.combat): J / left mouse light combo (hold to charge a heavy), K / right mouse
+// parry (hold: block), Space dodge (i-frames, stamina), R / H kelp-tea flask. Skills sit in slots 1-4 (keys
+// 1-4) and spend mana; Q / L cycles the HUD selection. Physics is a 2D soft body (softbody.ts): the body
 // squishes against rocks and bounces back, and the 3D mesh bends to match. Near the surface a blobfish
 // decompresses: it sags, bloats and weakens.
 //
@@ -15,7 +15,7 @@ import type { Entity, World, Team, DamageKind } from '../game/types';
 import type { AbilityId, Stats } from '../game/run';
 import { SoftBody } from './softbody';
 import { BlobModel, outlineAt, SB_N, type BlobAnim } from './blobModel';
-import { WEAPON_KIND, WEAPON_LEN, type BlobGear } from './gear';
+import { type BlobGear } from './gear';
 import { SlashTrail } from './slashTrail';
 import { clamp, damp, dampAngle, smooth, TAU, segDist } from '../core/math';
 import { audio } from '../audio/audio';
@@ -24,8 +24,8 @@ import { buildHook } from '../fishing/bait';
 import type { SkillCaster } from '../skills/types';
 import { SKILLS, skillSlotsFor } from '../skills/registry';
 import { skillMods, strike } from '../skills/combat';
-import { manaBoltShot } from '../skills/projectiles';
 import { FX } from '../skills/fx';
+import { PlayerCombat } from '../combat/moveset';
 
 export interface HookLink {
   /** where the line pulls toward (next line node) */
@@ -58,15 +58,11 @@ export class Blobfish implements SkillCaster {
   /** 0 deep .. 1 at the surface: decompression weakness */
   pressure = 0;
   outOfWater = false;
-  // weapon
+  // weapon + souls-like moveset (stamina, parry, dodge, flasks: src/combat/moveset.ts)
   private trail = new SlashTrail();
-  private swing = { t: 0, dur: 0, from: 0, to: 0, combo: 0, hitSet: new Set<Entity>(), reach: 0.9, spin: false, whirl: 0, whirlDmg: 1 };
-  private comboTimer = 0;
-  private swordAng = 0.4;
-  private lastTip = new THREE.Vector3();
+  private goldTrail = new SlashTrail(new THREE.Color('#ffe070'));
+  combat: PlayerCombat;
   attackCd = 0;
-  // dash
-  private dashCd = 0;
   private dashT = 0;
   // legacy abilities (ability cores)
   ability: AbilityId | null = null;
@@ -107,12 +103,13 @@ export class Blobfish implements SkillCaster {
 
   constructor(x = 0, y = -4) {
     this.x = x; this.y = y;
+    this.combat = new PlayerCombat(this);
     this.sb.place(x, y);
     this.obj.add(this.model.root);
     this.model.attach(this.obj);
     this.model.weaponCtl = 'external';
-    this.model.weaponZ = 0.6;
-    this.obj.add(this.trail.mesh);
+    this.model.weaponZ = 0.95;
+    this.obj.add(this.trail.mesh, this.goldTrail.mesh);
     // laser beams (two eye beams converge)
     this.laser = new THREE.Group();
     // opaque HDR beams: the post fog is depth-based, so solid depth-writing beams read right (and bloom)
@@ -189,13 +186,15 @@ export class Blobfish implements SkillCaster {
     // ---- buffs
     this.dmgT -= dt; if (this.dmgT <= 0) this.dmgMul = 1;
     this.spdT -= dt; if (this.spdT <= 0) this.spdMul = 1;
+    // ---- combat moveset: input, buffering, move timelines (before swimming so it can slow / lock it)
+    this.combat.update(dt, w);
     // ---- swimming
     const rocky = this.rock > 0.5;
-    const speed = s.speed * weak * (rocky ? 0.35 : 1) * (this.puffT > 0 ? 0.6 : 1) * this.spdMul * (this.swing.whirl > 0 ? 0.7 : 1);
+    const speed = s.speed * weak * (rocky ? 0.35 : 1) * (this.puffT > 0 ? 0.6 : 1) * this.spdMul * this.combat.moveMul();
     let accel = s.accel * weak * this.spdMul;
     if (this.outOfWater || this.riding) accel = 0;
     const tvx = ax.x * speed, tvy = ax.y * speed;
-    let fx = (tvx - this.sb.vx) * (accel / speed), fy = (tvy - this.sb.vy) * (accel / speed);
+    let fx = (tvx - this.sb.vx) * (accel / Math.max(0.5, speed)), fy = (tvy - this.sb.vy) * (accel / Math.max(0.5, speed));
     if (!this.swimming || this.riding) { fx = this.riding ? 0 : -this.sb.vx * 1.2; fy = this.riding ? 0 : -this.sb.vy * 1.2; }
     // buoyancy: blobfish are almost neutrally buoyant; rock sinks; puff floats; air drops you
     if (this.outOfWater) fy -= 18;
@@ -207,20 +206,8 @@ export class Blobfish implements SkillCaster {
     fx += this.extForce.x; fy += this.extForce.y;
     this.extForce.set(0, 0);
     this.carried?.(dt);
-    // ---- dash
-    this.dashCd -= dt; this.dashT -= dt;
-    if (inp.hit('dash') && this.dashCd <= 0 && !this.hooked && !this.outOfWater) {
-      const d = Math.hypot(ax.x, ax.y) > 0.1 ? new THREE.Vector2(ax.x, ax.y).normalize() : this.aim.clone();
-      const p = s.dashPower * weak;
-      this.sb.accel(d.x * p / dt * 0.6, d.y * p / dt * 0.6, dt);
-      this.dashCd = 0.55; this.dashT = 0.22; this.invuln = Math.max(this.invuln, 0.18);
-      this.sb.stretch = 0.35; this.sb.stretchDir = Math.atan2(d.y, d.x);
-      w.fx.emit('bubble', this.x - d.x * 0.4, this.y - d.y * 0.4, { n: 10, spread: 0.25, speed: 1.2 });
-      w.sfx('swish_a', this.x, 0.5, 1.3);
-      w.emit('dash', {});
-      // rogue 6-set: dashing through an enemy backstabs it
-      if ((s.sets?.rogue ?? 0) >= 6) this.dashStab = 0.25;
-    }
+    // ---- dodge (the moveset starts it: see dodged()); rogue 6-set dash-stab
+    this.dashT -= dt;
     if (this.dashStab > 0) {
       this.dashStab -= dt;
       for (const e of w.near(this.x, this.y, 0.7, 'enemy')) if (!this.stabbed.has(e)) { this.stabbed.add(e); strike(w, this, e, s.swordDmg * 2, this.vx, this.vy, 'sword', { gore: 0.6 }); }
@@ -232,10 +219,10 @@ export class Blobfish implements SkillCaster {
     const nrm = (x: number, y: number) => w.terrain.normal(x, y);
     const drag = this.outOfWater ? 0.15 : 1.4;
     this.sb.accel(-this.sb.vx * drag, -this.sb.vy * drag, dt);
-    // body orientation follows swim direction (pitch), facing flips through a squash
+    // body orientation follows swim direction (pitch), facing flips through a squash; moves face the aim
     const vel = Math.hypot(this.sb.vx, this.sb.vy);
-    if (Math.abs(ax.x) > 0.2 && !this.hooked) this.facing = Math.sign(ax.x);
-    else if (this.swing.t > 0 && Math.abs(this.aim.x) > 0.3) this.facing = Math.sign(this.aim.x);
+    if (this.combat.faceAim && Math.abs(this.aim.x) > 0.15 && !this.hooked) this.facing = Math.sign(this.aim.x);
+    else if (Math.abs(ax.x) > 0.2 && !this.hooked) this.facing = Math.sign(ax.x);
     const pitchTarget = vel > 0.6 ? clamp(Math.atan2(this.sb.vy, Math.abs(this.sb.vx) + 0.5) * this.facing, -0.75, 0.75) : 0;
     this.bodyAngle = dampAngle(this.bodyAngle, pitchTarget + (this.hooked ? Math.sin(w.time * 18) * 0.12 : 0), 6, dt);
     this.sb.angle = this.bodyAngle;
@@ -266,8 +253,11 @@ export class Blobfish implements SkillCaster {
       if (k > 0.5) { this.setExpr('dizzy', 0.35); w.game.addShake(0.05 * k); }
       if (rocky && k > 0.4) this.crush(w, k);
     }
-    // ---- weapon
-    this.updateWeapon(dt, w);
+    // ---- weapon: the moveset animates the blade and sweeps it for hits
+    const hand = this.model.handWorld(this.tmpV.clone());
+    this.combat.updateBlade(dt, w, hand);
+    this.trail.update(dt); this.goldTrail.update(dt);
+    this.model.weaponVisible = this.rock < 0.5;
     // ---- skills + legacy abilities
     this.updateSkills(dt, w);
     this.updateAbilities(dt, w);
@@ -279,7 +269,7 @@ export class Blobfish implements SkillCaster {
     this.model.squeeze = damp(this.model.squeeze, this.hooked ? 0.6 + Math.sin(w.time * 20) * 0.3 : 0, 8, dt);
     this.exprHold -= dt;
     if (this.exprHold <= 0) {
-      this.model.setExpression(this.hooked ? 'strain' : this.outOfWater ? 'scared' : this.hp <= 2 ? 'sad' : this.swing.t < this.swing.dur || this.swing.whirl > 0 ? 'attack' : 'brave');
+      this.model.setExpression(this.hooked ? 'strain' : this.outOfWater ? 'scared' : this.combat.blocking ? 'focus' : this.combat.attacking ? 'attack' : this.hp <= 2 ? 'sad' : 'brave');
     }
     // the eyes look where you aim
     this.model.look.set(this.aim.x * this.facing, this.aim.y);
@@ -292,13 +282,17 @@ export class Blobfish implements SkillCaster {
     const root = this.model.root;
     root.position.set(this.x, this.y, 0);
     // a 3/4 view: yawed toward the camera, mirrored for facing; the flip passes through a squash
-    const f = this.flipK;
-    root.scale.set(Math.sign(f || 1) * Math.max(0.12, Math.abs(f)), 1, 1);
-    root.rotation.set(0, -0.55 * Math.sign(f || 1) * Math.abs(f), 0);
-    this.model.body.rotation.set(0, 0, this.bodyAngle * Math.sign(f || 1));
+    const f = this.flipK, fs = Math.sign(f || 1);
+    // combat pose layer (moveset): lean back / into a blow, coil squash, spin-slash yaw, riposte / dodge roll
+    const c = this.combat, sq = c.squash;
+    root.scale.set(fs * Math.max(0.12, Math.abs(f)) * (1 + sq * 0.5), 1 - sq, 1 + sq * 0.5);
+    root.rotation.set(0, -0.55 * fs * Math.abs(f) + c.spin * fs, c.roll);
+    this.model.body.rotation.set(0, 0, this.bodyAngle * fs - c.lean);
     root.updateMatrixWorld(true);
-    this.model.facingSign = Math.sign(f || 1);
+    this.model.facingSign = fs;
     this.model.update(w.game.dt, { sb: this.sb, swim: clamp(Math.hypot(this.vx, this.vy) / 5, 0, 1), time: w.time, vel: new THREE.Vector2(this.vx, this.vy) });
+    // the thrust: the toothpick slides out along its own axis
+    if (c.thrust) { const a = this.model.weaponAng; this.model.weaponPivot.position.x += Math.cos(a) * c.thrust; this.model.weaponPivot.position.y += Math.sin(a) * c.thrust; }
     // the hook in the lip, pointing along the line
     this.lipHook.visible = this.hooked;
     if (this.hooked && this.hook) {
@@ -312,112 +306,16 @@ export class Blobfish implements SkillCaster {
     (this.shieldMesh.material as THREE.ShaderMaterial).uniforms.uT.value = w.time;
   }
 
-  // ------------------------------------------------------------------ weapon
-  private updateWeapon(dt: number, w: World) {
-    const inp = w.game.input, s = this.stats;
-    this.attackCd -= dt; this.comboTimer -= dt;
-    const hand = this.model.handWorld(this.tmpV.clone());
-    hand.z = 0.6;
-    const aimAng = Math.atan2(this.aim.y, this.aim.x);
-    const wk = WEAPON_KIND[this.model.weaponId];
-    const reachK = WEAPON_LEN[this.model.weaponId] / 0.84;
-    if (inp.hit('attack') && this.attackCd <= 0 && !this.outOfWater && this.rock < 0.5 && this.swing.whirl <= 0) {
-      const combo = this.comboTimer > 0 ? (this.swing.combo + 1) % 3 : 0;
-      if (wk === 'caster') {
-        // wands / staves: a mana bolt toward the aim (the third in a combo splits in three)
-        const tip = this.tip(new THREE.Vector3());
-        const n = combo === 2 ? 3 : 1;
-        for (let k = 0; k < n; k++) manaBoltShot(w, this, tip.x, tip.y, aimAng + (k - (n - 1) / 2) * 0.25, s.swordDmg * (0.75 + 0.25 * (s.spellPower ?? 1)) * (n > 1 ? 0.7 : 1));
-        this.swing = { ...this.swing, t: 0, dur: 0.18, from: aimAng + 0.6 * this.facing, to: aimAng, combo, hitSet: new Set(), reach: 0, spin: false };
-        this.attackCd = 0.3 / Math.max(0.5, s.swordRate / 2.6);
-        this.comboTimer = 0.7;
-        this.lunge(-this.aim.x, -this.aim.y, 0.8);
-        w.sfx('magic_whoosh1', this.x, 0.35, 1.4 + combo * 0.1);
-        this.setExpr('focus', 0.3);
-      } else {
-        const spin = combo === 2 && wk !== 'polearm';
-        const dir = combo === 1 ? -1 : 1;
-        const arc = spin ? TAU : wk === 'polearm' ? 0.9 : wk === 'blunt' ? 2.0 : 2.5;
-        const durK = wk === 'blunt' ? 1.35 : wk === 'polearm' ? 1.1 : 1;
-        this.swing = { ...this.swing, t: 0, dur: (spin ? 0.34 : 0.22) * durK / Math.max(0.5, s.swordRate / 2.6), from: aimAng + (arc / 2) * dir * (spin ? 0 : 1), to: aimAng - (arc / 2) * dir * (spin ? 0 : 1) - (spin ? TAU * this.facing : 0), combo, hitSet: new Set(), reach: s.swordReach * (spin ? 1.25 : 1) * Math.max(0.6, reachK), spin };
-        if (spin) this.swing.from = aimAng;
-        this.attackCd = this.swing.dur + 0.06;
-        this.comboTimer = this.swing.dur + 0.45;
-        this.sb.accel(this.aim.x * 3.5 / dt * 0.3 * (wk === 'polearm' ? 1.6 : 1), this.aim.y * 3.5 / dt * 0.3 * (wk === 'polearm' ? 1.6 : 1), dt);
-        w.sfx('sw_swish', this.x, 0.55, (spin ? 0.85 : 1.1 + combo * 0.08) * (wk === 'blunt' ? 0.75 : 1));
-        this.setExpr('attack', this.swing.dur + 0.25);
-        this.lastTip.set(hand.x + Math.cos(this.swing.from) * this.swing.reach, hand.y + Math.sin(this.swing.from) * this.swing.reach, 0);
-      }
-    }
-    let ang: number;
-    if (this.swing.whirl > 0) {
-      // whirlwind: the blade spins round and round, hitting everything near
-      this.swing.whirl -= dt;
-      ang = this.swordAng + dt * 22 * this.facing;
-      this.swordAng = ang;
-      const reach = s.swordReach * 1.3;
-      const tip = new THREE.Vector3(hand.x + Math.cos(ang) * reach, hand.y + Math.sin(ang) * reach, 0.6);
-      this.trail.push(new THREE.Vector3(hand.x + Math.cos(ang) * 0.18, hand.y + Math.sin(ang) * 0.18, 0.6), tip);
-      this.whirlTick -= dt;
-      if (this.whirlTick <= 0) { this.whirlTick = 0.16; this.swing.hitSet.clear(); w.sfx('sw_swish', this.x, 0.3, 1.3); }
-      this.hitArc(w, hand.x, hand.y, this.lastTip.x, this.lastTip.y, tip.x, tip.y, ang, this.swing.whirlDmg);
-      this.lastTip.copy(tip);
-    } else if (this.swing.t < this.swing.dur && this.swing.dur > 0) {
-      this.swing.t += dt;
-      const k = Math.min(1, this.swing.t / this.swing.dur);
-      const e = 1 - Math.pow(1 - k, 3);
-      ang = this.swing.from + (this.swing.to - this.swing.from) * e;
-      if (this.swing.reach > 0) {
-        const thrust = wk === 'polearm' ? Math.sin(k * Math.PI) * 0.45 : 0;
-        const reach = this.swing.reach + thrust;
-        const tip = new THREE.Vector3(hand.x + Math.cos(ang) * reach, hand.y + Math.sin(ang) * reach, 0.6);
-        this.trail.push(new THREE.Vector3(hand.x + Math.cos(ang) * 0.18, hand.y + Math.sin(ang) * 0.18, 0.6), tip);
-        this.hitArc(w, hand.x, hand.y, this.lastTip.x, this.lastTip.y, tip.x, tip.y, ang, 1);
-        this.lastTip.copy(tip);
-      }
-      this.swordAng = ang;
-    } else {
-      // idle: held up and forward, bobbing, pointing roughly where you aim
-      const idle = Math.atan2(this.aim.y * 0.6 + 0.35, this.aim.x * 0.6 + this.facing * 0.5);
-      this.swordAng = dampAngle(this.swordAng, idle + Math.sin(w.time * 2.2) * 0.08, 10, dt);
-      ang = this.swordAng;
-    }
-    this.trail.update(dt);
-    this.model.weaponAng = ang;
-    this.model.weaponVisible = this.rock < 0.5;
-  }
-  private whirlTick = 0;
+  // ------------------------------------------------------------------ weapon hooks (the moveset drives the blade)
   /** start a whirlwind (warrior skill): spin the weapon for dur seconds */
-  whirl(dur: number, dmgMul: number) { this.swing.whirl = dur; this.swing.whirlDmg = dmgMul; this.swing.hitSet = new Set(); this.setExpr('attack', dur); }
-
-  /** sweep test for the blade between last and current tip */
-  private hitArc(w: World, hx: number, hy: number, px: number, py: number, tx: number, ty: number, ang: number, mul: number) {
-    const s = this.stats;
-    for (const e of w.entities) {
-      if (!e.alive || e === (this as Entity)) continue;
-      if (e.slash) {
-        if (e.slash(hx, hy, tx, ty, s.lineCut, w) || e.slash(px, py, tx, ty, s.lineCut, w)) FX.sparks(w, tx, ty, 6, undefined, 4);
-        continue;
-      }
-      if (e.team === 'player' || e.team === 'friend' || this.swing.hitSet.has(e) || !e.hit) continue;
-      const d1 = segDist(e.x, e.y, hx, hy, tx, ty).d, d2 = segDist(e.x, e.y, px, py, tx, ty).d;
-      if (Math.min(d1, d2) < e.r + 0.08) {
-        this.swing.hitSet.add(e);
-        const dx = Math.cos(ang);
-        const wk = WEAPON_KIND[this.model.weaponId];
-        const dmg = s.swordDmg * (this.swing.spin ? 1.5 : 1) * mul * (wk === 'blunt' ? 1.25 : 1);
-        if (strike(w, this, e, dmg, e.x - this.x === 0 ? dx : Math.sign(e.x - this.x), 0.3, 'sword', { quiet: true })) {
-          FX.sparks(w, e.x - (e.x - tx) * 0.5, e.y - (e.y - ty) * 0.5, 8, ang, 5);
-          w.fx.emit('star', tx, ty, { n: 2, speed: 2, life: 0.4, size: 0.18 });
-          w.sfx(wk === 'blunt' ? 'clank' : 'sw_slash', e.x, 0.6);
-          w.game.freeze(0.045);
-          w.game.addShake(0.06);
-          if (wk === 'blunt') e.vx += Math.sign(e.x - this.x) * 4;
-          // warrior 6-set: the spinning flourish releases a shockwave
-          if (this.swing.spin && (s.sets?.warrior ?? 0) >= 6) { FX.shock(w, this.x, this.y, 1.2, '#ffe8a0'); for (const o of w.near(this.x, this.y, 2.4, 'enemy')) if (o !== e) strike(w, this, o, s.swordDmg, o.x - this.x, o.y - this.y, 'crush'); }
-        }
-      }
-    }
+  whirl(dur: number, dmgMul: number) { this.combat.whirl(dur, dmgMul); }
+  /** a trail segment along the blade (gold for ripostes / full-charge heavies) */
+  trailPush(base: THREE.Vector3, tip: THREE.Vector3, gold = false) { (gold ? this.goldTrail : this.trail).push(base, tip); }
+  /** the moveset started a dodge */
+  dodged(_w: World) {
+    this.dashT = 0.22;
+    // rogue 6-set: dashing through an enemy backstabs it
+    if ((this.stats.sets?.rogue ?? 0) >= 6) this.dashStab = 0.25;
   }
 
   // ------------------------------------------------------------------ skills
@@ -441,8 +339,8 @@ export class Blobfish implements SkillCaster {
         w.sfx('k_select1', this.x, 0.5);
       }
     }
+    // (right mouse / K is the parry / block now: src/combat/moveset.ts)
     const selId = this.slots[this.sel];
-    if (selId && inp.hit('ability')) this.cast(selId, w);
     // keep the legacy HUD in sync with the selected slot
     this.ability = selId && selId in ABILITY_CD ? (selId as AbilityId) : null;
   }
@@ -488,7 +386,7 @@ export class Blobfish implements SkillCaster {
     for (const k of Object.keys(this.cds) as AbilityId[]) this.cds[k] = Math.max(0, (this.cds[k] ?? 0) - dt);
     // laser: hold the slot key (or right mouse with it selected)
     const li = this.slots.indexOf('laserEyes');
-    const held = li >= 0 && (inp.key(SLOT_KEYS[li]) || (this.sel === li && inp.held('ability')));
+    const held = li >= 0 && inp.key(SLOT_KEYS[li]);
     this.laserOn = held && this.laserEnergy > 0.02 && !this.outOfWater;
     if (this.laserOn) this.laserEnergy = Math.max(0, this.laserEnergy - dt / (2.8 * (1 + 0.4 * ((this.abilityLv.laserEyes ?? 1) - 1)))); else this.laserEnergy = Math.min(1, this.laserEnergy + dt / 4);
     this.updateLaser(dt, w);
@@ -497,7 +395,7 @@ export class Blobfish implements SkillCaster {
     this.model.U.uRock.value = this.rock;
     if (this.puffT > 0) {
       this.puffT -= dt;
-      for (const e of w.near(this.x, this.y, 0.85, 'enemy')) if (e.hit && !this.swing.hitSet.has(e)) { e.hit(1, Math.sign(e.x - this.x), 0.5, w, this, 'spike'); FX.sparks(w, e.x, e.y, 5, undefined, 3); }
+      for (const e of w.near(this.x, this.y, 0.85, 'enemy')) if (e.hit) { e.hit(1, Math.sign(e.x - this.x), 0.5, w, this, 'spike'); FX.sparks(w, e.x, e.y, 5, undefined, 3); }
     }
     this.model.U.uGlow.value.setRGB(this.laserOn ? 0.5 : 0, this.laserOn ? 0.05 : 0, this.laserOn ? 0.1 : 0);
   }
@@ -587,6 +485,8 @@ export class Blobfish implements SkillCaster {
 
   damage(dmg: number, fromX: number, fromY: number, w: World, kind?: DamageKind): boolean {
     if (!this.alive || this.invuln > 0) return false;
+    // dodge i-frames / parry / block (hits routed through attackPlayer were already checked)
+    if (this.combat.legacyDefend(w, dmg, fromX, fromY, kind)) return false;
     const dx = this.x - fromX, dy = this.y - fromY, l = Math.hypot(dx, dy) || 1;
     if (this.shield > 0) {
       this.shield = 0; this.invuln = 0.6;
@@ -598,7 +498,8 @@ export class Blobfish implements SkillCaster {
     if (this.rock > 0.5 && kind !== 'explosion') { w.sfx('rock_hit', this.x, 0.7); FX.sparks(w, this.x, this.y, 6, undefined, 3); return false; }
     if (Math.random() < this.stats.armor) { w.text.pop('BLOCK', this.x, this.y + 0.8, 'hint', { size: 0.3 }); w.sfx('sw_clang', this.x, 0.5); this.invuln = 0.4; return false; }
     this.hp = Math.max(0, this.hp - dmg);
-    this.invuln = 1.0;
+    this.invuln = 0.8;
+    this.combat.onHurt(w);
     this.hurtCount++;
     this.flash = 1;
     this.sb.poke(dx / l, dy / l, 9);

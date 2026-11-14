@@ -98,6 +98,10 @@ export function itemIconBox(id: string, w: number, h = w, level = 1): HTMLCanvas
 
 interface ListState { scroll: number; target: number; drag: number }
 
+/** the UI is laid out on a canvas about this many UI pixels tall (see PixelUI.pickScale) */
+export const UI_TARGET_H = 360;
+const UI_MIN_H = 264, UI_MIN_W = 440;
+
 export class PixelUI {
   readonly cv: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
@@ -142,7 +146,7 @@ export class PixelUI {
 
   constructor(o: { fixed?: [number, number]; targetH?: number } = {}) {
     this.fixed = !!o.fixed;
-    this.targetH = o.targetH ?? 260;
+    this.targetH = o.targetH ?? UI_TARGET_H;
     this.cv = document.createElement('canvas');
     if (o.fixed) { this.w = o.fixed[0]; this.h = o.fixed[1]; }
     this.cv.width = this.w; this.cv.height = this.h;
@@ -166,15 +170,32 @@ export class PixelUI {
   }
   get texture() { return this.tex; }
 
-  /** pick the integer scale so the UI is about targetH pixels tall; ?uiscale=N forces one */
+  /**
+   * One shared UI density for every PixelUI on screen: the integer scale that makes the canvas closest to
+   * UI_TARGET_H (360) UI pixels tall, never below UI_MIN_H. 960x540 -> 2 (480x270), 1280x720 -> 2 (640x360),
+   * 1920x1080 -> 3 (640x360), 2560x1440 -> 4, 4K -> 6. (`targetH` from the constructor is kept for API
+   * compatibility but no longer changes the density, so a HUD, a toast and a panel always share one pixel size.)
+   * ?uiscale=N forces a scale.
+   */
+  static pickScale(devW: number, devH: number): number {
+    const forced = Number(new URLSearchParams(location.search).get('uiscale') || 0);
+    if (forced > 0) return forced;
+    let best = 1, err = Infinity;
+    for (let s = 1; s <= 16; s++) {
+      const h = devH / s, w = devW / s;
+      if (s > 1 && (h < UI_MIN_H || w < UI_MIN_W)) break;
+      const e = Math.abs(Math.log(h / UI_TARGET_H));
+      if (e < err) { err = e; best = s; }
+    }
+    return best;
+  }
+
   resize(cssW: number, cssH: number, pixelRatio = 1) {
     const devW = Math.max(1, Math.floor(cssW * pixelRatio)), devH = Math.max(1, Math.floor(cssH * pixelRatio));
     this.devW = devW; this.devH = devH; this.pr = pixelRatio;
     this.cam.left = 0; this.cam.right = devW; this.cam.top = devH; this.cam.bottom = 0; this.cam.updateProjectionMatrix();
     if (this.fixed) return;
-    const forced = Number(new URLSearchParams(location.search).get('uiscale') || 0);
-    let s = forced || Math.max(1, Math.round(devH / this.targetH));
-    if (!forced) while (s > 1 && devH / s < this.targetH * 0.88) s--;
+    const s = PixelUI.pickScale(devW, devH);
     this.scale = s;
     const w = Math.ceil(devW / s), h = Math.ceil(devH / s);
     if (w !== this.w || h !== this.h) {

@@ -1,4 +1,4 @@
-// Entry: boot, fonts, game, screens. No query: the v2 game (hideout -> runs). ?preview=<name> dev previews
+// Entry: boot, fonts, game, screens. No query: the game (title -> hideout -> runs). ?preview=<name> dev previews
 // (?preview=run&area=kelp&mastery=0&wave=1 starts a run directly); ?dive= / ?menu= are the v1 screens.
 import { Game, Screen } from './game/game';
 import { loadFonts } from './ui/text';
@@ -24,6 +24,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   blobstudio: () => import('./dev/preview_blobstudio'),
   run: () => import('./dev/preview_run'),
   intro: () => import('./dev/preview_intro'),
+  combat: () => import('./dev/preview_combat'),
 };
 
 async function boot() {
@@ -53,9 +54,13 @@ async function boot() {
     game.register(new Sandbox(game));
     game.go('sandbox');
   } else {
-    // the real game (v2): the prologue on first boot, then the title (the hero-shot main menu) -> hideout / runs
-    setupFlow(game);
-    game.go(wantsIntro() ? 'intro' : 'title', {});
+    // the real game: the title (the travelling shot to the signpost: NEW GAME / RESUME) -> the prologue the first
+    // time -> the hideout hub -> runs. ?intro=1 jumps straight into the prologue, ?hideout=1 straight home.
+    const flow = setupFlow(game);
+    const iq = q.get('intro');
+    if (iq !== null && iq !== '0' && wantsIntro()) game.go('intro', {});
+    else if (q.get('hideout') !== null) flow.continueGame();
+    else game.go('title', {});
   }
   game.start();
   document.getElementById('boot')?.classList.add('gone');

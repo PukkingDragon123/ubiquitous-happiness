@@ -28,14 +28,25 @@ export interface PxFont {
 
 const def = (family: string, px: number, track = 0): PxFont => ({ family, px, capTop: 0, cap: Math.round(px * 0.6), desc: 2, lh: px, track });
 
-/** the bundled pixel fonts at their native (1:1) sizes */
+/**
+ * The bundled pixel fonts at their TRUE native sizes: the px size where one font pixel lands on exactly one canvas
+ * pixel (measured: zero partially-covered pixels when rasterised). Any other size makes the thresholding below
+ * drop or double whole columns, which is what made v2 text look smushed (m6x11plus was drawn at 16 px; its grid
+ * is 18 px). Pick by role:
+ *   body   m6x11plus 18   bold 2-px-feel workhorse (buttons, dialogue, tooltips)   cap 11
+ *   small  m5x7 16        light labels, secondary lines, numbers on chips          cap 7
+ *   tiny   m5x7 16        (alias of small: nothing smaller than m5x7 for words)
+ *   title  Alagard 16     headings, names, big numbers                             cap 11
+ *   fancy  Alagard 16     (alias; Jacquard 24 has no integer native size)
+ *   big    Alagard 32     splash titles (exact 2x)
+ */
 export const FONTS: Record<FontName, PxFont> = {
-  body: def('M6x11', 16),     // m6x11plus: the workhorse
-  small: def('M5x7', 16),     // m5x7: compact labels, counts
-  tiny: def('M5x7', 16),      // compact labels on cards (m5x7: chunkier and more readable than Tiny5)
-  title: def('Alagard', 16),  // Alagard: headings, numbers
-  fancy: def('Jacquard', 24), // Jacquard 24: big blackletter names
-  big: def('Alagard', 32),    // Alagard x2 for splash titles
+  body: def('M6x11', 18),
+  small: def('M5x7', 16),
+  tiny: def('M5x7', 16),
+  title: def('Alagard', 16),
+  fancy: def('Alagard', 16),
+  big: def('Alagard', 32),
 };
 
 let calibrated = false;
@@ -147,10 +158,10 @@ export function glyphs(str: string, o: TextOpts = {}): Glyphs {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const gx = x - pad, gy = y - pad;
     if (on(gx, gy)) { put(x, y, gy >= half ? col2 : col); continue; }
-    if (oc && (on(gx - 1, gy) || on(gx + 1, gy) || on(gx, gy - 1) || on(gx, gy + 1))) { put(x, y, oc); continue; }
+    if (oc && (on(gx - 1, gy) || on(gx + 1, gy) || on(gx, gy - 1) || on(gx, gy + 1) || on(gx - 1, gy - 1) || on(gx + 1, gy - 1) || on(gx - 1, gy + 1) || on(gx + 1, gy + 1))) { put(x, y, oc); continue; }
     if (sc) {
       const sx = gx - 1, sy = gy - 1;
-      const hitS = on(sx, sy) || (oc && (on(sx - 1, sy) || on(sx + 1, sy) || on(sx, sy - 1) || on(sx, sy + 1)));
+      const hitS = on(sx, sy) || (oc && (on(sx - 1, sy) || on(sx + 1, sy) || on(sx, sy - 1) || on(sx, sy + 1) || on(sx - 1, sy - 1) || on(sx + 1, sy - 1) || on(sx - 1, sy + 1) || on(sx + 1, sy + 1)));
       if (hitS) put(x, y, sc);
     }
   }
@@ -161,9 +172,23 @@ export function glyphs(str: string, o: TextOpts = {}): Glyphs {
   return out;
 }
 
+/**
+ * Light text with no shadow/outline given gets an automatic 1 px drop shadow in a deep shade of its own hue, so
+ * it always separates from busy 3D behind it (pass shadow: null to opt out). Dark text (on paper) gets none.
+ */
+function withAutoShadow(o: TextOpts): TextOpts {
+  if (o.shadow !== undefined || o.outline !== undefined) return o;
+  const [r, g, b] = rgba(o.color ?? '#ffffff');
+  if (r * 0.3 + g * 0.55 + b * 0.15 < 120) return o;
+  const k = 0.16;
+  const sh = '#' + [r, g, b].map((v) => Math.round(v * k + 6).toString(16).padStart(2, '0')).join('');
+  return { ...o, shadow: sh };
+}
+
 /** draw text with its cap top at y; returns the drawn width */
 export function drawText(ctx: CanvasRenderingContext2D, str: string, x: number, y: number, o: TextOpts = {}): number {
   if (!str) return 0;
+  o = withAutoShadow(o);
   const g = glyphs(str, o);
   const tw = g.w - (o.outline ? 2 : 0) - (o.shadow ? 1 : 0);
   let dx = Math.round(x);

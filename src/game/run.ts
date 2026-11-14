@@ -50,6 +50,8 @@ export interface ItemInst {
   gx: number; gy: number; // grid cell of the shape's origin (-1 = loose / not in grid)
   rot: number;          // 0..3 quarter turns
   level?: number;       // upgraded by merging
+  /** stack count for stackable materials (default 1; capped by stackCap(id), src/game/items.ts) */
+  n?: number;
 }
 
 export interface MapNodeRef { act: number; id: number }
