@@ -127,6 +127,7 @@ export class LevelBuild {
     const deep = plan.top < -2.9;
     terrain.ceiling = deep ? () => plan.top : a.ice ? terrain.ceiling : null;
     this.buildBodies(r);
+    this.dressExit(r);
     // the post office: the manatee paints into the scenery's prop atlas, so she's built before finish()
     const post = plan.pois.find((p) => p.kind === 'post');
     if (post) {
@@ -147,6 +148,7 @@ export class LevelBuild {
     }
     // the exit pit's grate and, on a floor that ends the planned run, the rope up to the surface
     const ex = plan.exit;
+    void ex;
     this.grate = grateModel(ex.x1 - ex.x0 + 0.8);
     this.grate.root.position.set((ex.x0 + ex.x1) / 2, ex.top - 0.2, 0);
     this.group.add(this.grate.root);
@@ -158,7 +160,7 @@ export class LevelBuild {
       this.group.add(this.rope.root);
     }
     // god-ray sheets (landmark shafts): remembered so the depth can dim them
-    this.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending && !(m.material as THREE.Material).userData.shared) this.shafts.push(m); });
+    this.group.traverse((o) => { const m = o as THREE.Mesh; const mt = m.material as THREE.MeshBasicMaterial; if (m.isMesh && mt.blending === THREE.AdditiveBlending && mt.isMeshBasicMaterial && !mt.userData.shared) this.shafts.push(m); });
     // gates + lids
     const sandCol = a.pal.sand[2];
     for (const ar of plan.arenas) {
@@ -166,7 +168,7 @@ export class LevelBuild {
       const kind = ar.kind;
       const sides = ar.kind === 'boss' ? [ar.x0 - 0.8] : [ar.x0 - 0.8, ar.x1 + 0.8];
       for (const gx of sides) {
-        const g = new ArenaGate(world, terrain, gx, sand.heightAt(gx), ar.top, a.id, kind, sandCol);
+        const g = new ArenaGate(world, terrain, gx, sand.heightAt(gx), ar.top, a.id, kind, sandCol, plan.top + 3);
         this.group.add(g.group);
         gs.push(g);
       }
@@ -181,7 +183,9 @@ export class LevelBuild {
     }
     // marine snow thickens with depth
     const dep = depthOf(plan, plan.base);
-    this.snow = new MarineSnow(a.snow * (1 + Math.min(2.2, dep / 120)), a.snowCol);
+    // ...and down in the dark it's half bioluminescent plankton
+    const snowCol = dep > 140 ? '#' + new THREE.Color(a.snowCol).lerp(new THREE.Color('#3aa8c0'), Math.min(0.6, (dep - 140) / 220)).multiplyScalar(dep > 220 ? 0.75 : 1).getHexString() : a.snowCol;
+    this.snow = new MarineSnow(Math.min(2.4, a.snow * (1 + dep / 400)), snowCol);
     this.group.add(this.snow.points);
     this.snow.setScale(world.game.h * Math.min(devicePixelRatio || 1, 1.5), world.camera.fov);
     // swords cut the seaweed
@@ -279,6 +283,19 @@ export class LevelBuild {
     this.roofGeo = g;
   }
   private roofGeo: THREE.BufferGeometry | null = null;
+
+  /** rock lining the exit shaft (behind and in front of the play plane) so it reads as a shaft, not a cut */
+  private dressExit(r: Rng) {
+    const ex = this.plan.exit, scen = this.scen;
+    for (const side of [-1, 1]) {
+      const wx = side < 0 ? ex.x0 - 1.2 : ex.x1 + 1.2;
+      for (let y = ex.bottom - 2; y < ex.top - 0.5; y += r.range(1.6, 2.4)) {
+        for (const z of [-2.6, 1.9]) scen.addRock(r.pick(scen.shapes('bigboulder')), wx + side * r.range(0, 0.6), y, z + r.range(-0.4, 0.4), r.range(1.2, 1.7), r.range(1.8, 2.6), z > 0 ? 0.9 : 1.4, r.range(0, 6), { tilt: 0.2, tint: z > 0 ? 0.55 : 0.8 });
+      }
+    }
+    // the shaft's back wall
+    for (let y = ex.bottom - 2; y < ex.top; y += 2.4) scen.addRock(r.pick(scen.shapes('bigboulder')), (ex.x0 + ex.x1) / 2, y, -3.6, (ex.x1 - ex.x0) / 2 + 1.5, 2.6, 1.2, r.range(0, 6), { tilt: 0.2, tint: 0.6 });
+  }
 
   /** make this level the live one: terrain, shared uniforms, events, owned entities */
   bind(world: World) {

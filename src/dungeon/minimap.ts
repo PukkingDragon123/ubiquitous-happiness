@@ -5,7 +5,7 @@
 //   const strip = stripMap(plan, player.x, player.y, { floors: 3 });
 import type { StripMap, StripPoi } from '../ui/hud3';
 import { bedAt, BIN, type LevelPlan } from './level';
-import { AREAS } from '../area/defs';
+import { biomeDef } from './biomes';
 
 const SAMPLES = 96;
 
@@ -48,6 +48,6 @@ export function stripMap(plan: LevelPlan, px: number, py: number, o: { floors: n
   return {
     length: plan.W, explored, player: px, playerY: normY(plan, py, deep),
     lanes: plan.lanes.map((l) => ({ ...l })), seabed, pois,
-    floor: plan.n + 1, floors: o.floors, name: AREAS[plan.area as keyof typeof AREAS]?.name ?? plan.area,
+    floor: plan.n + 1, floors: o.floors, name: biomeDef(plan.area).name,
   };
 }

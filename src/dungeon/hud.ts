@@ -18,14 +18,29 @@ export interface HudAnchor { x: number; y: number; on: boolean }
 export interface Prompt { key: string; label: string; at?: HudAnchor; bad?: boolean }
 export interface MailState { items: ItemInst[]; picked: Set<number>; capacity: number; used: number }
 
+/** the depth gauge's data (metres, positive down) */
+export interface DepthHud {
+  /** the blobfish's real depth now (animated during a descent) */
+  m: number;
+  /** this floor's span: its first shelf and the bottom of its exit shaft */
+  floorTop: number; floorBottom: number;
+  /** the deepest reached on this floor / this run, and the all-time record (META.records.maxDepth) */
+  floorMax: number; runMax: number; record: number;
+  zone: 'sunlit' | 'twilight' | 'midnight' | 'abyssal' | 'hadal';
+  /** past the planned floors (the endless deep) / in a descent between floors */
+  deeper: boolean; descending: boolean;
+}
+
 /** everything the dungeon HUD shows: L's HudData + the run's prompts and menus */
 export interface DungeonHudState {
   data: HudData;
   prompt: Prompt | null;
   paused: boolean;
   mail: MailState | null;
-  /** "SUNLIT REEF · FLOOR 1/3" for the pause menu */
+  /** "SUNLIT REEF · -32 M · FLOOR 1" for the pause menu */
   where: string;
+  /** the depth gauge (also handed to L's Hud as data.depth) */
+  depth: DepthHud;
 }
 
 const C = { white: '#f4f0e6', red: '#ff6a5a', ink: '#06080e' };
@@ -47,7 +62,10 @@ export class DungeonHud {
     ui.begin(input, dt);
     this.t += dt;
     // menus are physical objects: the HUD tucks itself away while the journal / mailbag is open
-    this.l.drawInto(ui, dt, s.paused || s.mail ? { ...s.data, hidden: true } : s.data);
+    // the depth gauge's data rides along as data.depth (agent L's brass gauge reads it)
+    const data = { ...s.data, depth: s.depth } as HudData;
+    this.l.drawInto(ui, dt, s.paused || s.mail ? { ...data, hidden: true } : data);
+    if (!s.paused && !s.mail && !s.data.hidden) this.depthCounter(s.depth);
     this.journal.visible = s.paused && !s.mail; this.bag.visible = !!s.mail; this.tag.visible = false;
     for (const [uid, m] of this.mailModels) if (!s.mail?.items.some((i) => i.uid === uid)) { m.removeFromParent(); this.mailModels.delete(uid); }
     let out: string | null = null;
@@ -88,6 +106,15 @@ export class DungeonHud {
     const label = new THREE.Mesh(new THREE.BoxGeometry(1, 13, 2), M('#f0e2c0', 0.9)); label.name = 'label';
     this.bag.add(bagRim, bagBody, flap, clasp, label);
     st.add(this.bag);
+  }
+
+  /** a plain depth readout until L's brass gauge reads data.depth */
+  private depthCounter(d: DepthHud) {
+    const ui = this.ui;
+    const t = `-${Math.round(d.m)} M`;
+    const x = ui.w - 8, y = 104;
+    ui.text(t, x, y, { font: 'title', color: d.descending ? '#9fe8ff' : '#f4f0e6', outline: '#06080e', align: 'right' });
+    ui.text(d.record > 0 ? `BEST -${Math.round(Math.max(d.record, d.runMax))} M` : d.zone.toUpperCase(), x, y + ui.lh('title'), { font: 'small', color: '#9aa8b8', outline: '#06080e', align: 'right' });
   }
 
   private prompt(p: Prompt) {

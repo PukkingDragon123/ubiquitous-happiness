@@ -43,7 +43,7 @@ export function depthLook(L: Look, m: number): Look {
     scatterTop: scTop, scatterDeep: scDeep,
     shallow: mixHex(L.shallow, scTop, tw), deep: mixHex(L.deep, scDeep, tw),
     depthMin: dMin,
-    rim: [mixHex(rim[0], '#7ab4ff', tw), rim[1] * (1 + 0.7 * mid)],
+    rim: [mixHex(rim[0], '#4a6aa8', tw), rim[1] * lerp(1, 0.6, tw) * lerp(1, 0.45, mid)],
     fill: [mixHex(fill[0], '#2a4a8a', tw), fill[1] * lerp(1, 0.6, mid)],
     exposure: L.exposure * (1 + 0.12 * tw + 0.15 * mid),
     bloom: (L.bloom ?? 0.3) + 0.2 * mid + 0.1 * had,

@@ -84,6 +84,8 @@ export interface MetaSave {
   cosmetics: CosmeticsSave;
   /** achievements (src/achievements): unlocked ids, when, and the running counters they track */
   achievements: AchievementsSave;
+  /** dungeon records (src/game/dungeonScreen.ts): the deepest metre reached, the deepest floor, hadal floors entered */
+  records?: { maxDepth: number; deepestFloor: number; hadal: number };
 }
 
 export interface CosmeticsSave { unlocked: string[]; equipped: { hat: string; skin: string; sword: string; trail: string; scarf: string } }

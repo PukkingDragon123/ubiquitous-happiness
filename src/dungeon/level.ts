@@ -121,7 +121,6 @@ export function genLevel(o: LevelOpts): LevelPlan {
     order.push('travel');
   }
   while (pi < pois.length) order.push(pois[pi++], 'travel');
-  order.push('travel');
   const travels = order.filter((s) => s === 'travel').length;
   const descent = r.range(28, 38);
   // drops: one per travel stretch (a couple stay flat), shares of the floor's descent
@@ -218,7 +217,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
   };
   seg.start();
   for (const s of order) {
-    if (s === 'travel') seg.travel(r.range(14, 22), x > 30 && r.chance(0.5));
+    if (s === 'travel') seg.travel(r.range(10, 15), x > 30 && r.chance(0.5));
     else seg[s]();
   }
   seg.boss();
@@ -285,6 +284,8 @@ export function explore(plan: LevelPlan, x: number, r = 14): boolean {
 /** the run's floors: from the starting area down the progression (extra floors repeat the deepest) */
 export const AREA_ORDER = ['reef', 'kelp', 'graveyard', 'arctic', 'abyss'];
 export function floorAreas(start: string, count: number): string[] {
+  // a hadal start (dev previews): hadal floors all the way
+  if (start.startsWith('hadal:')) return Array.from({ length: count }, (_, k) => (k === 0 ? start : 'hadal:' + ['vents', 'trench', 'bones', 'crystal'][k % 4]));
   const i = Math.max(0, AREA_ORDER.indexOf(start));
   return Array.from({ length: count }, (_, k) => AREA_ORDER[Math.min(AREA_ORDER.length - 1, i + k)]);
 }
