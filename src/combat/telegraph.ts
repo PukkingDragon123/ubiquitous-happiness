@@ -42,12 +42,14 @@ function starTex(red: boolean) {
   });
 }
 function ringTex(red: boolean) {
-  return pxTex('tgRing' + red, 64, 64, (p) => {
-    const col = red ? '#ff3a28' : '#d8f0ff', edge = red ? '#3a0004' : '#0c2a44';
-    for (let a = 0; a < 96; a++) {
-      if (a % 6 > 3) continue; // dashes
-      const t = (a / 96) * Math.PI * 2;
-      for (let r = 27; r <= 29; r++) p.set(Math.round(31.5 + Math.cos(t) * r), Math.round(31.5 + Math.sin(t) * r), col);
+  return pxTex('tgRing' + red, 128, 128, (p) => {
+    const col = red ? '#ff3a28' : '#d8f0ff', hi = red ? '#ffb090' : '#ffffff', edge = red ? '#3a0004' : '#0c2a44';
+    // 24 short dashes round a 2 px ring, each with a bright inner pixel row
+    for (let a = 0; a < 720; a++) {
+      const t = (a / 720) * Math.PI * 2;
+      if (Math.floor((a / 720) * 24 * 2) % 2) continue;
+      p.set(Math.round(63.5 + Math.cos(t) * 59), Math.round(63.5 + Math.sin(t) * 59), col);
+      p.set(Math.round(63.5 + Math.cos(t) * 58), Math.round(63.5 + Math.sin(t) * 58), hi);
     }
     p.outline(edge);
   });
@@ -113,7 +115,7 @@ export function glint(w: World, x: number, y: number, o: { red?: boolean; size?:
   const sz = (o.size ?? 0.9) * (red ? 1.25 : 1);
   w.add(new FxBit(x, y, o.z ?? 0.9, unlitMat(starTex(red), '#ffffff', red ? 1.8 : 2.2), 0.42, sz, 'glint', o.follow));
   if (red) w.add(new FxBit(x, y, (o.z ?? 0.9) - 0.02, unlitMat(ringTex(true), '#ffffff', 1.6), 0.5, sz * 1.4, 'ring', o.follow, 3));
-  w.fx.emit('glow', x, y, { n: 1, size: sz * 1.4, life: 0.25, color: red ? '#ff3020' : '#d8f0ff', z: (o.z ?? 0.9) - 0.05 });
+  w.fx.emit('glow', x, y, { n: 1, size: sz * 0.7, life: 0.2, alpha: 0.6, color: red ? '#ff3020' : '#d8f0ff', z: (o.z ?? 0.9) - 0.05 });
   if (o.sound !== false) {
     if (red) { w.sfx('k_glass', x, 0.65, 0.55); w.sfx('charge', x, 0.45, 0.8); }
     else w.sfx('k_glass', x, 0.55, 1.5);

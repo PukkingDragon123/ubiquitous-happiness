@@ -1,6 +1,6 @@
-// The TV's pixel picture (a 320 x 240 canvas shown through the CRT material): cosy décor now that the main menu is
-// the title screen (src/title). It loops a little nature channel: kelp swaying, a pixel blobfish gliding past, the
-// channel bug and a news ticker. Clicking the TV in the hideout takes you to the main menu.
+// The TV's pixel picture (a 320 x 240 canvas shown through the CRT material): cosy décor. It loops a little nature
+// channel: kelp swaying, a pixel blobfish gliding past, the channel bug and a news ticker. Watching it from the
+// hideout (E at the TV) dollies into the tube and replays the prologue.
 import type { Input } from '../core/input';
 import { PixelUI } from '../ui/pixel/ui';
 import { blobSprite, fishSprite } from './tvArt';
@@ -54,7 +54,7 @@ export class TvUI {
     ui.text('LIVE', 10, 8, { font: 'small', color: '#ff4a4a', shadow: '#000' });
     if (Math.sin(t * 3) > 0) ui.fill(36, 9, 4, 4, '#ff4a4a');
     ui.fill(0, 226, TV_W, 14, '#000818');
-    const tick = 'BLOBFISH TV  •  CLICK THE TV FOR THE MAIN MENU  •  TONIGHT: HUMANS, WHY?  •  WEATHER: WET  •  HATS ARE BACK  •  ';
+    const tick = 'BLOBFISH TV  •  TONIGHT: WHERE IT ALL BEGAN (THE BREAD)  •  HUMANS, WHY?  •  WEATHER: WET  •  HATS ARE BACK  •  ';
     const w = ui.measure(tick, 'small');
     const off = -((t * 30) % w);
     ui.text(tick + tick, Math.round(off), 229, { font: 'small', color: '#ffe04a' });

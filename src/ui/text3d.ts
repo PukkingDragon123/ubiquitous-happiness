@@ -33,7 +33,7 @@ export const T3D = {
   gold: { font: 'title', top: '#fffbe0', bottom: '#f0b030', edge: '#4a2a00', glow: 0.4 },
   danger: { font: 'title', top: '#ffe0e0', bottom: '#ff4a3a', edge: '#3a0006', glow: 0.35 },
   blood: { font: 'title', top: '#ff6a5a', bottom: '#b80e18', edge: '#1a0004', glow: 0.25, depth: 4 },
-  hint: { font: 'body', top: '#f0fdff', bottom: '#8ae8ff', edge: '#06303f', glow: 0.45 },
+  hint: { font: 'small', top: '#f0fdff', bottom: '#8ae8ff', edge: '#06303f', glow: 0.45 },
   item: { font: 'title', top: '#ffffff', bottom: '#9fd6ff', edge: '#0c2a4a', glow: 0.45 },
   name: { font: 'title', top: '#fff2c8', bottom: '#ffd27a', edge: '#2a1408', glow: 0.35 },
   damage: { font: 'title', top: '#ffffff', bottom: '#ffd0c8', edge: '#5a0614', glow: 0.5 },
@@ -41,7 +41,7 @@ export const T3D = {
   heal: { font: 'title', top: '#ffffff', bottom: '#5ae08a', edge: '#0b4a2a', glow: 0.5 },
   magic: { font: 'title', top: '#ffffff', bottom: '#c08cff', edge: '#2a0c4a', glow: 0.5 },
   logo: { font: 'title', top: '#fff6c8', bottom: '#ffb43a', edge: '#3a1400', glow: 0.3, depth: 4 },
-  sub: { font: 'title', top: '#dff8ff', bottom: '#4ac8ff', edge: '#02203a', glow: 0.45 },
+  sub: { font: 'small', top: '#dff8ff', bottom: '#4ac8ff', edge: '#02203a', glow: 0.45 },
 } satisfies Record<string, T3DStyle>;
 export type T3DName = keyof typeof T3D;
 
@@ -168,6 +168,9 @@ function material(st: T3DStyle): THREE.MeshStandardMaterial {
   return m;
 }
 
+/** the internal height the 3D scene renders at (src/gfx/post.ts lowResH) and the minimum glyph pixel size there */
+export const TEXT3D_VIEW = { lowResH: 440, minPx: 1.7 };
+
 // ------------------------------------------------------------------ a word in the world
 export interface T3DOpts {
   /** cap height in metres (default 0.6) */
@@ -217,7 +220,7 @@ export class Text3D {
     this.text = text;
     this.o = {
       size: o.size ?? 0.6, life: o.life ?? 0, bob: o.bob ?? 0.06, wave: o.wave ?? 0.55, stagger: o.stagger ?? 0.045, delay: o.delay ?? 0,
-      rise: o.rise ?? 0, face: o.face ?? 0.85, angle: o.angle ?? 0.22, shake: o.shake ?? 0, shadow: o.shadow ?? true, enter: o.enter ?? 'pop',
+      rise: o.rise ?? 0, face: o.face ?? 0.85, angle: o.angle ?? ((o.size ?? 0.6) < 0.45 ? 0.08 : 0.22), shake: o.shake ?? 0, shadow: o.shadow ?? true, enter: o.enter ?? 'pop',
       follow: o.follow, onLand: o.onLand,
     };
     this.riseV = this.o.rise;
@@ -280,6 +283,15 @@ export class Text3D {
     this.yaw += (want - this.yaw) * (1 - Math.exp(-dt * 6));
     const pitch = -Math.atan2(cp.y - gy, Math.hypot(cp.x - gx, cp.z - gz)) * 0.35 * o.face;
     this.group.rotation.set(-pitch * 0.5, this.yaw, Math.sin(this.t * 0.9) * 0.02, 'YXZ');
+    // legibility floor: the world renders at ~TEXT3D_VIEW.lowResH px tall, so a glyph pixel must cover at least
+    // TEXT3D_VIEW.minPx of those or letters alias into mush; small words grow (up to 2x) until it does
+    const pc = cam as THREE.PerspectiveCamera;
+    if (pc.isPerspectiveCamera) {
+      const dist = Math.max(0.1, Math.hypot(cp.x - gx, cp.y - gy, cp.z - gz));
+      const worldPerPx = (2 * dist * Math.tan(THREE.MathUtils.degToRad(pc.fov) / 2)) / TEXT3D_VIEW.lowResH;
+      const need = (TEXT3D_VIEW.minPx * worldPerPx) / this.vox;
+      this.group.scale.setScalar(Math.min(2, Math.max(1, need)));
+    }
     let allGone = this.outT >= 0;
     const n = this.letters.length;
     for (const L of this.letters) {

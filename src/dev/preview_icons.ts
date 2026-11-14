@@ -11,6 +11,8 @@ import { drawText } from '../ui/pixel/font';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
 import { icon, ICON_NAMES } from '../ui/pixel/art';
 import { itemIcon } from '../game/items';
+import { cosmeticIcon, COSMETIC_ICON_IDS } from '../cosmetics/icons';
+import { medal, MEDAL_EMBLEMS } from '../achievements/medals';
 
 const BG: Record<string, [string, string]> = { slate: ['#232836', '#2a3040'], leather: ['#5a3420', '#6a3e26'], light: ['#d8d0c0', '#e4dccc'] };
 
@@ -20,7 +22,8 @@ export default function make(game: Game): Screen {
   const cols = Number(q.get('cols') || 8);
   const bg = BG[q.get('bg') || 'slate'] ?? BG.slate;
   const from = Number(q.get('from') || 0), cnt = Number(q.get('n') || 999);
-  const items = ITEM_LIST.slice(from, from + cnt);
+  const ids = q.get('ids')?.split(',');
+  const items = ids ? ITEM_LIST.filter((d) => ids.includes(d.id)) : ITEM_LIST.slice(from, from + cnt);
   const old = q.get('old') === '1';
   const W = Math.max(1280, innerWidth);
   const cv = document.createElement('canvas');
@@ -34,27 +37,21 @@ export default function make(game: Game): Screen {
 
   if (set === 'all' || set === 'items') {
     head(`ITEMS  (${items.filter((d) => ICON_ART[d.id]).length}/${items.length} redrawn)  1x and 3x`);
-    // each tile: the 1x icon top-left, the 3x copy right of it
-    const cw = Math.floor((W - 20) / cols);
-    let col = 0, rowH = 0;
+    // flow layout: each tile holds the 1x icon and its 3x copy
+    let cx = 10, rowH = 0, k = 0;
     for (const d of items) {
-      const ic = itemIcon(d.id);
+      const ic = paintIconAt(getItem(d.id), 1, 32) ?? itemIcon(d.id);
       const ic3 = big(ic, 3);
-      const oldIc = old ? null : null;
-      void oldIc;
-      const th = Math.max(ic3.height + 18, 60);
-      const tw = cw;
-      if (col === 0) rowH = 0;
-      const tx = 10 + col * cw, ty = y;
-      x.fillStyle = (col + Math.floor(y / 7)) % 2 ? bg[0] : bg[1]; x.fillRect(tx, ty, tw - 2, th);
-      x.drawImage(ic, tx + 4, ty + 4);
-      x.drawImage(ic3, tx + 8 + ic.width, ty + 4);
-      drawText(x, d.id, tx + 4, ty + th - 11, { font: 'small', color: ICON_ART[d.id] ? RARITY_COLOR[d.rarity] : '#ff5a4a' });
-      rowH = Math.max(rowH, th + 2);
-      col++;
-      if (col >= cols || tx + 2 * tw > W) { col = 0; y += rowH; }
+      const tw = Math.max(150, ic.width + ic3.width + 16), th = ic3.height + 20;
+      if (cx + tw > W - 6) { cx = 10; y += rowH + 2; rowH = 0; }
+      x.fillStyle = k++ % 2 ? bg[0] : bg[1]; x.fillRect(cx, y, tw, th);
+      x.drawImage(ic, cx + 4, y + 4);
+      x.drawImage(ic3, cx + 10 + ic.width, y + 4);
+      drawText(x, d.id, cx + 4, y + th - 11, { font: 'small', color: ICON_ART[d.id] ? RARITY_COLOR[d.rarity] : '#ff5a4a' });
+      cx += tw + 2; rowH = Math.max(rowH, th);
     }
-    if (col) y += rowH;
+    y += rowH;
+    void cols;
     y += 10;
   }
   if (set === 'all' || set === 'small') {
@@ -99,6 +96,22 @@ export default function make(game: Game): Screen {
     }
     y += rowH + 16;
   }
+  const strip = (title: string, list: { name: string; c: HTMLCanvasElement }[]) => {
+    head(title);
+    let cx = 10, rowH = 0;
+    for (const { name, c } of list) {
+      const c3 = big(c, 3);
+      const w = Math.max(c.width + c3.width + 14, name.length * 6 + 4);
+      if (cx + w > W - 10) { cx = 10; y += rowH + 6; rowH = 0; }
+      x.fillStyle = bg[0]; x.fillRect(cx - 2, y - 2, w, c3.height + 16);
+      x.drawImage(c, cx, y); x.drawImage(c3, cx + c.width + 6, y);
+      drawText(x, name, cx, y + c3.height + 3, { font: 'small', color: '#c8c0b0' });
+      cx += w + 6; rowH = Math.max(rowH, c3.height + 16);
+    }
+    y += rowH + 16;
+  };
+  if (set === 'all' || set === 'cos') strip('COSMETICS  (32 px design shown at 24 and 3x)', COSMETIC_ICON_IDS.map((id) => ({ name: id, c: cosmeticIcon(id, 24) })));
+  if (set === 'all' || set === 'medals') strip('ACHIEVEMENT MEDALS  (gold / silver / bronze / locked)', MEDAL_EMBLEMS.flatMap((e, i) => [{ name: e, c: medal(e, (['gold', 'silver', 'bronze'] as const)[i % 3]) }, ...(i < 3 ? [{ name: 'locked', c: medal(e, 'gold', true) }] : [])]));
   extraSections.forEach((f) => { if (set === 'all' || set === f.set) { head(f.title); y = f.draw(x, 10, y, W - 20, bg, big) + 16; } });
 
   const out = document.createElement('canvas');

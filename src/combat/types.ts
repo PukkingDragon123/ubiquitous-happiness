@@ -1,8 +1,9 @@
 // Combat contracts (souls-like layer). Shared by the player moveset (moveset.ts), the enemy kit (core.ts), the
-// enemy roster (src/combat/sealife.ts, src/combat/divers.ts), the bosses (src/bosses) and the dungeon (agent J).
+// enemy roster (src/combat/sealife.ts, src/waves/human.ts duel brain), the bosses (src/bosses) and the dungeon
+// levels (agent J: continuous side-scrolling floors with arena-lock encounters and roaming groups).
 import type { Entity, World, DamageKind } from '../game/types';
 
-/** a room arena (side view): walls at x0 / x1, the seabed at `floor`, the ceiling (or water top) at `top` */
+/** an arena-lock box (side view): walls at x0 / x1, the seabed at `floor`, the ceiling (or water top) at `top` */
 export interface Arena { x0: number; x1: number; floor: number; top: number }
 
 export type FloorId = 'reef' | 'kelp' | 'graveyard' | 'arctic' | 'abyss';
@@ -16,12 +17,13 @@ export type EnemyKind =
 export const ENEMY_KINDS: EnemyKind[] = ['harpoon', 'knife', 'net', 'heavy', 'medic', 'moray', 'crab', 'puffer', 'jelly', 'angler', 'barracuda', 'dummy'];
 
 export interface SpawnOpts {
-  /** a stronger variant: more hp + poise, faster wind-ups, a gold name tag */
+  /** a stronger variant: more hp + poise, faster wind-ups, longer combos, a gold shimmer */
   elite?: boolean;
   /** a returning nemesis (META.nemeses id): divers only */
   nemesis?: string;
-  /** the room the enemy lives in (defaults to the world's arena, see setArena) */
-  arena?: Arena;
+  /** an arena-lock box to fight in; omitted / null = a roamer (patrols round its spawn point, notices the
+   *  player, chases within a leash, swims home). Lock / release later with bindArena(e, arena | null). */
+  arena?: Arena | null;
   /** 0..1+: scales hp / damage / aggression (floor depth x mastery) */
   difficulty?: number;
   /** don't world.add() it (the caller adds it) */

@@ -70,8 +70,10 @@ export interface Flow {
   continueGame(): void;
   /** a run ended (lost / won; META already updated): home to the hideout with the result card */
   runEnded(result: RunResult): void;
-  /** back to the title (the hideout's sign-post on the wall / settings) */
+  /** back to the title (the hideout's pause card) */
   toTitle(): void;
+  /** the dungeon's pause menu QUIT: home through the hatch (the run stays in META.activeRun for RESUME) */
+  dungeonQuit(): void;
   /** the prologue finished (skipped = held ESC). META.introDone is already set; reassign to route elsewhere */
   afterIntro: (skipped: boolean) => void;
 }
@@ -123,6 +125,7 @@ export function setupFlow(game: Game): Flow {
     continueGame: () => { if (!resume()) home({ arrive: true }); },
     runEnded: (r) => { game.go('hideout', { arrive: true }); game.openModal('result', r); },
     toTitle: () => game.go('title', { quick: true }),
+    dungeonQuit: () => home({ arrive: true }),
     afterIntro: (skipped) => { welcome = !skipped; home({ arrive: true }); },
   };
   const title = new TitleScreen(game, { onNew: () => flow.newGame(), onResume: () => flow.continueGame(), hasSave });

@@ -149,7 +149,7 @@ export class EnemyCore {
   /** called by attackPlayer when the player perfectly parried this enemy */
   parried(w: World) {
     const h = this.head();
-    callout(w, 'PARRIED', h.x, h.y + 0.3, 'gold', 0.4);
+    callout(w, 'PARRIED', h.x, h.y + 0.5, 'hint', 0.3);
     this.poise = 0;
     this.stagger(w, this.owner.isBoss ? 1.3 : 1.6, 'parried');
   }
@@ -174,7 +174,6 @@ export class EnemyCore {
     if (this.blocks(dirX) && kind !== 'explosion' && kind !== 'zap') {
       if (b && (b.guardBreak || b.riposte)) {
         // a heavy smashes the guard open
-        this.guard = this.guard === 'all' ? 'all' : this.guard;
         callout(w, 'GUARD BREAK', o.x, o.y + o.r + 0.7, 'gold', 0.42);
         clang(w, o.x - dirX * o.r, o.y, Math.atan2(dirY, dirX), true);
         this.poise = 0;

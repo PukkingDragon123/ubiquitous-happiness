@@ -42,7 +42,8 @@ export default function make(game: Game): Screen {
   const showSheet = q.get('sheet') !== '0';
   let t = Number(q.get('t') || 0);
   const combat: PlayerCombatHud = { stamina: 100, staminaMax: 100, staminaDelay: 0, flasks: 2, flasksMax: 3, drinking: 0, guard: 'idle', parryWindow: 0, lastParry: null, lastParryAge: 9, charge: 0, move: null, iframes: false };
-  const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null };
+  const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null,
+    skills: { sel: 1, mana: 40, maxMana: 60, slots: [{ id: 'manaBolt', name: 'Mana Volley', cd: 0, cdMax: 4, mana: 10, color: '#6a9aff' }, { id: 'frostNova', name: 'Frost Nova', cd: 2, cdMax: 6, mana: 20, color: '#8ae8ff' }, null, { id: 'chainZap', name: 'Chain', cd: 0, cdMax: 5, mana: 80, color: '#ffe04a' }] } };
   return {
     name: 'hudpreview', scene, camera, underwater: false,
     overlays: [hud.layer, sheetUi.layer],
@@ -60,6 +61,7 @@ export default function make(game: Game): Screen {
       combat.drinking = (t % 4) / 4;
       combat.guard = Math.floor(t / 3) % 4 === 1 ? 'riposte' : 'idle';
       s.mana = 30 + Math.sin(t) * 25;
+      if (s.skills?.slots[1]) s.skills.slots[1].cd = Math.max(0, 6 - (t % 8));
       s.pearls = 7 + (Math.floor(t / 2) % 30);
       s.keys = 1 + (Math.floor(t / 5) % 2);
       s.pack = { used: 14 + (Math.floor(t / 3) % 12), total: 25 };

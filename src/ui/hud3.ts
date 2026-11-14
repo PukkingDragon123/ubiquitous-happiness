@@ -27,7 +27,8 @@ import { PixelUI } from './pixel/ui';
 import type { Input } from '../core/input';
 import type { PlayerCombatHud, BossBar } from '../combat/types';
 import { hudArt } from './hudArt';
-import { ITEMS } from '../game/items';
+import { ITEMS, skillItem } from '../game/items';
+import type { SkillHudState } from '../skills/hud';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -75,6 +76,8 @@ export interface HudData {
   strip?: StripMap | null;
   /** K's boss bar (drawn while visible) */
   boss?: BossBar | null;
+  /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
+  skills?: SkillHudState | null;
   /** hide everything but title cards (cutscenes) */
   hidden?: boolean;
 }
@@ -98,6 +101,8 @@ export class Hud {
   private bossShown = 1; private bossChip = 1; private bossChipHold = 0; private bossFlash = 0; private bossIn = 0; private bossName = '';
   private pop: Record<Counter, number> = { pearls: 0, keys: 0, bombs: 0, pack: 0, hp: 0 };
   private parryFlash = 0;
+  private prevCd: number[] = [];
+  private slotFlash: number[] = [];
   private cards: Card[] = [];
 
   resize(w: number, h: number, pr: number) { this.ui.resize(w, h, pr); }
@@ -131,6 +136,7 @@ export class Hud {
       this.counters(ui, 7, y + 4, s);
       if (s.strip) this.strip(ui, s.strip);
       if (s.boss && s.boss.visible !== false) this.bossBar(ui, s.boss);
+      if (s.skills) this.skillRow(ui, s.skills);
     }
     this.drawCards(ui, dt);
     this.prev = { ...s, combat: s.combat ? { ...s.combat } : s.combat };
@@ -154,6 +160,7 @@ export class Hud {
       if (s.pack && p.pack && s.pack.used !== p.pack.used) this.pop.pack = Math.max(this.pop.pack, 0.6);
       if (s.combat?.lastParry && s.combat.lastParryAge < (p.combat?.lastParryAge ?? 99)) this.parryFlash = s.combat.lastParry === 'perfect' ? 1 : 0.5;
     }
+    if (s.skills) s.skills.slots.forEach((sl, i) => { const cd = sl?.cd ?? 0; if ((this.prevCd[i] ?? 0) > 0 && cd <= 0) this.slotFlash[i] = 1; this.prevCd[i] = cd; this.slotFlash[i] = Math.max(0, (this.slotFlash[i] ?? 0) - dt * 3); });
     for (let i = 0; i < this.heartBump.length; i++) this.heartBump[i] = Math.max(0, this.heartBump[i] - dt * 3);
     this.heartFlash = Math.max(0, this.heartFlash - dt * 4);
     for (const k of Object.keys(this.pop) as Counter[]) this.pop[k] = Math.max(0, this.pop[k] - dt * 3.5);
@@ -226,7 +233,7 @@ export class Hud {
     const c = s.combat;
     let yy = y;
     if (c && c.staminaMax > 0) {
-      const sw = Math.round(36 + Math.min(84, c.staminaMax * 0.7));
+      const sw = Math.round(36 + Math.min(64, c.staminaMax * 0.5));
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
       const ramp: [string, string, string, string] = broken ? ['#6a0a10', '#d0302a', '#ff8a6a', '#ffffff']
         : c.staminaDelay > 0 ? ['#6a4a08', '#c89a28', '#f0d060', '#ffffff'] : ['#235c10', '#62b828', '#b0ec5c', '#ffffff'];
@@ -397,6 +404,40 @@ export class Hud {
     const sk = hudArt('skull');
     ui.img(sk, x - 9 - sk.width + 2, y + Math.round((H - sk.height) / 2));
     if (n > 1) { const pw = n * 7 - 2, px0 = Math.round(ui.w / 2 - pw / 2); for (let i = 0; i < n; i++) ui.img(hudArt(i < ph ? 'pip' : 'pipOff'), px0 + i * 7, y + H + 4); }
+  }
+
+  // ---------------------------------------------------------------- bottom left: skill slots
+  private skillRow(ui: PixelUI, s: SkillHudState) {
+    const S = 26, gap = 4, x0 = 8, y0 = ui.h - S - 8;
+    s.slots.forEach((sl, i) => {
+      const x = x0 + i * (S + gap), sel = i === s.sel && !!sl;
+      const y = y0 - (sel ? 2 : 0);
+      ui.fill(x + 1, y + 1, S, S, '#00000066');
+      ui.fill(x, y, S, S, '#0a0610');
+      ui.fill(x + 1, y + 1, S - 2, S - 2, sel ? '#f0c040' : '#8a6a3a');
+      ui.fill(x + 1, y + 1, S - 2, 1, sel ? '#fff2a0' : '#c8a060'); ui.fill(x + 1, y + 1, 1, S - 2, sel ? '#fff2a0' : '#c8a060');
+      ui.fill(x + 1, y + S - 2, S - 2, 1, sel ? '#a06a10' : '#4a3418'); ui.fill(x + S - 2, y + 1, 1, S - 2, sel ? '#a06a10' : '#4a3418');
+      ui.fill(x + 3, y + 3, S - 6, S - 6, '#1c2230');
+      ui.fill(x + 3, y + 3, S - 6, 1, '#0c1018');
+      if (sl) {
+        const it = skillItem(sl.id);
+        if (it) ui.item(it.id, x + 3, y + 3, S - 6, S - 6);
+        else ui.fill(x + 8, y + 8, S - 16, S - 16, sl.color);
+        const k = sl.cdMax > 0 ? clamp01(sl.cd / sl.cdMax) : 0;
+        if (k > 0) {
+          const hh = Math.ceil((S - 6) * k);
+          ui.fill(x + 3, y + 3, S - 6, hh, '#060810', 0.78);
+          ui.fill(x + 3, y + 3 + hh, S - 6, 1, '#8a9ab8');
+          ui.text(String(Math.ceil(sl.cd)), x + S / 2, y + S / 2 - 5, { font: 'body', color: '#ffffff', outline: '#06080e', align: 'center' });
+        } else if (sl.mana > s.mana) ui.fill(x + 3, y + 3, S - 6, S - 6, '#14286a', 0.55);
+        if ((this.slotFlash[i] ?? 0) > 0) ui.fill(x + 3, y + 3, S - 6, S - 6, '#ffffff', this.slotFlash[i] * 0.8);
+        if (sl.mana > 0) { ui.img(hudArt('manaGem'), x + S - 7, y + S - 8, { alpha: sl.mana > s.mana ? 0.4 : 1 }); }
+      }
+      // key plate
+      ui.fill(x - 2, y - 3, 9, 10, '#0a0610');
+      ui.fill(x - 1, y - 2, 7, 8, sel ? '#fff2a0' : '#d8c8a0');
+      ui.text(String(i + 1), x + 2.5, y - 1, { font: 'small', color: '#2a1a0a', shadow: null, align: 'center' });
+    });
   }
 
   // ---------------------------------------------------------------- title cards / pickup streaks

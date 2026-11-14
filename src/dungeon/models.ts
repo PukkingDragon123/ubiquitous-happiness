@@ -1,9 +1,9 @@
 // Dungeon props, PS2 blocky low-poly: flat-shaded, matte, clean hand-placed pages (no noise, no dither).
 //
-//   gateModel(area, kind)   a side-door cage (rows of bars seen from the front) + its frame; kind 'normal' |
-//                           'locked' (gold trim + padlock) | 'boss' (a jawed skull arch, red eyes) | 'challenge'
-//   hatchModel(area, up)    the grate over a shaft
-//   crackedPlug(area)       the cracked rock that seals a secret passage (bomb it)
+//   arenaGateModel(area, kind, h)  a fence of the area's bars (coral, kelp, iron, ice, bone) that grows out of the
+//                           sand to seal an arena side; 'challenge' adds a skull pike, 'boss' a jawed skull arch
+//   crackedPlug(area)       the cracked rock lid over a secret pit (bomb it)
+//   padlock()               for locked chests
 //   pedestalModel(area)     carved plinth an item floats over
 //   chestModel()            iron-banded chest with a lid pivot
 //   keyModel() bombModel() pearlModel(v) heartModel(half)  pickups
@@ -127,20 +127,18 @@ const pufferPage = () => ctex('dg.puffer', 64, 32, (p) => {
 
 const AREA_STONE: Record<string, string> = { reef: '#c8b49a', kelp: '#8a8670', graveyard: '#7a7a6a', arctic: '#a8b8c8', abyss: '#4a5266' };
 
-// ------------------------------------------------------------------ the side-door gate
-export type GateKind = 'normal' | 'locked' | 'boss' | 'challenge' | 'secret';
+// ------------------------------------------------------------------ arena gates
+export type GateKind = 'arena' | 'challenge' | 'boss';
 export interface GateModel {
   root: THREE.Group;
-  /** the bars that retract (one group per row, staggered) */
-  bars: THREE.Group[];
-  /** the frame (stays) */
+  /** the bar columns, each rising on its own (staggered) */
+  cols: THREE.Group[];
+  /** decoration that stays put (the boss skull arch) */
   frame: THREE.Group;
-  /** padlock (locked doors) */
-  lock: THREE.Group | null;
   /** glowing bits (boss eyes) */
   glow: THREE.Mesh[];
-  /** height the bars travel */
-  travel: number;
+  /** height of the barrier */
+  h: number;
 }
 
 function barMat(area: string): THREE.MeshStandardMaterial {
@@ -153,107 +151,102 @@ function barMat(area: string): THREE.MeshStandardMaterial {
   }
 }
 
-/** one bar of the area's kind, height h, standing on y = 0 */
+/** one bar of the area's kind, height h, standing on y = 0 (the tip at the top) */
 function barGeo(area: string, h: number, seed: number): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = [];
-  const r = 0.12 + hash2(seed, 1, 3) * 0.03;
+  const r = 0.13 + hash2(seed, 1, 3) * 0.04;
+  const segs = Math.max(2, Math.round(h / 2));
   switch (area) {
     case 'kelp': {
-      // a twisted kelp stipe with a blade or two and a rope lashing
-      const g = lpCyl(r * 0.8, h, 6, r * 0.7, 4); g.translate(0, h / 2, 0); out.push(g);
-      for (let k = 0; k < 2; k++) { const b = new THREE.BoxGeometry(0.06, 0.7, 0.32); b.rotateZ(0.5 * (k ? 1 : -1)); b.translate((k ? 1 : -1) * 0.2, h * (0.3 + k * 0.35), 0); out.push(b); }
+      // a kelp stipe with blades every couple of metres and a float bulb at the tip
+      const g = lpCyl(r * 0.8, h, 6, r * 0.6, segs); g.translate(0, h / 2, 0); out.push(g);
+      for (let y = 1.2; y < h - 0.6; y += 1.6 + hash2(seed, y, 2) * 0.8) { const sgn = hash2(seed, y, 5) > 0.5 ? 1 : -1; const b = new THREE.BoxGeometry(0.05, 0.9, 0.34); b.rotateZ(0.55 * sgn); b.translate(sgn * 0.26, y, 0); out.push(b); }
+      const bulb = lpSphere(r * 1.6, 0); bulb.translate(0, h + 0.1, 0); out.push(bulb);
       break;
     }
     case 'graveyard': {
       const g = boxUV(new THREE.BoxGeometry(r * 1.4, h, r * 1.4), 1.4); g.translate(0, h / 2, 0); out.push(g);
-      const tip = lpCone(r * 1.1, 0.35, 4); tip.rotateX(Math.PI); tip.translate(0, 0.1, 0); out.push(tip);
+      const tip = lpCone(r * 1.2, 0.45, 4); tip.translate(0, h + 0.2, 0); out.push(tip);
       break;
     }
     case 'arctic': {
-      const g = lpCyl(r * 1.2, h, 5, r * 0.8, 3); g.translate(0, h / 2, 0); out.push(g);
-      const tip = lpCone(r * 1.2, 0.5, 5); tip.rotateX(Math.PI); tip.translate(0, 0.2, 0); out.push(tip);
+      const g = lpCyl(r * 1.3, h, 5, r * 0.7, segs); g.translate(0, h / 2, 0); out.push(g);
+      const tip = lpCone(r * 0.7, 0.6, 5); tip.translate(0, h + 0.28, 0); out.push(tip);
       break;
     }
     case 'abyss': {
-      // a fang: thick at the top (it hangs from the lintel), sharp at the bottom
-      const g = lpCyl(r * 0.5, h, 6, r * 1.3, 3); g.translate(0, h / 2, 0); out.push(g);
-      const tip = lpCone(r * 0.5, 0.4, 6); tip.rotateX(Math.PI); tip.translate(0, 0.0, 0); out.push(tip);
+      const g = lpCyl(r * 1.4, h, 6, r * 0.5, segs); g.translate(0, h / 2, 0); out.push(g);
+      const tip = lpCone(r * 0.5, 0.5, 6); tip.translate(0, h + 0.24, 0); out.push(tip);
       break;
     }
     default: {
-      // a coral branch: a trunk with two knobbly side branches
-      const g = lpCyl(r, h, 6, r * 0.85, 4); g.translate(0, h / 2, 0); out.push(g);
-      for (let k = 0; k < 2; k++) {
-        const s = k ? 1 : -1, y0 = h * (0.25 + hash2(seed, k + 4, 3) * 0.45);
-        const b = lpCyl(r * 0.55, 0.55, 5, r * 0.4); b.translate(0, 0.27, 0); b.rotateZ(-s * 0.7); b.translate(s * 0.05, y0, 0); out.push(b);
-        const knob = lpSphere(r * 0.6, 0); knob.translate(s * 0.38, y0 + 0.4, 0); out.push(knob);
+      // a coral branch: a trunk with knobbly side branches all the way up
+      const g = lpCyl(r, h, 6, r * 0.75, segs); g.translate(0, h / 2, 0); out.push(g);
+      for (let y = 0.8; y < h - 0.5; y += 1.3 + hash2(seed, y, 3) * 0.9) {
+        const s2 = hash2(seed, y, 4) > 0.5 ? 1 : -1;
+        const b = lpCyl(r * 0.55, 0.6, 5, r * 0.4); b.translate(0, 0.3, 0); b.rotateZ(-s2 * 0.75); b.translate(s2 * 0.05, y, 0); out.push(b);
+        const knob = lpSphere(r * 0.6, 0); knob.translate(s2 * 0.42, y + 0.44, 0); out.push(knob);
       }
+      const knob = lpSphere(r * 0.9, 0); knob.translate(0, h, 0); out.push(knob);
     }
   }
   return out;
 }
 
 /**
- * A side-door gate for the wall at x = side * HALF_W (side = -1 left, +1 right), built around the local origin:
- * x = 0 at the wall line, y = 0 at the bottom of the gap, height `h`. Bars fill x in [-0.7, 0.7] (local, toward
- * the room is -side), in rows across z so the front reads as a portcullis.
+ * An arena gate: a fence band of the area's bars (coral, kelp, rusted iron, ice, bone) that grows up out of the
+ * sand to seal one side of an encounter. Built around x = 0, standing on y = 0, height h; columns spread over
+ * x in [-0.7, 0.7] and rows across z so the front reads as a barrier. The boss kind adds a jawed skull arch.
  */
-export function gateModel(area: string, kind: GateKind, h: number): GateModel {
+export function arenaGateModel(area: string, kind: GateKind, h: number): GateModel {
   const root = new THREE.Group();
   const frame = new THREE.Group();
   root.add(frame);
-  const bars: THREE.Group[] = [];
   const glow: THREE.Mesh[] = [];
   const mat = kind === 'boss' ? M('bar.boss', ironPage, { rough: 0.6, metal: 0.3, color: '#6a4a44' }) : barMat(area);
-  const rows = [-1.15, -0.4, 0.35, 1.1];
-  rows.forEach((z, ri) => {
+  const xs = [-0.55, 0, 0.55], zs = [-1.3, -0.45, 0.4, 1.25];
+  const cols: THREE.Group[] = [];
+  xs.forEach((cx, ci) => {
     const g = new THREE.Group();
-    const n = 3;
-    for (let k = 0; k < n; k++) {
-      const x = (k - (n - 1) / 2) * 0.5 + (ri % 2 ? 0.25 : 0) - 0.12;
-      for (const geo of barGeo(kind === 'boss' ? 'graveyard' : area, h + 0.4, ri * 7 + k)) { const m = mesh(geo, mat); m.position.set(x, -0.05, z + (hash2(k, ri, 2) - 0.5) * 0.12); g.add(m); }
-    }
-    // a cross rail holding the row together
-    if (area !== 'abyss' || kind === 'boss') for (const yy of [h * 0.3, h * 0.72]) { const rail = mesh(boxUV(new THREE.BoxGeometry(1.5, 0.12, 0.14), 2), mat); rail.position.set(0, yy, z); g.add(rail); }
-    root.add(g);
-    bars.push(g);
+    zs.forEach((z, zi) => {
+      const hh = h + (hash2(ci, zi, 3) - 0.5) * 0.8;
+      for (const geo of barGeo(kind === 'boss' ? 'graveyard' : area, hh, ci * 7 + zi)) { const m = mesh(geo, mat); m.position.set(cx + (zi % 2 ? 0.12 : -0.12), 0, z); g.add(m); }
+    });
+    root.add(g); cols.push(g);
   });
-  // ---- the frame: two posts and a lintel at the front (z ~ 1.75), carved stone tinted to the area
-  const stone = M('frame.' + area, () => stonePage(AREA_STONE[area] ?? '#9a9a90', area), { rough: 0.9 });
-  const post = (x: number) => { const m = mesh(chamferBox(0.55, h + 0.4, 0.6, 0.08), stone); m.position.set(x, (h + 0.4) / 2 - 0.2, 1.8); frame.add(m); };
-  post(-0.85); post(0.85);
-  const lintel = mesh(chamferBox(2.4, 0.6, 0.7, 0.1), stone); lintel.position.set(0, h + 0.3, 1.8); frame.add(lintel);
-  let lock: THREE.Group | null = null;
-  if (kind === 'locked') {
-    const gold = M('gold', goldPage, { rough: 0.4, metal: 0.35, emissive: '#3a2000', emissiveK: 0.3 });
-    for (const x of [-0.85, 0.85]) { const t = mesh(boxUV(new THREE.BoxGeometry(0.62, 0.14, 0.66), 2), gold); t.position.set(x, h * 0.5, 1.8); frame.add(t); }
-    const tl = mesh(boxUV(new THREE.BoxGeometry(2.5, 0.16, 0.75), 2), gold); tl.position.set(0, h + 0.62, 1.8); frame.add(tl);
-    lock = padlock();
-    lock.position.set(0, h * 0.5, 2.15);
-    root.add(lock);
-  } else if (kind === 'challenge') {
-    // crossed harpoons over the lintel: a fight in here
-    const iron = M('bar.iron', ironPage, { rough: 0.75, metal: 0.25 });
-    for (const s of [-1, 1]) { const sp = mesh(boxUV(new THREE.BoxGeometry(0.08, 2.2, 0.08), 2), iron); sp.rotation.z = s * 0.8; sp.position.set(0, h + 0.6, 2.2); frame.add(sp); const tip = mesh(lpCone(0.12, 0.3, 4), iron); tip.position.set(-s * 0.78, h + 1.38, 2.2); tip.rotation.z = s * 0.8; frame.add(tip); }
-    const skull = skullHead(0.55); skull.position.set(0, h + 0.62, 2.25); frame.add(skull);
-  } else if (kind === 'boss') {
-    // a huge jawed skull around the opening: upper jaw over the lintel, fangs, glowing red eye sockets
-    const bone = M('bossBone', bonePage, { rough: 0.85 });
-    const cap = mesh(lpSphere(1.6, 1), bone); cap.scale.set(1.25, 0.75, 0.6); cap.position.set(0, h + 1.2, 1.7); frame.add(cap);
-    for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(lpSphere(0.3, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2a1a').multiplyScalar(2.2) }));
-      eye.position.set(s * 0.6, h + 1.25, 2.55); frame.add(eye); glow.push(eye);
-      const sock = mesh(lpCyl(0.42, 0.3, 6), M('dark', () => null, { color: '#120808', rough: 1 })); sock.rotation.x = Math.PI / 2; sock.position.set(s * 0.6, h + 1.25, 2.42); frame.add(sock);
-      const jaw = mesh(chamferBox(0.7, h + 1, 0.8, 0.12), bone); jaw.position.set(s * 1.25, (h + 1) / 2 - 0.3, 1.75); jaw.rotation.z = s * 0.06; frame.add(jaw);
-      for (let k = 0; k < 3; k++) { const f = mesh(lpCone(0.16, 0.65, 4), bone); f.rotation.x = Math.PI; f.position.set(s * (0.25 + k * 0.32), h + 0.05, 2.2); frame.add(f); }
-      const horn = mesh(lpCone(0.35, 1.6, 5), bone); horn.rotation.z = -s * 0.9; horn.position.set(s * 1.9, h + 1.9, 1.6); frame.add(horn);
-    }
-    const nose = mesh(lpCone(0.25, 0.4, 3), M('dark', () => null, { color: '#120808', rough: 1 })); nose.rotation.x = Math.PI; nose.position.set(0, h + 0.75, 2.5); frame.add(nose);
+  // crossbars at the front and the back every couple of metres: a ladder face that reads as a barrier from the side
+  if (area !== 'abyss' || kind === 'boss') {
+    const rails = new THREE.Group();
+    for (let y = 1.4; y < h - 0.6; y += 2.4) for (const z of [-1.3, 1.25]) { const rail = mesh(boxUV(new THREE.BoxGeometry(1.5, 0.14, 0.16), 2), mat); rail.position.set(0, y, z); rails.add(rail); }
+    cols[1].add(rails);
   }
-  return { root, bars, frame, lock, glow, travel: h + 0.6 };
+  if (kind === 'challenge') {
+    // a skull on a pike in front: a fight worth having in here
+    const iron = M('bar.iron', ironPage, { rough: 0.75, metal: 0.25 });
+    const pike = mesh(boxUV(new THREE.BoxGeometry(0.1, 3.2, 0.1), 2), iron); pike.position.set(0, 1.6, 2.2); frame.add(pike);
+    const skull = skullHead(0.7); skull.position.set(0, 3.4, 2.2); frame.add(skull);
+  } else if (kind === 'boss') {
+    // a huge jawed skull arch over the way in: cranium, horns, fangs, glowing red sockets
+    const bone = M('bossBone', bonePage, { rough: 0.85 });
+    const dark = M('dark', () => null, { color: '#120808', rough: 1 });
+    const H = 6.5;
+    const cap = mesh(lpSphere(2.6, 1), bone); cap.scale.set(1.3, 0.8, 0.55); cap.position.set(0, H + 1.4, 1.9); frame.add(cap);
+    for (const s of [-1, 1]) {
+      const eye = new THREE.Mesh(lpSphere(0.42, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2a1a').multiplyScalar(2.2) }));
+      eye.position.set(s * 1.0, H + 1.5, 3.2); frame.add(eye); glow.push(eye);
+      const sock = mesh(lpCyl(0.7, 0.4, 6), dark); sock.rotation.x = Math.PI / 2; sock.position.set(s * 1.0, H + 1.5, 3.0); frame.add(sock);
+      const jaw = mesh(chamferBox(1.0, H + 1.2, 1.1, 0.16), bone); jaw.position.set(s * 2.3, (H + 1.2) / 2 - 0.4, 1.9); jaw.rotation.z = s * 0.07; frame.add(jaw);
+      for (let k = 0; k < 3; k++) { const f = mesh(lpCone(0.26, 1.1, 4), bone); f.rotation.x = Math.PI; f.position.set(s * (0.4 + k * 0.55), H + 0.25, 2.6); frame.add(f); }
+      const horn = mesh(lpCone(0.6, 3.0, 5), bone); horn.rotation.z = -s * 0.9; horn.position.set(s * 3.4, H + 3.0, 1.7); frame.add(horn);
+      const tusk = mesh(lpCone(0.3, 1.4, 4), bone); tusk.position.set(s * 1.7, 0.6, 2.6); frame.add(tusk);
+    }
+    const nose = mesh(lpCone(0.4, 0.7, 3), dark); nose.rotation.x = Math.PI; nose.position.set(0, H + 0.95, 3.1); frame.add(nose);
+  }
+  return { root, cols, frame, glow, h };
 }
 
-function padlock(): THREE.Group {
+/** a brass padlock (locked chests) */
+export function padlock(): THREE.Group {
   const g = new THREE.Group();
   const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
   const body = mesh(chamferBox(0.5, 0.42, 0.22, 0.06), brass); g.add(body);
@@ -271,31 +264,6 @@ function skullHead(s: number): THREE.Group {
   const jaw = mesh(chamferBox(s * 0.6, s * 0.3, s * 0.5, s * 0.06), bone); jaw.position.set(0, -s * 0.42, s * 0.05); g.add(jaw);
   for (const x of [-1, 1]) { const e = mesh(lpSphere(s * 0.14, 0), dark); e.position.set(x * s * 0.18, -s * 0.02, s * 0.36); g.add(e); }
   return g;
-}
-
-// ------------------------------------------------------------------ shaft grate (top / bottom)
-export interface HatchModel { root: THREE.Group; leaves: THREE.Group[] }
-/** a grate over a shaft, centred on x = 0, lying in y = 0, spanning |x| < hw, |z| < 1.5; two leaves swing open */
-export function hatchModel(area: string, hw: number): HatchModel {
-  const root = new THREE.Group();
-  const mat = barMat(area);
-  const leaves: THREE.Group[] = [];
-  for (const s of [-1, 1]) {
-    const pivot = new THREE.Group();
-    pivot.position.x = s * hw;
-    const leaf = new THREE.Group();
-    for (let k = 0; k < 4; k++) {
-      const z = -1.2 + k * 0.8;
-      const bar = mesh(boxUV(new THREE.BoxGeometry(hw, 0.18, 0.18), 2), mat); bar.position.set(-s * hw / 2, 0, z); leaf.add(bar);
-    }
-    for (const x of [0.3, 0.9, 1.5]) if (x < hw) { const cross = mesh(boxUV(new THREE.BoxGeometry(0.16, 0.22, 3), 2), mat); cross.position.set(-s * x, 0, 0); leaf.add(cross); }
-    pivot.add(leaf);
-    root.add(pivot);
-    leaves.push(pivot);
-  }
-  const stone = M('frame.' + area, () => stonePage(AREA_STONE[area] ?? '#9a9a90', area), { rough: 0.9 });
-  for (const s of [-1, 1]) { const curb = mesh(chamferBox(0.6, 0.5, 3.4, 0.08), stone); curb.position.set(s * (hw + 0.3), 0, 0); root.add(curb); }
-  return { root, leaves };
 }
 
 // ------------------------------------------------------------------ cracked wall plug (secret passages)

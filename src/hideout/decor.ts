@@ -42,7 +42,7 @@ const M: Mount[] = [
   { side: 'w', u: 0.35, y: 2.25, r: 0.3, kind: 'sconce' },
   { side: 'w', u: 3.45, y: 1.75, r: 0.5, kind: 'photo' },
   { side: 'w', u: 3.4, y: 3.2, r: 0.35, kind: 'crack' },
-  { side: 'w', u: -2.1, y: 3.75, r: 0.95, kind: 'jars' },
+  { side: 's', u: 0.4, y: 2.0, r: 0.95, kind: 'jars' },
   { side: 's', u: 2.6, y: 3.3, r: 0.8, kind: 'net' },
   { side: 's', u: -2.2, y: 2.4, r: 0.5, kind: 'rope' },
   { side: 'e', u: 0.2, y: 2.4, r: 0.6, kind: 'rope' },

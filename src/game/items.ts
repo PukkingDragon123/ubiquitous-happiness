@@ -782,7 +782,7 @@ export function itemIcon(id: string, level = 1): HTMLCanvasElement {
  * them at the new size, their 1-cell art is tiled into every cell of the new shape (a little heap: alternate
  * cells mirrored). Remove an id here once src/backpack/icons.ts paints it natively at its shape.
  */
-export const ICON_TILE: Record<string, true> = { coralShard: true, scrap: true };
+export const ICON_TILE: Record<string, true> = {};
 function tiledIcon(d: ItemDef, level: number): HTMLCanvasElement {
   const one = paintIcon({ ...d, shape: [[0, 0]] }, level);
   const { w, h } = shapeSize(d.shape);

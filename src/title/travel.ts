@@ -130,8 +130,8 @@ export class TravelSet {
       G.add(m);
     }
     // ---- foreground silhouettes close to the lens (dark, unlit): kelp fronds and boulders sliding by
-    const silK = new THREE.MeshBasicMaterial({ map: KELP(), alphaTest: 0.5, side: THREE.DoubleSide, color: '#0a2028' });
-    const silR = new THREE.MeshBasicMaterial({ color: '#04121a' });
+    const silK = new THREE.MeshBasicMaterial({ map: KELP(), alphaTest: 0.5, side: THREE.DoubleSide, color: '#16404e' });
+    const silR = new THREE.MeshBasicMaterial({ color: '#0a2430' });
     for (let i = 0; i < 16; i++) {
       const x = -64 + i * 6.1 + hash2(i, 1, 13) * 3, z = 3.4 + hash2(i, 2, 13) * 2.2;
       if (x > -9 && x < 8) continue;
@@ -228,8 +228,9 @@ export class TravelSet {
     copy.scale.setScalar(0.85);
     const holder = new THREE.Group();
     holder.add(copy);
-    copy.rotation.set(0, 0, 2.55);
-    copy.position.set(0.32, -0.28, 0.06);
+    // samurai-style: the grip pokes up behind the hat brim, the blade runs down and back across the body
+    copy.rotation.set(0, 0, 3.8);
+    copy.position.set(0.16, 0.2, 0.2);
     this.hero.attach('back', holder);
   }
 

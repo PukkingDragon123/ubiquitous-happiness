@@ -1,10 +1,12 @@
-// Souls-like combat: public API for the dungeon (agent J) and the HUD (agent L).
+// Souls-like combat: public API for the dungeon levels (agent J) and the HUD (agent L).
 //
-//   import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena } from '../combat';
-//   setArena(world, { x0, x1, floor, top });                 // once per room (enemies clamp to it)
-//   const e = spawnEnemy(world, 'knife', x, y, { elite: true }); // builds + world.add()s it; team 'enemy', hp
-//   ENEMIES_FOR('reef', 0.4)                                  // weighted kind list for a room (repeat = weight)
-//   const b = spawnBoss(world, 'reef', arena); b.onDefeated = () => openDoors(); b.bar() -> { name, hp, max, phase }
+//   import { spawnEnemy, ENEMIES_FOR, spawnBoss, bindArena } from '../combat';
+//   const e = spawnEnemy(world, 'knife', x, y);                  // a roamer: patrols round (x, y), notices the
+//                                                                 // player, chases within a leash, goes home
+//   const e = spawnEnemy(world, 'knife', x, y, { arena });        // locked in an arena-lock encounter box
+//   bindArena(e, arena) / bindArena(e, null)                      // lock / release an existing enemy
+//   ENEMIES_FOR('reef', 0.4)                                      // weighted kind list (repeat = weight)
+//   const b = spawnBoss(world, 'reef', arena); b.onDefeated = () => openGate(); b.bar() -> { name, hp, max, phase }
 //
 // Events (world.emit): 'kill' {kind, x, y, elite, boss} when an enemy dies (drops are J's job),
 // 'parry' {perfect}, 'riposte' {kind}, 'guardBreak' {}, 'bossIntro' {id, name, title}, 'bossPhase' {id, phase},
@@ -12,21 +14,21 @@
 // Player side: (world.player as Blobfish).combat.hud() -> PlayerCombatHud (stamina, flasks, parry state).
 import type { World, Entity } from '../game/types';
 import type { Arena, EnemyKind, FloorId, SpawnOpts, BossEntity } from './types';
-import { setArena, arenaOf } from './arena';
+import { setArena } from './arena';
 import { buildEnemy } from './roster';
 import { buildBoss } from '../bosses';
 
 export type { Arena, EnemyKind, FloorId, SpawnOpts, BossEntity, BossBar, AttackSpec, DefenseResult, PlayerCombatHud } from './types';
 export { ENEMY_KINDS } from './types';
 export { setArena, arenaOf } from './arena';
+export { bindArena } from './roster';
+export { PlayerCombat } from './moveset';
 export { attackPlayer } from './resolve';
 export { BOSS_INFO } from '../bosses';
 
 /** build an enemy of `kind` at (x, y) inside the arena and add it to the world */
 export function spawnEnemy(world: World, kind: EnemyKind, x: number, y: number, opts: SpawnOpts = {}): Entity {
-  const arena = opts.arena ?? arenaOf(world);
-  if (opts.arena) setArena(world, opts.arena);
-  const e = buildEnemy(world, kind, x, y, { ...opts, arena });
+  const e = buildEnemy(world, kind, x, y, { ...opts, arena: opts.arena ?? null });
   if (!opts.noAdd) world.add(e);
   (e as Entity & { onSpawn?(w: World): void }).onSpawn?.(world);
   return e;

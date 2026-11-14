@@ -1,23 +1,28 @@
-// The v3 RUN: a Binding-of-Isaac style dungeon crawl (replaces runScreen.ts's wave defense as the run).
+// The v3 RUN: the Binding-of-Isaac loop (fight -> loot -> gear up -> boss, floors, keys / bombs / pearls, shop,
+// treasure, post office, secrets, pack-everything) in a continuous 2D side-scrolling ocean. It replaces
+// runScreen.ts's wave defense as the run.
 //
-//   floors follow the areas from cfg.startArea down the progression (reef > kelp > graveyard > arctic > abyss);
-//   3 floors at mastery 0 (floorsForMastery). Each floor is a seeded grid of 10-14 rooms (src/dungeon/floor.ts):
-//   start, combat, treasure (locked: key), Mr. Crab's shop, the manatee's post office, a challenge, a secret room
-//   (bomb the cracked wall) and the boss. Swim through a door: a quick slide + fade into the next room, entering
-//   from the matching side. Uncleared combat rooms slam their gates and spawn K's enemies (src/combat); clearing
-//   opens them and drops an Isaac-style reward. Every item pickup goes into the backpack grid (src/dungeon/pack.ts);
-//   pearls, keys, bombs and hearts are counters. The boss drops a pedestal item and opens the hatch down.
-//   Death loses the pack (mailed items are safe); beating the last boss brings the pack home.
+//   Floors follow the areas from cfg.startArea down the progression (reef > kelp > graveyard > arctic > abyss);
+//   3 floors at mastery 0 (floorsForMastery). Each floor is ONE long level (src/dungeon/level.ts, ~300-400 m):
+//   open water with an upper lane over mid-water ledges, the seabed lane, a cave branch under a rock lid (with the
+//   CHALLENGE arena) that rejoins, Mr. Crab's shop, the post office buoy, a treasure nook (locked chest / pedestal
+//   on a ledge), a secret pit under a cracked lid, and the boss arena behind a skull gate at the far end.
+//   Encounters are beat-'em-up arena locks: swim in, gates burst out of the sand on both sides, K's enemies spawn
+//   (src/combat), the camera frames the fight; clear it and the gates sink with a reward burst. Roaming groups
+//   patrol between arenas. Every item pickup goes into the backpack grid (src/dungeon/pack.ts); pearls, keys,
+//   bombs and hearts are counters. Death loses the pack (mailed items are safe); the last boss brings it home.
 //
 //   const ds = new DungeonScreen(game); game.register(ds);
 //   game.go('dungeon', { cfg })            a new run from a RunConfig (loadout uids come out of the stash)
 //   game.go('dungeon', { resume: true })   continue the saved run (loadDungeonSave())
-//   game.go('dungeon')                     dev: from the URL (?preview=dungeon&floor=reef&room=boss&god=1&mastery=0
-//                                          &floorIdx=0&seed=N&rich=1&reveal=1&keys=N&bombs=N&pearls=N)
-//   The run end goes to (window).flow.runEnded(result) when flow has it, else hideout + the result card.
+//   game.go('dungeon')                     dev, from the URL: ?preview=dungeon&floor=reef&at=boss|shop|treasure|post|
+//                                          secret|challenge|arena&god=1&mastery=0&floorIdx=0&seed=N&rich=1&reveal=1
+//                                          &keys=N&bombs=N&pearls=N
+//   The run's end goes to (window).flow.runEnded(result) when flow has it, else hideout + the result card.
 //
-// World events (besides K's and the v2 ones): 'roomEnter' {type, id}, 'roomCleared' {type}, 'floorCleared' {n},
-// 'bossDefeated' {id} (if the boss didn't), 'extract' {items, counts} (mail), 'itemPicked' {id}, 'packFull' {id}.
+// World events (besides K's and the v2 ones): 'arenaLock' {kind}, 'roomCleared' {type}, 'floorCleared' {n},
+// 'bossDefeated' {id} (if the boss didn't), 'extract' {items, counts} (mail), 'itemPicked' {id}, 'packFull' {id},
+// 'secretFound' {x}, 'buy' {kind, id, price}.
 import * as THREE from 'three';
 import type { Game, Screen } from './game';
 import { Run, type ItemInst } from './run';
@@ -37,40 +42,39 @@ import { ITEMS, installItemSystem, skillLevels, abilityLevels, findSpot, getItem
 import { META, saveMeta, addMaterials, stashItem, takeFromStash, returnToStash, type RunConfig, type RunResult, type RunTally } from '../meta/meta';
 import { AREAS as AREA_LIST, masteryScalars, MAX_MASTERY } from '../hideout/mastery';
 import { stationsBuilt } from '../hideout/blueprints';
-import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, type BossEntity, type EnemyKind, type PlayerCombatHud } from '../combat';
+import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, type BossEntity, type EnemyKind, type PlayerCombatHud, type Arena } from '../combat';
 import { roomBudget } from '../combat/index';
 import { board } from '../waves/board';
 import { Dialogue } from '../story/dialogue';
-import { genFloor, reveal, floorAreas, floorsForMastery, DIRS, OPP, type Floor, type RoomNode, type Dir } from '../dungeon/floor';
-import { RoomBuild, ROOM_FLOOR } from '../dungeon/room';
-import { HALF_W, DOOR_Y0, DOOR_Y1, SHAFT_HW, ROOM_H } from '../dungeon/terrain';
-import { Door } from '../dungeon/doors';
-import type { GateKind } from '../dungeon/models';
+import { genLevel, explore, floorAreas, floorsForMastery, type LevelPlan, type ArenaPlan, type PoiPlan, type GroupPlan } from '../dungeon/level';
+import { LevelBuild } from '../dungeon/levelBuild';
 import { DungeonWorld } from '../dungeon/world';
-import { Pickup } from '../dungeon/pickups';
+import { Pickup, type PickKind } from '../dungeon/pickups';
 import { PufferBomb } from '../dungeon/bomb';
 import { packAdd, packCells, packTotals, packLoose, packFits } from '../dungeon/pack';
-import { rollClearReward, rollGear, rollMaterial, rollShop, type Reward } from '../dungeon/rewards';
-import { minimapData } from '../dungeon/minimap';
-import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState } from '../dungeon/hud';
-import { Pedestal, ShopStock, ChestProp, ExitHatch, PostOffice, type ShopStand } from '../dungeon/contents';
+import { rollClearReward, rollGear, rollShop, rollMaterial, type Reward } from '../dungeon/rewards';
+import { stripMap } from '../dungeon/minimap';
+import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt } from '../dungeon/hud';
+import { Pedestal, ShopStock, ChestProp, ExitHatch, type ShopStand } from '../dungeon/contents';
 
 // ------------------------------------------------------------------ save / resume
 export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number }
+interface FloorLoot { kind: PickKind; id?: string; x: number; y: number; n: number; level: number }
 export interface DungeonSave {
-  v: 3;
+  v: 4;
   cfg: RunConfig; seed: number;
-  floors: string[]; floorIdx: number; floor: Floor; roomId: number;
+  floors: string[]; floorIdx: number; plan: LevelPlan; checkX: number;
   hp: number; items: ItemInst[]; nextUid: number;
   pearls: number; keys: number; bombs: number;
-  tally: DungeonTally; mailed: string[];
+  tally: DungeonTally; mailed: string[]; loot: FloorLoot[];
 }
-const SAVE_KEY = 'blobfish.dungeon.v3';
+/** the run in progress lives in META.activeRun (v 4) like the v2 run's did, so flow's RESUME finds it */
 export function loadDungeonSave(): DungeonSave | null {
-  try { const raw = localStorage.getItem(SAVE_KEY); if (!raw) return null; const s = JSON.parse(raw) as DungeonSave; return s && s.v === 3 ? s : null; } catch { return null; }
+  const s = META.activeRun as unknown as DungeonSave | null;
+  return s && s.v === 4 ? s : null;
 }
 export const hasDungeonSave = () => !!loadDungeonSave();
-export function clearDungeonSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* blocked */ } }
+export function clearDungeonSave() { if (loadDungeonSave() || META.activeRun) { META.activeRun = null; saveMeta(); } }
 
 /** the run's end, for flow / the result card: RunResult (the v2 card reads it) + the dungeon's own fields */
 export interface DungeonResult extends RunResult {
@@ -88,11 +92,11 @@ export interface DungeonResult extends RunResult {
 
 export interface DungeonEnter { cfg?: RunConfig; resume?: boolean | DungeonSave }
 
-type Phase = 'play' | 'trans' | 'dead' | 'descend' | 'done';
-type Fight = 'calm' | 'arming' | 'fight' | 'boss';
+type Phase = 'play' | 'dead' | 'descend' | 'done';
+interface Fight { arena: ArenaPlan; pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[]; ents: Entity[]; clearT: number; boss: BossEntity | null; bossDone: boolean; bossDeadT: number }
 
 const AREA_NAME = (id: string) => AREA_LIST.find((a) => a.id === id)?.name ?? id;
-const ENTRY_GAP = 1.3;
+const FAR = 1e9;
 
 export class DungeonScreen implements Screen {
   name = 'dungeon';
@@ -117,39 +121,33 @@ export class DungeonScreen implements Screen {
   seed = 1;
   floors: string[] = [];
   floorIdx = 0;
-  floor!: Floor;
-  roomId = 0;
+  plan!: LevelPlan;
+  level: LevelBuild | null = null;
   keys = 1; bombs = 1;
   tally: DungeonTally = { kills: 0, time: 0, waves: 0, extracted: 0, repairs: 0, bosses: 0, rooms: 0, floors: 0, pearls: 0 };
   mailed: string[] = [];
   world!: DungeonWorld;
   player!: Blobfish;
-  room: RoomBuild | null = null;
-  doors: Partial<Record<Dir, Door>> = {};
   phase: Phase = 'play';
-  fight: Fight = 'calm';
+  fight: Fight | null = null;
   paused = false;
   light = new Lighting();
+  /** where a resume / respawn puts the blobfish (the start, then past each cleared arena) */
+  checkX = 9;
   private water = new WaterFX();
   private fx = new Particles();
   private text!: Float3D;
   private dlg!: Dialogue;
-  private cache = new Map<number, RoomBuild>();
-  private props: { update(dt: number, ...a: unknown[]): void; dispose(): void; group: THREE.Object3D }[] = [];
-  private pedestal: Pedestal | null = null;
+  private props: { update(dt: number): void; dispose(): void }[] = [];
+  private pedestals = new Map<number, Pedestal>();
+  private chests = new Map<number, ChestProp>();
   private shop: ShopStock | null = null;
-  private chest: ChestProp | null = null;
+  private shopPoi: PoiPlan | null = null;
   private hatch: ExitHatch | null = null;
-  private post: PostOffice | null = null;
-  private boss: BossEntity | null = null;
-  private bossDeadT = -1;
-  private bossDone = false;
-  private pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[] = [];
-  private clearT = 0;
-  private trans: { dir: Dir; t: number; swapped: boolean; to: number } | null = null;
-  private camOff = new THREE.Vector2();
+  private groups = new Map<number, Entity[]>();
   private camLook = new THREE.Vector3();
-  private camDist = 19.5;
+  private camDist = 16.5;
+  private lookAhead = 0;
   private seq: { t: number; fn: () => void }[] = [];
   private deadT = -1;
   private ended = false;
@@ -169,6 +167,13 @@ export class DungeonScreen implements Screen {
   private stuck = new WeakMap<Entity, number>();
   private killer: RunResult['killer'] = null;
   private fullPopT = 0;
+  private musicKey = '';
+  private hintT = 0;
+  private hintText = '';
+  /** a line of help at the bottom of the screen for a few seconds */
+  hint(text: string, life = 4) { this.hintText = text; this.hintT = life; }
+  /** dev: teleport the blobfish (console: dungeon.tp(x, y?)) */
+  tp(x: number, y?: number) { const p = this.player, yy = y ?? this.level!.terrain.floorUnder(x, this.plan.top) + 2.5; p.sb.place(x, yy); p.x = x; p.y = yy; this.camLook.copy(this.camTarget(1)); }
 
   constructor(public game: Game) {
     (window as unknown as { dungeon: DungeonScreen }).dungeon = this;
@@ -184,7 +189,7 @@ export class DungeonScreen implements Screen {
 
   enter(data?: unknown) {
     const d = (data ?? {}) as DungeonEnter;
-    this.ended = false; this.paused = false; this.seq = []; this.deadT = -1; this.killer = null; this.mail = null;
+    this.ended = false; this.paused = false; this.seq = []; this.deadT = -1; this.killer = null; this.mail = null; this.phase = 'play';
     this.game.timeScale = 1;
     POST.uDesat.value = 0; POST.uPulse.value = 0; POST.uFade.value = 0;
     const q = new URLSearchParams(location.search);
@@ -200,9 +205,7 @@ export class DungeonScreen implements Screen {
 
   exit() {
     this.ambience?.stop(); this.ambience = null;
-    this.teardownRoom(true);
-    for (const r of this.cache.values()) r.dispose();
-    this.cache.clear();
+    this.teardownLevel();
     this.world?.clear();
     this.player?.dispose();
     this.scene.clear(); this.overlay.clear(); this.t3d.clear();
@@ -221,7 +224,7 @@ export class DungeonScreen implements Screen {
     this.light = new Lighting();
     this.water = new WaterFX(); this.fx = new Particles(); this.text = new Float3D(this.t3d);
     this.player?.dispose();
-    this.player = new Blobfish(0, -10);
+    this.player = new Blobfish(0, -6);
     this.run = new Run(1);
     const w = this.world = new DungeonWorld(this.game, this.run, this.scene, this.camera, this.water, this.fx, this.text, new Rng(1), this.player);
     w.god = this.god;
@@ -232,7 +235,7 @@ export class DungeonScreen implements Screen {
     this.player.onDeath = () => this.die();
     this.dlg = new Dialogue(this.hud.ui, () => this.camera);
     this.dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e8603a', voice: 'crab_click', pitch: 0.9, anchor: () => this.shop?.head() ?? null });
-    this.dlg.speaker({ id: 'manatee', name: 'MAUDE', color: '#8ab8e8', voice: 'whale', pitch: 1.6, vol: 0.25, anchor: () => this.post ? new THREE.Vector3(this.post.at.x, this.post.at.y + 1.2, -1) : null });
+    this.dlg.speaker({ id: 'manatee', name: 'MAUDE', color: '#8ab8e8', voice: 'whale', pitch: 1.6, vol: 0.25, anchor: () => { const m = this.level?.mailbox?.manatee; return m ? new THREE.Vector3(m.x, m.y + 1.3, m.z) : null; } });
     this.wire();
     this.resize(this.game.w, this.game.h);
   }
@@ -266,28 +269,27 @@ export class DungeonScreen implements Screen {
     this.run.hp = this.run.stats().maxHp;
     if (dev?.get('rich') === '1') for (const id of ['copperOre', 'driftwood', 'coralShard', 'kelp', 'scrap', 'seashell', 'ironOre', 'pearl']) for (let k = 0; k < 4; k++) packAdd(this.run, id);
     if (!dev) { META.runs++; saveMeta(); }
-    this.startFloor(this.floorIdx, true);
+    this.startFloor(this.floorIdx, null);
   }
 
   private restore(s: DungeonSave) {
     this.cfg = { ...s.cfg, loadout: [...s.cfg.loadout] };
     this.seed = s.seed;
     this.run.seed = s.seed; this.run.rng = new Rng(s.seed);
-    this.world.rng = new Rng((s.seed ^ 0xd00d ^ s.roomId * 977) >>> 0);
+    this.world.rng = new Rng((s.seed ^ 0xd00d ^ Math.round(s.checkX) * 977) >>> 0);
     this.run.items = s.items.filter((i) => ITEMS[i.id]).map((i) => ({ ...i }));
     this.run.nextUid = s.nextUid;
     this.run.coins = s.pearls; this.keys = s.keys; this.bombs = s.bombs;
-    this.floors = [...s.floors]; this.floorIdx = s.floorIdx; this.floor = s.floor;
+    this.floors = [...s.floors];
     this.tally = { ...s.tally }; this.mailed = [...s.mailed];
     this.scal = masteryScalars(this.cfg.mastery);
     this.installStats();
     this.run.hp = s.hp;
-    this.applyLook();
-    this.enterRoom(s.roomId, null);
+    this.startFloor(s.floorIdx, s);
     this.player.hp = Math.max(1, Math.min(this.player.maxHp, s.hp));
   }
 
-  /** the pack's item system + hideout station perks + the dungeon's rules (no pressure weakness in rooms) */
+  /** the pack's item system + hideout station perks + the dungeon's rules (no surface weakness) */
   private installStats() {
     installItemSystem(this.run);
     const inner = this.run.statFn!;
@@ -313,309 +315,256 @@ export class DungeonScreen implements Screen {
   }
 
   // ================================================================ floors
-  private startFloor(i: number, first = false) {
+  private teardownLevel() {
+    for (const pr of this.props) pr.dispose();
+    this.props = [];
+    this.pedestals.clear(); this.chests.clear(); this.groups.clear();
+    this.shop = null; this.shopPoi = null; this.hatch = null; this.fight = null;
+    this.t3d.clear();
+    this.dmgAcc.clear();
+    this.world?.clearRoom();
+    this.level?.dispose();
+    this.level = null;
+  }
+
+  private startFloor(i: number, save: DungeonSave | null) {
+    this.teardownLevel();
     this.floorIdx = i;
     const area = this.floors[i];
     const seed = (this.seed ^ Math.imul(i + 1, 0x2c1b3c6d)) >>> 0;
-    this.floor = genFloor({ n: i, area, seed, rooms: 10 + Math.min(4, i + Math.floor(this.cfg.mastery / 3)) });
-    if (this.dev?.get('reveal') === '1') for (const r of this.floor.rooms) r.seen = true;
-    for (const r of this.cache.values()) r.dispose();
-    this.cache.clear();
-    this.applyLook();
-    // a fresh floor: the flasks refill, a breather heal
-    (this.player as unknown as { combat?: { refill?: () => void } }).combat?.refill?.();
-    if (!first) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
-    let start = this.floor.start, from: Dir | null = null;
-    const want = this.dev?.get('room');
-    if (want && first) {
-      const tgt = this.floor.rooms.find((r) => r.type === want);
-      if (tgt) {
-        start = tgt.id;
-        const d = (Object.keys(tgt.doors) as Dir[]).find((k) => !tgt.cracked[k]);
-        from = d ?? null;
-        if (tgt.type === 'treasure' || tgt.type === 'secret') for (const r of this.floor.rooms) for (const k of DIRS) if (r.doors[k] === tgt.id) r.opened[k] = true;
-      }
-    }
-    this.enterRoom(start, from);
-    this.after(0.6, () => this.title3d(AREA_NAME(area).toUpperCase(), `FLOOR ${i + 1} OF ${this.floors.length}`, T3D.title, 3.6));
-    this.world.emit('enterNode', { type: 'floor', n: i });
-    audio.play('jin_biome', { vol: 0.5 });
-  }
-
-  private applyLook() {
-    const area = this.floors[this.floorIdx];
-    const def = AREA_LIST.find((a) => a.id === area);
-    void def;
-  }
-
-  // ================================================================ rooms
-  private teardownRoom(all = false) {
-    const r = this.room;
-    for (const d of Object.values(this.doors)) d?.dispose();
-    this.doors = {};
-    for (const p of this.props) p.dispose();
-    this.props = [];
-    this.pedestal = null; this.shop = null; this.chest = null; this.hatch = null; this.post = null;
-    this.boss = null; this.bossDeadT = -1; this.bossDone = false;
-    this.pending = [];
-    this.t3d.clear();
-    this.dmgAcc.clear();
-    if (!r) return;
-    // remember the pickups left lying here
-    const node = this.floor.rooms[this.roomId];
-    if (node) {
-      const floorLoot: NonNullable<NonNullable<RoomNode['loot']>['floor']> = [];
-      for (const e of this.world.entities) if (e instanceof Pickup && e.alive) floorLoot.push({ kind: e.pk, id: e.id, x: e.x, y: e.y, n: e.pk === 'item' ? e.n : e.value, level: e.level });
-      node.loot = { ...(node.loot ?? {}), floor: floorLoot };
-    }
-    this.world.clearRoom();
-    r.unbind(this.world);
-    if (all) { r.dispose(); this.room = null; return; }
-    // keep the room built: going back is instant (two rooms cached)
-    this.cache.set(this.roomId, r);
-    while (this.cache.size > 2) { const [k, v] = this.cache.entries().next().value as [number, RoomBuild]; v.dispose(); this.cache.delete(k); }
-    this.room = null;
-  }
-
-  private enterRoom(id: number, from: Dir | null) {
-    this.teardownRoom();
-    const node = this.floor.rooms[id];
-    this.roomId = id;
-    const first = !node.visited;
-    reveal(this.floor, id);
-    // ---- build (or reuse) the room
-    let r = this.cache.get(id);
-    if (r) this.cache.delete(id);
-    else {
-      r = new RoomBuild(this.world, this.floor, node, {
-        light: this.game.lowQuality || node.type === 'boss' ? false : false,
-        prefinish: node.type === 'post' ? (scen, room) => { this.post = new PostOffice(scen, this.world, 1, room.sand.heightAt(1)); } : undefined,
-      });
-      if (r.buildMs > 60) console.info(`[dungeon] built room ${id} (${node.type}) in ${r.buildMs.toFixed(0)} ms`);
-    }
-    if (node.type === 'post' && !this.post) {
-      // a cached post office room: rebuild the manatee is not possible after finish(); rebuild the room
-      r.dispose();
-      r = new RoomBuild(this.world, this.floor, node, { prefinish: (scen, room) => { this.post = new PostOffice(scen, this.world, 1, room.sand.heightAt(1)); } });
-    }
-    this.room = r;
-    r.bind(this.world);
-    r.setLighting(this.light);
-    this.light.applyLook(r.look);
-    this.fx.ambient(r.a.id);
-    this.water.sim.setSwell(r.a.swell);
-    POST.uExposure.value = r.look.exposure * (1 - this.scal.darkness);
-    setArena(this.world, r.arena);
-    audio.music(node.type === 'boss' && !node.cleared ? 'mu_volcano' : r.a.music);
-    if (!this.ambience) this.ambience = audio.loop(r.a.ambience, 0.35);
-    // ---- doors
-    for (const d of DIRS) {
-      if (node.doors[d] === undefined) continue;
-      const nb = this.floor.rooms[node.doors[d]!];
-      let kind: GateKind = 'normal';
-      if (node.cracked[d] && !node.opened[d]) kind = 'secret';
-      else if (nb.type === 'treasure' && !node.opened[d] && node.type !== 'treasure') kind = 'locked';
-      else if (nb.type === 'boss' || node.type === 'boss') kind = 'boss';
-      else if (nb.type === 'challenge' || node.type === 'challenge') kind = 'challenge';
-      const door = new Door(this.world, r, d, kind);
-      this.doors[d] = door;
-      const gap = r.terrain.doors[d];
-      gap.exists = kind !== 'secret';
-      gap.shut = () => door.shut;
-    }
-    // ---- the player arrives
+    this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, floors: this.floors.length });
+    const plan = this.plan;
+    if (this.dev?.get('reveal') === '1') plan.explored.fill(1);
+    const lvl = this.level = new LevelBuild(this.world, plan, { light: this.game.lowQuality && this.dev?.get('full') !== '1' });
+    console.info(`[dungeon] floor ${i + 1} (${area}): ${plan.W.toFixed(0)} m built in ${lvl.buildMs.toFixed(0)} ms`);
+    lvl.bind(this.world);
+    lvl.setLighting(this.light);
+    this.light.applyLook(lvl.look);
+    this.fx.ambient(lvl.a.id);
+    this.water.sim.setSwell(lvl.a.swell);
+    POST.uExposure.value = lvl.look.exposure * (1 - this.scal.darkness);
+    this.setTravelArena();
+    this.music(lvl.a.music);
+    this.ambience?.stop(); this.ambience = audio.loop(lvl.a.ambience, 0.35);
+    // arenas: cleared ones stay open
+    for (const a of plan.arenas) if (a.cleared) for (const g of lvl.gates.get(a.id) ?? []) g.drop(true);
+    this.buildPois();
+    // the blobfish arrives: a current drops it in from above (or back at the checkpoint)
+    let x = save ? save.checkX : plan.startX;
+    const at = this.dev?.get('at');
+    if (at && !save) x = this.devJump(at);
+    this.checkX = x;
     const p = this.player;
-    const spot = this.entrySpot(from);
-    p.sb.place(spot.x, spot.y); p.x = spot.x; p.y = spot.y;
-    if (spot.vx || spot.vy) p.sb.accel(spot.vx / 0.016, spot.vy / 0.016, 0.016);
+    const y = save || at ? lvl.terrain.floorUnder(x, plan.top) + 2.5 : plan.top - 1.5;
+    p.sb.place(x, y); p.x = x; p.y = y;
+    if (!save && !at) { p.sb.accel(2 / 0.016, -5 / 0.016, 0.016); this.world.fx.emit('bubbleBig', x, y + 1, { n: 24, spread: 1, speed: 2.5 }); }
     if (p.obj.parent !== this.scene) this.scene.add(p.obj);
     this.applyStats();
-    // ---- contents
-    this.fight = 'calm';
-    this.buildContents(node, first);
-    const fights = !node.cleared && (node.type === 'combat' || node.type === 'challenge' || node.type === 'boss');
-    for (const [d, door] of Object.entries(this.doors) as [Dir, Door][]) {
-      if (door.cracked || door.locked) continue;
-      if (fights) { if (d === from) door.open(true); else door.close(true); }
-      else door.open(true);
+    if (save) for (const it of save.loot) {
+      if (it.kind === 'item') { if (it.id && ITEMS[it.id]) this.world.spawnPickup('item', it.x, it.y, { id: it.id, level: it.level, n: it.n, vx: 0, vy: 0 }); }
+      else this.world.spawnPickup(it.kind, it.x, it.y, { value: it.n, vx: 0, vy: 0 });
     }
-    if (fights) this.arm(node);
-    // ---- restore what was left lying here
-    for (const it of node.loot?.floor ?? []) {
-      if (it.kind === 'item' && it.id && ITEMS[it.id]) this.world.spawnPickup('item', it.x, it.y, { id: it.id, level: it.level, n: it.n, vx: 0, vy: 0, hold: 0.6 });
-      else if (it.kind !== 'item') this.world.spawnPickup(it.kind as 'pearl', it.x, it.y, { value: it.n, vx: 0, vy: 0 });
+    explore(plan, x, 20);
+    this.camLook.copy(this.camTarget(1));
+    this.game.post.cut?.();
+    if (!save) {
+      (this.player as unknown as { combat?: { refill?: () => void } }).combat?.refill?.();
+      if (i > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
+      this.world.emit('enterNode', { type: 'floor', n: i });
     }
-    if (node.loot) node.loot.floor = [];
-    // ---- camera snap
-    const look = this.camTarget();
-    this.camLook.copy(look);
-    this.world.emit('roomEnter', { type: node.type, id });
-    if (first && node.type === 'start' && this.floorIdx === 0 && META.runs <= 2) this.after(2.2, () => this.text.pop('Swim through a door. Clear rooms, grab loot, find the boss.', p.x + 2, p.y + 1.8, 'hint', { size: 0.3, life: 5 }));
-    this.save();
+    this.after(0.5, () => this.hud.l.title(AREA_NAME(area).toUpperCase(), `FLOOR ${i + 1} OF ${this.floors.length}`));
+    audio.play('jin_biome', { vol: 0.5 });
+    if (i === 0 && !save && META.runs <= 2) this.after(3, () => this.hint('SWIM RIGHT · ARENAS LOCK BEHIND YOU · LOOT GOES IN YOUR PACK [TAB] · BOMBS [G]', 7));
   }
 
-  private entrySpot(from: Dir | null): { x: number; y: number; vx: number; vy: number } {
-    const r = this.room!, F = r.F;
-    switch (from) {
-      case 'L': return { x: -HALF_W + ENTRY_GAP, y: F + 1.6, vx: 4, vy: 0 };
-      case 'R': return { x: HALF_W - ENTRY_GAP, y: F + 1.6, vx: -4, vy: 0 };
-      case 'U': return { x: 0, y: F + ROOM_H - 1.4, vx: 0, vy: -3 };
-      case 'D': return { x: 0, y: F + 1.2, vx: 0, vy: 4 };
-      default: return { x: r.node.type === 'boss' ? -8 : -3, y: F + 2.5, vx: 0, vy: 0 };
-    }
+  /** dev: start next to a POI / arena (?at=boss|shop|treasure|post|secret|challenge|arena) */
+  private devJump(at: string): number {
+    const plan = this.plan;
+    if (at === 'arena') { const a = plan.arenas.find((q) => q.kind === 'arena'); return a ? a.x0 - 6 : plan.startX; }
+    if (at === 'boss') return plan.bossX0 - 6;
+    const p = plan.pois.find((q) => q.kind === at);
+    if (!p) return plan.startX;
+    if (at === 'challenge') { const a = plan.arenas.find((q) => q.kind === 'challenge'); return a ? a.x0 - 9 : p.x; }
+    return p.x - 6;
   }
 
-  private buildContents(node: RoomNode, first: boolean) {
-    const r = this.room!, w = this.world, rng = new Rng((node.seed ^ 0xc0ffee) >>> 0);
+  /** outside an arena, enemies roam in a box round the player's stretch of the level */
+  private setTravelArena(cx?: number) {
+    const plan = this.plan, x = cx ?? this.player?.x ?? plan.startX;
+    setArena(this.world, { x0: Math.max(0.5, x - 18), x1: Math.min(plan.W - 0.5, x + 18), floor: plan.base - 8, top: plan.top });
+  }
+
+  private music(id: string) { if (this.musicKey === id) return; this.musicKey = id; audio.music(id); }
+
+  private buildPois() {
+    const plan = this.plan, lvl = this.level!, w = this.world;
     const luck = this.run.stats().luck;
-    const fl = (x: number) => r.sand.heightAt(x);
-    node.loot ??= {};
-    const L = node.loot;
-    const centreX = node.doors.D !== undefined ? -4.5 : 0;
-    switch (node.type) {
-      case 'treasure': {
-        if (L.pedestal === undefined) L.pedestal = rollGear(rng, luck, 'treasure');
-        this.addPedestal(centreX, L.pedestalTaken ? null : L.pedestal);
-        break;
-      }
-      case 'secret': {
-        if (L.pedestal === undefined) L.pedestal = rng.chance(0.55) ? rollGear(rng, luck + 1, 'treasure') : '';
-        if (L.pedestal) this.addPedestal(centreX, L.pedestalTaken ? null : L.pedestal);
-        if (first) for (let i = 0; i < 6; i++) w.spawnPickup('pearl', centreX + 2.5 + (i % 3) * 0.6, r.F + 1.5, { value: i === 0 ? 5 : 1, vx: (rng.next() - 0.5) * 2 });
-        break;
-      }
-      case 'shop': {
-        L.shop ??= rollShop(rng, luck, this.floorIdx);
-        const shop = this.shop = new ShopStock(w, this.t3d, L.shop, fl, r.a.id);
-        r.group.add(shop.group);
-        shop.setLighting(this.light);
-        this.props.push({ update: (dt: number) => shop.update(dt), dispose: () => shop.dispose(), group: shop.group });
-        if (first) this.after(0.8, () => this.dlg.bark('crab', rng.pick(["Pearls on the counter, kid. Let's see 'em.", 'Mind the merchandise. Breaks? Buys.', "Back again? Swim slow, I'm old."]), 3.2));
-        break;
-      }
-      case 'post': {
-        const po = this.post;
-        if (po) {
-          r.group.add(po.group);
-          this.props.push({ update: (dt: number) => po.update(dt, r.top), dispose: () => po.dispose(), group: po.group });
-          if (first) this.after(1, () => this.dlg.bark('manatee', 'Parcels home? Pop them in my bag, dear.', 3));
+    for (const p of plan.pois) {
+      const rng = new Rng((plan.seed ^ Math.imul(p.id + 3, 0x9e3779b1)) >>> 0);
+      switch (p.kind) {
+        case 'shop': {
+          p.shop ??= rollShop(rng, luck, this.floorIdx);
+          const shop = this.shop = new ShopStock(w, this.t3d, p.shop, (x) => lvl.terrain.floorAt(x), lvl.a.id, p.x);
+          this.shopPoi = p;
+          lvl.group.add(shop.group);
+          shop.setLighting(this.light);
+          this.props.push({ update: (dt) => shop.update(dt), dispose: () => shop.dispose() });
+          break;
         }
-        break;
-      }
-      case 'boss': {
-        if (node.cleared) this.bossRewards(node, false);
-        break;
-      }
-      case 'challenge': {
-        if (node.cleared) this.addChest(L.chest?.open ?? false);
-        break;
+        case 'treasure': {
+          p.items ??= p.style === 'chest' ? [rollGear(rng, luck + 1, 'treasure'), rollMaterial(rng, plan.area)] : [rollGear(rng, luck + 1, 'treasure')];
+          const fl = lvl.terrain.floorUnder(p.x, p.y + 1);
+          if (p.style === 'chest') this.addChest(p, p.x, fl, true);
+          else this.addPedestal(p, p.x, fl, p.taken ? null : p.items[0]);
+          break;
+        }
+        case 'secret': {
+          p.items ??= rng.chance(0.6) ? [rollGear(rng, luck + 1, 'treasure')] : [];
+          const fl = lvl.terrain.floorAt(p.x);
+          if (p.items.length) this.addPedestal(p, p.x - 1.5, fl, p.taken ? null : p.items[0]);
+          if (!p.done) {
+            p.done = true; // the pearl pile is placed once; later it's whatever is lying there (saved loot)
+            for (let k = 0; k < 6; k++) w.spawnPickup('pearl', p.x + 1.2 + (k % 3) * 0.5, fl + 0.6 + Math.floor(k / 3) * 0.4, { value: k === 0 ? 5 : 1, vx: 0, vy: 0 });
+            p.done = !p.items.length;
+          }
+          break;
+        }
+        case 'challenge': {
+          const a = plan.arenas.find((q) => q.kind === 'challenge');
+          if (a?.cleared) this.addChest(p, (a.x0 + a.x1) / 2, a.floor + 0.3, false);
+          break;
+        }
+        case 'boss': {
+          const a = plan.arenas.find((q) => q.kind === 'boss');
+          if (a?.cleared) this.bossRewards(a, p, false);
+          break;
+        }
+        default: break;
       }
     }
   }
 
-  private addPedestal(x: number, id: string | null) {
-    const r = this.room!;
-    const p = this.pedestal = new Pedestal(r.a.id, x, r.sand.heightAt(x), id);
-    r.group.add(p.group);
-    this.props.push({ update: (dt: number) => p.update(dt, this.world), dispose: () => p.dispose(), group: p.group });
+  private addPedestal(p: PoiPlan, x: number, floorY: number, id: string | null) {
+    const ped = new Pedestal(this.level!.a.id, x, floorY, id);
+    this.level!.group.add(ped.group);
+    this.pedestals.set(p.id, ped);
+    this.props.push({ update: (dt) => ped.update(dt, this.world), dispose: () => ped.dispose() });
   }
-  private addChest(opened: boolean) {
-    const r = this.room!;
-    const c = this.chest = new ChestProp(2, r.sand.heightAt(2), opened);
-    r.group.add(c.group);
-    this.props.push({ update: (dt: number) => c.update(dt), dispose: () => c.dispose(), group: c.group });
+  private addChest(p: PoiPlan, x: number, y: number, locked: boolean) {
+    const c = new ChestProp(x, y, !!p.taken, locked);
+    this.level!.group.add(c.group);
+    this.chests.set(p.id, c);
+    this.props.push({ update: (dt) => c.update(dt), dispose: () => c.dispose() });
   }
 
-  // ================================================================ fights
-  private difficulty(node: RoomNode) { return this.floorIdx * 0.25 + this.cfg.mastery * 0.08 + Math.min(0.2, node.depth * 0.03); }
+  // ================================================================ arenas
+  private difficulty() { return this.floorIdx * 0.25 + this.cfg.mastery * 0.08; }
+  private arenaBox(a: ArenaPlan): Arena { return { x0: a.x0, x1: a.x1, floor: a.floor, top: a.top }; }
 
-  /** lock the doors and queue the room's enemies */
-  private arm(node: RoomNode) {
-    const r = this.room!, rng = new Rng((node.seed ^ 0xe7e7) >>> 0);
-    this.fight = 'arming';
-    this.clearT = 0;
-    // the gate behind the player slams shut a beat after they're in
-    this.after(0.45, () => { for (const d of Object.values(this.doors)) d?.close(); });
-    if (node.type === 'boss') {
-      this.after(1.2, () => {
-        if (this.room !== r) return;
-        const b = this.boss = spawnBoss(this.world, this.floors[this.floorIdx], r.arena);
+  /** the player is inside an uncleared arena: lock it */
+  private checkArenas() {
+    if (this.fight || this.phase !== 'play') return;
+    const p = this.player;
+    for (const a of this.plan.arenas) {
+      if (a.cleared) continue;
+      if (p.x < a.x0 + 1.5 || p.x > a.x1 - 1.5 || p.y > a.top + 0.5 || p.y < a.floor - 1) continue;
+      this.lockArena(a);
+      return;
+    }
+  }
+
+  private lockArena(a: ArenaPlan) {
+    const lvl = this.level!, rng = new Rng((a.seed ^ 0xe7e7) >>> 0);
+    const f: Fight = this.fight = { arena: a, pending: [], ents: [], clearT: 0, boss: null, bossDone: false, bossDeadT: -1 };
+    for (const g of lvl.gates.get(a.id) ?? []) g.raise();
+    setArena(this.world, this.arenaBox(a));
+    this.world.emit('arenaLock', { kind: a.kind, id: a.id });
+    audio.play('k_bong', { vol: 0.5 });
+    if (a.kind === 'boss') {
+      this.music('mu_volcano');
+      this.after(1.4, () => {
+        if (this.fight !== f) return;
+        const b = f.boss = spawnBoss(this.world, this.floors[this.floorIdx], this.arenaBox(a));
         if (b.hp !== undefined) { b.hp *= this.scal.enemyHp; if (b.maxHp) b.maxHp *= this.scal.enemyHp; }
         b.onDefeated = () => this.bossDown();
-        this.fight = 'boss';
+        f.ents.push(b);
         const info = b.bar?.();
-        this.title3d(info?.name ?? 'THE BOSS', info?.title ?? '', T3D.danger, 3.2, { x: 0, y: r.F + 8.5 });
+        this.title3d(info?.name ?? 'THE BOSS', info?.title ?? '', T3D.danger, 3.2, { x: (a.x0 + a.x1) / 2, y: a.floor + 8 });
         audio.play('boss_growl', { vol: 0.7 }); audio.play('roar1', { vol: 0.4 });
         this.game.addShake(0.4);
       });
       return;
     }
-    const dif = this.difficulty(node) + (node.type === 'challenge' ? 0.35 : 0);
+    const dif = this.difficulty() + (a.kind === 'challenge' ? 0.35 : 0) + a.id * 0.04;
     const kinds = ENEMIES_FOR(this.floors[this.floorIdx], dif);
     const [lo, hi] = roomBudget(dif);
     let n = rng.int(lo, hi) + this.scal.extraPerWave;
     const list: { kind: EnemyKind; elite: boolean }[] = [];
-    if (node.type === 'challenge') {
+    if (a.kind === 'challenge') {
       const big: EnemyKind = kinds.includes('heavy') ? 'heavy' : kinds.includes('moray') ? 'moray' : kinds[0];
       list.push({ kind: big, elite: true });
       n = 2 + this.scal.extraPerWave;
+      this.title3d('CHALLENGE', 'A CHAMPION BLOCKS THE WAY', T3D.danger, 2.6, { x: (a.x0 + a.x1) / 2, y: a.floor + 5 });
     }
     for (let i = 0; i < n; i++) list.push({ kind: rng.pick(kinds), elite: rng.chance(0.06 + this.floorIdx * 0.05) });
     const p = this.player;
     list.forEach((e, i) => {
-      const pos = this.spawnPoint(rng, e.kind, p.x);
-      this.pending.push({ t: 0.7 + i * 0.12, kind: e.kind, x: pos.x, y: pos.y, elite: e.elite });
-      // a swirl of silt where each one will appear
-      this.after(0.25 + i * 0.12, () => { if (this.room === r) this.world.fx.emit('ink', pos.x, pos.y, { n: 10, spread: 0.6, speed: 0.6, life: 1.4, size: 0.5, size1: 1.3, color: new THREE.Color(r.a.pal.silt), alpha: 0.55, drag: 2 }); });
+      const pos = this.spawnPoint(rng, e.kind, a, p.x);
+      f.pending.push({ t: 0.8 + i * 0.15, kind: e.kind, x: pos.x, y: pos.y, elite: e.elite });
+      this.after(0.3 + i * 0.15, () => { if (this.fight === f) this.world.fx.emit('ink', pos.x, pos.y, { n: 10, spread: 0.6, speed: 0.6, life: 1.4, size: 0.5, size1: 1.3, color: new THREE.Color(lvl.a.pal.silt), alpha: 0.55, drag: 2 }); });
     });
   }
 
-  private spawnPoint(rng: Rng, kind: EnemyKind, px: number): { x: number; y: number } {
-    const r = this.room!, F = r.F, T = r.terrain;
+  private spawnPoint(rng: Rng, kind: EnemyKind, a: { x0: number; x1: number; floor: number; top: number }, px: number): { x: number; y: number } {
+    const T = this.level!.terrain;
     const floorKind = kind === 'crab' || kind === 'moray' || kind === 'heavy';
-    for (let k = 0; k < 30; k++) {
-      const x = rng.range(-HALF_W + 2.5, HALF_W - 2.5);
-      if (Math.abs(x - px) < 5.5) continue;
-      const y = floorKind ? T.floorAt(x) + 0.7 : rng.range(F + 2.2, F + ROOM_H - 2.2);
+    const yTop = Math.min(a.top - 1.5, a.floor + 10);
+    for (let k = 0; k < 40; k++) {
+      const x = rng.range(a.x0 + 2, a.x1 - 2);
+      if (Math.abs(x - px) < 5) continue;
+      const fl = T.floorUnder(x, yTop);
+      const y = floorKind ? fl + 0.7 : rng.range(Math.max(a.floor, fl) + 1.8, yTop);
       if (T.sdf(x, y) < 1.0) continue;
       return { x, y };
     }
-    return { x: px > 0 ? -7 : 7, y: F + 4 };
+    return { x: (a.x0 + a.x1) / 2 + (px < (a.x0 + a.x1) / 2 ? 5 : -5), y: a.floor + 4 };
+  }
+
+  private spawnOne(s: { kind: EnemyKind; x: number; y: number; elite: boolean }, arena: Arena): Entity {
+    const e = spawnEnemy(this.world, s.kind, s.x, s.y, { elite: s.elite, difficulty: this.difficulty(), arena });
+    if (e.hp !== undefined) { e.hp *= this.scal.enemyHp; if (e.maxHp) e.maxHp *= this.scal.enemyHp; }
+    this.world.fx.emit('bubbleBig', s.x, s.y, { n: 8, spread: 0.5, speed: 1.6 });
+    this.world.sfx('gloop1', s.x, 0.4);
+    return e;
   }
 
   private updateFight(dt: number) {
-    const node = this.floor.rooms[this.roomId];
-    // queued spawns
-    for (const s of this.pending) s.t -= dt;
-    const due = this.pending.filter((s) => s.t <= 0);
-    this.pending = this.pending.filter((s) => s.t > 0);
-    for (const s of due) {
-      const e = spawnEnemy(this.world, s.kind, s.x, s.y, { elite: s.elite, difficulty: this.difficulty(node), arena: this.room!.arena });
-      if (e.hp !== undefined) { e.hp *= this.scal.enemyHp; if (e.maxHp) e.maxHp *= this.scal.enemyHp; }
-      this.world.fx.emit('bubbleBig', s.x, s.y, { n: 8, spread: 0.5, speed: 1.6 });
-      this.world.sfx('gloop1', s.x, 0.4);
-      if (this.fight === 'arming') this.fight = 'fight';
+    const f = this.fight!;
+    for (const s of f.pending) s.t -= dt;
+    const due = f.pending.filter((s) => s.t <= 0);
+    f.pending = f.pending.filter((s) => s.t > 0);
+    for (const s of due) f.ents.push(this.spawnOne(s, this.arenaBox(f.arena)));
+    if (f.arena.kind === 'boss') {
+      const b = f.boss;
+      if (b && !f.bossDone) {
+        if ((b.hp ?? 1) <= 0) { if (f.bossDeadT < 0) f.bossDeadT = 0; f.bossDeadT += dt; if (f.bossDeadT > 2.5) this.bossDown(); }
+        else if (!b.alive) this.bossDown();
+      }
+      return;
     }
-    if (this.fight === 'fight') {
-      const alive = this.liveEnemies(dt);
-      if (alive === 0 && !this.pending.length) { this.clearT += dt; if (this.clearT > 0.6) this.roomCleared(); } else this.clearT = 0;
-    }
-    if (this.fight === 'boss' && this.boss) {
-      const b = this.boss;
-      if (!this.bossDone && (b.hp ?? 1) <= 0) { if (this.bossDeadT < 0) this.bossDeadT = 0; this.bossDeadT += dt; if (this.bossDeadT > 2.5) this.bossDown(); }
-      if (!this.bossDone && !b.alive) this.bossDown();
-    }
+    if (!f.ents.length && f.pending.length) return;
+    const alive = this.alive(f.ents, f.arena.top, dt);
+    if (alive === 0 && !f.pending.length) { f.clearT += dt; if (f.clearT > 0.7) this.arenaCleared(); } else f.clearT = 0;
   }
 
-  /** living enemies (and the stuck-escapee safety: a diver pinned to the ceiling trying to surface counts as gone) */
-  private liveEnemies(dt: number): number {
-    const top = this.room!.top;
+  /** living enemies of a list (a diver pinned under the ceiling trying to surface counts as gone after a while) */
+  private alive(ents: Entity[], top: number, dt: number): number {
     let n = 0;
-    for (const e of this.world.entities) {
+    for (const e of ents) {
       if (!e.alive || e.team !== 'enemy') continue;
       const st = (e as unknown as { state?: string }).state;
       if (st === 'retreat' || st === 'breathe') {
-        const t = (this.stuck.get(e) ?? 0) + (e.y > top - 2 ? dt : 0);
+        const t = (this.stuck.get(e) ?? 0) + (e.y > top - 2.5 ? dt : 0);
         this.stuck.set(e, t);
         if (t > 3) { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 14, 2); this.world.emit('escaped', { kind: e.kind, x: e.x, y: e.y }); continue; }
       }
@@ -624,61 +573,108 @@ export class DungeonScreen implements Screen {
     return n;
   }
 
-  private roomCleared() {
-    const node = this.floor.rooms[this.roomId];
-    if (node.cleared) return;
-    node.cleared = true;
-    this.fight = 'calm';
+  private arenaCleared() {
+    const f = this.fight;
+    if (!f) return;
+    const a = f.arena, lvl = this.level!;
+    a.cleared = true;
+    this.fight = null;
     this.tally.rooms++; this.tally.waves++;
-    for (const d of Object.values(this.doors)) d?.open();
+    for (const g of lvl.gates.get(a.id) ?? []) g.drop();
+    this.setTravelArena();
     audio.play('jin_good', { vol: 0.45 });
-    this.hud.banner('ROOM CLEARED', '', '#fff6c8', 1.8);
-    this.world.emit('roomCleared', { type: node.type, id: node.id });
-    const r = this.room!, rng = this.world.rng;
-    if (node.type === 'challenge') {
-      this.addChest(false);
-      node.loot ??= {};
-      node.loot.chest = { open: false, items: [rollGear(rng, this.run.stats().luck + 1, 'treasure'), rollGear(rng, this.run.stats().luck, 'room')] };
-    } else if (node.type === 'combat') {
-      const rewards = rollClearReward(rng, r.a.id, this.run.stats().luck, this.scal.lootBonus);
-      this.spawnRewards(rewards, 0, r.F + 3);
+    this.title3d(a.kind === 'challenge' ? 'CHAMPION DOWN' : 'CLEARED', '', T3D.gold, 1.8, { x: this.player.x, y: this.player.y + 2.4 });
+    this.world.emit('roomCleared', { type: a.kind === 'challenge' ? 'challenge' : a.kind === 'boss' ? 'boss' : 'combat', id: a.id });
+    const cx = clamp(this.player.x, a.x0 + 3, a.x1 - 3), cy = Math.min(a.top - 2, this.player.y + 1.5);
+    if (a.kind === 'challenge') {
+      const p = this.plan.pois.find((q) => q.kind === 'challenge')!;
+      p.items = [rollGear(this.world.rng, this.run.stats().luck + 1, 'treasure'), rollGear(this.world.rng, this.run.stats().luck, 'room')];
+      this.addChest(p, (a.x0 + a.x1) / 2, lvl.terrain.floorAt((a.x0 + a.x1) / 2), false);
+    } else if (a.kind === 'arena') {
+      // the reward burst: an Isaac-style clear drop, plus a guaranteed handful of pearls on the later arenas
+      const rewards = rollClearReward(this.world.rng, lvl.a.id, this.run.stats().luck, this.scal.lootBonus);
+      if (a.id > 0 && this.world.rng.chance(0.5)) rewards.push({ kind: 'pearl', value: 1 });
+      this.spawnRewards(rewards, cx, cy);
     }
+    this.checkX = a.x1 + 2;
     this.save();
   }
 
   private spawnRewards(rewards: Reward[], x: number, y: number) {
     rewards.forEach((rw, i) => {
-      const xx = x + (i - (rewards.length - 1) / 2) * 0.7;
-      if (rw.kind === 'item') this.world.spawnPickup('item', xx, y, { id: rw.id, vy: 3 });
-      else if (rw.kind === 'pearl' || rw.kind === 'heart') this.world.spawnPickup(rw.kind, xx, y, { value: rw.value, vy: 3 });
-      else this.world.spawnPickup(rw.kind, xx, y, { vy: 3 });
+      const xx = x + (i - (rewards.length - 1) / 2) * 0.7, vx = (i - (rewards.length - 1) / 2) * 1.2;
+      if (rw.kind === 'item') this.world.spawnPickup('item', xx, y, { id: rw.id, vy: 3.5, vx });
+      else if (rw.kind === 'pearl' || rw.kind === 'heart') this.world.spawnPickup(rw.kind, xx, y, { value: rw.value, vy: 3.5, vx });
+      else this.world.spawnPickup(rw.kind, xx, y, { vy: 3.5, vx });
     });
-    if (rewards.length) { this.world.fx.emit('glow', x, y, { n: 2, size: 2, life: 0.5, color: '#ffe8a0' }); this.world.sfx('pickup_sparkle1', x, 0.4); }
+    if (rewards.length) {
+      this.world.fx.emit('glow', x, y, { n: 2, size: 2.4, life: 0.5, color: '#ffe8a0' });
+      this.world.fx.burst('star', x, y, 12, 2.5, { color: '#fff2b0' });
+      this.world.sfx('pickup_sparkle1', x, 0.5); this.world.sfx('treasure1', x, 0.3);
+    }
   }
 
   private bossDown() {
-    if (this.bossDone) return;
-    this.bossDone = true;
-    const node = this.floor.rooms[this.roomId], b = this.boss;
+    const f = this.fight;
+    if (!f || f.bossDone) return;
+    f.bossDone = true;
+    const a = f.arena, b = f.boss;
     this.tally.bosses++;
     if (b) this.world.emit('bossDefeated', { id: b.bossId, floor: this.floorIdx, byDungeon: true });
-    this.roomCleared();
-    this.title3d('VICTORY', this.floorIdx >= this.floors.length - 1 ? 'THE SEA IS YOURS' : 'THE WAY DOWN IS OPEN', T3D.gold, 3.5, { x: 0, y: this.room!.F + 8 });
-    audio.music(this.room!.a.music, 2);
+    a.cleared = true;
+    this.fight = null;
+    this.tally.rooms++;
+    this.setTravelArena();
+    this.world.emit('roomCleared', { type: 'boss', id: a.id });
+    const last = this.floorIdx >= this.floors.length - 1;
+    this.title3d('VICTORY', last ? 'THE SEA IS YOURS' : 'THE WAY DOWN IS OPEN', T3D.gold, 3.5, { x: (a.x0 + a.x1) / 2, y: a.floor + 8 });
+    this.music(this.level!.a.music);
     audio.play('jin_legend', { vol: 0.6 });
-    this.bossRewards(node, true);
+    const p = this.plan.pois.find((q) => q.kind === 'boss')!;
+    this.bossRewards(a, p, true);
+    this.checkX = (a.x0 + a.x1) / 2;
+    this.save();
   }
 
-  private bossRewards(node: RoomNode, fresh: boolean) {
-    const r = this.room!;
-    node.loot ??= {};
-    if (node.loot.pedestal === undefined) node.loot.pedestal = rollGear(this.world.rng, this.run.stats().luck, 'boss');
-    this.addPedestal(-4, node.loot.pedestalTaken ? null : node.loot.pedestal);
-    const h = this.hatch = new ExitHatch(this.world, 4.5, r.sand.heightAt(4.5));
-    r.group.add(h.group);
-    this.props.push({ update: (dt: number) => h.update(dt), dispose: () => h.dispose(), group: h.group });
-    if (fresh) this.after(1.6, () => h.activate()); else h.activate();
-    if (fresh) this.spawnRewards([{ kind: 'heart', value: 2 }, { kind: 'pearl', value: 5 }], 0, r.F + 4);
+  private bossRewards(a: ArenaPlan, p: PoiPlan, fresh: boolean) {
+    const lvl = this.level!, cx = (a.x0 + a.x1) / 2;
+    p.items ??= [rollGear(this.world.rng, this.run.stats().luck, 'boss')];
+    this.addPedestal(p, cx - 5, lvl.terrain.floorAt(cx - 5), p.taken ? null : p.items[0]);
+    const hx = a.x1 - 8;
+    const h = this.hatch = new ExitHatch(this.world, hx, lvl.terrain.floorAt(hx));
+    lvl.group.add(h.group);
+    this.props.push({ update: (dt) => h.update(dt), dispose: () => h.dispose() });
+    if (fresh) { this.after(1.6, () => h.activate()); this.spawnRewards([{ kind: 'heart', value: 2 }, { kind: 'pearl', value: 5 }, { kind: 'key' }], cx, a.floor + 4); }
+    else h.activate();
+  }
+
+  // ================================================================ roaming groups
+  private updateGroups(dt: number) {
+    const p = this.player;
+    for (const g of this.plan.groups) {
+      if (g.cleared) continue;
+      if (!g.spawned) {
+        if (Math.abs(p.x - g.x) > 17 || this.fight) continue;
+        this.spawnGroup(g);
+        continue;
+      }
+      const ents = this.groups.get(g.id) ?? [];
+      if (this.alive(ents, this.plan.top, dt) === 0) { g.cleared = true; this.world.emit('roomCleared', { type: 'roam', id: g.id }); }
+    }
+  }
+  private spawnGroup(g: GroupPlan) {
+    g.spawned = true;
+    const rng = new Rng(g.seed), lvl = this.level!;
+    const kinds = ENEMIES_FOR(this.floors[this.floorIdx], this.difficulty());
+    const box: Arena = { x0: Math.max(1, g.x - 14), x1: Math.min(this.plan.W - 1, g.x + 14), floor: this.plan.base - 8, top: this.plan.top };
+    const ents: Entity[] = [];
+    for (let i = 0; i < g.n; i++) {
+      const kind = rng.pick(kinds);
+      const pos = this.spawnPoint(rng, kind, { x0: g.x - 5, x1: g.x + 8, floor: this.plan.base, top: this.plan.top }, this.player.x);
+      ents.push(this.spawnOne({ kind, x: pos.x, y: pos.y, elite: false }, box));
+    }
+    this.groups.set(g.id, ents);
+    void lvl;
   }
 
   // ================================================================ pickups -> counters / the pack
@@ -687,107 +683,100 @@ export class DungeonScreen implements Screen {
     switch (p.pk) {
       case 'pearl':
         this.run.coins += p.value; this.tally.pearls += p.value;
-        this.hud.flash('pearls');
         w.sfx(p.value > 1 ? 'coins_pile1' : 'coin_a', p.x, 0.5, 1.1 + Math.random() * 0.2);
         this.text.pop(`+${p.value}`, p.x, p.y + 0.5, 'gold', { size: 0.3, life: 0.9 });
         return true;
       case 'heart':
         if (pl.hp >= pl.maxHp) return false;
         pl.heal(p.value, w);
-        this.hud.flash('hp');
         return true;
-      case 'key': this.keys++; this.hud.flash('keys'); w.sfx('hook_clink1', p.x, 0.6, 1.3); w.sfx('k_confirm2', p.x, 0.3); return true;
-      case 'bomb': this.bombs++; this.hud.flash('bombs'); w.sfx('inflate1', p.x, 0.4, 1.4); return true;
+      case 'key': this.keys++; w.sfx('hook_clink1', p.x, 0.6, 1.3); w.sfx('k_confirm2', p.x, 0.3); return true;
+      case 'bomb': this.bombs++; w.sfx('inflate1', p.x, 0.4, 1.4); return true;
       default: {
         const res = packAdd(this.run, p.id!, p.level, p.n);
         if (!res) { this.packFull(p.id!, p.x, p.y); return false; }
         if (res.left > 0) { p.n = res.left; this.packFull(p.id!, p.x, p.y); }
-        const d = getItem(p.id!);
-        this.text.pop(d.name, p.x, p.y + 0.6, 'item', { size: 0.32, life: 1.4, vy: 0.5 });
+        this.hud.l.pickup(p.id!);
         w.sfx('pickup_sparkle1', p.x, 0.5); w.sfx('jin_catch', p.x, 0.3);
         w.emit('itemPicked', { id: p.id });
-        this.hud.flash('pack');
         this.installStats(); this.applyStats();
         return res.left <= 0;
       }
     }
   }
   private packFull(id: string, x: number, y: number) {
+    this.hud.l.flash('pack');
     if (this.fullPopT > 0) return;
     this.fullPopT = 1.6;
     this.text.pop('PACK FULL', x, y + 0.7, 'danger', { size: 0.3, life: 1.2 });
     this.world.sfx('k_err1', x, 0.4);
-    this.hud.flash('pack');
     this.world.emit('packFull', { id });
   }
 
   // ================================================================ interactions
-  private interact(): DungeonHudState['prompt'] {
-    const p = this.player, inp = this.game.input, w = this.world, r = this.room!;
+  private interact(): Prompt | null {
+    const p = this.player, inp = this.game.input, w = this.world, lvl = this.level!;
     if (!p.alive || this.phase !== 'play') return null;
     const E = inp.hit('interact');
-    // a locked door: touch it with a key
-    for (const [d, door] of Object.entries(this.doors) as [Dir, Door][]) {
-      if (!door.locked) continue;
-      const near = (d === 'L' || d === 'R') ? Math.abs(p.x - (d === 'L' ? -HALF_W : HALF_W)) < 1.8 && p.y < r.F + DOOR_Y1 + 0.6 : Math.abs(p.x) < SHAFT_HW + 0.5 && Math.abs(p.y - (d === 'U' ? r.top : r.F)) < 1.8;
-      if (!near) continue;
-      if (this.keys > 0) {
-        if (E || this.fight === 'calm') { this.keys--; this.hud.flash('keys'); door.unlock(); this.markOpened(d); this.save(); }
-        return { key: 'E', label: 'UNLOCK', at: this.anchor(p.x, p.y + 0.6) };
-      }
-      return { key: '', label: 'LOCKED: NEEDS A KEY', at: this.anchor(p.x, p.y + 0.6), bad: true };
+    // pedestals: swim into the floating item
+    for (const [pid, ped] of this.pedestals) {
+      if (!ped.id || Math.abs(p.x - ped.x) > 1.1 || Math.abs(p.y - ped.itemY) > 1.3) continue;
+      if (!packFits(this.run, ped.id)) { this.packFull(ped.id, ped.x, ped.itemY); return { key: 'TAB', label: 'PACK FULL: MAKE ROOM', at: this.anchor(ped.x, ped.itemY + 0.6), bad: true }; }
+      const id = ped.id;
+      packAdd(this.run, id);
+      ped.setItem(null);
+      const poi = this.plan.pois[pid]; poi.taken = true; poi.done = true;
+      this.hud.l.pickup(id);
+      w.fx.burst('star', ped.x, ped.itemY, 18, 2.6, { color: '#fff2b0' });
+      audio.play('treasure1', { vol: 0.6 }); audio.play('jin_rare1', { vol: 0.4 });
+      w.emit('itemPicked', { id, pedestal: true });
+      this.installStats(); this.applyStats();
+      this.save();
     }
-    // the pedestal
-    const ped = this.pedestal;
-    if (ped?.id && Math.abs(p.x - ped.x) < 1.1 && Math.abs(p.y - ped.itemY) < 1.3) {
-      if (packFits(this.run, ped.id)) {
-        const id = ped.id;
-        packAdd(this.run, id);
-        ped.setItem(null);
-        const node = this.floor.rooms[this.roomId]; if (node.loot) node.loot.pedestalTaken = true;
-        const d = getItem(id);
-        this.hud.banner(d.name.toUpperCase(), d.desc, '#ffffff', 3.2);
-        w.fx.burst('star', ped.x, ped.itemY, 18, 2.6, { color: '#fff2b0' });
-        audio.play('treasure1', { vol: 0.6 }); audio.play('jin_rare1', { vol: 0.4 });
-        w.emit('itemPicked', { id, pedestal: true });
-        this.installStats(); this.applyStats();
-        this.save();
-      } else { this.packFull(ped.id, ped.x, ped.itemY); return { key: 'TAB', label: 'PACK FULL: MAKE ROOM', at: this.anchor(ped.x, ped.itemY + 0.5), bad: true }; }
-    }
-    // the chest
-    const ch = this.chest, node = this.floor.rooms[this.roomId];
-    if (ch && !ch.open && Math.abs(p.x - ch.x) < 1.6 && p.y < ch.y + 2.2) {
-      if (E || true) {
-        ch.open = true;
-        if (node.loot?.chest) node.loot.chest.open = true;
-        audio.play('chest_creak', { vol: 0.7 }); audio.play('treasure1', { vol: 0.5 });
-        const items = node.loot?.chest?.items ?? [];
-        this.after(0.5, () => this.spawnRewards([...items.map((id) => ({ kind: 'item' as const, id })), { kind: 'pearl', value: 5 }], ch.x, ch.y + 1));
-        this.save();
+    // chests (treasure nooks are locked: a key opens them)
+    for (const [pid, ch] of this.chests) {
+      if (ch.open || Math.abs(p.x - ch.x) > 1.8 || p.y > ch.y + 2.4 || p.y < ch.y - 1) continue;
+      const poi = this.plan.pois[pid];
+      if (ch.locked) {
+        if (this.keys <= 0) return { key: '', label: 'LOCKED: NEEDS A KEY', at: this.anchor(ch.x, ch.y + 1.6), bad: true };
+        if (!E) return { key: 'E', label: 'UNLOCK (1 KEY)', at: this.anchor(ch.x, ch.y + 1.6) };
+        this.keys--; ch.unlock();
+        w.sfx('k_confirm1', ch.x, 0.7); w.sfx('clank1', ch.x, 0.6);
       }
+      ch.open = true; poi.taken = true; poi.done = true;
+      audio.play('chest_creak', { vol: 0.7 }); audio.play('treasure1', { vol: 0.5 });
+      const items = poi.items ?? [];
+      this.after(0.5, () => this.spawnRewards([...items.map((id) => ({ kind: 'item' as const, id })), { kind: 'pearl', value: poi.kind === 'challenge' ? 5 : 1 }], ch.x, ch.y + 1.2));
+      this.save();
     }
     // the shop
     if (this.shop) {
       let best: ShopStand | null = null;
-      for (const st of this.shop.stands) if (!st.slot.sold && Math.abs(p.x - st.x) < 1.2 && p.y < st.y + 2.6) best = st;
+      for (const st of this.shop.stands) if (!st.slot.sold && Math.abs(p.x - st.x) < 1.2 && p.y < st.y + 2.8 && p.y > st.y - 1) best = st;
       if (best) {
         const price = best.slot.price, can = this.run.coins >= price;
         const label = `${this.shop.label(best).toUpperCase()} · ${price} PEARLS`;
         if (E) this.buy(best);
-        return { key: 'E', label: can ? `BUY ${label}` : label, at: this.anchor(best.x, best.y + 2.2), bad: !can };
+        return { key: 'E', label: can ? `BUY ${label}` : label, at: this.anchor(best.x, best.y - 0.6), bad: !can };
+      }
+      if (this.shopPoi && Math.abs(p.x - this.shopPoi.x) < 12 && !this.shopPoi.known) { /* noop */ }
+    }
+    // the post office: the manatee comes when you swim near the buoy
+    const mb = lvl.mailbox;
+    if (mb) {
+      if (mb.manatee.state === 'away' && Math.abs(p.x - mb.x) < 30 && mb.eta > 2) mb.eta = 1;
+      if (mb.canDeposit(p.x, p.y)) {
+        if (E) this.openMail();
+        return { key: 'E', label: 'MAIL ITEMS HOME', at: this.anchor(mb.manatee.x, mb.manatee.y + 1.4) };
       }
     }
-    // the post office
-    if (this.post && Math.hypot(p.x - this.post.at.x, p.y - this.post.at.y) < 4) {
-      if (E) this.openMail();
-      return { key: 'E', label: 'MAIL ITEMS HOME', at: this.anchor(this.post.at.x, this.post.at.y + 1.4) };
+    // the way down
+    const h = this.hatch;
+    if (h?.active && Math.abs(p.x - h.x) < 1.7 && p.y < h.y + 2.4) {
+      if (E || p.y < h.y + 0.9) this.descend();
+      return { key: 'E', label: this.floorIdx >= this.floors.length - 1 ? 'SWIM HOME' : 'DIVE DEEPER', at: this.anchor(h.x, h.y + 2.1) };
     }
-    // the hatch down
-    if (this.hatch?.active && Math.abs(p.x - this.hatch.x) < 1.6 && p.y < this.hatch.y + 2.2) {
-      if (E || p.y < this.hatch.y + 0.9) this.descend();
-      return { key: 'E', label: this.floorIdx >= this.floors.length - 1 ? 'SWIM HOME' : 'DIVE DEEPER', at: this.anchor(this.hatch.x, this.hatch.y + 2) };
-    }
-    // a refused pickup nearby (pack full / health full)
+    // a refused pickup nearby
     for (const e of w.entities) if (e instanceof Pickup && e.refused > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 2) {
       if (e.pk === 'item') return { key: 'TAB', label: 'PACK FULL: MAKE ROOM', at: this.anchor(e.x, e.y + 0.6), bad: true };
       if (e.pk === 'heart') return { key: '', label: 'HEALTH FULL', at: this.anchor(e.x, e.y + 0.6) };
@@ -795,11 +784,12 @@ export class DungeonScreen implements Screen {
     return null;
   }
 
-  private markOpened(d: Dir) {
-    const node = this.floor.rooms[this.roomId];
-    node.opened[d] = true;
-    const nb = node.doors[d];
-    if (nb !== undefined) this.floor.rooms[nb].opened[OPP[d]] = true;
+  private shopGreeted = false;
+  private updateShopTalk() {
+    const sp = this.shopPoi;
+    if (!sp || this.shopGreeted || Math.abs(this.player.x - sp.x) > 9) return;
+    this.shopGreeted = true;
+    this.dlg.bark('crab', this.world.rng.pick(["Pearls on the counter, kid. Let's see 'em.", 'Mind the merchandise. Breaks? Buys.', "Back again? Swim slow, I'm old."]), 3.2);
   }
 
   private buy(st: ShopStand) {
@@ -807,24 +797,26 @@ export class DungeonScreen implements Screen {
     if (this.run.coins < s.price) { this.dlg.bark('crab', "Pearls first, kid. I don't do tabs.", 2.4); w.sfx('k_err1', st.x, 0.4); return; }
     if (s.kind === 'item' && !packFits(this.run, s.id!)) { this.dlg.bark('crab', "Your bag's stuffed. Make room, then we talk.", 2.6); this.packFull(s.id!, st.x, st.y + 1.5); return; }
     this.run.coins -= s.price;
-    this.hud.flash('pearls');
-    if (s.kind === 'item') { packAdd(this.run, s.id!); this.installStats(); this.applyStats(); w.emit('itemPicked', { id: s.id, bought: true }); }
+    if (s.kind === 'item') { packAdd(this.run, s.id!); this.installStats(); this.applyStats(); this.hud.l.pickup(s.id!); w.emit('itemPicked', { id: s.id, bought: true }); }
     else if (s.kind === 'heart') this.player.heal(2, w);
     else if (s.kind === 'key') this.keys++;
     else this.bombs++;
     this.shop!.sell(st);
+    if (this.shopPoi && this.shopPoi.shop?.every((q) => q.sold)) this.shopPoi.done = true;
     audio.play('buy1', { vol: 0.6 }); audio.play('coins_many1', { vol: 0.4 });
-    this.dlg.bark('crab', this.world.rng.pick(['Pleasure doing business.', 'Good eye. Better than mine.', "Don't spend it all in one reef.", 'No refunds. Ever.']), 2.4);
+    this.dlg.bark('crab', w.rng.pick(['Pleasure doing business.', 'Good eye. Better than mine.', "Don't spend it all in one reef.", 'No refunds. Ever.']), 2.4);
     w.emit('buy', { kind: s.kind, id: s.id, price: s.price });
     this.save();
   }
 
   // ---- post office
+  private mailUsed = 0;
+  static MAIL_CAPACITY = 8;
   private openMail() {
-    if (!this.post) return;
     const items = this.run.items.filter((i) => ITEMS[i.id]);
-    this.mail = { items, picked: new Set(), capacity: PostOffice.CAPACITY - this.post.used, used: 0 };
+    this.mail = { items, picked: new Set(), capacity: DungeonScreen.MAIL_CAPACITY - this.mailUsed, used: 0 };
     audio.play('page1', { vol: 0.5, dry: true });
+    if (!this.mailUsed) this.dlg.bark('manatee', 'Parcels home? Pop them in my bag, dear.', 3);
   }
   private mailAction(a: string) {
     const m = this.mail;
@@ -836,22 +828,24 @@ export class DungeonScreen implements Screen {
     m.used = m.items.filter((i) => m.picked.has(i.uid)).reduce((s, i) => s + getItem(i.id).shape.length, 0);
   }
   private sendMail() {
-    const m = this.mail, po = this.post;
-    if (!m || !po || !m.picked.size || m.used > m.capacity) return;
+    const m = this.mail, mb = this.level?.mailbox;
+    if (!m || !mb || !m.picked.size || m.used > m.capacity) return;
     const sent = this.run.items.filter((i) => m.picked.has(i.uid));
     this.run.items = this.run.items.filter((i) => !m.picked.has(i.uid));
     const { materials, gear } = packTotals(sent);
     addMaterials(materials);
     for (const g of gear) stashItem(g.id, g.level);
     META.extractions++; saveMeta();
-    po.used += m.used;
+    this.mailUsed += m.used;
     const ids = expandIds(sent);
     this.mailed.push(...ids);
     this.tally.extracted += ids.length;
-    po.celebrate();
-    audio.play('jin_catch', { vol: 0.5 }); audio.play('bag_zip1', { vol: 0.5 });
+    mb.deposit(ids);                       // the manatee's delivery roll (emits 'extract')
+    mb.waitLeft = 1e6;                     // ...but she stays for more
+    const post = this.plan.pois.find((q) => q.kind === 'post');
+    if (post && this.mailUsed >= DungeonScreen.MAIL_CAPACITY) post.done = true;
+    audio.play('bag_zip1', { vol: 0.5 });
     this.dlg.bark('manatee', 'Off they go! Safe and sound at home, dear.', 2.6);
-    this.world.emit('extract', { items: ids, counts: materials });
     this.installStats(); this.applyStats();
     this.mail = null;
     this.save();
@@ -861,7 +855,6 @@ export class DungeonScreen implements Screen {
   private dropBomb() {
     if (this.bombs <= 0) { this.world.sfx('k_err1', this.player.x, 0.3); return; }
     this.bombs--;
-    this.hud.flash('bombs');
     const p = this.player;
     this.world.add(new PufferBomb(p.x, p.y - 0.1, p.vx * 0.3, p.vy * 0.3 - 0.5));
     this.world.sfx('inflate1', p.x, 0.5); this.world.sfx('k_tick1', p.x, 0.4);
@@ -892,39 +885,7 @@ export class DungeonScreen implements Screen {
     });
   }
 
-  // ================================================================ transitions
-  private checkExits() {
-    if (this.phase !== 'play' || this.trans) return;
-    const p = this.player, r = this.room!, node = this.floor.rooms[this.roomId];
-    const open = (d: Dir) => { const dr = this.doors[d]; return !!dr && dr.isOpen && !dr.cracked && !dr.locked && node.doors[d] !== undefined; };
-    let dir: Dir | null = null;
-    if (p.x < -HALF_W - 0.7 && open('L')) dir = 'L';
-    else if (p.x > HALF_W + 0.7 && open('R')) dir = 'R';
-    else if (p.y > r.top + 0.8 && open('U')) dir = 'U';
-    else if (p.y < r.F - 1.0 && Math.abs(p.x) < SHAFT_HW && open('D')) dir = 'D';
-    if (!dir) return;
-    this.trans = { dir, t: 0, swapped: false, to: node.doors[dir]! };
-    this.phase = 'trans';
-    this.game.post.fadeTo?.(1, 0.16, '#02060a');
-    this.world.sfx('swish_b', p.x, 0.4, 0.8);
-  }
-
-  private updateTrans(dt: number) {
-    const tr = this.trans!;
-    tr.t += dt;
-    const [dx, dy] = tr.dir === 'L' ? [-1, 0] : tr.dir === 'R' ? [1, 0] : tr.dir === 'U' ? [0, 1] : [0, -1];
-    if (!tr.swapped) {
-      this.camOff.x += dx * dt * 16; this.camOff.y += dy * dt * 10;
-      if (tr.t >= 0.18) {
-        tr.swapped = true;
-        this.enterRoom(tr.to, OPP[tr.dir]);
-        this.camOff.set(-dx * 3.5, -dy * 2.5);
-        this.game.post.cut?.();
-        this.game.post.fadeTo?.(0, 0.24, '#02060a');
-      }
-    } else if (tr.t > 0.45) { this.trans = null; this.phase = 'play'; }
-  }
-
+  // ================================================================ the way down
   private descend() {
     if (this.phase !== 'play') return;
     this.phase = 'descend';
@@ -936,11 +897,10 @@ export class DungeonScreen implements Screen {
     this.tally.floors++;
     this.after(1.0, () => {
       if (n >= this.floors.length - 1) { this.victory(); return; }
-      this.teardownRoom(true);
-      this.startFloor(n + 1);
+      this.mailUsed = 0; this.shopGreeted = false;
+      this.startFloor(n + 1, null);
       this.world.god = this.god;
       this.phase = 'play';
-      this.game.post.cut?.();
       this.game.post.fadeTo?.(0, 0.9);
       this.save();
     });
@@ -954,8 +914,9 @@ export class DungeonScreen implements Screen {
     this.paused = false; this.mail = null;
     audio.music(null, 2);
     const b = board(this.world), by = b.lastHurt.by;
+    const boss = this.fight?.boss;
     if (by && b.time - b.lastHurt.t < 6) this.killer = { name: by.callsign, title: by.nemesisId ? META.nemeses.find((n) => n.id === by.nemesisId)?.title : undefined, nemesis: !!by.nemesisId };
-    else if (this.boss && this.fight === 'boss') this.killer = { name: this.boss.bar?.().name ?? 'The boss', title: this.boss.bar?.().title };
+    else if (boss) this.killer = { name: boss.bar?.().name ?? 'The boss', title: boss.bar?.().title };
     else this.killer = { name: 'The deep', title: AREA_NAME(this.floors[this.floorIdx]) };
   }
 
@@ -974,7 +935,7 @@ export class DungeonScreen implements Screen {
     this.ended = true;
     const lost = expandIds(this.run.items.filter((i) => ITEMS[i.id]));
     this.run.items = [];
-    META.deaths++; saveMeta();
+    if (!this.dev) { META.deaths++; saveMeta(); }
     clearDungeonSave();
     this.finish(this.result(false, lost));
   }
@@ -984,22 +945,25 @@ export class DungeonScreen implements Screen {
     this.ended = true;
     const items = this.run.items.filter((i) => ITEMS[i.id]);
     const home = expandIds(items);
-    const { materials, gear } = packTotals(items);
-    returnToStash(gear);
-    addMaterials(materials);
-    META.wins++;
-    const before = META.masteryUnlocked;
-    META.masteryUnlocked = Math.max(META.masteryUnlocked, Math.min(MAX_MASTERY, this.cfg.mastery + 1));
-    saveMeta();
-    clearDungeonSave();
     const r = this.result(true, home);
-    if (META.masteryUnlocked > before) r.unlocked = META.masteryUnlocked;
+    if (!this.dev) {
+      const { materials, gear } = packTotals(items);
+      returnToStash(gear);
+      addMaterials(materials);
+      META.wins++;
+      const before = META.masteryUnlocked;
+      META.masteryUnlocked = Math.max(META.masteryUnlocked, Math.min(MAX_MASTERY, this.cfg.mastery + 1));
+      saveMeta();
+      if (META.masteryUnlocked > before) r.unlocked = META.masteryUnlocked;
+    }
+    clearDungeonSave();
     this.finish(r);
   }
 
   private finish(r: DungeonResult) {
     this.phase = 'done';
     this.game.timeScale = 1;
+    (window as unknown as { lastDungeonResult: DungeonResult }).lastDungeonResult = r;
     if (this.onEnd) { this.onEnd(r); return; }
     const flow = (window as unknown as { flow?: { runEnded?: (r: DungeonResult) => void } }).flow;
     if (flow?.runEnded) { flow.runEnded(r); return; }
@@ -1013,18 +977,21 @@ export class DungeonScreen implements Screen {
     if (this.onQuit) { this.onQuit(); return; }
     const flow = (window as unknown as { flow?: { dungeonQuit?: () => void } }).flow;
     if (flow?.dungeonQuit) { flow.dungeonQuit(); return; }
-    if (this.game.get('hideout')) this.game.go('hideout', {});
+    if (this.game.get('hideout')) this.game.go('hideout', { arrive: true });
   }
 
-  /** the run so far (RESUME): written on every room change, clear, purchase and mail */
+  /** the run so far (RESUME): written at floor starts, arena clears, purchases, mail and quit */
   save() {
-    if (this.ended || this.phase === 'dead' || !this.floor || this.dev) return;
+    if (this.ended || this.phase === 'dead' || !this.plan || this.dev) return;
+    const loot: FloorLoot[] = [];
+    for (const e of this.world.entities) if (e instanceof Pickup && e.alive) loot.push({ kind: e.pk, id: e.id, x: e.x, y: e.y, n: e.pk === 'item' ? e.n : e.value, level: e.level });
     const s: DungeonSave = {
-      v: 3, cfg: this.cfg, seed: this.seed, floors: [...this.floors], floorIdx: this.floorIdx, floor: this.floor, roomId: this.roomId,
+      v: 4, cfg: this.cfg, seed: this.seed, floors: [...this.floors], floorIdx: this.floorIdx, plan: this.plan, checkX: this.checkX,
       hp: this.player?.hp ?? this.run.hp, items: this.run.items.map((i) => ({ ...i })), nextUid: this.run.nextUid,
-      pearls: this.run.coins, keys: this.keys, bombs: this.bombs, tally: { ...this.tally }, mailed: [...this.mailed],
+      pearls: this.run.coins, keys: this.keys, bombs: this.bombs, tally: { ...this.tally }, mailed: [...this.mailed], loot,
     };
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch { /* storage full / blocked */ }
+    META.activeRun = s as unknown as typeof META.activeRun;
+    saveMeta();
   }
 
   // ================================================================ events
@@ -1033,19 +1000,18 @@ export class DungeonScreen implements Screen {
     w.on('kill', (d) => { if (d.boss) return; this.tally.kills++; this.run.kills++; });
     w.on('hit', (d) => { if (d.crit) this.critPending = true; });
     w.on('explosion', (d) => {
-      if (typeof d.x !== 'number' || typeof d.y !== 'number') return;
-      for (const [dir, door] of Object.entries(this.doors) as [Dir, Door][]) {
-        if (door.blast(d.x, d.y as number, (d.r as number) ?? 2)) {
-          this.markOpened(dir);
-          this.room!.terrain.doors[dir].exists = true;
-          this.hud.banner('A SECRET!', '', '#e0c0ff', 2);
-          audio.play('jin_rare2', { vol: 0.5 });
-          reveal(this.floor, this.roomId);
-          this.save();
-        }
+      if (typeof d.x !== 'number' || typeof d.y !== 'number' || !this.level) return;
+      for (const [pid, lid] of this.level.lids) {
+        if (!lid.blast(d.x, d.y as number, (d.r as number) ?? 2)) continue;
+        const p = this.plan.pois[pid];
+        p.opened = true; p.known = true;
+        this.hud.l.title('A SECRET!', 'SOMETHING GLITTERS BELOW', '#e0c0ff', 2.4);
+        audio.play('jin_rare2', { vol: 0.5 });
+        this.world.emit('secretFound', { x: p.x });
+        this.save();
       }
     });
-    w.on('bossDefeated', (d) => { if (!d.byDungeon && this.boss && d.id === this.boss.bossId) this.after(1.5, () => this.bossDown()); });
+    w.on('bossDefeated', (d) => { const b = this.fight?.boss; if (!d.byDungeon && b && d.id === b.bossId) this.after(1.5, () => this.bossDown()); });
   }
 
   private after(t: number, fn: () => void) { this.seq.push({ t, fn }); }
@@ -1074,8 +1040,8 @@ export class DungeonScreen implements Screen {
 
   // ================================================================ frame
   update(dt: number) {
-    const w = this.world, p = this.player, inp = this.game.input, r = this.room;
-    if (!w || !r || this.ended) return;
+    const w = this.world, p = this.player, inp = this.game.input, lvl = this.level;
+    if (!w || !lvl || this.ended) return;
     // ---- pause
     if (inp.hit('pause') && !this.mail && this.phase !== 'dead' && this.phase !== 'descend') { this.paused = !this.paused; audio.play(this.paused ? 'k_open1' : 'k_close1', { vol: 0.5, dry: true }); }
     this.game.cursor = this.paused || this.mail ? 'none' : 'aim';
@@ -1092,9 +1058,9 @@ export class DungeonScreen implements Screen {
     const due = this.seq.filter((s) => s.t <= 0);
     this.seq = this.seq.filter((s) => s.t > 0);
     for (const s of due) s.fn();
-    if (this.ended || this.room !== r) { if (this.ended) return; }
-    const room = this.room!;
-    // ---- the blobfish (frozen in place while the mail picker is up)
+    if (this.ended || !this.level) return;
+    const L = this.level;
+    // ---- the blobfish (frozen while the mail picker is up)
     if (this.god) p.hp = p.maxHp;
     if (!this.mail) p.update(dt, w);
     const spd = Math.hypot(p.vx, p.vy);
@@ -1107,21 +1073,26 @@ export class DungeonScreen implements Screen {
       const e = w.entities[i];
       if (!e.alive) { e.dispose?.(w); e.obj?.removeFromParent(); w.entities.splice(i, 1); }
     }
-    // ---- the room
-    room.update(dt, this.camLook.x);
-    for (const d of Object.values(this.doors)) d?.update(dt);
+    // ---- the level
+    L.update(dt, this.camLook.x);
     for (const pr of this.props) pr.update(dt);
     w.emit('tick', { dt });
-    if (this.fight !== 'calm') this.updateFight(dt);
+    if (this.phase === 'play') {
+      explore(this.plan, p.x);
+      this.checkArenas();
+      if (!this.fight) this.setTravelArenaThrottled(dt);
+    }
+    if (this.fight) this.updateFight(dt);
+    this.updateGroups(dt);
+    this.updateShopTalk();
     // ---- input: bombs, the bag
     if (this.phase === 'play' && p.alive && !this.mail) {
       if (inp.keyHit('KeyG')) this.dropBomb();
       if (inp.hit('bag')) this.openBag();
     }
-    const prompt = this.mail ? null : this.interact();
-    // ---- transitions
-    if (this.phase === 'play') this.checkExits();
-    if (this.phase === 'trans' && this.trans) this.updateTrans(dt);
+    let prompt = this.mail ? null : this.interact();
+    this.hintT -= dt;
+    if (!prompt && this.hintT > 0) prompt = { key: '', label: this.hintText };
     // ---- camera, water, fx
     this.updateCamera(dt);
     w.water.update(this.game.renderer, dt, this.camLook.x);
@@ -1129,20 +1100,17 @@ export class DungeonScreen implements Screen {
     w.text.update(dt);
     this.t3d.update(dt, this.camera);
     audio.listenerX = this.camLook.x;
-    audio.setUnderwater(0.55);
-    // ---- heartbeat / desat
+    audio.setUnderwater(this.camera.position.y < 0.2 ? 0.55 : 0.15);
     const low = p.alive && p.hp <= 2;
     this.heartbeat -= dt;
     if (low && this.heartbeat <= 0) { this.heartbeat = 1.0; audio.play('heartbeat1', { vol: 0.5 }); POST.uPulse.value = 1; }
     POST.uPulse.value *= Math.exp(-dt * 3);
     if (this.phase !== 'dead') POST.uDesat.value = damp(POST.uDesat.value, 0, 3, dt);
     this.run.hp = p.hp;
-    // ---- HUD
-    this.dlg.update(dt, inp);
-    const act = this.hud.draw(dt, this.hudState(prompt), inp);
+    // ---- HUD (+ the dialogue bubbles on the same layer)
+    this.dlg.update(dt, this.mail ? null : inp);
+    const act = this.hud.draw(dt, this.hudState(prompt), inp, () => this.dlg.draw());
     if (act?.startsWith('mail:')) this.mailAction(act);
-    if (this.mail && inp.keyHit('Escape')) this.mail = null;
-    this.hud.ui.begin(null, 0); this.dlg.draw(); this.hud.ui.end();
     this.bar.visible = this.phase === 'play' && !this.mail;
     this.bar.update(dt, p.skillHud());
     // ---- death
@@ -1153,29 +1121,40 @@ export class DungeonScreen implements Screen {
     }
   }
 
-  private camTarget(): THREE.Vector3 {
-    const r = this.room!, p = this.player;
-    const halfV = (ROOM_H + 0.8) / 2;
-    this.camDist = halfV / Math.tan((this.camera.fov * Math.PI) / 360);
-    const halfW = halfV * this.camera.aspect;
-    // keep the side walls in frame when there's room, else follow the blobfish along the room
-    const span = Math.max(0, HALF_W + 1.4 - halfW);
-    const tx = clamp(p.x * 0.6, -span, span);
-    const ty = r.F + ROOM_H / 2 + clamp((p.y - (r.F + ROOM_H / 2)) * 0.12, -0.6, 0.6);
+  private travelT = 0;
+  private setTravelArenaThrottled(dt: number) { this.travelT -= dt; if (this.travelT <= 0) { this.travelT = 0.5; this.setTravelArena(); } }
+
+  /** the camera target: side-scrolling follow with look-ahead, clamped to the level; framed on an arena fight */
+  private camTarget(snap = 0): THREE.Vector3 {
+    const p = this.player, plan = this.plan, f = this.fight;
+    const fov = (this.camera.fov * Math.PI) / 360;
+    const dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5;
+    this.camDist = snap ? dist : damp(this.camDist, dist, 2, 1 / 60);
+    const halfV = this.camDist * Math.tan(fov), halfW = halfV * this.camera.aspect;
+    let tx = p.x + this.lookAhead, ty = p.y + clamp(p.vy * 0.2, -1.2, 1.2);
+    let x0 = 0, x1 = plan.W, y0 = plan.base - 9, y1 = plan.top + 1.8;
+    if (f) { x0 = f.arena.x0 - 1.5; x1 = f.arena.x1 + 1.5; y0 = f.arena.floor - 1.5; y1 = f.arena.top + 1.8; }
+    tx = x1 - x0 > halfW * 2 ? clamp(tx, x0 + halfW, x1 - halfW) : (x0 + x1) / 2;
+    // keep the seabed under the frame and don't show much sky
+    const floorHere = this.level!.terrain.floorAt(clamp(tx, 0, plan.W));
+    const lo = Math.max(y0, Math.min(floorHere, p.y - 2)) + halfV - 2.8, hi = y1 - halfV + 0.6;
+    ty = lo < hi ? clamp(ty, lo, hi) : (lo + hi) / 2;
     return new THREE.Vector3(tx, ty, 0);
   }
 
   private updateCamera(dt: number) {
+    const p = this.player;
+    const want = clamp(p.vx * 0.55, -3.5, 3.5) + p.facing * 1.2;
+    this.lookAhead = damp(this.lookAhead, want, 1.6, dt);
     const t = this.camTarget();
-    this.camLook.x = damp(this.camLook.x, t.x, 5, dt);
-    this.camLook.y = damp(this.camLook.y, t.y, 5, dt);
-    if (!this.trans || this.trans.swapped) { this.camOff.x = damp(this.camOff.x, 0, 9, dt); this.camOff.y = damp(this.camOff.y, 0, 9, dt); }
+    const k = this.fight ? 3 : 4.5;
+    this.camLook.x = damp(this.camLook.x, t.x, k, dt);
+    this.camLook.y = damp(this.camLook.y, t.y, 3.5, dt);
     const sh = this.game.shakeOffset();
-    const cx = this.camLook.x + this.camOff.x, cy = this.camLook.y + this.camOff.y;
-    this.camera.position.set(cx + sh.x, cy + 0.9 + sh.y, this.camDist);
-    this.camera.lookAt(cx + sh.x * 0.5, cy + sh.y * 0.5, 0);
+    this.camera.position.set(this.camLook.x + sh.x, this.camLook.y + 0.8 + sh.y, this.camDist);
+    this.camera.lookAt(this.camLook.x + sh.x * 0.5, this.camLook.y + sh.y * 0.5, 0);
     this.camera.updateMatrixWorld();
-    this.light.follow(cx, cy);
+    this.light.follow(this.camLook.x, this.camLook.y);
   }
 
   private anchor(x: number, y: number, z = 0): HudAnchor {
@@ -1185,27 +1164,24 @@ export class DungeonScreen implements Screen {
     return { x: sx, y: sy, on: v.z < 1 && sx >= 0 && sx <= ui.w && sy >= 0 && sy <= ui.h };
   }
 
-  /** everything the HUD shows (agent L's HUD can read this every frame: dungeon.hudState()) */
-  hudState(prompt: DungeonHudState['prompt'] = null): DungeonHudState {
-    const p = this.player, node = this.floor.rooms[this.roomId];
+  /** everything the HUD shows (L's HudData + prompts / menus); agent L can also read dungeon.hudState() */
+  hudState(prompt: Prompt | null = null): DungeonHudState {
+    const p = this.player;
     const combat = (p as unknown as { combat?: { hud?: () => PlayerCombatHud } }).combat?.hud?.() ?? null;
     const cells = packCells(this.run);
-    let enemies = this.pending.length;
-    for (const e of this.world.entities) if (e.alive && e.team === 'enemy') enemies++;
+    const boss = this.fight?.boss && !this.fight.bossDone ? this.fight.boss.bar() : null;
     return {
-      hp: p.hp, maxHp: p.maxHp,
-      pearls: this.run.coins, keys: this.keys, bombs: this.bombs,
-      combat,
-      floor: { n: this.floorIdx, of: this.floors.length, name: AREA_NAME(this.floors[this.floorIdx]), area: this.floors[this.floorIdx] },
-      room: { type: node.type, cleared: node.cleared, enemies },
-      minimap: minimapData(this.floor, this.roomId, this.dev?.get('reveal') === '1'),
-      boss: this.boss && this.fight === 'boss' && !this.bossDone ? this.boss.bar() : null,
-      prompt,
-      pack: { ...cells, full: cells.free <= 0 },
-      paused: this.paused,
-      mail: this.mail,
+      data: {
+        hp: p.hp, maxHp: p.maxHp, combat, mana: p.mana, maxMana: p.maxMana,
+        pearls: this.run.coins, keys: this.keys, bombs: this.bombs,
+        pack: { used: cells.used, total: cells.total, full: cells.free <= 0 },
+        strip: stripMap(this.plan, p.x, p.y, { floors: this.floors.length, revealAll: this.dev?.get('reveal') === '1' }),
+        boss, hidden: this.phase === 'descend' || this.phase === 'done',
+      },
+      prompt, paused: this.paused, mail: this.mail,
+      where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()} · FLOOR ${this.floorIdx + 1}/${this.floors.length}`,
     };
   }
 }
 
-void ROOM_FLOOR; void DOOR_Y0; void rollMaterial;
+void FAR;

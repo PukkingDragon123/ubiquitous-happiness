@@ -70,6 +70,8 @@ export class Pix {
   private col: Uint8ClampedArray; // explicit colour per pixel when locked
   private shapes: ShapeRec[] = [];
   private noOutline: Uint8Array;
+  /** deliberate single-pixel tone details (setTone / tone lines): cleanup leaves them alone */
+  private keep: Uint8Array;
   emit: Uint8Array;
 
   constructor(w: number, h: number, k = 1) {
@@ -79,6 +81,7 @@ export class Pix {
     this.lock = new Uint8Array(w * h);
     this.col = new Uint8ClampedArray(w * h * 3);
     this.noOutline = new Uint8Array(w * h);
+    this.keep = new Uint8Array(w * h);
     this.emit = new Uint8Array(w * h);
   }
 
@@ -150,7 +153,7 @@ export class Pix {
         const li = n[0] * L[0] + n[1] * L[1] + n[2] * L[2] + (o.lift ?? 0);
         t = li < 0.18 ? 1 : li < 0.5 ? 2 : li < 0.76 ? 3 : li < 0.94 || !o.spec ? 4 : 5;
       }
-      this.sid[gi] = id; this.tone[gi] = t; this.lock[gi] = 0;
+      this.sid[gi] = id; this.tone[gi] = t; this.lock[gi] = 0; this.keep[gi] = 0;
       this.noOutline[gi] = o.outline === false ? 1 : 0;
       this.emit[gi] = o.emit ? 1 : 0;
     }
@@ -257,7 +260,7 @@ export class Pix {
   setTone(x: number, y: number, t: number) {
     const gx = Math.floor(this.X(x)), gy = Math.floor(this.Y(y));
     if (gx < 0 || gy < 0 || gx >= this.w || gy >= this.h) return;
-    const i = gy * this.w + gx; if (this.sid[i] >= 0) { this.tone[i] = t; this.lock[i] = 0; }
+    const i = gy * this.w + gx; if (this.sid[i] >= 0) { this.tone[i] = t; this.lock[i] = 0; this.keep[i] = 1; }
   }
   /** a 1 px line of explicit colour (or a tone shift of what's under it when c is a number: -1 darker, +1 lighter) */
   line(pts: V2[], c: string | number, o: { add?: boolean } = {}) {
@@ -268,7 +271,7 @@ export class Pix {
         const gx = Math.round(ax + ((bx - ax) * i) / n), gy = Math.round(ay + ((by - ay) * i) / n);
         if (gx < 0 || gy < 0 || gx >= this.w || gy >= this.h) continue;
         const j = gy * this.w + gx;
-        if (typeof c === 'number') { if (this.sid[j] >= 0 && !this.lock[j]) this.tone[j] = Math.max(0, Math.min(5, this.tone[j] + c)); }
+        if (typeof c === 'number') { if (this.sid[j] >= 0 && !this.lock[j]) { this.tone[j] = Math.max(0, Math.min(5, this.tone[j] + c)); this.keep[j] = 1; } }
         else this.px(gx / this.k - this.ox + 0.01, gy / this.k - this.oy + 0.01, c, o);
       }
     }
@@ -283,9 +286,9 @@ export class Pix {
   }
   /** a 4-point sparkle: centre white, arms in c2 (size 1 = plus, 2 = long cross) */
   glint(x: number, y: number, size = 1, c = '#ffffff', c2?: string) {
-    const arm = c2 ?? c;
-    this.px(x, y, c);
-    for (let r = 1; r <= size; r++) { this.px(x + r, y, arm); this.px(x - r, y, arm); this.px(x, y + r, arm); this.px(x, y - r, arm); }
+    const arm = c2 ?? c, o = { add: true };
+    this.px(x, y, c, o);
+    for (let r = 1; r <= size; r++) { this.px(x + r, y, arm, o); this.px(x - r, y, arm, o); this.px(x, y + r, arm, o); this.px(x, y - r, arm, o); }
   }
   /** erase pixels where test is true (design coords) */
   erase(test: (x: number, y: number) => boolean) {
@@ -300,7 +303,7 @@ export class Pix {
     const nt = new Int8Array(this.tone);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = y * w + x, s = this.sid[i];
-      if (s < 0 || this.lock[i]) continue;
+      if (s < 0 || this.lock[i] || this.keep[i]) continue;
       const t = this.tone[i];
       const cnt = new Map<number, number>(); let same = 0, n = 0;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {

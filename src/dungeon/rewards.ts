@@ -3,7 +3,7 @@
 import type { Rng } from '../core/rng';
 import { ITEMS, rollItem, type ItemDef } from '../game/items';
 import { stationPerks } from '../hideout/blueprints';
-import type { ShopSlot } from './floor';
+import type { ShopSlot } from './level';
 
 export type Reward = { kind: 'pearl'; value: number } | { kind: 'heart'; value: number } | { kind: 'key' } | { kind: 'bomb' } | { kind: 'item'; id: string };
 

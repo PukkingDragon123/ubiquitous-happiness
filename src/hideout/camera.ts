@@ -18,6 +18,8 @@ export class CamRig {
   /** blend speed toward the goal */
   k = 4.5;
   bounds = { x: 4, z: 3.2 };
+  /** wheel zoom range (distance) */
+  zoom: [number, number] = [12, 40];
   private drag: { kind: 'orbit' | 'pan'; x: number; y: number; yaw: number; pitch: number; tx: number; tz: number; moved: number } | null = null;
   enabled = true;
   /** was the last left click part of a pan-drag (so it shouldn't count as a click) */
@@ -32,14 +34,14 @@ export class CamRig {
   snap() { const g = this.shot ?? this.user; this.cur = { ...g, target: g.target.clone() }; this.apply(); }
 
   /** handle user orbit / pan / zoom input (call only when the UI doesn't own the mouse) */
-  controls(input: Input, dt: number, o: { allowPan: boolean; overUI: boolean }) {
+  controls(input: Input, dt: number, o: { allowPan: boolean; overUI: boolean; keys?: boolean }) {
     if (!this.enabled || this.shot) { this.drag = null; return; }
     const m = input.mouse;
     const u = this.user;
     if (!o.overUI) {
       if (input.pressed.has('Mouse2') || input.pressed.has('Mouse1')) this.drag = { kind: input.pressed.has('Mouse2') ? 'orbit' : 'pan', x: m.x, y: m.y, yaw: u.yaw, pitch: u.pitch, tx: u.target.x, tz: u.target.z, moved: 0 };
       else if (o.allowPan && input.pressed.has('Mouse0')) this.drag = { kind: 'pan', x: m.x, y: m.y, yaw: u.yaw, pitch: u.pitch, tx: u.target.x, tz: u.target.z, moved: 0 };
-      if (m.wheel) u.dist = clamp(u.dist * (1 + m.wheel * 0.12), 12, 40);
+      if (m.wheel) u.dist = clamp(u.dist * (1 + m.wheel * 0.12), this.zoom[0], this.zoom[1]);
     }
     if (input.pressed.has('Mouse0')) this.dragged = false;
     if (this.drag) {
@@ -59,7 +61,8 @@ export class CamRig {
         this.dragged = true;
       }
     }
-    // keys
+    // keys (the hub's follow camera leaves WASD / Q / E to the hero)
+    if (o.keys === false) return;
     const kx = (input.key('KeyD') || input.key('ArrowRight') ? 1 : 0) - (input.key('KeyA') || input.key('ArrowLeft') ? 1 : 0);
     const kz = (input.key('KeyS') || input.key('ArrowDown') ? 1 : 0) - (input.key('KeyW') || input.key('ArrowUp') ? 1 : 0);
     if (kx || kz) {

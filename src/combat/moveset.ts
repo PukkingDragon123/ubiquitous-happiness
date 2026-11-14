@@ -140,8 +140,6 @@ export class PlayerCombat implements Defender {
   // ------------------------------------------------------------------ per frame (before the controller moves)
   update(dt: number, w: World) {
     const p = this.p, inp = w.game.input;
-    const rate = clamp((p.stats.swordRate ?? 2.6) / 2.6, 0.6, 1.6);
-    void rate;
     // aim
     this.aimAng = Math.atan2(p.aim.y, p.aim.x);
     this.f = p.aim.x >= 0 ? 1 : -1;
@@ -341,7 +339,7 @@ export class PlayerCombat implements Defender {
         break;
       case 'parry':
         // held: becomes a block once the windows close; released: a short recovery
-        if (this.t >= this.lateT + 0.0001 && this.parryDown) { this.end(); break; }
+        if (this.lateT <= 0 && this.parryDown) { this.end(); break; }
         if (this.t >= PARRY_WINDOW + PARRY_RECOVER && !this.parryDown) this.end();
         break;
       case 'drink':
@@ -374,9 +372,11 @@ export class PlayerCombat implements Defender {
       if (DODGE.iframes - this.iframes < 0.12) { callout(w, 'DODGE!', p.x, p.y + 0.8, 'hint', 0.3); w.emit('dodge', { perfect: true }); }
     } else if (p.invuln > 0) res = 'immune';
     else {
-      const front = (a.x - p.x) * (this.faceAim ? this.f : p.facing) > -0.35;
+      // facing check against the attacker's body (a claw tip can overshoot past us), projectiles by their path
+      const ox = a.projectile ? a.x : a.src ? a.src.x : a.x;
+      const front = (ox - p.x) * (this.faceAim ? this.f : p.facing) > -0.35;
       if (!a.unblockable && a.parryable !== false && this.parryT > 0 && front) res = 'parried';
-      else if (!a.unblockable && front && (this.blocking || (this.move === 'parry' && this.lateT > 0) || this.lateT > 0)) {
+      else if (!a.unblockable && front && (this.blocking || this.lateT > 0)) {
         this.drain(a.guardDmg ?? 18 + a.dmg * 10, 0.8);
         res = this.stamina <= 0 ? 'guardBreak' : 'blocked';
       } else res = 'hit';
@@ -550,7 +550,7 @@ export class PlayerCombat implements Defender {
     const mul = whirl ? this.whirlMul : s?.dmg ?? 1;
     let dmg = st.swordDmg * mul * (rip ? 3 : 1);
     const core = coreOf(e);
-    if (rip) dmg *= 1; // the x3 above; crit FX below
+    const kind = e.kind;
     const dirX = e.x - p.x === 0 ? Math.cos(this.bladeAng) : Math.sign(e.x - p.x);
     const ang = Math.atan2(e.y - p.y, e.x - p.x);
     const hx = e.x - (e.x - tip.x) * 0.5, hy = e.y - (e.y - tip.y) * 0.5;
@@ -562,7 +562,7 @@ export class PlayerCombat implements Defender {
       return;
     }
     impact(w, hx, hy, ang, rip ? 'riposte' : heavy ? 'heavy' : 'light', { armour: (e as unknown as { armoured?: boolean }).armoured });
-    if (rip) { callout(w, 'RIPOSTE!', e.x, e.y + e.r + 0.9, 'gold', 0.55); w.emit('riposte', { kind: e.kind }); w.game.timeScale = 1; }
+    if (rip) { callout(w, 'RIPOSTE!', e.x, e.y + e.r + 0.9, 'gold', 0.55); w.emit('riposte', { kind }); w.game.timeScale = 1; }
     if (heavy) { e.vx += Math.cos(ang) * 5; e.vy += Math.sin(ang) * 3; }
     // warrior 6-set: the spinning flourish releases a shockwave
     if (m === 'light3' && (st.sets?.warrior ?? 0) >= 6) { w.fx.shockwave(p.x, p.y, 1.2, '#ffe8a0'); for (const o of w.near(p.x, p.y, 2.4, 'enemy')) if (o !== e) strike(w, p, o, st.swordDmg, o.x - p.x, o.y - p.y, 'crush'); }

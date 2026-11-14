@@ -109,7 +109,7 @@ export class TitleScreen implements Screen {
     POST.uFade.value = 1; POST.uLetterbox.value = 1;
     this.fadeIn = 1;
     const s = this.set.signAt;
-    this.rest.set(s.x - 2.35, floorAt(s.x - 2.35, 0) + 1.75, 0.3);
+    this.rest.set(s.x - 2.45, floorAt(s.x - 2.45, 0) + 2.25, 0.4);
     this.hx = this.rest.x - (d.quick ? 13 : 30); this.hy = this.rest.y + 1.4; this.vx = 3.6;
     this.phase = 'travel'; this.phaseT = 0; this.t = 0;
     this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false;
@@ -278,8 +278,8 @@ export class TitleScreen implements Screen {
     const k = this.phase === 'idle' || this.leaving ? 1 : clamp01(1 - (togo - 1) / 9);
     const ks = k * k * (3 - 2 * k);
     // travel: just ahead of the fish, close; arrival: the sign and the fish together, wider
-    const tx = THREE.MathUtils.lerp(this.hx + 1.6, s.x - 0.35, ks), ty = THREE.MathUtils.lerp(this.hy + 0.55, s.y + 2.95, ks);
-    const dist = THREE.MathUtils.lerp(8.2, 11.2, ks);
+    const tx = THREE.MathUtils.lerp(this.hx + 1.6, s.x - 0.5, ks), ty = THREE.MathUtils.lerp(this.hy + 0.45, s.y + 2.85, ks);
+    const dist = THREE.MathUtils.lerp(7.6, 10.6, ks);
     const lx = this.leaving ? (this.hx - tx) * clamp01(this.leaving.t - 0.3) * 0.35 : 0;
     const t = this.t;
     const hx = (Math.sin(t * 0.61) + Math.sin(t * 1.37 + 1) * 0.5) * 0.03, hy = (Math.sin(t * 0.83 + 2) + Math.sin(t * 1.71) * 0.4) * 0.025;

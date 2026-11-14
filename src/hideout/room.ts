@@ -29,7 +29,7 @@ export interface Nook { id: 'loft' | 'trophy' | 'maproom'; side: 'n' | 'w'; u0: 
 export const NOOKS: Nook[] = [
   { id: 'loft', side: 'n', u0: -4.45, u1: -1.55, y0: 0.55, y1: 3.0, arch: 0.55, depth: 2.5 },
   { id: 'trophy', side: 'n', u0: 1.45, u1: 4.15, y0: 0.42, y1: 2.95, arch: 0.4, depth: 0.95 },
-  { id: 'maproom', side: 'w', u0: -3.65, u1: -0.55, y0: -0.4, y1: 3.1, arch: 0.6, depth: 2.6 },
+  { id: 'maproom', side: 'w', u0: -3.65, u1: -0.55, y0: -0.4, y1: 3.55, arch: 0.7, depth: 2.6 },
 ];
 /** how far a nook pushes the inner wall face back at (u, y): 0 outside, depth inside, eased at the edges */
 export function nookPush(side: 'n' | 'w' | 's' | 'e', u: number, y: number): number {
@@ -78,10 +78,17 @@ function rockSlab(cx: number, cz: number, len: number, alongX: boolean, inwardSi
       const k = clamp01((d - c.r) / 0.9);
       if (k < 1) { const back = (onInner ? -inwardSign : inwardSign) * 0.35 * (1 - k); if (alongX) dz = dz * k + back; else dx = dx * k + back; }
     }
-    // nooks: the inner face is pushed deep into the rock (the slab is thick enough to hold the pocket)
-    if (onInner && o.nook) {
+    // nooks: the inner face is pushed deep into the rock, and everything behind it within the slab (its end faces
+    // at the segment seams) is squeezed back behind the pocket, so no seam fins poke into it
+    if (o.nook) {
       const push = nookPush(o.nook, alongX ? x : z, y);
-      if (push > 0) { const tame = 0.35; if (alongX) { dz = dz * tame - inwardSign * push; dx *= tame; } else { dx = dx * tame - inwardSign * push; dz *= tame; } dy *= tame; }
+      if (push > 0) {
+        const d = Math.abs((alongX ? z : x) - inner);
+        const nd = push + (d * (T - push)) / T;
+        const tame = onInner ? 0.35 : 1;
+        if (alongX) { dz = dz * tame - inwardSign * (nd - d); dx *= tame; } else { dx = dx * tame - inwardSign * (nd - d); dz *= tame; }
+        dy *= tame;
+      }
     }
     P.setXYZ(i, x + dx, y + dy, z + dz);
   }

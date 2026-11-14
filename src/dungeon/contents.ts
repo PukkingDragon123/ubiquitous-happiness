@@ -2,17 +2,16 @@
 //   Pedestal   a carved plinth with an item floating over it (treasure, boss reward, secret room)
 //   ShopStock  Mr. Crab's stall (CrabShop + MrCrab from src/story/crab.ts) with 3-4 stands and price tags
 //   ChestProp  the challenge room's reward chest: the lid creaks open and the loot pops out
-//   ExitHatch  the boss room's way down: a porthole hatch in the floor that swings open on a cold current
-//   PostOffice the manatee (src/area/manatee.ts) waiting by a pillar box; she takes mail home
+//   ExitHatch  the boss arena's way down: a porthole hatch in the seabed that swings open on a cold current
+// (the post office is the area's MailBuoy + manatee, built with the level: src/dungeon/levelBuild.ts)
 import * as THREE from 'three';
 import type { World } from '../game/types';
-import { itemMesh, getItem } from '../game/items';
+import { getItem } from '../game/items';
+import { itemObject } from './pickups';
 import { Text3DLayer, T3D, type Text3D } from '../ui/text3d';
 import { MrCrab, CrabShop } from '../story/crab';
-import { Manatee } from '../area/manatee';
-import type { Scenery } from '../area/scenery';
-import type { ShopSlot } from './floor';
-import { pedestalModel, chestModel, floorHatch, postBox, keyModel, bombModel, heartModel, disposeModel, type ChestModel, type FloorHatch } from './models';
+import type { ShopSlot } from './level';
+import { pedestalModel, chestModel, floorHatch, keyModel, bombModel, heartModel, padlock, disposeModel, type ChestModel, type FloorHatch } from './models';
 import type { LampHandle } from '../gfx/lighting';
 
 type Rig = { lamp(x: number, y: number, z: number, color: string, intensity?: number, distance?: number): LampHandle | null } | null;
@@ -31,11 +30,12 @@ export class Pedestal {
   }
   /** where the item floats (world) */
   get itemY() { return this.floorY + 1.95; }
+  set z(v: number) { this.group.position.z = v; }
   setItem(id: string | null) {
     if (this.item) { this.item.removeFromParent(); this.item = null; }
     this.id = id;
     if (!id) return;
-    const m = itemMesh(id, 1);
+    const m = itemObject(id, 1);
     const holder = new THREE.Group();
     holder.add(m);
     holder.position.set(0, 2.05, 0.2);
@@ -62,8 +62,8 @@ export class ShopStock {
   stall = new CrabShop();
   stands: ShopStand[] = [];
   private t = 0;
-  constructor(public w: World, public t3d: Text3DLayer, public slots: ShopSlot[], floorAt: (x: number) => number, area: string) {
-    const sx = 0, fl = floorAt(sx);
+  constructor(public w: World, public t3d: Text3DLayer, public slots: ShopSlot[], floorAt: (x: number) => number, area: string, cx = 0) {
+    const sx = cx, fl = floorAt(sx);
     this.stall.group.position.set(sx, fl - 0.15, -2.6);
     this.stall.group.scale.setScalar(1.35);
     this.group.add(this.stall.group);
@@ -73,20 +73,20 @@ export class ShopStock {
     this.crab.group.scale.setScalar(1.5);
     this.group.add(this.crab.group);
     this.crab.onPuff = (p) => w.fx.emit('bubble', p.x, p.y, { n: 2, spread: 0.05, vy: 0.8, life: 2 });
-    const xs = slots.length === 4 ? [-7, -4, 4, 7] : slots.length === 3 ? [-6, -3.2, 3.6] : [-5, 5];
+    const xs = (slots.length === 4 ? [-6.5, -3.8, 3.8, 6.5] : slots.length === 3 ? [-5.5, -3, 3.4] : [-4.5, 4.5]).map((v) => v + cx);
     slots.forEach((slot, i) => {
-      const x = xs[i] ?? i * 2 - 4, y = floorAt(x);
+      const x = xs[i] ?? cx + i * 2 - 4, y = floorAt(x);
       const model = new THREE.Group();
-      const stand = pedestalModel(area); stand.scale.set(0.7, 0.55, 0.7); model.add(stand);
-      const goods = slot.kind === 'item' ? itemMesh(slot.id!, 1) : slot.kind === 'key' ? keyModel() : slot.kind === 'bomb' ? bombModel() : heartModel(false);
-      goods.position.y = 1.0; if (slot.kind !== 'item') goods.scale.setScalar(1.5);
+      const stand = pedestalModel(area); stand.scale.set(0.8, 0.62, 0.8); model.add(stand);
+      const goods = slot.kind === 'item' ? itemObject(slot.id!, 1) : slot.kind === 'key' ? keyModel() : slot.kind === 'bomb' ? bombModel() : heartModel(false);
+      goods.position.y = 1.15; goods.scale.setScalar(slot.kind === 'item' ? 1.7 : 2.2);
       goods.name = 'goods';
       model.add(goods);
       model.position.set(x, y - 0.05, 0.1);
       this.group.add(model);
       const st: ShopStand = { slot, x, y, model, tag: null };
       this.stands.push(st);
-      if (!slot.sold) st.tag = t3d.add(`${slot.price}`, x, y + 1.75, 0.6, T3D.gold, { size: 0.32, life: 0, bob: 0.05 });
+      if (!slot.sold) st.tag = t3d.add(`${slot.price}`, x, y + 2.15, 0.6, T3D.gold, { size: 0.42, life: 0, bob: 0.05 });
       else model.getObjectByName('goods')!.visible = false;
     });
   }
@@ -110,7 +110,7 @@ export class ShopStock {
     this.stall.update(dt);
     this.crab.lookX = this.w.player.x;
     this.crab.update(dt);
-    for (const s of this.stands) { const g = s.model.getObjectByName('goods'); if (g) { g.rotation.y = Math.sin(this.t + s.x) * 0.8; g.position.y = 1.0 + Math.sin(this.t * 2 + s.x) * 0.06; } }
+    for (const s of this.stands) { const g = s.model.getObjectByName('goods'); if (g) { g.rotation.y = Math.sin(this.t + s.x) * 0.8; g.position.y = 1.15 + Math.sin(this.t * 2 + s.x) * 0.06; } }
   }
   head() { return this.crab.head(); }
   dispose() { this.stall.release(); for (const s of this.stands) s.tag?.hide(); this.group.removeFromParent(); }
@@ -120,15 +120,20 @@ export class ShopStock {
 export class ChestProp {
   m: ChestModel;
   open = false;
+  locked: boolean;
+  private lock: THREE.Group | null = null;
   private t = 0;
   private lidA = 0;
-  constructor(public x: number, public y: number, opened: boolean) {
+  constructor(public x: number, public y: number, opened: boolean, locked = false) {
     this.m = chestModel();
     this.m.root.position.set(x, y - 0.05, -0.1);
     this.m.root.scale.setScalar(1.25);
     this.open = opened;
+    this.locked = locked && !opened;
     if (opened) this.lidA = 1.9;
+    if (this.locked) { this.lock = padlock(); this.lock.position.set(0, 0.36, 0.42); this.lock.scale.setScalar(0.8); this.m.root.add(this.lock); }
   }
+  unlock() { this.locked = false; if (this.lock) this.lock.visible = false; }
   get group() { return this.m.root; }
   update(dt: number) {
     this.t += dt;
@@ -136,6 +141,7 @@ export class ChestProp {
     this.lidA += (tgt - this.lidA) * (1 - Math.exp(-dt * 5));
     this.m.lid.rotation.x = -this.lidA;
     if (!this.open) this.m.root.rotation.z = Math.sin(this.t * 7) * 0.012;
+    if (this.lock && this.lock.visible) this.lock.rotation.z = Math.sin(this.t * 2.2) * 0.12;
   }
   dispose() { this.m.root.removeFromParent(); disposeModel(this.m.root); }
 }
@@ -173,38 +179,4 @@ export class ExitHatch {
     }
   }
   dispose() { this.m.root.removeFromParent(); disposeModel(this.m.root); }
-}
-
-// ------------------------------------------------------------------ post office
-export class PostOffice {
-  group = new THREE.Group();
-  manatee: Manatee;
-  box = postBox();
-  /** cells mailed from this post office so far (her bag holds CAPACITY per floor) */
-  used = 0;
-  static CAPACITY = 8;
-  private t = 0;
-  /** build before the scenery finishes (the manatee paints into its prop atlas) */
-  constructor(scen: Scenery, public w: World, public x: number, public floorY: number) {
-    this.manatee = new Manatee(scen);
-    this.group.add(this.manatee.root);
-    this.box.position.set(x - 4.2, floorY - 0.05, -0.9);
-    this.box.scale.setScalar(1.3);
-    this.group.add(this.box);
-    this.manatee.arrive(x + 4, x);
-    this.manatee.state = 'waiting';
-    this.manatee.x = x + 1.6; this.manatee.y = floorY + 4.2;
-  }
-  /** where she floats (for the [E] prompt and the dialogue) */
-  get at() { return { x: this.manatee.x, y: this.manatee.y }; }
-  update(dt: number, top: number) {
-    this.t += dt;
-    // buoyX / buoyY steer where she hangs: just over the post box, well under the ceiling
-    this.manatee.update(dt, this.w, this.x, this.floorY + 6.8);
-    if (this.manatee.state !== 'waiting') { this.manatee.state = 'waiting'; }
-    const m = this.manatee;
-    if (m.y > top - 1.6) { m.y = top - 1.6; m.root.position.y = m.y; }
-  }
-  celebrate() { this.manatee.celebrate(); }
-  dispose() { this.manatee.dispose(); disposeModel(this.box); this.group.removeFromParent(); }
 }

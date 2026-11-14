@@ -5,9 +5,9 @@
 //   textSprite('Laser Eyes', STYLES.item, 0.5)                    a THREE.Sprite, world height 0.5
 //   floatText.pop('YOINK!', x, y, 'shout')                        an animated floating word in the world
 //
-// Fonts (all bundled in public/fonts, see CREDITS.md):
-//   Alagard (Hewett Tsoi) – titles, numbers; Goofy (TBME Goofy, from Chewy, Apache-2.0) – exclamations;
-//   Jacquard 24 (OFL) – item names, fancy headings; m6x11plus (Daniel Linssen) – body; Tiny5 (OFL) – small labels.
+// Fonts (all bundled in public/fonts, see CREDITS.md), always at their TRUE native px (see ui/pixel/font.ts):
+//   Alagard 16 (Hewett Tsoi) – titles, numbers, item names; Goofy (TBME Goofy, from Chewy, Apache-2.0) – exclamations;
+//   m6x11plus 18 (Daniel Linssen) – body, hints; m5x7 16 (Daniel Linssen) – small labels.
 import * as THREE from 'three';
 import { easeOutBack, clamp01 } from '../core/math';
 
@@ -27,12 +27,12 @@ export const STYLES = {
   damage: { font: 'Alagard', px: 16, fill: ['#ffffff', '#ffd0d0', '#ff5a5a'], outline: '#5a0614', outline2: '#14020a' },
   heal: { font: 'Alagard', px: 16, fill: ['#ffffff', '#c8ffd8', '#4fe08a'], outline: '#0b4a2a', outline2: '#021a0e' },
   gold: { font: 'Goofy', px: 20, fill: ['#fffbe0', '#ffe27a', '#e8a224'], outline: '#5e3500', outline2: '#1f1000' },
-  item: { font: 'Jacquard', px: 24, fill: ['#ffffff', '#e8f6ff', '#9fd6ff'], outline: '#0c2a4a', outline2: '#020a14', shadow: '#0007' },
-  body: { font: 'M6x11', px: 16, fill: '#f3f7ff', outline: '#0b1626', shadow: '#0006' },
-  small: { font: 'Tiny5', px: 8, fill: '#e8f2ff', outline: '#0b1626' },
-  hint: { font: 'M6x11', px: 16, fill: ['#e8fdff', '#9ff0ff'], outline: '#06303f', outline2: '#011018' },
+  item: { font: 'Alagard', px: 16, fill: ['#ffffff', '#e8f6ff', '#9fd6ff'], outline: '#0c2a4a', outline2: '#020a14', shadow: '#0007' },
+  body: { font: 'M6x11', px: 18, fill: '#f3f7ff', outline: '#0b1626', shadow: '#0006' },
+  small: { font: 'M5x7', px: 16, fill: '#e8f2ff', outline: '#0b1626' },
+  hint: { font: 'M6x11', px: 18, fill: ['#e8fdff', '#9ff0ff'], outline: '#06303f', outline2: '#011018' },
   danger: { font: 'Goofy', px: 20, fill: ['#ffffff', '#ffb3b3', '#ff4040'], outline: '#4a0008', outline2: '#120002' },
-  magic: { font: 'Jacquard', px: 24, fill: ['#ffffff', '#f0d8ff', '#c08cff'], outline: '#2a0c4a', outline2: '#0a0214' },
+  magic: { font: 'Alagard', px: 16, fill: ['#ffffff', '#f0d8ff', '#c08cff'], outline: '#2a0c4a', outline2: '#0a0214' },
 } satisfies Record<string, TextStyle>;
 export type StyleName = keyof typeof STYLES;
 

@@ -1,6 +1,7 @@
 // Pixel medals for the achievements: a ribbon in the tier colour over a round bronze / silver / gold medal with
 // an embossed 9 x 9 emblem. Locked medals are a dark stone silhouette.
-import { Px, type RGB } from '../gfx/px';
+import { Pix, ramp } from '../backpack/pix';
+
 
 const EMB: Record<string, string[]> = {
   bread: ['..#####..', '.#.....#.', '#.......#', '#.#.#.#.#', '#.......#', '#.......#', '#.......#', '#########', '.........'],
@@ -29,14 +30,16 @@ const EMB: Record<string, string[]> = {
   wave: ['.........', '...###...', '..#...#..', '.#..#..#.', '#..#.#..#', '..#...#..', '.#.....##', '#........', '.........'],
 };
 
-const TIER: Record<string, { face: string[]; ribbon: [string, string] }> = {
-  bronze: { face: ['#2a1206', '#5a2e10', '#8e5420', '#c07a3a', '#e8a868'], ribbon: ['#1a4a8a', '#3a7ad8'] },
-  silver: { face: ['#1a1e28', '#4a5262', '#8a94a6', '#c4ccda', '#f0f4fa'], ribbon: ['#7a1420', '#c8343e'] },
-  gold: { face: ['#3a1e04', '#8a520a', '#c88a18', '#f0c040', '#fff0a8'], ribbon: ['#145a2a', '#2aa04a'] },
-};
-const LOCKED = { face: ['#0c0c12', '#1a1a24', '#262632', '#343442', '#444456'], ribbon: ['#18181e', '#26262e'] as [string, string] };
+// v3: painted on the icon painter (src/backpack/pix.ts): a notched two-band ribbon, a cel-shaded medal with a
+// stepped rim, the emblem embossed (lit top-left edge, shadowed bottom-right), a hard shine.
 
-const hx = (c: string): RGB => { const v = parseInt(c.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+const TIER: Record<string, { face: ReturnType<typeof ramp>; ribbon: [ReturnType<typeof ramp>, ReturnType<typeof ramp>]; emb: [string, string, string] }> = {
+  bronze: { face: ramp('#2a1006', '#5a2a10', '#8e5020', '#c07a3a', '#e8a868', '#fff0d0'), ribbon: [ramp('#06143a', '#0e2a6a', '#1a4a9a', '#3a7ad8', '#6aa8f0', '#c0e0ff'), ramp('#2a0606', '#6a1010', '#a82020', '#d84040', '#f07a6a', '#ffd0c0')], emb: ['#4a2008', '#f8c88a', '#7a3a14'] },
+  silver: { face: ramp('#141824', '#3a4252', '#6e7890', '#a8b2c4', '#dce4f0', '#ffffff'), ribbon: [ramp('#2a040c', '#5e0a18', '#9a1428', '#c8343e', '#f06a6a', '#ffc8c0'), ramp('#06143a', '#0e2a6a', '#1a4a9a', '#3a7ad8', '#6aa8f0', '#c0e0ff')], emb: ['#262c3a', '#ffffff', '#4a5262'] },
+  gold: { face: ramp('#3a1804', '#8a4a0a', '#c88418', '#f0bc3a', '#ffe880', '#fffde0'), ribbon: [ramp('#04200e', '#0a4a22', '#147a36', '#2aa04a', '#6ad078', '#c8f8c8'), ramp('#2a0606', '#6a1010', '#a82020', '#d84040', '#f07a6a', '#ffd0c0')], emb: ['#5a2a04', '#fffbe0', '#8a4a0a'] },
+};
+const LOCKED = { face: ramp('#08080e', '#14141c', '#1e1e28', '#2a2a36', '#383846', '#4a4a5a'), ribbon: [ramp('#08080e', '#121218', '#1a1a22', '#24242e', '#2e2e3a', '#3a3a48'), ramp('#08080e', '#121218', '#1a1a22', '#24242e', '#2e2e3a', '#3a3a48')] as [ReturnType<typeof ramp>, ReturnType<typeof ramp>], emb: ['#0a0a10', '#3a3a48', '#14141c'] as [string, string, string] };
+
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** a medal canvas (28 x 32): tier medal with the emblem, or the locked silhouette */
@@ -45,30 +48,26 @@ export function medal(emblem: string, tier: 'bronze' | 'silver' | 'gold', locked
   let c = cache.get(key);
   if (c) return c;
   const T = locked ? LOCKED : TIER[tier];
-  const p = new Px(28, 32);
-  // the ribbon: a V of two bands
-  for (let y = 0; y < 10; y++) {
-    for (let x = 0; x < 6; x++) { p.set(6 + x + Math.floor(y * 0.5), y, x < 2 ? T.ribbon[0] : T.ribbon[1]); p.set(16 + x - Math.floor(y * 0.5), y, x > 3 ? T.ribbon[0] : T.ribbon[1]); }
-  }
-  // the medal: stepped rim, lit top-left, embossed emblem
-  const F = T.face.map(hx);
-  p.ellipse(14, 19, 11, 11, (nx, ny) => {
-    const r = Math.hypot(nx, ny);
-    if (r > 0.86) return nx + ny < -0.2 ? F[4] : nx + ny > 0.5 ? F[1] : F[3];
-    if (r > 0.78) return F[1];
-    return nx + ny < -0.6 ? F[4] : F[2] ;
-  });
+  const p = new Pix(28, 32);
+  // the ribbon: two bands crossing into a V, notched tails
+  p.poly([[5, 0], [11, 0], [16, 12], [11, 14]], T.ribbon[0], { shade: 'flat', bevel: 1 });
+  p.poly([[23, 0], [17, 0], [12, 12], [17, 14]], T.ribbon[1], { shade: 'flat', bevel: 1 });
+  p.line([[7, 1], [11, 10]], 1); p.line([[21, 1], [17, 10]], -1);
+  // the medal
+  p.circle(14, 20, 10.6, T.face, { spec: !locked });
+  p.ring(14, 20, 8.4, 1.1, T.face, { shade: 'facet', tone: 2, edge: false });
+  for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; p.setTone(14 + Math.cos(a) * 10, 20 + Math.sin(a) * 10, i % 2 ? 2 : 4); }
   const g = EMB[emblem] ?? EMB.crown;
-  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) {
-    if (g[y][x] !== '#') continue;
-    const px = 10 + x, py = 15 + y;
-    p.set(px + 1, py + 1, F[locked ? 2 : 4]);
-    p.set(px, py, F[locked ? 0 : 0]);
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (g[y][x] === '#') { p.px(10 + x, 16 + y, T.emb[2]); }
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (g[y][x] === '#') {
+    const lit = y === 0 || g[y - 1][x] !== '#' || x === 0 || g[y][x - 1] !== '#';
+    p.px(9 + x, 15 + y, lit ? T.emb[1] : T.emb[0]);
   }
-  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (g[y][x] === '#') p.set(10 + x, 15 + y, locked ? F[0] : F[1]);
-  if (!locked) { p.set(8, 13, '#ffffff'); p.set(9, 12, '#ffffff'); p.set(7, 14, F[4]); }
-  p.outline('#0e0a14', 255, false);
-  c = p.canvas();
+  if (!locked) { p.px(8, 13, '#ffffff'); p.px(7, 14, '#ffffff'); p.px(8, 14, T.face[5]); }
+  c = p.render();
   cache.set(key, c);
   return c;
 }
+
+/** every emblem name (the icon sheet lists them) */
+export const MEDAL_EMBLEMS = Object.keys(EMB);

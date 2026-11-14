@@ -231,7 +231,7 @@ export function defaultLayout(): Placement[] {
     P('lamp', 6, 3, 0),
     P('storage', 2, 7, 2),
     P('locker', 0, 4, 1),
-    P('workbench', 9, 2, 3),
+    P('workbench', 9, 3, 3),
     P('plant', 9, 0, 0),
     P('armchair', 7, 2, 3),
     P('aquarium', 7, 7, 2),

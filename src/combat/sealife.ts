@@ -189,7 +189,7 @@ export class CombatMoray extends Foe {
   private hide = 0; private moveT = R(7, 11); private hurtN = 0;
   private body: THREE.Group;
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('moray', 'moray', x, y, { ...o, hp: 7, poise: 16, scale: 1.05, r: 0.32, gore: '#a08040' });
+    super('moray', 'moray', x, y, { ...o, hp: 7, poise: 16, scale: 1.35, r: 0.4, gore: '#a08040' });
     this.avoidTerrain = false;
     this.body = this.obj;
     this.sight = 4.5;
@@ -274,7 +274,7 @@ export class CombatMoray extends Foe {
     this.x = this.denX + ax * this.reach * this.ext;
     this.y = this.denY + ay * this.reach * this.ext;
     // only the head is a target, and only when it's out
-    this.r = this.ext > 0.15 ? 0.32 : 0.001;
+    this.r = this.ext > 0.15 ? 0.4 : 0.001;
     const nose = this.L / 2;
     this.yaw = ax >= 0 ? 0 : -Math.PI;
     this.pitch = Math.atan2(ay, Math.abs(ax));
@@ -306,7 +306,7 @@ export class CombatCrab extends Foe {
   onGround = true; legH: number;
   private combo = 0; private open = 0;
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('crab', 'crab', x, y, { ...o, hp: 8, poise: 30, scale: 1.9, r: 0.42, speed: 1.9, gore: '#d8502a' });
+    super('crab', 'crab', x, y, { ...o, hp: 8, poise: 30, scale: 3, r: 0.62, speed: 1.9, gore: '#d8502a' });
     this.legH = 0.16 * this.baseScale;
     this.yaw = 0; this.facing = 1;
     this.core.guard = 'front';
@@ -321,7 +321,7 @@ export class CombatCrab extends Foe {
   }
   choose(w: World, d: number): MoveDef | null {
     const p = w.player;
-    if (Math.abs(p.x - this.x) > 1.9 || p.y - this.y > 2.2) return null;
+    if (Math.abs(p.x - this.x) > 2.2 || p.y - this.y > 2.4) return null;
     void d;
     this.cd = R(0.5, 1.1) / this.core.speed;
     if (Math.random() < (this.elite ? 0.35 : 0.22)) return C_SLAM;
@@ -345,8 +345,8 @@ export class CombatCrab extends Foe {
       this.facing = want === 0 ? this.facing : want > 0 ? 1 : -1;
       anim.raise = damp(anim.raise ?? 0, 0.3, 4, dt);
     } else if (c.phase === 'idle') {
-      if (Math.abs(dx) > 1.25) want = Math.sign(dx) * this.speedMax;
-      else if (Math.abs(dx) < 0.8) want = -Math.sign(dx) * this.speedMax * 0.5;
+      if (Math.abs(dx) > 1.5) want = Math.sign(dx) * this.speedMax;
+      else if (Math.abs(dx) < 1.0) want = -Math.sign(dx) * this.speedMax * 0.5;
       this.facing = dx >= 0 ? 1 : -1;
       anim.raise = damp(anim.raise ?? 0, this.open > 0 ? 0.1 : 0.75, 6, dt); anim.pinch = damp(anim.pinch ?? 0, 0, 6, dt);
     } else if (c.phase === 'windup') {
@@ -363,7 +363,7 @@ export class CombatCrab extends Foe {
       if (c.move?.id === 'slam') {
         // claws + a shockwave along the floor
         if (!c.landed && Math.abs(p.x - (this.x + this.facing * 0.7)) < 1.8 && p.y - fl < 1.3) c.strike(w, { x: this.x + this.facing * 0.7, y: fl });
-      } else this.bite(w, this.x + this.facing * 0.75, this.y + 0.3, 0.55, { kind: 'crush' });
+      } else this.bite(w, this.x + this.facing * 1.0, this.y + 0.4, 0.65, { kind: 'crush' });
       want = this.facing * 2;
     } else if (c.phase === 'recover') {
       anim.pinch = damp(anim.pinch ?? 0, 0, 6, dt); anim.raise = damp(anim.raise ?? 0, 0.3, 4, dt);
@@ -402,13 +402,11 @@ export class CombatCrab extends Foe {
 // ============================================================================================ puffer
 const P_BLOW: MoveDef = { id: 'blowup', windup: 1.1, active: 0.1, recover: 0.1, dmg: 2, unblockable: true, kind: 'explosion', tell: 'none' };
 export class CombatPuffer extends Foe {
-  private home: { x: number; y: number };
   private launched = 0;
   private puffK = 0;
   private wob = R(0, 6);
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('puffer', 'pufferfish', x, y, { ...o, hp: 4, poise: 10, scale: 1.45, speed: 1.6, gore: '#e0c070' });
-    this.home = { x, y };
+    super('puffer', 'pufferfish', x, y, { ...o, hp: 4, poise: 10, scale: 2.2, speed: 1.6, gore: '#e0c070' });
   }
   choose(w: World, d: number): MoveDef | null {
     if (d > 2.4) return null;
@@ -484,7 +482,7 @@ const J_PULSE: MoveDef = { id: 'pulse', windup: 0.9, active: 0.2, recover: 0.8, 
 export class CombatJelly extends Foe {
   private drift = R(-0.3, 0.3);
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('jelly', 'jellyfish', x, y, { ...o, hp: 4, poise: 8, scale: R(1.15, 1.35), r: 0.34, gore: '#f0a0d8' });
+    super('jelly', 'jellyfish', x, y, { ...o, hp: 4, poise: 8, scale: R(1.5, 1.75), r: 0.44, gore: '#f0a0d8' });
     this.r = 0.3 * this.baseScale;
   }
   idle(dt: number, w: World) { this.act(dt, w); }
@@ -555,7 +553,7 @@ export class CombatAngler extends Foe {
   private lureK = 1;
   private next: 'flash' | 'snap' = 'flash';
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('angler', 'anglerfish', x, y, { ...o, hp: 9, poise: 22, scale: 1.5, speed: 1.7, r: 0.46, gore: '#4a3438' });
+    super('angler', 'anglerfish', x, y, { ...o, hp: 9, poise: 22, scale: 1.9, speed: 1.7, r: 0.58, gore: '#4a3438' });
   }
   private lure() { const a = this.model.asset.anchors.lure; return a ? { x: this.x + a.x * this.baseScale * this.facingDir(), y: this.y + a.y * this.baseScale } : { x: this.mouthX(), y: this.y + 0.5 }; }
   choose(w: World, d: number): MoveDef | null {
@@ -613,7 +611,7 @@ const B_RED: MoveDef = { id: 'frenzy', windup: 0.8, active: 0.5, recover: 1.1, d
 export class CombatBarracuda extends Foe {
   private n = 0; private dirX = 1; private dirY = 0;
   constructor(x: number, y: number, o: FoeOpts = {}) {
-    super('barracuda', 'barracuda', x, y, { ...o, hp: 6, poise: 14, scale: 1.15, speed: 2.8, r: 0.34, gore: '#b0c0d0' });
+    super('barracuda', 'barracuda', x, y, { ...o, hp: 6, poise: 14, scale: 1.5, speed: 2.8, r: 0.42, gore: '#b0c0d0' });
   }
   choose(w: World, d: number): MoveDef | null {
     const p = w.player;
@@ -640,7 +638,7 @@ export class CombatBarracuda extends Foe {
       const sp = c.move?.unblockable ? 18 : 15;
       this.vx = this.dirX * sp; this.vy = this.dirY * sp;
       this.model.setJaw(1);
-      if (Math.random() < dt * 30) w.fx.emit('bubble', this.x - this.facing * this.L * 0.4, this.y, { n: 1, spread: 0.1 });
+      if (Math.random() < dt * 12) w.fx.emit('bubbleS', this.x - this.facing * this.L * 0.4, this.y, { n: 1, spread: 0.1 });
       const res = this.bite(w, this.mouthX(), this.mouthY(), 0.42);
       if (res === 'parried' || res === 'blocked') { this.vx = -this.vx * 0.3; this.vy = -this.vy * 0.3; }
       // a red frenzy turns round once for a second pass

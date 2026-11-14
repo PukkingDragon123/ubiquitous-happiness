@@ -2,9 +2,11 @@
 //
 // A flat walled arena (24 x 11 m), the real blobfish with the full moveset, and enemies / a boss from the URL:
 //   &enemy=knife,harpoon,moray   spawn these (spawnEnemy)        &boss=reef|kelp|graveyard|arctic|abyss
-//   &elite=1   elites            &god=1  no damage               &dummy=1 (default with nothing else) a
+//   &elite=1   elites   &roam=1 roamers (patrol / notice / leash) instead of arena-locked   &god=1  no damage               &dummy=1 (default with nothing else) a
 //   training dummy that swings white, white, RED on a rhythm and logs every defense + parry timing
 //   &dummy=still  a dummy that doesn't attack (combo / heavy practice)   &d=<camera distance>   &look=<area>
+//   &auto=parry:<ms>|block|dodge:<ms>  auto-defend the first enemy's attacks (timing tests)   &pauseOn=<event> freeze
+//   the sim on an event (screenshots of the parry flash: &pauseOn=parry)
 // Keys: J / LMB light (hold: heavy), K / RMB parry (hold: block), Space dodge, R / H flask, 1-4 skills,
 //       [ respawn the URL's enemies, ] refill hp / flasks / stamina, \ toggle the dummy's attacks.
 // window.combatPreview: { world, blob, spawn(kind, x, y), dummy, log() } for console-driven tests.
@@ -34,7 +36,7 @@ class ArenaTerrain implements Terrain {
 
 function arenaMeshes(a: Arena): THREE.Group {
   const g = new THREE.Group();
-  const sand = kitMat('arenaSand', 64, 64, (x, y) => band([176, 150, 108], 0.9 + (nz(x, y, 16, 3) - 0.5) * 0.16 + (((x + (y >> 2)) % 9) === 0 ? 0.06 : 0), x, y, 0.05), { rough: 0.95 });
+  const sand = kitMat('arenaSand', 64, 64, (x, y) => band([138, 118, 90], 0.9 + (nz(x, y, 16, 3) - 0.5) * 0.16 + (((x + (y >> 2)) % 9) === 0 ? 0.06 : 0), x, y, 0.05), { rough: 0.95 });
   const stone = kitMat('arenaStone', 64, 64, (x, y) => {
     const row = y >> 4, bx = (x + (row & 1) * 12) % 24, by = y % 16;
     const edge = bx === 0 || by === 0;
@@ -100,11 +102,15 @@ class CombatPreview extends MockScreen {
     this.god = q.get('god') === '1';
     const blob = this.blob, self = this;
     this.world.hurtPlayer = (dmg: number, fx: number, fy: number, kind?: DamageKind) => {
-      if (self.god) { if (!blob.combat.resolving && blob.combat.legacyDefend(self.world, dmg, fx, fy, kind)) return; self.world.text.pop('(' + dmg + ')', blob.x, blob.y + 0.8, 'hint', { size: 0.26 }); return; }
+      if (self.god) { if (!blob.combat.resolving && blob.combat.legacyDefend(self.world, dmg, fx, fy, kind)) return; console.log(`[god] blocked a ${dmg} dmg ${kind ?? ''} hit`); return; }
       blob.damage(dmg, fx, fy, self.world, kind);
       if (blob.hp <= 0) setTimeout(() => self.revive(), 2500);
     };
-    this.world.emit = (ev: string, d?: Record<string, unknown>) => { this.world.run.fire(ev, d); if (ev === 'kill' || ev === 'parry' || ev === 'bossDefeated' || ev === 'bossPhase' || ev === 'guardBreak' || ev === 'riposte') console.log(`[event] ${ev} ${JSON.stringify(d ?? {})}`); };
+    const pauseOn = q.get('pauseOn');
+    this.world.emit = (ev: string, d?: Record<string, unknown>) => {
+      if (pauseOn === ev && !(window as unknown as { __paused?: boolean }).__paused) { (window as unknown as { __paused?: boolean }).__paused = true; setTimeout(() => { this.game.timeScale = 0.00001; }, +(q.get('pauseDelay') || 0)); setTimeout(() => { this.game.timeScale = 1; }, 15000); }
+      this.world.run.fire(ev, d); if (ev === 'kill' || ev === 'parry' || ev === 'bossDefeated' || ev === 'bossPhase' || ev === 'guardBreak' || ev === 'riposte') console.log(`[event] ${ev} ${JSON.stringify(d ?? {})}`); };
+    this.keyQ = [];
     this.spawned = []; this.dummy = null; this.boss = null; this.autoT = 0; this.autoKey = null; this.autoMove = null;
     this.spawnAll();
     this.makeHud();
@@ -113,6 +119,11 @@ class CombatPreview extends MockScreen {
       spawn: (k: EnemyKind, x = 3, y = a.floor + 2) => spawnEnemy(this.world, k, x, y, { arena: a }),
       get dummy() { return self.dummy; }, get boss() { return self.boss; },
       log: () => ({ dummy: self.dummy?.log ?? [], parry: blob.combat.parryLog, hud: blob.combat.hud(), boss: self.boss?.bar() ?? null }),
+      /** press a key / mouse code for holdMs (console-driven tests: press('KeyJ'), press('KeyJ', 900) = heavy) */
+      press: (code: string, holdMs = 60) => { const inp = self.game.input; inp.pressed.add(code); inp.down.add(code); setTimeout(() => { inp.down.delete(code); inp.released.add(code); }, holdMs); },
+      moves: [] as string[],
+      /** game-time key script (software GL frames are slow): [[t, code, holdSec], ...] relative to now */
+      script: (steps: [number, string, number?][]) => { const t0 = self.world.time; for (const [t, code, hold] of steps) self.keyQ.push({ at: t0 + t, code, hold: hold ?? 0.05, down: false }); },
       entities: () => self.world.entities.filter((e) => e.team === 'enemy').map((e) => ({ kind: e.kind, x: +e.x.toFixed(2), y: +e.y.toFixed(2), hp: e.hp })),
     };
   }
@@ -133,7 +144,7 @@ class CombatPreview extends MockScreen {
     kinds.forEach((k, i) => {
       const x = 2 + i * (8 / Math.max(1, kinds.length)) + (k === 'moray' ? 0 : 0);
       const y = k === 'crab' || k === 'heavy' ? a.floor + 0.5 : k === 'moray' ? a.floor + 0.8 : a.floor + 2.5 + (i % 2) * 1.5;
-      this.spawned.push(spawnEnemy(w, k, k === 'moray' ? a.x1 - 0.3 : x, y, { arena: a, elite: q.get('elite') === '1' }));
+      this.spawned.push(spawnEnemy(w, k, k === 'moray' ? a.x1 - 0.3 : x, y, { arena: q.get('roam') ? null : a, elite: q.get('elite') === '1' }));
     });
     if (bossId) { this.boss = spawnBoss(w, bossId, a); this.spawned.push(this.boss); }
   }
@@ -147,12 +158,12 @@ class CombatPreview extends MockScreen {
     if (!spec) return;
     const foe = this.dummy ?? this.world.entities.find((e) => e.team === 'enemy' && (e as unknown as { core?: unknown }).core);
     const c = (foe as unknown as { core?: import('../combat/core').EnemyCore } | undefined)?.core;
-    if (!c || c.phase !== 'windup' || this.autoMove === c.move) return;
+    if (!c || c.phase !== 'windup' || this.autoMove === Math.round((this.world.time - c.t) * 100)) return;
     const [mode, msS] = spec.split(':');
     const lead = (+(msS ?? 60)) / 1000;
     const left = c.move!.windup / c.speed - c.t;
     if (left > lead) return;
-    this.autoMove = c.move;
+    this.autoMove = Math.round((this.world.time - c.t) * 100);
     const key = mode === 'dodge' ? 'Space' : mode === 'parry' || mode === 'block' ? 'KeyK' : null;
     if (!key) return;
     inp.pressed.add(key); inp.down.add(key);
@@ -175,10 +186,25 @@ class CombatPreview extends MockScreen {
     this.hud = d;
   }
 
-  update(dt: number) { this.autoDefend(dt); super.update(dt); }
+  declare keyQ: { at: number; code: string; hold: number; down: boolean }[];
+  update(dt: number) {
+    this.autoDefend(dt);
+    // scripted keys, in game time
+    const inp = this.game.input, now = this.world.time + dt;
+    for (const k of this.keyQ) {
+      if (!k.down && now >= k.at) { k.down = true; inp.pressed.add(k.code); inp.down.add(k.code); }
+      else if (k.down && now >= k.at + k.hold) { inp.down.delete(k.code); inp.released.add(k.code); k.at = -1; }
+    }
+    this.keyQ = this.keyQ.filter((k) => k.at >= 0);
+    super.update(dt);
+  }
 
   tick(dt: number) {
     const inp = this.game.input, b = this.blob, a = this.arena;
+    const cp = (window as unknown as { combatPreview: { moves: string[] } }).combatPreview;
+    const mv = b.combat.move;
+    if (mv && cp.moves[cp.moves.length - 1] !== mv) { cp.moves.push(mv); if (cp.moves.length > 50) cp.moves.shift(); }
+    if (!mv && cp.moves[cp.moves.length - 1] !== '-') cp.moves.push('-');
     if (inp.keyHit('BracketLeft')) this.spawnAll();
     if (inp.keyHit('BracketRight')) { b.hp = b.maxHp; b.combat.refill(); b.combat.stamina = b.combat.staminaMax; }
     if (inp.keyHit('Backslash') && this.dummy) this.dummy.attacks = !this.dummy.attacks;

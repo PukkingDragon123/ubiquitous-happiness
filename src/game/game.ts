@@ -43,6 +43,7 @@ export class Game {
   private fpsAcc = 0; private fpsN = 0; fps = 60;
   w = 1; h = 1;
   lowQuality = false;
+  private lqRes = false;
   shake = { amp: 0, t: 0 };
   private ray = new THREE.Raycaster();
   /** pixel-art cursor drawn over everything: 'normal' fin pointer, 'point' (hover), 'aim' crosshair (dive), 'grab' */
@@ -97,7 +98,10 @@ export class Game {
 
   resize() {
     this.w = innerWidth; this.h = innerHeight;
-    const pr = this.lowQuality ? 0.5 : Math.min(devicePixelRatio || 1, 1.5);
+    // the canvas always matches real screen pixels so the UI overlays stay crisp (no browser smoothing); the 3D
+    // scene's cost is set by post's internal low-res height instead (lower in low-quality mode)
+    const pr = this.lowQuality ? 1 : Math.min(devicePixelRatio || 1, 2);
+    if (this.lowQuality && !this.lqRes) { this.lqRes = true; this.post.setLowRes(300); }
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(this.w, this.h, false);
     this.post.setSize(this.w, this.h, pr);

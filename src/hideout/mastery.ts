@@ -22,6 +22,9 @@ export const MAX_MASTERY = MASTERY.length - 1;
 /** all modifier lines active at a mastery level (cumulative) */
 export function masteryMods(level: number): string[] { return MASTERY.slice(1, level + 1).map((m) => m.mod); }
 
+/** floors a run dives at a mastery level: 3 at M0, 4 from M3, 5 from M6 (the dungeon reads masteryScalars().floors) */
+export function floorsAt(level: number) { return level >= 6 ? 5 : level >= 3 ? 4 : 3; }
+
 /** numbers the run can apply */
 export function masteryScalars(level: number) {
   const L = (n: number) => (level >= n ? 1 : 0);
@@ -37,6 +40,7 @@ export function masteryScalars(level: number) {
     mailRate: L(8) ? 0.5 : 1,
     bossPhase2: !!L(9),
     lootBonus: 1 + level * 0.08,
+    floors: floorsAt(level),
   };
 }
 

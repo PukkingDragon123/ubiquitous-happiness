@@ -1,864 +1,779 @@
-// The backpack screen: a detailed physical leather backpack on the seabed, opened toward you. Its quilted
-// 5x5 lining holds the items you've packed (only those count); loose finds wait on a driftwood board.
+// The backpack screen (v3): a crisp 2D pixel-art leather pack drawn over the frozen world (the screen beneath
+// keeps rendering its last frame). Every icon is shown 1:1 (32 px per cell) on the shared PixelUI density.
 //
 //   game.openModal('backpack', { run, onClose })        (closing calls installItemSystem(run), then onClose)
 //
-// Hover an item: it lifts and its paper tag swings in. Drag: it rises and follows the fin with a springy
-// tilt; R / right-click turns it; pockets glow where it fits (red where it doesn't, gold over a merge
-// partner). Drop on a matching item to fuse them. Drop elsewhere: back to the board. Tab / Esc / clicking
-// the flap closes the bag.
+//   the pack      a stitched leather backpack, flap thrown open; its 5x5 canvas pockets hold the packed items
+//                 (only those count). Items sit in their pockets with a drop shadow, stack counts on materials.
+//   the seabed    a sandy patch beside it: loose finds (run.items with gx < 0). Whatever is left there when the
+//                 bag closes is dropped back into the water by the run screen.
+//   the card      the hovered / held item: name, rarity, kind, stack, stats, set tags, what it fuses with; with
+//                 nothing hovered, the BUILD: set bonuses with their 2 / 4 / 6 tier pips.
+//
+// Drag (LMB) to move; R or RMB rotates the held / hovered item; pockets light green where it fits, red where it
+// doesn't, gold over a stack it tops up or a partner it fuses with. Tab / Esc / the X closes.
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import type { Run, ItemInst } from '../game/run';
 import {
-  getItem, itemMesh, installItemSystem, fits, findSpot, mergeResult, occupancy, rotCells, shapeSize, recipesWith,
-  GRID, ITEM_CELL_M, ITEMS, type ItemDef,
+  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, recipesWith, GRID, ITEMS, RARITY_COLOR,
+  setBonuses, statLines, stackCap, stackOnto, itemIcon, type ItemDef,
 } from '../game/items';
-import { buildBag, CELL, GRID_CX, GRID_CY, type BagModel } from './bagModel';
-import { buildScenery, type Scenery } from './scenery';
-import { Particles } from '../gfx/particles';
-import { POST } from '../gfx/post';
+import { PixelUI } from '../ui/pixel/ui';
 import { audio } from '../audio/audio';
-import { STYLES, textCanvas, type TextStyle } from '../ui/text';
-import { Tag, Floaters, Cursor, type CursorKind } from './ui';
-import { BuildPanel } from './buildPanel';
-import { setBonuses, SETS } from '../game/items';
-import { retroAll } from '../gfx/retro';
-import { clamp, damp, hash2 } from '../core/math';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
-const SCALE = (CELL / ITEM_CELL_M) * 0.94;
-const BAG_POS = new THREE.Vector3(-0.55, 0, 0.1);
-const BAG_TILT = -0.62; // leaning back against the boulder
-const OPEN_ANG = -3.78;
-
-interface Vis {
-  inst: ItemInst;
-  root: THREE.Group;     // spring-driven world transform
-  spin: THREE.Group;     // turn about the item's normal
-  model: THREE.Object3D;
-  halo: THREE.Mesh;
-  pos: THREE.Vector3; vel: THREE.Vector3;
-  q: THREE.Quaternion;
-  ang: number; angV: number; angT: number;
-  sq: number; sqV: number;
-  pop: number; popV: number; popDelay: number; popT: number;
-  lift: number; glow: number;
-  tray: THREE.Vector2 | null;
-  depth: number;
-  wob: number;
-  dead?: boolean;
-}
-
-type Region = 'grid' | 'tray' | 'none';
+const C = 32; // px per cell (icons are painted at 32 px per cell: 1:1)
 
 function sfx(ids: string | string[], o: { vol?: number; rate?: number; delay?: number } = {}) {
-  for (const id of Array.isArray(ids) ? ids : [ids]) if (audio.has(id)) { audio.play(id, { vol: o.vol ?? 0.7, rate: o.rate, delay: o.delay, dry: true, jitter: 0.08 }); return; }
+  for (const id of Array.isArray(ids) ? ids : [ids]) if (audio.has(id)) { audio.play(id, { vol: o.vol ?? 0.6, rate: o.rate, delay: o.delay, dry: true, jitter: 0.06 }); return; }
 }
+
+// ------------------------------------------------------------------ cached art
+const artCache = new Map<string, HTMLCanvasElement>();
+function cached(key: string, f: () => HTMLCanvasElement) { let c = artCache.get(key); if (!c) { c = f(); artCache.set(key, c); if (artCache.size > 600) artCache.clear(); } return c; }
+function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; return [c, x]; }
+
+/** an item's icon turned by rot quarter turns (clockwise, matching rotCells) */
+function rotIcon(id: string, level: number, rot: number): HTMLCanvasElement {
+  rot = ((rot % 4) + 4) % 4;
+  const src = itemIcon(id, level);
+  if (!rot) return src;
+  return cached(`rot|${id}|${level}|${rot}`, () => {
+    const sw = src.width, sh = src.height, odd = rot % 2 === 1;
+    const [c, x] = canvas(odd ? sh : sw, odd ? sw : sh);
+    x.translate(c.width / 2, c.height / 2); x.rotate((rot * Math.PI) / 2); x.drawImage(src, -sw / 2, -sh / 2);
+    return c;
+  });
+}
+/** a flat-colour silhouette of a canvas (shadows, hover rims) */
+function silhouette(src: HTMLCanvasElement, col: string, key: string): HTMLCanvasElement {
+  return cached(`sil|${key}|${col}`, () => {
+    const [c, x] = canvas(src.width, src.height);
+    x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = col; x.fillRect(0, 0, c.width, c.height);
+    return c;
+  });
+}
+/** a 1 px rim around a canvas's silhouette, in col */
+function rim(src: HTMLCanvasElement, col: string, key: string): HTMLCanvasElement {
+  return cached(`rim|${key}|${col}`, () => {
+    const s = silhouette(src, col, key);
+    const [c, x] = canvas(src.width + 2, src.height + 2);
+    for (const [dx, dy] of [[0, 1], [2, 1], [1, 0], [1, 2]]) x.drawImage(s, dx, dy);
+    x.globalCompositeOperation = 'destination-out'; x.drawImage(src, 1, 1);
+    return c;
+  });
+}
+
+// the pack: hue-shifted leather, canvas pockets, brass
+const LE = { out: '#1c0c06', d2: '#3e1e10', d1: '#56301a', b: '#7a4528', l1: '#94583a', l2: '#b47448', st: '#e8c084', stD: '#8a5a30' };
+const PK = { out: '#140a06', base: '#3c2c1e', sh: '#2a1c12', lit: '#56422e', st: '#9a7448', fl: '#4a3826' };
+const BR = { out: '#2e1404', d: '#8a5a14', b: '#d8a038', l: '#f8d878', w: '#fffbe0' };
+
+/** the whole backpack art for a grid of n x n cells of size c; the pocket area starts at PACK_IN */
+const PACK_IN = { x: 16, y: 38 };
+function packArt(n: number, c: number): HTMLCanvasElement {
+  return cached(`pack|${n}|${c}`, () => {
+    const gw = n * c, W = gw + PACK_IN.x * 2, H = gw + PACK_IN.y + 18;
+    const [cv, x] = canvas(W + 16, H + 4);
+    const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
+    const ox = 8; // room for the side straps
+    // side straps (behind the body)
+    for (const sx of [ox - 7, ox + W - 1]) {
+      f(sx, 44, 8, H - 50, LE.out); f(sx + 1, 45, 6, H - 52, LE.d1); f(sx + 1, 45, 1, H - 52, LE.l1);
+      for (let yy = 52; yy < H - 12; yy += 26) { f(sx + 2, yy, 4, 4, BR.out); f(sx + 3, yy + 1, 2, 2, BR.b); f(sx + 3, yy + 1, 1, 1, BR.w); }
+    }
+    // top handle loop
+    for (let i = 0; i <= 40; i++) { const a = Math.PI * (i / 40); const hx = ox + W / 2 + Math.cos(a) * 22, hy = 16 - Math.sin(a) * 14; f(Math.round(hx) - 2, Math.round(hy) - 2, 5, 5, LE.out); }
+    for (let i = 0; i <= 40; i++) { const a = Math.PI * (i / 40); const hx = ox + W / 2 + Math.cos(a) * 22, hy = 16 - Math.sin(a) * 14; f(Math.round(hx) - 1, Math.round(hy) - 1, 3, 3, i < 20 ? LE.d1 : LE.b); }
+    // body: rounded rect with an outline, lit top-left, shaded bottom-right
+    const R0 = 12, by = 12;
+    const inBody = (px: number, py: number, inset = 0) => {
+      const x0 = ox + inset, y0 = by + inset, x1 = ox + W - 1 - inset, y1 = by + H - 13 - inset, r = Math.max(1, R0 - inset);
+      if (px < x0 || py < y0 || px > x1 || py > y1) return false;
+      const qx = Math.max(x0 + r - px, 0, px - (x1 - r)), qy = Math.max(y0 + r - py, 0, py - (y1 - r));
+      return qx * qx + qy * qy <= r * r;
+    };
+    for (let py = 0; py < cv.height; py++) for (let px = 0; px < cv.width; px++) {
+      if (!inBody(px, py)) continue;
+      let col = LE.b;
+      if (!inBody(px, py, 1)) col = LE.out;
+      else if (!inBody(px, py, 2)) col = px - ox < W / 2 && py - by < H / 3 ? LE.l2 : px - ox > W * 0.6 || py - by > H * 0.7 ? LE.d2 : LE.l1;
+      else if (!inBody(px, py, 4)) col = py - by > H * 0.75 || px - ox > W - 6 ? LE.d1 : LE.b;
+      else if (!inBody(px, py, 5)) col = ((px + py) >> 1) % 2 ? LE.st : LE.b; // stitching
+      f(px, py, 1, 1, col);
+    }
+    // a couple of creases and scuffs (deliberate, not noise)
+    for (const [cx0, cy0, len] of [[ox + 9, by + 60, 14], [ox + W - 14, by + 90, 10], [ox + 12, by + H - 40, 12]]) for (let i = 0; i < len; i++) f(cx0 + (i % 2 ? 0 : 1) * 0, cy0 + i, 1, 1, LE.d1);
+    // the pocket panel (canvas) with stitched cells
+    const gx0 = ox + PACK_IN.x, gy0 = PACK_IN.y;
+    f(gx0 - 5, gy0 - 5, gw + 10, gw + 10, LE.out);
+    f(gx0 - 4, gy0 - 4, gw + 8, gw + 8, PK.fl);
+    f(gx0 - 4, gy0 - 4, gw + 8, 1, LE.d2);
+    for (let cy = 0; cy < n; cy++) for (let cx = 0; cx < n; cx++) {
+      const X = gx0 + cx * c, Y = gy0 + cy * c;
+      f(X + 1, Y + 1, c - 2, c - 2, PK.base);
+      f(X + 1, Y + 1, c - 2, 2, PK.sh); f(X + 1, Y + 1, 2, c - 2, PK.sh);
+      f(X + 1, Y + c - 2, c - 2, 1, PK.lit); f(X + c - 2, Y + 1, 1, c - 2, PK.lit);
+      // stitched seams between pockets
+      for (let i = 2; i < c - 2; i += 3) { f(X + i, Y, 2, 1, PK.st); f(X, Y + i, 1, 2, PK.st); }
+      // a faint weave in the canvas: a 1 px dot every 4 px on a diagonal lattice
+      for (let yy = 4; yy < c - 3; yy += 4) for (let xx = 4 + ((yy / 4) % 2) * 2; xx < c - 3; xx += 4) f(X + xx, Y + yy, 1, 1, PK.fl);
+    }
+    for (let i = 2; i < gw; i += 3) { f(gx0 + i, gy0 + gw - 1, 2, 1, PK.st); f(gx0 + gw - 1, gy0 + i, 1, 2, PK.st); }
+    // the flap thrown open over the top, with a brass buckle
+    const fy = 2, fh = 28, fx0 = ox + 4, fw = W - 8;
+    for (let py = fy; py < fy + fh; py++) for (let px = fx0; px < fx0 + fw; px++) {
+      const r = 10, ly = py - fy, lx = px - fx0;
+      const qx = Math.max(r - lx, 0, lx - (fw - 1 - r)), qy = Math.max(0, ly - (fh - 1 - r));
+      const d = Math.sqrt(qx * qx + qy * qy);
+      if (d > r) continue;
+      let col = LE.d1;
+      if (d > r - 1 || ly === 0 || lx === 0 || lx === fw - 1) col = LE.out;
+      else if (ly <= 2) col = LE.l1;
+      else if (d > r - 3 && ly > fh - 8) col = LE.d2;
+      else if (d > r - 5 && d <= r - 4 && ly > 6) col = ((px + py) >> 1) % 2 ? LE.st : LE.d1;
+      f(px, py, 1, 1, col);
+    }
+    const bx = ox + W / 2 - 8, byk = fy + fh - 10;
+    f(bx + 5, byk - 6, 6, 12, LE.out); f(bx + 6, byk - 6, 4, 11, LE.d2);
+    f(bx, byk, 16, 12, BR.out); f(bx + 1, byk + 1, 14, 10, BR.b); f(bx + 1, byk + 1, 14, 1, BR.l); f(bx + 1, byk + 1, 1, 10, BR.l);
+    f(bx + 4, byk + 4, 8, 4, LE.d2); f(bx + 7, byk + 3, 2, 6, BR.d); f(bx + 2, byk + 2, 1, 1, BR.w);
+    return cv;
+  });
+}
+
+/** the seabed patch the loose items lie on */
+function seabedArt(w: number, h: number): HTMLCanvasElement {
+  return cached(`sea|${w}|${h}`, () => {
+    const [cv, x] = canvas(w, h);
+    const f = (px: number, py: number, ww: number, hh: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, ww, hh); };
+    const r = 8;
+    for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+      const qx = Math.max(r - px, 0, px - (w - 1 - r)), qy = Math.max(r - py, 0, py - (h - 1 - r));
+      const d = Math.sqrt(qx * qx + qy * qy);
+      if (d > r) continue;
+      let col = '#b8955e';
+      if (d > r - 1 || px === 0 || py === 0 || px === w - 1 || py === h - 1) col = '#2a1a0c';
+      else if (d > r - 2 || px === 1 || py === 1) col = py < h / 2 ? '#e8cc94' : '#8a6a3c';
+      // ripples: gentle sine bands
+      else if (Math.abs(((py + Math.sin(px * 0.18) * 2.2) % 9) - 4) < 0.6) col = '#a4824e';
+      else if (Math.abs(((py + Math.sin(px * 0.18) * 2.2 + 1) % 9) - 4) < 0.6) col = '#d4b47c';
+      f(px, py, 1, 1, col);
+    }
+    // a pebble and a little shell in the corners
+    f(w - 14, h - 9, 6, 4, '#3a3440'); f(w - 13, h - 10, 4, 1, '#3a3440'); f(w - 13, h - 9, 4, 2, '#7e7880'); f(w - 13, h - 9, 1, 1, '#d8d2cc');
+    f(6, h - 10, 5, 4, '#6e4446'); f(7, h - 11, 3, 1, '#6e4446'); f(7, h - 10, 3, 3, '#e2b4a2'); f(8, h - 10, 1, 3, '#b07c74');
+    return cv;
+  });
+}
+
+// ------------------------------------------------------------------ the screen
+interface Vis { x: number; y: number; vx: number; vy: number; lift: number; pop: number; shake: number }
+type Plan =
+  | { kind: 'grid'; gx: number; gy: number; ok: boolean; cells: [number, number][] }
+  | { kind: 'board'; bx: number; by: number; ok: boolean }
+  | { kind: 'stack'; target: ItemInst; k: number }
+  | { kind: 'fuse'; target: ItemInst; id: string; level: number }
+  | { kind: 'none' };
+
+interface Layout { packX: number; packY: number; gridX: number; gridY: number; boardX: number; boardY: number; boardW: number; boardH: number; bCols: number; bRows: number; infoX: number; infoY: number; infoW: number; card: boolean; closeX: number; closeY: number }
 
 export class BackpackScreen implements Screen {
   name = 'backpack';
-  underwater = false;
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(34, 16 / 9, 0.1, 60);
-  overlay = new THREE.Scene();
-  ocam = new THREE.OrthographicCamera(0, 1280, 0, -720, -100, 100);
-  overlays = [{ scene: this.overlay, camera: this.ocam as THREE.Camera }];
+  private bg = new THREE.Scene();
+  private bgCam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 10);
+  /** the screen beneath (its scene keeps rendering, frozen) */
+  private under: Screen | null = null;
+  get scene(): THREE.Scene { return this.under?.scene ?? this.bg; }
+  get camera(): THREE.PerspectiveCamera { return this.under?.camera ?? this.bgCam; }
+  get underwater() { return this.under?.underwater ?? false; }
+  ui = new PixelUI();
+  overlays = [this.ui.layer];
 
-  private bag: BagModel;
-  private env: Scenery;
-  private fx = new Particles();
-  private items = new THREE.Group();
-  private vis = new Map<number, Vis>();
-  /** where loose items were left on the board (kept between openings) */
-  private trayMem = new Map<number, THREE.Vector2>();
   private run: Run | null = null;
   private onClose?: () => void;
-  private state: 'closed' | 'opening' | 'open' | 'closing' = 'closed';
-  private st = 0;
   private t = 0;
-  private S = 2;   // overlay pixel scale (cursor, floating words)
-  private CS = 1;  // tag card pixel scale
-  private w = 1280; private h = 720;
-  // bag motion
-  private drop = 0; private dropV = 0; private landed = false;
-  private bagSq = 0; private bagSqV = 0;
-  private flap = 0; private flapV = 0; private flapT = 0;
-  private shake = 0;
-  // interaction
-  private ray = new THREE.Raycaster();
-  private hover: Vis | null = null;
-  private hoverT = 0;
-  private held: Vis | null = null;
-  private heldFrom: { gx: number; gy: number; rot: number; tray: THREE.Vector2 | null } | null = null;
-  private plan: { region: Region; gx: number; gy: number; ok: boolean; merge: Vis | null; point: THREE.Vector3; tray: THREE.Vector2 | null } | null = null;
-  private merging: { a: Vis; b: Vis; t: number; done: boolean } | null = null;
-  private mousePrev = new THREE.Vector2();
-  private mouseVel = new THREE.Vector2();
-  // overlay
-  private tag = new Tag();
-  private floaters = new Floaters();
-  private cursor = new Cursor();
-  private mergeLabel: THREE.Mesh | null = null; private mergeKey = '';
-  private blob: THREE.Mesh;
-  /** the BUILD panel: set bonuses + granted skills (pixel UI kit) */
-  private build = new BuildPanel();
-  // dangly bits (world space verlet)
-  private chain = { p1: new THREE.Vector3(), o1: new THREE.Vector3(), p2: new THREE.Vector3(), o2: new THREE.Vector3(), init: false };
-  private tagp = { p: new THREE.Vector3(), o: new THREE.Vector3(), yaw: 0, yawV: 0, init: false };
-  private postSave: Record<string, number> = {};
-  private camBase = new THREE.Vector3(); private camLook = new THREE.Vector3();
+  private open = 0;            // 0..1 open animation
+  private closing = false;
+  private vis = new Map<number, Vis>();
+  /** board slot of each loose item (top-left cell on the seabed grid) */
+  private slot = new Map<number, { bx: number; by: number }>();
+  private held: ItemInst | null = null;
+  private heldFrom: { gx: number; gy: number; rot: number; slot?: { bx: number; by: number } } | null = null;
+  private grab = { x: 0, y: 0 };
+  private plan: Plan = { kind: 'none' };
+  private hover: ItemInst | null = null;
+  private sparks: { x: number; y: number; vx: number; vy: number; t: number; life: number; col: string }[] = [];
+  private toasts: { text: string; sub: string; x: number; y: number; t: number; col: string }[] = [];
+  private L!: Layout;
+  private prevCursor: Game['cursor'] | null = null;
 
   constructor(private game: Game) {
-    this.scene.background = new THREE.Color('#0e3a48');
-    this.scene.fog = new THREE.Fog('#0e3a48', 4.5, 14);
-    this.env = buildScenery();
-    this.scene.add(this.env.group);
-    this.bag = buildBag();
-    this.scene.add(this.bag.root);
-    this.scene.add(this.items);
-    this.scene.add(this.fx.object);
-    this.fx.waterAt = () => 100; this.fx.floorAt = () => 0;
-    // light rig: warm lantern key (in the scenery), cool sea fill, a soft rim from behind
-    this.scene.add(new THREE.HemisphereLight('#7ac4d0', '#3a2c1c', 1.35));
-    const rim = new THREE.DirectionalLight('#7ad0e8', 1.1); rim.position.set(3, 4, -4); this.scene.add(rim);
-    const fill = new THREE.DirectionalLight('#ffe2b8', 0.55); fill.position.set(1, 3, 6); this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight('#20343c', 0.6));
-    this.env.lampLight.target.position.set(-0.3, 0.9, 0);
-    this.overlay.add(this.tag.group, this.floaters.group, this.cursor.mesh);
-    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, color: '#000000', opacity: 0 }));
-    this.blob.renderOrder = 6;
-    this.scene.add(this.blob);
-    this.placeBag(0);
-    this.layoutCamera();
-    // PS1 look: vertex snapping + affine texture swim on the physical bag and its surroundings
-    retroAll(this.bag.root); retroAll(this.env.group);
-    this.overlays.unshift(this.build.ui.layer);
+    this.bg.background = new THREE.Color('#06121c');
   }
 
-  // ---------------------------------------------------------------- lifecycle
   enter(data?: unknown) {
     const d = (data ?? {}) as BackpackEnter;
     if (!d.run) return;
+    this.under = this.game.screen && this.game.screen !== this ? this.game.screen : null;
+    // the pack draws its own pixel cursor (arrow / point / grab); hide the game's
+    this.prevCursor = this.game.cursor; this.game.cursor = 'none';
     this.run = d.run; this.onClose = d.onClose;
-    for (const v of this.vis.values()) this.items.remove(v.root);
-    this.vis.clear();
-    this.held = null; this.hover = null; this.merging = null; this.plan = null;
-    this.tag.key = '';
-    // anything sitting in an invalid spot falls out onto the board
+    this.held = null; this.hover = null; this.plan = { kind: 'none' };
+    this.closing = false; this.open = 0;
+    this.vis.clear(); this.sparks = []; this.toasts = [];
+    // anything sitting in an invalid spot falls out onto the seabed
     const ok: ItemInst[] = [];
     for (const it of this.run.items) {
       if (!ITEMS[it.id]) continue;
       if (it.gx >= 0 && !fits(ok, it, it.gx, it.gy, it.rot)) { it.gx = -1; it.gy = -1; }
       if (it.gx >= 0) ok.push(it);
     }
+    for (const uid of [...this.slot.keys()]) if (!this.run.items.some((i) => i.uid === uid && i.gx < 0)) this.slot.delete(uid);
+    this.layout();
+    this.layoutBoard();
     let k = 0;
-    for (const it of this.run.items) if (ITEMS[it.id]) this.addVis(it, 0.62 + (k++) * 0.045);
-    this.layoutTray();
-    this.state = 'opening'; this.st = 0;
-    this.drop = 2.6; this.dropV = 0; this.landed = false; this.flap = 0; this.flapV = 0; this.flapT = 0;
-    this.chain.init = false; this.tagp.init = false;
-    if (!Object.keys(this.postSave).length) for (const k2 of ['uExposure', 'uVignette', 'uBloom', 'uBloomThreshold', 'uSaturation', 'uContrast', 'uDesat', 'uPulse'] as const) this.postSave[k2] = POST[k2].value as number;
-    POST.uExposure.value = 1.0; POST.uVignette.value = 0.55; POST.uBloom.value = 0.6; POST.uBloomThreshold.value = 0.9; POST.uSaturation.value = 1.1; POST.uContrast.value = 1.06;
-    POST.uDesat.value = 0; POST.uPulse.value = 0;
-    sfx(['bag_zip1', 'cloth1'], { vol: 0.5, delay: 0.05 });
+    for (const it of this.run.items) { if (!ITEMS[it.id]) continue; const [tx, ty] = this.targetOf(it); this.vis.set(it.uid, { x: tx, y: ty + 10 + (k % 5) * 3, vx: 0, vy: 0, lift: 0, pop: -0.04 * k++, shake: 0 }); }
+    sfx(['bag_zip1', 'cloth1'], { vol: 0.5 });
   }
-  exit() {
-    for (const [k, v] of Object.entries(this.postSave)) (POST as Record<string, { value: unknown }>)[k].value = v;
-    this.postSave = {};
-    this.tag.update(0, false, 0, 0, 0, 0, 1);
-  }
-  resize(w: number, h: number) {
-    this.w = w; this.h = h;
-    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-    this.ocam.right = w; this.ocam.bottom = -h; this.ocam.updateProjectionMatrix();
-    this.S = Math.max(1, Math.round(h / 400));
-    this.CS = Math.max(1, Math.round(h / 800));
-    this.build.resize(w, h, this.game.renderer.getPixelRatio());
-    this.fx.setPixelScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
-    this.layoutCamera();
-  }
+  exit() { this.under = null; if (this.prevCursor !== null) this.game.cursor = this.prevCursor; this.prevCursor = null; }
+  resize(w: number, h: number) { this.ui.resize(w, h, this.game.renderer.getPixelRatio()); this.bgCam.aspect = w / h; this.bgCam.updateProjectionMatrix(); }
 
   close() {
-    if (this.state !== 'open' && this.state !== 'opening') return;
+    if (this.closing || !this.run) return;
     if (this.held) this.dropHeld(true);
-    this.state = 'closing'; this.st = 0;
-    for (const v of this.vis.values()) { v.popDelay = Math.random() * 0.08; }
-    sfx(['k_close1', 'swish_a'], { vol: 0.5 });
+    this.closing = true;
+    sfx(['k_close1', 'bag_zip1'], { vol: 0.5 });
   }
 
   // ---------------------------------------------------------------- layout
-  private layoutCamera() {
-    const a = this.camera.aspect;
-    // keep bag + board framed on any aspect
-    const dist = 5.35 * Math.max(1, 1.62 / a);
-    const look = new THREE.Vector3(0.32, 1.2, 0.1);
-    const dir = new THREE.Vector3(0.16, 0.56, 0.81).normalize();
-    this.camLook.copy(look);
-    this.camBase.copy(look).addScaledVector(dir, dist);
-    // hang the lantern in the top-left corner of the view, its rope running out of frame
-    this.camera.position.copy(this.camBase); this.camera.lookAt(look); this.camera.updateMatrixWorld();
-    const lp = new THREE.Vector3(-0.84, 0.66, 0.5).unproject(this.camera).sub(this.camBase).normalize().multiplyScalar(4.3).add(this.camBase);
-    this.env.lamp.position.copy(lp);
-  }
-  private placeBag(dt: number) {
-    const r = this.bag.root;
-    r.position.copy(BAG_POS);
-    r.position.y += 1.12 + this.drop;
-    r.rotation.set(BAG_TILT, 0.06, 0);
-    const s = this.bagSq;
-    r.scale.set(1 + s * 0.6, 1 - s, 1 + s * 0.6);
-    this.bag.flapPivot.rotation.x = this.flap;
-    void dt;
-  }
-  private trayWorld(p: THREE.Vector2, y: number, out = new THREE.Vector3()) { return this.env.tray.localToWorld(out.set(p.x, y, p.y)); }
-
-  private addVis(it: ItemInst, popDelay = 0): Vis {
-    const model = itemMesh(it.id, it.level || 1);
-    const spin = new THREE.Group();
-    spin.add(model);
-    const root = new THREE.Group();
-    root.add(spin);
-    const halo = new THREE.Mesh(HALO_GEO, new THREE.MeshBasicMaterial({ map: haloTex(), color: '#ffe0a0', transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
-    halo.renderOrder = 4;
-    root.add(halo);
-    model.scale.setScalar(SCALE);
-    this.items.add(root);
-    const v: Vis = {
-      inst: it, root, spin, model, halo,
-      pos: new THREE.Vector3(), vel: new THREE.Vector3(), q: new THREE.Quaternion(),
-      ang: -it.rot * Math.PI / 2, angV: 0, angT: -it.rot * Math.PI / 2, sq: 0, sqV: 0,
-      pop: 0, popV: 0, popDelay, popT: 0, lift: 0, glow: 0, tray: null, depth: (model.userData.depth as number) * SCALE, wob: 0,
+  private layout() {
+    const ui = this.ui;
+    const packW = GRID * C + PACK_IN.x * 2 + 16, packH = GRID * C + PACK_IN.y + 22;
+    const infoW = 176, gap = 12;
+    let bCols = 4;
+    let card = ui.w >= packW + gap + bCols * C + 16 + gap + infoW + 12;
+    if (!card) bCols = Math.max(2, Math.min(4, Math.floor((ui.w - packW - gap - 28) / C)));
+    else bCols = Math.max(4, Math.min(5, Math.floor((ui.w - packW - gap * 2 - infoW - 28) / C)));
+    if (ui.w < packW + gap + bCols * C + 16) card = false;
+    const bRows = Math.max(3, Math.min(GRID, Math.floor((packH - 30) / C)));
+    const boardW = bCols * C + 16, boardH = bRows * C + 16;
+    const total = packW + gap + boardW + (card ? gap + infoW : 0);
+    const x0 = Math.max(4, Math.round((ui.w - total) / 2));
+    const y0 = Math.max(20, Math.round((ui.h - packH) / 2) + 6);
+    const packX = x0, packY = y0;
+    const boardX = packX + packW + gap, boardY = packY + PACK_IN.y - 8;
+    this.L = {
+      packX, packY, gridX: packX + 8 + PACK_IN.x, gridY: packY + PACK_IN.y, boardX, boardY, boardW, boardH, bCols, bRows,
+      infoX: boardX + boardW + gap, infoY: packY + 8, infoW, card, closeX: (card ? boardX + boardW + gap + infoW : boardX + boardW) - 14, closeY: Math.max(4, packY - 14),
     };
-    root.userData.vis = v;
-    this.vis.set(it.uid, v);
-    this.target(v, v.pos, v.q);
-    root.position.copy(v.pos); root.quaternion.copy(v.q);
-    root.visible = false;
-    return v;
   }
 
-  /** auto-place loose items without a spot on the board */
-  private layoutTray() {
-    const hx = this.env.trayHalf.x - 0.12, hz = this.env.trayHalf.z - 0.12;
-    const taken: { p: THREE.Vector2; r: number }[] = [];
-    for (const v of this.vis.values()) if (v.inst.gx < 0 && v.tray) taken.push({ p: v.tray, r: this.radius(v) });
-    for (const v of this.vis.values()) {
-      if (v.inst.gx >= 0 || v.tray) continue;
-      const mem = this.trayMem.get(v.inst.uid);
-      if (mem) { v.tray = mem.clone(); taken.push({ p: v.tray, r: this.radius(v) }); continue; }
-      const r = this.radius(v);
-      let best: THREE.Vector2 | null = null, bestScore = -1e9;
-      for (let k = 0; k < 90; k++) {
-        const p = new THREE.Vector2((hash2(k, v.inst.uid, 7) * 2 - 1) * hx, (hash2(k, v.inst.uid, 8) * 2 - 1) * hz);
-        let clear = 1e9;
-        for (const o of taken) clear = Math.min(clear, p.distanceTo(o.p) - o.r - r);
-        const score = Math.min(clear, 0.5) - p.length() * 0.05;
-        if (score > bestScore) { bestScore = score; best = p; }
-      }
-      v.tray = best!;
-      taken.push({ p: v.tray, r });
+  /** the seabed: a cell grid of its own; items keep their slot between openings */
+  private boardOcc(skip = -1): number[][] {
+    const { bCols, bRows } = this.L;
+    const g = Array.from({ length: bRows + 6 }, () => new Array(bCols).fill(0));
+    for (const it of this.run!.items) {
+      if (it.gx >= 0 || it.uid === skip || !ITEMS[it.id]) continue;
+      const s = this.slot.get(it.uid); if (!s) continue;
+      for (const [x, y] of rotCells(getItem(it.id).shape, it.rot)) { const yy = s.by + y, xx = s.bx + x; if (g[yy] && xx < bCols) g[yy][xx] = it.uid; }
     }
+    return g;
   }
-  private radius(v: Vis) { const { w, h } = shapeSize(getItem(v.inst.id).shape); return Math.max(w, h) * CELL * 0.42; }
-
-  /** where an item wants to be (world position + orientation) */
-  private target(v: Vis, pos: THREE.Vector3, q: THREE.Quaternion) {
-    const it = v.inst;
-    if (it.gx >= 0) {
+  private boardFits(it: ItemInst, bx: number, by: number, rot: number) {
+    const { bCols } = this.L;
+    const occ = this.boardOcc(it.uid);
+    for (const [x, y] of rotCells(getItem(it.id).shape, rot)) { const xx = bx + x, yy = by + y; if (xx < 0 || yy < 0 || xx >= bCols || !occ[yy] || occ[yy][xx]) return false; }
+    return true;
+  }
+  private freeBoardSlot(it: ItemInst): { bx: number; by: number } | null {
+    const { bCols, bRows } = this.L;
+    for (let rows = bRows; rows <= bRows + 5; rows++) for (let by = 0; by < rows; by++) for (let bx = 0; bx < bCols; bx++) {
       const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
-      const lx = GRID_CX + (it.gx + w / 2 - GRID / 2) * CELL, ly = GRID_CY - (it.gy + h / 2 - GRID / 2) * CELL;
-      pos.set(lx, ly, this.bag.floorZ(lx, ly) + 0.016 + v.depth + v.lift);
-      this.bag.root.localToWorld(pos);
-      this.bag.root.getWorldQuaternion(q);
-    } else {
-      const p = v.tray ?? new THREE.Vector2();
-      this.trayWorld(p, v.depth + 0.01 + v.lift, pos);
-      this.env.tray.getWorldQuaternion(q);
-      q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+      if (by + h > rows) continue;
+      if (this.boardFits(it, bx, by, it.rot)) return { bx, by };
     }
-  }
-
-  // ---------------------------------------------------------------- input → world
-  private mouseRay() {
-    const m = this.game.input.mouse;
-    this.ray.setFromCamera(new THREE.Vector2(m.nx, m.ny), this.camera);
-    return this.ray.ray;
-  }
-  private planes() {
-    const r = this.mouseRay();
-    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.getWorldQuaternion(new THREE.Quaternion()));
-    const p0 = this.bag.root.localToWorld(new THREE.Vector3(0, 0, 0.02));
-    const bagPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, p0);
-    const hitB = r.intersectPlane(bagPlane, new THREE.Vector3());
-    const local = hitB ? this.bag.root.worldToLocal(hitB.clone()) : null;
-    const tn = new THREE.Vector3(0, 1, 0).applyQuaternion(this.env.tray.getWorldQuaternion(new THREE.Quaternion()));
-    const hitT = r.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(tn, this.env.tray.getWorldPosition(new THREE.Vector3())), new THREE.Vector3());
-    const tl = hitT ? this.env.tray.worldToLocal(hitT.clone()) : null;
-    return { hitB, local, hitT, tl, n, tn };
-  }
-
-  private screenOf(p: THREE.Vector3): [number, number] {
-    const v = p.clone().project(this.camera);
-    return [(v.x * 0.5 + 0.5) * this.w, (-v.y * 0.5 + 0.5) * this.h];
-  }
-
-  // ---------------------------------------------------------------- update
-  update(dt: number) {
-    this.t += dt; this.st += dt;
-    const inp = this.game.input;
-    const m = inp.mouse;
-    this.mouseVel.set((m.x - this.mousePrev.x) / Math.max(dt, 1e-3), (m.y - this.mousePrev.y) / Math.max(dt, 1e-3));
-    this.mousePrev.set(m.x, m.y);
-    this.env.update(this.t);
-    this.animateBag(dt);
-    this.placeBag(dt);
-    this.scene.updateMatrixWorld();
-
-    const interactive = this.run && (this.state === 'open' || (this.state === 'opening' && this.st > 0.85)) && !this.merging;
-    if (interactive) this.interact(dt);
-    else if (this.held && this.state !== 'closing') this.interactHeld();
-    if (this.merging) this.updateMerge(dt);
-    this.updateItems(dt);
-    this.updateGlows(dt);
-    this.updateBlob(dt);
-    this.updateDangly(dt);
-    this.ambient(dt);
-    this.fx.update(dt);
-    // camera: a slow breathing drift + landing shake
-    this.shake *= Math.exp(-dt * 8);
-    const sh = this.shake;
-    this.camera.position.copy(this.camBase).add(new THREE.Vector3(Math.sin(this.t * 0.31) * 0.05 + Math.sin(this.t * 37) * sh * 0.04, Math.sin(this.t * 0.23) * 0.03 + Math.cos(this.t * 41) * sh * 0.05, 0));
-    this.camera.lookAt(this.camLook);
-    this.updateOverlay(dt);
-    if (this.state === 'opening' && this.st > 1.4) this.state = 'open';
-    if (this.state === 'closing' && this.st > 0.62) {
-      this.state = 'closed';
-      if (this.run) installItemSystem(this.run);
-      const cb = this.onClose; this.onClose = undefined;
-      cb?.();
-    }
-  }
-
-  private animateBag(dt: number) {
-    if (this.state === 'opening') {
-      if (!this.landed) {
-        this.dropV -= 16 * dt; this.drop += this.dropV * dt;
-        if (this.drop <= 0) {
-          this.drop = 0; this.landed = true; this.bagSqV = 3.2 + Math.min(4, -this.dropV * 0.25); this.dropV = 0;
-          this.shake = 1;
-          sfx(['thud_heavy1', 'box_thud', 'uw_thud1'], { vol: 0.8 });
-          sfx('gravel1', { vol: 0.35, delay: 0.03 });
-          const base = this.bag.root.localToWorld(new THREE.Vector3(0, -1.1, -0.2));
-          for (let k = 0; k < 2; k++) {
-            this.fx.emit('dust', base.x + (k ? 1 : -1) * 0.9, 0.05, { n: 14, spread: 0.45, speed: 1.2, vy: 0.5, life: 1.4, size: 0.09, color: '#c8b088', z: base.z + 0.5 });
-          }
-          this.fx.debrisBurst(base.x, 0.05, 16, '#8a7350', 1.6, 0.03, base.z + 0.5);
-          this.fx.emit('bubble', base.x, 0.2, { n: 10, spread: 0.6, vy: 1.2, life: 2.5, z: base.z + 0.4, size: 0.05 });
-        }
-      }
-      if (this.st > 0.5 && this.flapT === 0) { this.flapT = OPEN_ANG; this.flapV = -6; sfx(['buckle1', 'clank1'], { vol: 0.6 }); sfx(['rope_creak1', 'creak1'], { vol: 0.45, delay: 0.12 }); }
-    }
-    if (this.state === 'closing') {
-      this.flapT = 0;
-      if (this.st > 0.4 && this.flap > -0.6 && !this.bag.root.userData.buckled) { this.bag.root.userData.buckled = true; sfx(['buckle1', 'clank2'], { vol: 0.6 }); this.bagSqV = 1.6; }
-    } else this.bag.root.userData.buckled = false;
-    // flap spring with a leathery flop
-    const k = this.state === 'closing' ? 120 : 55, c = this.state === 'closing' ? 14 : 6.5;
-    this.flapV += ((this.flapT - this.flap) * k - this.flapV * c) * dt;
-    this.flap += this.flapV * dt;
-    if (this.flap < OPEN_ANG - 0.18) { this.flap = OPEN_ANG - 0.18; this.flapV *= -0.3; }
-    // squash spring
-    this.bagSqV += (-this.bagSq * 260 - this.bagSqV * 9) * dt;
-    this.bagSq += this.bagSqV * dt * 0.05;
-  }
-
-  private interact(dt: number) {
-    const inp = this.game.input;
-    if (inp.hit('bag') || inp.keyHit('Escape')) { if (this.st > 0.3) { this.close(); return; } }
-    if (this.held) { this.interactHeld(); return; }
-    if (this.build.ui.overUI) { if (this.hover) { this.hover = null; this.hoverT = 0; } return; }
-    // hover
-    const r = this.mouseRay();
-    this.ray.camera = this.camera;
-    const roots = [...this.vis.values()].filter((v) => !v.dead && v.pop > 0.5).map((v) => v.model.userData.mesh as THREE.Mesh);
-    const hits = this.ray.intersectObjects(roots, false);
-    void r;
-    const h = hits.length ? this.visOf(hits[0].object) : null;
-    if (h !== this.hover) { this.hover = h; this.hoverT = 0; if (h) sfx(['k_tick1', 'tab1'], { vol: 0.18, rate: 1.3 }); }
-    else this.hoverT += dt;
-    // rotate the hovered item in place (if it still fits)
-    if (this.hover && (inp.keyHit('KeyR') || inp.pressed.has('Mouse2'))) {
-      const v = this.hover, it = v.inst, nr = (it.rot + 1) % 4;
-      if (it.gx < 0) { it.rot = nr; v.angT -= Math.PI / 2; sfx(['swish_a', 'sw_swish1'], { vol: 0.35, rate: 1.4 }); }
-      else if (fits(this.run!.items, it, it.gx, it.gy, nr)) { it.rot = nr; v.angT -= Math.PI / 2; v.sqV += 4; sfx(['swish_a', 'sw_swish1'], { vol: 0.35, rate: 1.4 }); }
-      else { v.wob = 1; sfx(['k_err1', 'k_err2'], { vol: 0.3 }); }
-    }
-    if (inp.pressed.has('Mouse0')) {
-      if (this.hover) this.pickUp(this.hover);
-      else {
-        const fh = this.ray.intersectObjects(this.bag.flapParts, true);
-        if (fh.length) this.close();
-      }
-    }
-  }
-  private visOf(o: THREE.Object3D): Vis | null {
-    let p: THREE.Object3D | null = o;
-    while (p) { if (p.userData.vis) return p.userData.vis as Vis; p = p.parent; }
     return null;
   }
-
-  private pickUp(v: Vis) {
-    this.held = v;
-    this.heldFrom = { gx: v.inst.gx, gy: v.inst.gy, rot: v.inst.rot, tray: v.tray ? v.tray.clone() : null };
-    v.inst.gx = -1; v.inst.gy = -1; v.tray = null;
-    v.sqV -= 5;
-    this.hover = null;
-    sfx(['cloth1', 'k_pluck1', 'k_pluck2'], { vol: 0.5 });
-    const p = v.root.position;
-    this.fx.emit('bubble', p.x, p.y, { n: 3, spread: 0.08, vy: 0.8, z: p.z, life: 1.6, size: 0.04 });
+  private layoutBoard() {
+    for (const it of this.run!.items) {
+      if (it.gx >= 0 || !ITEMS[it.id]) continue;
+      const s = this.slot.get(it.uid);
+      if (s && this.boardFits(it, s.bx, s.by, it.rot)) continue;
+      this.slot.delete(it.uid);
+      let sp = this.freeBoardSlot(it);
+      if (!sp) { for (let r = 0; r < 4 && !sp; r++) { it.rot = (it.rot + 1) % 4; sp = this.freeBoardSlot(it); } }
+      this.slot.set(it.uid, sp ?? { bx: 0, by: this.L.bRows + 4 });
+    }
+  }
+  /** where an item rests (top-left of its rotated icon, UI px) */
+  private targetOf(it: ItemInst): [number, number] {
+    const L = this.L;
+    if (it.gx >= 0) return [L.gridX + it.gx * C, L.gridY + it.gy * C];
+    const s = this.slot.get(it.uid) ?? { bx: 0, by: 0 };
+    return [L.boardX + 8 + s.bx * C, L.boardY + 8 + s.by * C];
   }
 
-  private interactHeld() {
-    const v = this.held!;
+  // ---------------------------------------------------------------- frame
+  update(dt: number) {
+    const run = this.run;
+    const ui = this.ui;
+    this.t += dt;
+    ui.drawCursor = true;
+    ui.begin(this.game.input, dt);
+    if (!run) { ui.end(); return; }
+    this.layout();
+    this.open = this.closing ? Math.max(0, this.open - dt * 6) : Math.min(1, this.open + dt * 5);
+    if (this.closing && this.open <= 0) {
+      ui.end();
+      this.closing = false;
+      installItemSystem(run);
+      const cb = this.onClose; this.run = null;
+      if (cb) cb(); else this.game.closeModal();
+      return;
+    }
+    const k = 1 - (1 - this.open) ** 3;
+    const slide = Math.round((1 - k) * 24);
+    // dim the frozen world
+    ui.fill(0, 0, ui.w, ui.h, '#03060c', 0.72 * k);
+    ui.block(0, 0, ui.w, ui.h);
+    this.drawHeader(slide);
+    this.drawPack(slide);
+    this.drawBoard(slide);
+    this.interact();
+    this.drawItems(dt, slide);
+    this.drawPreview();
+    this.drawHeld(dt);
+    this.drawFx(dt);
+    if (this.L.card) this.drawCard(slide);
+    else if (this.hover || this.held) ui.tooltip(this.tipLines(this.held ?? this.hover!), { kind: 'dark', maxW: 170 });
+    this.drawHints();
+    ui.end();
     const inp = this.game.input;
-    const wheel = inp.mouse.wheel;
-    if (inp.keyHit('KeyR') || inp.pressed.has('Mouse2') || wheel) {
-      const dir = wheel < 0 ? -1 : 1;
-      v.inst.rot = (v.inst.rot + dir + 4) % 4; v.angT -= dir * Math.PI / 2; v.angV -= 3 * dir;
-      sfx(['swish_a', 'sw_swish2'], { vol: 0.4, rate: 1.2 });
-    }
-    const { local, hitB, tl, hitT, tn } = this.planes();
-    const d = getItem(v.inst.id);
-    const { w, h } = shapeSize(rotCells(d.shape, v.inst.rot));
-    let region: Region = 'none';
-    let gx = 0, gy = 0, ok = false, merge: Vis | null = null;
-    const point = new THREE.Vector3();
-    let trayP: THREE.Vector2 | null = null;
-    const half = (GRID / 2) * CELL;
-    if (local && Math.abs(local.x - GRID_CX) < half + CELL * 0.6 && Math.abs(local.y - GRID_CY) < half + CELL * 0.6) {
-      region = 'grid';
-      const cx = (local.x - (GRID_CX - half)) / CELL, cy = ((GRID_CY + half) - local.y) / CELL;
-      gx = Math.round(cx - w / 2); gy = Math.round(cy - h / 2);
-      ok = fits(this.run!.items, v.inst, gx, gy, v.inst.rot);
-      const occ = occupancy(this.run!.items, v.inst.uid);
-      const fx = Math.floor(cx), fy = Math.floor(cy);
-      const under = fx >= 0 && fy >= 0 && fx < GRID && fy < GRID ? occ[fy][fx] : 0;
-      if (under) {
-        const other = this.vis.get(under);
-        if (other && mergeResult(v.inst, other.inst)) merge = other;
-      }
-      point.copy(hitB!).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.quaternion), 0.42);
-    } else if (tl && Math.abs(tl.x) < this.env.trayHalf.x + 0.25 && Math.abs(tl.z) < this.env.trayHalf.z + 0.3) {
-      region = 'tray';
-      trayP = new THREE.Vector2(clamp(tl.x, -this.env.trayHalf.x + 0.1, this.env.trayHalf.x - 0.1), clamp(tl.z, -this.env.trayHalf.z + 0.1, this.env.trayHalf.z - 0.1));
-      // merge onto loose items too
-      for (const o of this.vis.values()) {
-        if (o === v || o.inst.gx >= 0 || !o.tray || o.dead) continue;
-        if (o.tray.distanceTo(new THREE.Vector2(tl.x, tl.z)) < this.radius(o) * 0.9 && mergeResult(v.inst, o.inst)) merge = o;
-      }
-      point.copy(hitT!).addScaledVector(tn, 0.3);
-    } else if (hitB && local && Math.abs(local.x) < 1.6 && Math.abs(local.y) < 1.6) {
-      point.copy(hitB).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.bag.root.quaternion), 0.32);
-    } else if (hitT) point.copy(hitT).addScaledVector(tn, 0.3);
-    else point.copy(v.root.position);
-    this.plan = { region, gx, gy, ok, merge, point, tray: trayP };
-    if (inp.released.has('Mouse0') || (!inp.down.has('Mouse0') && !inp.pressed.has('Mouse0'))) this.dropHeld(false);
+    if (inp.keyHit('Tab') || inp.keyHit('Escape')) this.close();
   }
 
-  private dropHeld(forced: boolean) {
-    const v = this.held!, p = this.plan, from = this.heldFrom!;
-    this.held = null; this.plan = null;
-    const it = v.inst;
-    if (!forced && p?.merge) { this.startMerge(v, p.merge); return; }
-    if (!forced && p?.region === 'grid' && p.ok) {
-      it.gx = p.gx; it.gy = p.gy;
-      v.sqV += 9; v.vel.multiplyScalar(0.3);
-      sfx(['k_drop2', 'k_drop3', 'cloth1'], { vol: 0.6 });
-      sfx(['thud_heavy1', 'box_thud'], { vol: 0.15, delay: 0.06, rate: 1.6 });
-      const wp = v.root.position;
-      this.fx.emit('dust', wp.x, wp.y - 0.1, { n: 6, spread: 0.15, speed: 0.4, life: 0.8, size: 0.05, color: '#6aa0a8', z: wp.z });
-      return;
-    }
-    if (!forced && p?.region === 'grid' && !p.ok) sfx(['k_err1', 'k_err2'], { vol: 0.35 });
-    // back where it came from if that still works, otherwise onto the board
-    if ((forced || p?.region !== 'tray') && from.gx >= 0 && fits(this.run!.items, it, from.gx, from.gy, from.rot) && (forced || p?.region === 'grid')) {
-      it.gx = from.gx; it.gy = from.gy;
-      if (it.rot !== from.rot) { v.angT += ((it.rot - from.rot) * Math.PI) / 2; it.rot = from.rot; }
-      return;
-    }
-    it.gx = -1; it.gy = -1;
-    v.tray = p?.tray ?? from.tray ?? null;
-    if (!v.tray) this.layoutTray();
-    v.sqV += 7;
-    sfx(['wood_knock1', 'k_drop2'], { vol: 0.5 });
+  // ---------------------------------------------------------------- drawing
+  private drawHeader(slide: number) {
+    const ui = this.ui, L = this.L, run = this.run!;
+    const used = run.items.filter((i) => i.gx >= 0).reduce((a, i) => a + getItem(i.id).shape.length, 0);
+    const pw = ui.measure('BACKPACK', 'title') + 22, px = L.packX + 8 + Math.round((GRID * C + PACK_IN.x * 2 - pw) / 2), py = L.packY - 18 - slide;
+    ui.frame('plaque', px, py, pw, 18);
+    ui.text('BACKPACK', px + pw / 2, py + 4, { font: 'title', color: '#3a2408', shadow: '#f8e0a0', align: 'center' });
+    const full = used >= GRID * GRID;
+    ui.text(`${used}/${GRID * GRID}`, L.packX + 8 + GRID * C + PACK_IN.x * 2 - 4, py + 5, { font: 'body', color: full ? '#ff7a6a' : '#e8dcc4', outline: '#0a0604', align: 'right' });
+    // the close button
+    if (ui.button('bp:close', '', L.closeX, L.closeY - slide, 14, 15, { style: 'red', icon: 'close', sfx: '' })) this.close();
   }
 
-  // ---------------------------------------------------------------- merging
-  private startMerge(a: Vis, b: Vis) {
-    this.merging = { a, b, t: 0, done: false };
-    a.inst.gx = -1;
-    b.lift = 0.12;
-    sfx(['magic_whoosh1', 'swish_b'], { vol: 0.5 });
+  private drawPack(slide: number) {
+    const ui = this.ui, L = this.L;
+    const art = packArt(GRID, C);
+    ui.img(silhouette(art, '#00000080', `pack${GRID}`), L.packX + 3, L.packY + 4 + slide);
+    ui.img(art, L.packX, L.packY + slide);
   }
-  private updateMerge(dt: number) {
-    const mg = this.merging!;
-    mg.t += dt;
-    const { a, b } = mg;
-    a.wob = b.wob = Math.min(1, mg.t * 3);
-    if (mg.t > 0.45 && !mg.done) {
-      mg.done = true;
-      const res = mergeResult(a.inst, b.inst);
-      const run = this.run!;
-      const at = b.root.position.clone();
-      const place = { gx: b.inst.gx, gy: b.inst.gy, rot: b.inst.rot, tray: b.tray?.clone() ?? null };
-      for (const v of [a, b]) { v.dead = true; this.items.remove(v.root); this.vis.delete(v.inst.uid); run.removeItem(v.inst.uid); }
-      if (!res) { this.merging = null; return; }
-      const it = run.addItem(res.id);
-      it.level = res.level; it.rot = place.rot;
-      if (place.gx >= 0) {
-        const spot = findSpot(run.items, it, { gx: place.gx, gy: place.gy, rot: place.rot });
-        if (spot && Math.hypot(spot.gx - place.gx, spot.gy - place.gy) <= 1.5) { it.gx = spot.gx; it.gy = spot.gy; it.rot = spot.rot; }
-      }
-      const nv = this.addVis(it, 0);
-      if (it.gx < 0) { nv.tray = place.tray; if (!nv.tray) this.layoutTray(); }
-      nv.pop = 0; nv.popV = 9; nv.sqV = 14;
-      // fanfare
-      const isLevel = res.id === a.inst.id && res.id === b.inst.id;
-      for (let k = 0; k < 2; k++) this.fx.burst('star', at.x, at.y, 14, 2.4, { z: at.z, life: 0.9, size: 0.12, color: k ? '#fff2b0' : '#c8a0ff' });
-      this.fx.burst('spark', at.x, at.y, 16, 3.4, { z: at.z, life: 0.5, size: 0.22, color: '#ffe7a0' });
-      this.fx.emit('ring', at.x, at.y, { n: 1, size: 0.2, size1: 1.6, life: 0.45, alpha: 0.8, add: true, z: at.z });
-      this.fx.emit('glow', at.x, at.y, { n: 2, size: 1.4, life: 0.5, color: '#ffd890', z: at.z });
-      this.fx.emit('bubble', at.x, at.y, { n: 8, spread: 0.15, vy: 1, z: at.z, life: 2, size: 0.05 });
-      this.game.flash('#fff2c8', 0.18);
-      this.shake = Math.max(this.shake, 0.35);
-      sfx(['magic1', 'magic2', 'powerup1'], { vol: 0.75 });
-      sfx(['pickup_sparkle1', 'shimmer1'], { vol: 0.5, delay: 0.08 });
-      const [sx, sy] = this.screenOf(at);
-      const d = getItem(res.id);
-      this.floaters.pop(d.name + '!', sx, sy - 30 * this.S, this.S, nameStyle(d), { life: 1.9 });
-      this.floaters.pop(isLevel ? `LEVEL ${res.level}` : 'FUSED', sx, sy - 6 * this.S, this.S, isLevel ? STYLES.gold : STYLES.shout, { life: 1.5, delay: 0.12 });
-      this.merging = null;
-      this.hover = null;
+
+  private drawBoard(slide: number) {
+    const ui = this.ui, L = this.L;
+    const art = seabedArt(L.boardW, L.boardH);
+    ui.img(silhouette(art, '#00000070', `sea${L.boardW}x${L.boardH}`), L.boardX + 2, L.boardY + 3 + slide);
+    ui.img(art, L.boardX, L.boardY + slide);
+    ui.text('ON THE SEABED', L.boardX + L.boardW / 2, L.boardY - 11 + slide, { font: 'small', color: '#f0e2c0', outline: '#140a04', align: 'center' });
+    const loose = this.run!.items.filter((i) => i.gx < 0).length;
+    if (!loose) ui.textBox('Loose finds wait here. Whatever is left when you close the bag stays behind.', L.boardX + 12, L.boardY + 16 + slide, L.boardW - 24, { font: 'small', color: '#6a4a26', shadow: null, align: 'center' });
+    // faint slot marks
+    for (let by = 0; by < L.bRows; by++) for (let bx = 0; bx < L.bCols; bx++) {
+      const X = L.boardX + 8 + bx * C, Y = L.boardY + 8 + by * C + slide;
+      ui.fill(X + 1, Y + 1, 2, 1, '#a4824e'); ui.fill(X + 1, Y + 1, 1, 2, '#a4824e');
     }
   }
 
-  // ---------------------------------------------------------------- per-frame item motion
-  private updateItems(dt: number) {
-    const tp = new THREE.Vector3(), tq = new THREE.Quaternion();
-    const closing = this.state === 'closing', closed = this.state === 'closed';
-    const opening = this.state === 'opening';
-    for (const v of this.vis.values()) {
-      // appear / vanish
-      if (v.popDelay > 0) { v.popDelay -= dt; if (opening || !closing) { v.root.visible = v.pop > 0.01; continue; } }
-      const want = closing || closed ? 0 : 1;
-      if (want === 1 && v.pop === 0 && v.popV === 0) { v.popV = 7; sfx(['pop1', 'pop_b', 'pop_c'], { vol: 0.25, rate: 1.1 + Math.random() * 0.4 }); }
-      v.popV += ((want - v.pop) * (want ? 160 : 260) - v.popV * (want ? 11 : 20)) * dt;
-      v.pop = Math.max(0, v.pop + v.popV * dt);
-      if (!want && v.pop < 0.02) { v.pop = 0; v.popV = 0; }
-      if (v.inst.gx < 0 && v.tray && v !== this.held) this.trayMem.set(v.inst.uid, v.tray); else if (v.inst.gx >= 0) this.trayMem.delete(v.inst.uid);
-      v.root.visible = v.pop > 0.01;
-      // hover lift
-      const hov = v === this.hover && !this.held ? 1 : 0;
-      v.lift = damp(v.lift, hov ? 0.07 : this.merging?.b === v ? 0.12 : 0, 14, dt);
-      v.glow = damp(v.glow, hov ? 1 : this.isPartner(v) ? 0.55 + Math.sin(this.t * 6) * 0.25 : 0, 10, dt);
-      const hm = v.halo.material as THREE.MeshBasicMaterial;
-      hm.opacity = v.glow * 0.55 * v.pop;
-      hm.color.set(this.isPartner(v) && !hov ? '#ffb840' : '#ffe8b0');
-      v.halo.visible = v.glow > 0.02;
-      const hr = this.radius(v) * 2.6;
-      v.halo.scale.set(hr, hr, 1);
-      v.halo.position.set(0, 0, -v.depth - v.lift - 0.004);
-      // target
-      if (v === this.held && this.plan) {
-        tp.copy(this.plan.point);
-        if (this.plan.region === 'tray') { this.env.tray.getWorldQuaternion(tq); tq.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)); }
-        else this.bag.root.getWorldQuaternion(tq);
-      } else if (this.merging && v === this.merging.a) {
-        tp.copy(this.merging.b.root.position).add(new THREE.Vector3(0, 0.1 * (1 - this.merging.t * 2), 0).addScaledVector(this.camera.position.clone().sub(this.merging.b.root.position).normalize(), 0.15));
-        tq.copy(this.merging.b.root.quaternion);
-      } else this.target(v, tp, tq);
-      // spring toward it (snappy when held, bouncy when landing)
-      const k = v === this.held ? 260 : 170, c = v === this.held ? 24 : 17;
-      v.vel.addScaledVector(tp.clone().sub(v.pos), k * dt).multiplyScalar(Math.exp(-c * dt));
-      v.pos.addScaledVector(v.vel, dt);
-      if (v.pos.lengthSq() < 1e-6 || !Number.isFinite(v.pos.x)) v.pos.copy(tp);
-      if (v.popT === 0 && v.pop > 0) { v.pos.copy(tp); v.popT = 1; }
-      v.q.slerp(tq, 1 - Math.exp(-dt * (v === this.held ? 10 : 14)));
-      v.root.position.copy(v.pos);
-      // tilt from velocity while carried
-      const tilt = new THREE.Quaternion();
-      if (v === this.held) {
-        const vv = v.vel.clone();
-        const ax = new THREE.Vector3(vv.z, 0, -vv.x).add(new THREE.Vector3(-vv.y * 0.6, 0, 0));
-        const amt = Math.min(0.5, ax.length() * 0.12);
-        if (amt > 1e-3) tilt.setFromAxisAngle(ax.normalize(), amt);
-      }
-      v.root.quaternion.copy(tilt).multiply(v.q);
-      // springy spin + squash
-      v.angV += ((v.angT - v.ang) * 240 - v.angV * 15) * dt;
-      v.ang += v.angV * dt;
-      v.sqV += (-v.sq * 300 - v.sqV * 12) * dt;
-      v.sq += v.sqV * dt * 0.06;
-      const wob = v.wob ? Math.sin(this.t * 34) * 0.08 * v.wob : 0;
-      if (!this.merging || (v !== this.merging.a && v !== this.merging.b)) v.wob = Math.max(0, v.wob - dt * 2.5);
-      v.spin.rotation.z = v.ang + wob * 0.6;
-      const s = v.pop * (v === this.held ? 1.14 : 1);
-      v.spin.scale.set(s * (1 + v.sq * 0.5 + wob), s * (1 + v.sq * 0.5 - wob), s * (1 - v.sq));
-    }
-  }
-  private isPartner(v: Vis): boolean {
-    const src = this.held ?? (this.hover && this.hoverT > 0.25 ? this.hover : null);
-    if (!src || src === v) return false;
-    return !!mergeResult(src.inst, v.inst);
-  }
-
-  private updateBlob(dt: number) {
-    const v = this.held, mat = this.blob.material as THREE.MeshBasicMaterial;
-    if (!v || !this.plan) { mat.opacity = damp(mat.opacity, 0, 12, dt); return; }
-    const onTray = this.plan.region === 'tray';
-    const q = onTray ? this.env.tray.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)) : this.bag.root.getWorldQuaternion(new THREE.Quaternion());
-    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    const o = onTray ? this.env.tray.getWorldPosition(new THREE.Vector3()) : this.bag.root.localToWorld(new THREE.Vector3(0, 0, 0.03));
-    const d = v.pos.clone().sub(o).dot(n);
-    this.blob.position.copy(v.pos).addScaledVector(n, -d + 0.012);
-    this.blob.quaternion.copy(q);
-    const r = this.radius(v) * 2.2 * (1 + d * 0.6);
-    this.blob.scale.set(r, r, 1);
-    mat.opacity = damp(mat.opacity, clamp(0.55 - d * 0.4, 0.15, 0.55), 12, dt);
-  }
-
-  private updateGlows(dt: number) {
-    const p = this.held ? this.plan : null;
-    const cells = new Map<number, string>();
-    if (p && p.region === 'grid') {
-      const cs = rotCells(getItem(this.held!.inst.id).shape, this.held!.inst.rot);
-      if (p.merge && p.merge.inst.gx >= 0) {
-        const occ = occupancy(this.run!.items);
-        for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) if (occ[y][x] === p.merge.inst.uid) cells.set(y * GRID + x, 'merge');
-      } else for (const [x, y] of cs) { const gx = p.gx + x, gy = p.gy + y; if (gx >= 0 && gy >= 0 && gx < GRID && gy < GRID) cells.set(gy * GRID + gx, p.ok ? 'ok' : 'bad'); }
-    }
-    const setCol = new Map<number, string>();
-    if (!this.held) {
-      const occ = this.run ? occupancy(this.run.items) : null;
-      const htags = this.hover ? (getItem(this.hover.inst.id).tags ?? []).filter((t) => SETS[t] && SETS[t].kind === 'build') : [];
-      if (occ) for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
-        const u = occ[y][x]; if (!u) continue;
-        const v = this.vis.get(u);
-        if (v && v === this.hover) cells.set(y * GRID + x, 'hover');
-        else if (v && this.isPartner(v)) cells.set(y * GRID + x, 'partner');
-        else if (v && htags.length) {
-          // set-mates: other packed items sharing a build tag glow in the set's colour
-          const t = (getItem(v.inst.id).tags ?? []).find((tg) => htags.includes(tg));
-          if (t) { cells.set(y * GRID + x, 'set'); setCol.set(y * GRID + x, SETS[t].color); }
-        }
-      }
-    }
-    this.bag.cellGlows.forEach((m, i) => {
-      const mat = m.material as THREE.MeshBasicMaterial;
-      const st = cells.get(i);
-      const base = this.held ? 0.16 : 0;
-      const target = st === 'ok' ? 0.95 : st === 'bad' ? 0.8 : st === 'merge' ? 0.75 + Math.sin(this.t * 10) * 0.25 : st === 'hover' ? 0.45 : st === 'partner' ? 0.3 + Math.sin(this.t * 6) * 0.15 : st === 'set' ? 0.4 + Math.sin(this.t * 5) * 0.1 : base;
-      mat.opacity = damp(mat.opacity, target, 18, dt);
-      if (st === 'set') mat.color.set(setCol.get(i) ?? '#ffffff');
-      else if (st) mat.color.set(st === 'ok' ? '#8fffd8' : st === 'bad' ? '#ff4a3a' : st === 'hover' ? '#ffe8c0' : '#ffd060');
-      else mat.color.lerp(new THREE.Color('#9fd8e0'), 1 - Math.exp(-dt * 8));
-    });
-  }
-
-  // ---------------------------------------------------------------- dangly physics: keychain + name tag
-  private updateDangly(dt: number) {
-    const A = this.bag.keyAnchor.getWorldPosition(new THREE.Vector3());
-    const ch = this.chain;
-    const L1 = 0.17, L2 = 0.1;
-    if (!ch.init) { ch.p1.copy(A).add(new THREE.Vector3(0.05, -L1, 0.03)); ch.o1.copy(ch.p1); ch.p2.copy(ch.p1).add(new THREE.Vector3(0, -L2, 0)); ch.o2.copy(ch.p2); ch.init = true; }
-    const steps = 3, h = Math.min(dt, 0.05) / steps;
-    // flick it with the fin
-    const [lx, ly] = this.screenOf(ch.p2);
-    const md = Math.hypot(this.game.input.mouse.x - lx, this.game.input.mouse.y - ly);
-    if (md < 26 * this.S && this.mouseVel.length() > 200) {
-      const kick = new THREE.Vector3(this.mouseVel.x, -this.mouseVel.y, 0).multiplyScalar(0.00035 * h * 60);
-      ch.o2.sub(kick); ch.o1.sub(kick.multiplyScalar(0.5));
-      if (!this.bag.root.userData.clinkT || this.t - this.bag.root.userData.clinkT > 0.25) { this.bag.root.userData.clinkT = this.t; sfx(['hook_clink1', 'chain1', 'k_glass1'], { vol: 0.45 }); }
-    }
-    for (let s = 0; s < steps; s++) {
-      for (const [p, o] of [[ch.p1, ch.o1], [ch.p2, ch.o2]] as [THREE.Vector3, THREE.Vector3][]) {
-        const vel = p.clone().sub(o).multiplyScalar(0.985);
-        o.copy(p);
-        p.add(vel).add(new THREE.Vector3(0, -5.5 * h * h, 0));
-      }
-      for (let it = 0; it < 3; it++) {
-        const d1 = ch.p1.clone().sub(A); ch.p1.copy(A).addScaledVector(d1.normalize(), L1);
-        const d2 = ch.p2.clone().sub(ch.p1), l2 = d2.length();
-        const corr = d2.multiplyScalar((l2 - L2) / Math.max(l2, 1e-5) * 0.5);
-        ch.p1.add(corr); ch.p2.sub(corr);
-      }
-      // don't swing through the bag's side
-      for (const p of [ch.p1, ch.p2]) {
-        const lp = this.bag.root.worldToLocal(p.clone());
-        if (lp.x < 1.2 && lp.z < 0.25) { lp.x = 1.2; p.copy(this.bag.root.localToWorld(lp)); }
-      }
-    }
-    const { links, lure } = this.bag.keychain;
-    const seg = ch.p1.clone().sub(A);
-    links.forEach((l, k) => {
-      const t = (k + 0.5) / links.length;
-      l.position.copy(A).addScaledVector(seg, t);
-      this.bag.root.worldToLocal(l.position);
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), seg.clone().normalize());
-      const wq = q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), k % 2 ? Math.PI / 2 : 0));
-      l.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(wq));
-    });
-    const dir = ch.p2.clone().sub(ch.p1).normalize();
-    const lq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
-    const toCam = this.camera.position.clone().sub(ch.p1); toCam.y = 0;
-    lq.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(toCam.x, toCam.z) * 0.6));
-    lure.position.copy(this.bag.root.worldToLocal(ch.p1.clone()));
-    lure.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(lq));
-    // name tag: one point on a string
-    const T = this.bag.tagAnchor.getWorldPosition(new THREE.Vector3());
-    const tg = this.tagp, LS = 0.1;
-    if (!tg.init) { tg.p.copy(T).add(new THREE.Vector3(-0.03, -LS, 0)); tg.o.copy(tg.p); tg.init = true; }
-    for (let s = 0; s < steps; s++) {
-      const vel = tg.p.clone().sub(tg.o).multiplyScalar(0.98);
-      tg.o.copy(tg.p); tg.p.add(vel).add(new THREE.Vector3(0, -5 * h * h, 0));
-      tg.p.copy(T).addScaledVector(tg.p.clone().sub(T).normalize(), LS);
-      const lp = this.bag.root.worldToLocal(tg.p.clone());
-      if (lp.z < 0.36) { lp.z = 0.36; tg.p.copy(this.bag.root.localToWorld(lp)); }
-    }
-    const [tx, ty] = this.screenOf(tg.p);
-    if (Math.hypot(this.game.input.mouse.x - tx, this.game.input.mouse.y - ty - 12 * this.S) < 30 * this.S && this.mouseVel.length() > 200) {
-      tg.o.sub(new THREE.Vector3(this.mouseVel.x, 0, 0).multiplyScalar(0.0002)); tg.yawV += (this.mouseVel.x > 0 ? 1 : -1) * 4;
-    }
-    tg.yawV += (-tg.yaw * 18 - tg.yawV * 1.6) * dt; tg.yaw += tg.yawV * dt;
-    const td = tg.p.clone().sub(T).normalize();
-    const hq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), td);
-    const tc = this.camera.position.clone().sub(tg.p); tc.y = 0;
-    hq.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(tc.x, tc.z) + tg.yaw));
-    const holder = this.bag.tag.obj;
-    holder.position.copy(this.bag.root.worldToLocal(tg.p.clone()));
-    holder.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(hq));
-    const str = this.bag.tag.string;
-    const mid = T.clone().add(tg.p).multiplyScalar(0.5);
-    str.position.copy(this.bag.root.worldToLocal(mid));
-    str.scale.set(1, LS, 1);
-    const sq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), td);
-    str.quaternion.copy(this.bag.root.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(sq));
-    // the landing thump sets them swinging
-    if (this.state === 'opening' && this.landed && this.st < 0.6 && !this.bag.root.userData.kicked) {
-      this.bag.root.userData.kicked = true;
-      ch.o2.add(new THREE.Vector3(-0.02, 0.03, -0.01)); tg.o.add(new THREE.Vector3(0.015, 0.02, 0)); tg.yawV += 5;
-    }
-    if (this.state !== 'opening') this.bag.root.userData.kicked = false;
-  }
-
-  private ambient(dt: number) {
-    if (Math.random() < dt * 1.2) {
-      const x = -2.5 + Math.random() * 5.5, z = -2.5 + Math.random() * 2;
-      this.fx.emit('bubble', x, 0.05, { n: 1 + (Math.random() * 3) | 0, spread: 0.05, vy: 0.6, z, life: 6, size: 0.03 + Math.random() * 0.03 });
-    }
-    if (Math.random() < dt * 6) {
-      const x = -3 + Math.random() * 6.5, y = 0.2 + Math.random() * 3, z = -1.5 + Math.random() * 3;
-      this.fx.emit('dust', x, y, { n: 1, vy: 0.02, life: 5, size: 0.025, color: '#a8d8d0', alpha: 0.6, z, grav: 0 });
+  private drawItems(dt: number, slide: number) {
+    const ui = this.ui, run = this.run!;
+    const order = [...run.items].filter((i) => ITEMS[i.id] && i !== this.held).sort((a, b) => (a.gx >= 0 ? 0 : 1) - (b.gx >= 0 ? 0 : 1));
+    for (const it of order) {
+      const v = this.visOf(it);
+      const [tx, ty] = this.targetOf(it);
+      this.spring(v, tx, ty, dt);
+      v.pop = Math.min(1, v.pop + dt * 4);
+      if (v.pop <= 0) continue;
+      const hov = this.hover === it && !this.held;
+      v.lift += ((hov ? 2 : 0) - v.lift) * Math.min(1, dt * 18);
+      v.shake = Math.max(0, v.shake - dt * 3);
+      const sx = Math.round(Math.sin(this.t * 60) * v.shake * 3);
+      const ic = rotIcon(it.id, it.level ?? 1, it.rot);
+      const key = `${it.id}|${it.level ?? 1}|${it.rot}`;
+      const px = Math.round(v.x) + sx, py = Math.round(v.y - v.lift) + slide;
+      const a = Math.min(1, v.pop * 1.6);
+      // a rarity tint in the pockets it fills
+      if (it.gx >= 0) for (const [cx, cy] of rotCells(getItem(it.id).shape, it.rot)) ui.fill(this.L.gridX + (it.gx + cx) * C + 3, this.L.gridY + (it.gy + cy) * C + 3 + slide, C - 5, C - 5, RARITY_COLOR[getItem(it.id).rarity], hov ? 0.22 : 0.09);
+      ui.img(silhouette(ic, '#000000', key), px + 2, py + 2 + Math.round(v.lift), { alpha: 0.45 * a });
+      if (hov) ui.img(rim(ic, '#fff6d0', key), px - 1, py - 1);
+      ui.img(ic, px, py, { alpha: a });
+      this.stackBadge(it, px, py, ic);
+      if (this.plan.kind === 'stack' || this.plan.kind === 'fuse') if (this.plan.target === it) ui.img(rim(ic, Math.sin(this.t * 14) > 0 ? '#ffe070' : '#ffb020', key), px - 1, py - 1);
     }
   }
 
-  // ---------------------------------------------------------------- overlay: tag, merge label, cursor
-  private updateOverlay(dt: number) {
-    const m = this.game.input.mouse;
-    const S = this.S;
-    this.floaters.update(dt);
-    // hover tag
-    const hv = !this.held && this.hover && this.hoverT > 0.12 && this.state === 'open' ? this.hover : null;
-    const CS = this.CS;
-    if (hv) this.tag.set({ id: hv.inst.id, level: hv.inst.level || 1, hints: this.hints(hv), sets: this.run ? setBonuses(this.run) : [] }, CS);
-    // the BUILD panel slides in while the bag is open; the hovered item's sets light up
-    const show = this.state === 'open' || (this.state === 'opening' && this.st > 0.6) ? 1 : 0;
-    const focus = this.held ?? hv;
-    this.build.draw(this.game.input, dt, this.run, show, focus ? (getItem(focus.inst.id).tags ?? []).filter((t) => SETS[t]) : []);
-    const anchor = hv ?? null;
-    let ix = 0, iy = 0, cx = 0, cy = 0;
-    if (anchor) {
-      [ix, iy] = this.screenOf(anchor.root.position);
-      const cw = this.tag.cw, chh = this.tag.ch;
-      if (anchor.inst.gx >= 0) {
-        // beside the bag, never over the pockets
-        const [bx] = this.screenOf(this.bag.root.localToWorld(new THREE.Vector3(1.3, 0, 0.2)));
-        const [lx] = this.screenOf(this.bag.root.localToWorld(new THREE.Vector3(-1.3, 0, 0.2)));
-        cx = bx + 18 * CS + cw / 2 < this.w - 8 ? bx + 18 * CS + cw / 2 : lx - 18 * CS - cw / 2;
-        cy = iy - chh * 0.35;
-      } else { cx = ix; cy = iy - chh - 46 * CS; if (cy < 8) cy = iy + 40 * CS; }
-      cx = clamp(cx, cw / 2 + 6, this.w - cw / 2 - 6); cy = clamp(cy, 10 * CS, this.h - chh - 6);
-      // dodge the BUILD panel: slide below it when the card would cover it
-      const R = this.build.rect;
-      if (R.w > 0 && cx + cw / 2 > R.x && cx - cw / 2 < R.x + R.w && cy < R.y + R.h) cy = Math.min(this.h - chh - 6, R.y + R.h + 10);
-    } else { cx = this.tag.x; cy = this.tag.y; ix = cx; iy = cy + 20; }
-    this.tag.update(dt, !!anchor, cx, cy, ix, iy, CS);
-    // merge preview label next to the fin
-    const mp = this.held && this.plan?.merge ? mergeResult(this.held.inst, this.plan.merge.inst) : null;
-    const key = mp ? mp.id + '|' + mp.level : '';
-    if (key !== this.mergeKey) {
-      this.mergeKey = key;
-      if (this.mergeLabel) { this.overlay.remove(this.mergeLabel); (this.mergeLabel.material as THREE.MeshBasicMaterial).map?.dispose(); this.mergeLabel = null; }
-      if (mp) {
-        const d = getItem(mp.id);
-        const txt = mp.id === this.held!.inst.id ? `${d.name}  Lv ${mp.level}` : `= ${d.name}`;
-        const c = textCanvas(txt, nameStyle(d));
-        const t = new THREE.CanvasTexture(c.canvas); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace;
-        this.mergeLabel = new THREE.Mesh(new THREE.PlaneGeometry(c.w * S, c.h * S), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthTest: false }));
-        this.mergeLabel.userData.w = c.w * S;
-        this.overlay.add(this.mergeLabel);
-        sfx(['k_select1', 'chirp1'], { vol: 0.3 });
-      }
-    }
-    if (this.mergeLabel) {
-      const bob = Math.sin(this.t * 6) * 2 * S;
-      this.mergeLabel.position.set(Math.round(m.x + 14 * S + this.mergeLabel.userData.w / 2), Math.round(-(m.y - 18 * S) + bob), 3);
-    }
-    // cursor
-    let kind: CursorKind = 'point';
-    if (this.held) kind = 'grab'; else if (this.hover) kind = 'open';
-    this.cursor.update(dt, m.x, m.y, kind, S);
-    this.cursor.mesh.visible = m.inside !== false;
+  private stackBadge(it: ItemInst, px: number, py: number, ic: HTMLCanvasElement) {
+    const cap = stackCap(it.id);
+    const n = it.n ?? 1;
+    if (cap <= 1 || n <= 1) return;
+    const s = `${n}`;
+    const tw = this.ui.measure(s, 'body');
+    const bx = px + ic.width - tw - 4, by = py + ic.height - 14;
+    this.ui.fill(bx - 2, by - 1, tw + 4, 13, '#0a0604', 0.55);
+    this.ui.text(s, bx, by + 1, { font: 'body', color: n >= cap ? '#ffd860' : '#ffffff', outline: '#0a0604' });
   }
 
-  private hints(v: Vis): string[] {
-    const run = this.run; if (!run) return [];
-    const out: string[] = [];
-    const d = getItem(v.inst.id);
-    const others = run.items.filter((o) => o.uid !== v.inst.uid);
-    if (d.maxLevel > 1 && (v.inst.level || 1) < d.maxLevel && others.some((o) => o.id === d.id && (o.level || 1) < d.maxLevel)) out.push(`another ${d.name} = Lv up`);
-    for (const r of recipesWith(d.id)) {
-      const partner = r.a === d.id ? r.b : r.a;
-      if (partner === d.id ? others.some((o) => o.id === d.id) : others.some((o) => o.id === partner)) out.push(`${getItem(partner).name} = ${getItem(r.out).name}`);
+  private drawPreview() {
+    const ui = this.ui, L = this.L, p = this.plan;
+    if (!this.held) return;
+    if (p.kind === 'grid') {
+      for (const [x, y] of p.cells) {
+        if (x < 0 || y < 0 || x >= GRID || y >= GRID) continue;
+        const X = L.gridX + x * C, Y = L.gridY + y * C;
+        const col = p.ok ? '#5ae04a' : '#ff4a3a';
+        ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.28);
+        ui.rect(X + 1, Y + 1, C - 2, C - 2, col);
+        if (p.ok) ui.fill(X + 2, Y + 2, C - 4, 1, '#d8ffc8', 0.8);
+      }
+    } else if (p.kind === 'board') {
+      const it = this.held;
+      for (const [x, y] of rotCells(getItem(it.id).shape, it.rot)) {
+        const X = L.boardX + 8 + (p.bx + x) * C, Y = L.boardY + 8 + (p.by + y) * C;
+        if (Y + C > L.boardY + L.boardH) continue;
+        ui.rect(X + 1, Y + 1, C - 2, C - 2, p.ok ? '#fff2c8' : '#ff4a3a');
+      }
     }
+  }
+
+  private drawHeld(dt: number) {
+    const ui = this.ui, it = this.held;
+    if (!it) return;
+    const v = this.visOf(it);
+    const tx = ui.mx - this.grab.x, ty = ui.my - this.grab.y;
+    v.x += (tx - v.x) * Math.min(1, dt * 30); v.y += (ty - v.y) * Math.min(1, dt * 30);
+    v.pop = Math.max(0, v.pop - dt * 6);
+    const ic = rotIcon(it.id, it.level ?? 1, it.rot);
+    const key = `${it.id}|${it.level ?? 1}|${it.rot}`;
+    const sq = 1 + v.pop * 0.12;
+    const w = Math.round(ic.width * sq), h = Math.round(ic.height / sq);
+    const px = Math.round(v.x + (ic.width - w) / 2), py = Math.round(v.y + (ic.height - h) / 2) - 4;
+    ui.img(silhouette(ic, '#000000', key), px + 5, py + 7, { alpha: 0.4, w, h });
+    ui.img(ic, px, py, { w, h });
+    this.stackBadge(it, px, py, ic);
+    const p = this.plan;
+    if (p.kind === 'stack' || p.kind === 'fuse') {
+      const label = p.kind === 'stack' ? `STACK +${p.k}` : `FUSE: ${getItem(p.id).name}${p.id === it.id ? ` +${p.level - 1}` : ''}`;
+      const lw = ui.measure(label, 'small');
+      ui.fill(ui.mx + 10, ui.my - 16, lw + 8, 12, '#1a0e02', 0.85);
+      ui.text(label, ui.mx + 14, ui.my - 14, { font: 'small', color: '#ffe070', outline: '#1a0e02' });
+    }
+  }
+
+  private drawFx(dt: number) {
+    const ui = this.ui;
+    for (const s of this.sparks) { s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 160 * dt; s.vx *= Math.exp(-dt * 2); }
+    this.sparks = this.sparks.filter((s) => s.t < s.life);
+    for (const s of this.sparks) { const a = 1 - s.t / s.life; ui.fill(Math.round(s.x), Math.round(s.y), 2, 2, s.col, a); if (a > 0.6) ui.fill(Math.round(s.x) - 1, Math.round(s.y), 4, 1, s.col, a * 0.5); }
+    for (const t of this.toasts) t.t += dt;
+    this.toasts = this.toasts.filter((t) => t.t < 1.8);
+    for (const t of this.toasts) {
+      const a = Math.min(1, (1.8 - t.t) * 2), dy = Math.round(-t.t * 16);
+      ui.text(t.text, t.x, t.y + dy, { font: 'title', color: t.col, outline: '#140a04', align: 'center', alpha: a });
+      if (t.sub) ui.text(t.sub, t.x, t.y + dy + 14, { font: 'small', color: '#fff2c8', outline: '#140a04', align: 'center', alpha: a });
+    }
+  }
+
+  private tipLines(it: ItemInst) {
+    const d = getItem(it.id), lv = it.level ?? 1;
+    const out: { text: string; color?: string; font?: 'body' | 'small' | 'title'; gap?: number }[] = [
+      { text: d.name + (lv > 1 ? ` +${lv - 1}` : ''), font: 'title', color: RARITY_COLOR[d.rarity] },
+      { text: `${d.rarity} ${d.kind}`.toUpperCase(), font: 'small', color: '#9aa4b8', gap: 1 },
+    ];
+    const cap = stackCap(it.id);
+    out.push({ text: `${d.shape.length} cell${d.shape.length > 1 ? 's' : ''}` + (cap > 1 ? `  ·  stack ${it.n ?? 1}/${cap}` : ''), font: 'small', color: cap > 1 ? '#ffd860' : '#9aa4b8' });
+    for (const l of statLines(it.id, lv)) out.push({ text: l.text, font: 'small', color: l.key === 'note' ? '#8ae8ff' : l.good ? '#8af07a' : '#ff8a7a' });
+    out.push({ text: d.desc, font: 'small', color: '#d8d0c0', gap: 2 });
     return out;
   }
 
-}
+  private drawCard(slide: number) {
+    const ui = this.ui, L = this.L, run = this.run!;
+    const it = this.held ?? this.hover;
+    const x = L.infoX, y = L.infoY + slide, w = L.infoW;
+    if (it) {
+      const h = this.cardBody(it, x, y, w, false);
+      ui.panel('dark', x, y, w, h);
+      this.cardBody(it, x, y, w, true);
+      return;
+    }
+    // nothing hovered: the build
+    const sets = setBonuses(run).slice(0, 6);
+    const h = 26 + Math.max(1, sets.length) * 24;
+    ui.panel('dark', x, y, w, h, 'BUILD');
+    let yy = y + 22;
+    if (!sets.length) ui.textBox('Pack tagged gear (mage, warrior, toymaker...) to unlock set bonuses at 2, 4 and 6.', x + 7, yy, w - 14, { font: 'small', color: '#a8b0c8' });
+    for (const s of sets) {
+      ui.fill(x + 7, yy + 1, 6, 6, s.color);
+      ui.text(s.name.toUpperCase(), x + 17, yy, { font: 'small', color: s.tier ? s.color : '#c8c8d0' });
+      for (let i = 0; i < 6; i++) ui.fill(x + w - 46 + i * 6, yy + 1, 5, 5, i < s.count ? s.color : '#2a3040');
+      const act = [...s.tiers].reverse().find((t) => t.active);
+      const nxt = s.tiers.find((t) => !t.active);
+      ui.text(act ? act.text : nxt ? `${s.count}/${nxt.n}: ${nxt.text}` : '', x + 17, yy + 10, { font: 'small', color: act ? '#e8e8f0' : '#7a8498' });
+      yy += 24;
+    }
+  }
 
-const HALO_GEO = new THREE.PlaneGeometry(1, 1);
-let haloT: THREE.Texture | null = null;
-function haloTex(): THREE.Texture { return (haloT ??= blobTex()); }
+  /** the item card; draw=false only measures. Returns its height */
+  private cardBody(it: ItemInst, x: number, y: number, w: number, draw: boolean): number {
+    const ui = this.ui;
+    const d = getItem(it.id), lv = it.level ?? 1;
+    const lines = this.tipLines(it);
+    const tw = w - 12, bw = 34;
+    const tb = (str: string, tx: number, ty: number, ww: number, o: { font: 'body' | 'small' | 'title'; color?: string }) => (draw ? ui.textBox(str, tx, ty, ww, o) : ui.textBox(str, -9999, -9999, ww, o));
+    if (draw) {
+      ui.fill(x + 6, y + 6, bw, bw, '#06080e', 0.8);
+      ui.rect(x + 6, y + 6, bw, bw, RARITY_COLOR[d.rarity]);
+      ui.item(it.id, x + 7, y + 7, 32, 32, lv);
+    }
+    const nh = tb(lines[0].text, x + bw + 12, y + 7, w - bw - 18, { font: 'title', color: lines[0].color });
+    tb(lines[1].text, x + bw + 12, y + 9 + nh, w - bw - 18, { font: 'small', color: '#9aa4b8' });
+    let yy = y + Math.max(46, 12 + nh + 12);
+    for (const l of lines.slice(2)) { yy += l.gap ?? 0; yy += tb(l.text, x + 6, yy, tw, { font: l.font ?? 'small', color: l.color }) + 1; }
+    const tags = (d.tags ?? []).filter((t) => t !== 'gem' && t !== 'metal');
+    if (tags.length) {
+      let tx = x + 6; yy += 3;
+      for (const t of tags) {
+        const tw2 = ui.measure(t.toUpperCase(), 'small') + 8;
+        if (tx + tw2 > x + w - 6) { tx = x + 6; yy += 13; }
+        const col = SET_COL[t] ?? '#8a94a8';
+        if (draw) { ui.fill(tx, yy, tw2, 11, col, 0.25); ui.rect(tx, yy, tw2, 11, col); ui.text(t.toUpperCase(), tx + 4, yy + 2, { font: 'small', color: '#ffffff', shadow: null }); }
+        tx += tw2 + 3;
+      }
+      yy += 14;
+    }
+    const recipes = recipesWith(it.id).slice(0, 3);
+    if (recipes.length) {
+      yy += 2;
+      if (draw) ui.text('FUSES WITH', x + 6, yy, { font: 'small', color: '#ffd860' });
+      yy += 11;
+      for (const r of recipes) {
+        const other = r.a === it.id ? r.b : r.a;
+        if (draw) {
+          ui.item(other, x + 6, yy - 2, 16, 16);
+          ui.text('>', x + 25, yy + 2, { font: 'small', color: '#9aa4b8' });
+          ui.item(r.out, x + 33, yy - 2, 16, 16);
+          let name = getItem(r.out).name;
+          while (name.length > 3 && ui.measure(name, 'small') > w - 60) name = name.slice(0, -2) + '…';
+          ui.text(name, x + 52, yy + 2, { font: 'small', color: '#e8dcc4' });
+        }
+        yy += 17;
+      }
+    }
+    return yy - y + 4;
+  }
 
-function blobTex(): THREE.Texture {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 31);
-  gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
+  private drawHints() {
+    const ui = this.ui, L = this.L;
+    let x = L.packX + 8, y = Math.min(ui.h - 16, L.packY + GRID * C + PACK_IN.y + 30);
+    x += ui.hint('LMB', 'drag', x, y);
+    x += ui.hint('R', 'turn', x, y);
+    x += ui.hint('RMB', 'turn', x, y);
+    x += ui.hint('TAB', 'close', x, y);
+  }
 
-function nameStyle(d: ItemDef): TextStyle {
-  switch (d.rarity) {
-    case 'legendary': return { ...STYLES.item, fill: ['#fffbe0', '#ffd860', '#f0a020'], outline: '#5a2a00' };
-    case 'epic': return STYLES.magic;
-    case 'rare': return STYLES.item;
-    case 'uncommon': return { ...STYLES.item, fill: ['#f0ffe8', '#b8f0a0', '#5ac860'], outline: '#0a3014' };
-    default: return { ...STYLES.item, fill: ['#ffffff', '#f0e8d8', '#c8b898'], outline: '#2a1a0c' };
+  // ---------------------------------------------------------------- interaction
+  private visOf(it: ItemInst): Vis {
+    let v = this.vis.get(it.uid);
+    if (!v) { const [x, y] = this.targetOf(it); v = { x, y, vx: 0, vy: 0, lift: 0, pop: 1, shake: 0 }; this.vis.set(it.uid, v); }
+    return v;
+  }
+  private spring(v: Vis, tx: number, ty: number, dt: number) {
+    const k = 260, damp = 24;
+    v.vx += ((tx - v.x) * k - v.vx * damp) * dt; v.vy += ((ty - v.y) * k - v.vy * damp) * dt;
+    v.x += v.vx * dt; v.y += v.vy * dt;
+    if (Math.abs(tx - v.x) < 0.3 && Math.abs(v.vx) < 2) { v.x = tx; v.vx = 0; }
+    if (Math.abs(ty - v.y) < 0.3 && Math.abs(v.vy) < 2) { v.y = ty; v.vy = 0; }
+  }
+
+  /** the item under a UI point */
+  private itemAt(mx: number, my: number, skip?: ItemInst): ItemInst | null {
+    const L = this.L, run = this.run!;
+    const gx = Math.floor((mx - L.gridX) / C), gy = Math.floor((my - L.gridY) / C);
+    for (const it of run.items) {
+      if (it === skip || !ITEMS[it.id]) continue;
+      const cells = rotCells(getItem(it.id).shape, it.rot);
+      if (it.gx >= 0) { if (cells.some(([x, y]) => it.gx + x === gx && it.gy + y === gy)) return it; }
+      else {
+        const s = this.slot.get(it.uid); if (!s) continue;
+        const bx = Math.floor((mx - L.boardX - 8) / C), by = Math.floor((my - L.boardY - 8) / C);
+        if (cells.some(([x, y]) => s.bx + x === bx && s.by + y === by)) return it;
+      }
+    }
+    return null;
+  }
+
+  private interact() {
+    const ui = this.ui, run = this.run!, L = this.L, inp = this.game.input;
+    if (this.closing) return;
+    const overClose = ui.hover(L.closeX, L.closeY, 14, 15);
+    this.hover = this.held || overClose ? null : this.itemAt(ui.mx, ui.my);
+    if (this.hover || this.held) ui.cursor = this.held ? 'grab' : 'point';
+    const rotate = inp.keyHit('KeyR') || ui.rpressed;
+    if (!this.held) {
+      if (this.hover && ui.pressed && !overClose) this.pickUp(this.hover);
+      else if (this.hover && rotate) this.rotateInPlace(this.hover);
+      return;
+    }
+    const it = this.held;
+    if (rotate) {
+      // turn about the grabbed point
+      const ic = rotIcon(it.id, it.level ?? 1, it.rot);
+      const ox = this.grab.x, oy = this.grab.y;
+      it.rot = (it.rot + 1) % 4;
+      this.grab = { x: ic.height - oy, y: ox };
+      const v = this.visOf(it); v.x = ui.mx - this.grab.x; v.y = ui.my - this.grab.y; v.pop = 1;
+      sfx(['k_tick4', 'cloth1'], { vol: 0.4, rate: 1.2 });
+    }
+    this.plan = this.planFor(it);
+    if (!ui.down) this.dropHeld(false);
+  }
+
+  private pickUp(it: ItemInst) {
+    const v = this.visOf(it);
+    this.held = it;
+    this.heldFrom = { gx: it.gx, gy: it.gy, rot: it.rot, slot: it.gx < 0 ? this.slot.get(it.uid) : undefined };
+    this.grab = { x: Math.max(2, Math.min(rotIcon(it.id, it.level ?? 1, it.rot).width - 2, this.ui.mx - v.x)), y: Math.max(2, this.ui.my - v.y) };
+    v.pop = 1;
+    sfx(['k_pick1', 'cloth1', 'k_tick1'], { vol: 0.45 });
+  }
+
+  private planFor(it: ItemInst): Plan {
+    const ui = this.ui, L = this.L, run = this.run!;
+    // over another item: stack or fuse
+    const tgt = this.itemAt(ui.mx, ui.my, it);
+    if (tgt) {
+      if (tgt.id === it.id && stackCap(it.id) > 1) {
+        const room = stackCap(it.id) - (tgt.n ?? 1);
+        if (room > 0) return { kind: 'stack', target: tgt, k: Math.min(room, it.n ?? 1) };
+      }
+      const m = mergeResult(tgt, it);
+      if (m) return { kind: 'fuse', target: tgt, id: m.id, level: m.level };
+    }
+    const tlx = ui.mx - this.grab.x, tly = ui.my - this.grab.y;
+    const cells = rotCells(getItem(it.id).shape, it.rot);
+    const gx = Math.round((tlx - L.gridX) / C), gy = Math.round((tly - L.gridY) / C);
+    const inGrid = ui.mx >= L.gridX - C / 2 && ui.my >= L.gridY - C / 2 && ui.mx < L.gridX + GRID * C + C / 2 && ui.my < L.gridY + GRID * C + C / 2;
+    if (inGrid) return { kind: 'grid', gx, gy, ok: fits(run.items, it, gx, gy, it.rot), cells: cells.map(([x, y]) => [gx + x, gy + y]) };
+    const inBoard = ui.mx >= L.boardX && ui.my >= L.boardY && ui.mx < L.boardX + L.boardW && ui.my < L.boardY + L.boardH + C;
+    if (inBoard) {
+      const bx = Math.round((tlx - L.boardX - 8) / C), by = Math.round((tly - L.boardY - 8) / C);
+      return { kind: 'board', bx, by, ok: this.boardFits(it, bx, by, it.rot) };
+    }
+    return { kind: 'none' };
+  }
+
+  private dropHeld(forced: boolean) {
+    const it = this.held!, from = this.heldFrom!, p = forced ? { kind: 'none' as const } : this.plan, run = this.run!;
+    this.held = null; this.plan = { kind: 'none' };
+    const v = this.visOf(it);
+    if (p.kind === 'stack') {
+      const moved = stackOnto(p.target, it);
+      if (moved > 0) {
+        this.burst(p.target, '#ffe070', 8);
+        sfx(['coin1', 'k_drop2', 'pickup1'], { vol: 0.5 });
+        this.visOf(p.target).pop = 0.6;
+        if ((it.n ?? 1) <= 0) { run.removeItem(it.uid); this.vis.delete(it.uid); this.slot.delete(it.uid); return; }
+      }
+      this.returnHome(it, from);
+      return;
+    }
+    if (p.kind === 'fuse') { this.fuse(p.target, it); return; }
+    if (p.kind === 'grid' && p.ok) {
+      it.gx = p.gx; it.gy = p.gy; this.slot.delete(it.uid);
+      v.vy = 60;
+      sfx(['k_drop2', 'k_drop3', 'cloth1'], { vol: 0.55 });
+      return;
+    }
+    if (p.kind === 'grid' && !p.ok) { sfx(['k_err1', 'k_err2'], { vol: 0.35 }); v.shake = 1; }
+    if (p.kind === 'board') {
+      it.gx = -1; it.gy = -1;
+      if (p.ok) this.slot.set(it.uid, { bx: p.bx, by: p.by });
+      else { this.slot.delete(it.uid); this.slot.set(it.uid, this.freeBoardSlot(it) ?? { bx: 0, by: this.L.bRows }); }
+      sfx(['sand_step1', 'k_drop2'], { vol: 0.45 });
+      return;
+    }
+    this.returnHome(it, from);
+  }
+
+  private returnHome(it: ItemInst, from: NonNullable<BackpackScreen['heldFrom']>) {
+    const run = this.run!;
+    it.rot = from.rot;
+    if (from.gx >= 0 && fits(run.items, it, from.gx, from.gy, from.rot)) { it.gx = from.gx; it.gy = from.gy; return; }
+    it.gx = -1; it.gy = -1;
+    if (from.slot && this.boardFits(it, from.slot.bx, from.slot.by, it.rot)) this.slot.set(it.uid, from.slot);
+    else this.slot.set(it.uid, this.freeBoardSlot(it) ?? { bx: 0, by: this.L.bRows });
+  }
+
+  private rotateInPlace(it: ItemInst) {
+    const run = this.run!, nr = (it.rot + 1) % 4;
+    const v = this.visOf(it);
+    if (it.gx >= 0) {
+      if (fits(run.items, it, it.gx, it.gy, nr)) it.rot = nr;
+      else {
+        const sp = findSpot(run.items, it, { gx: it.gx, gy: it.gy, rot: nr });
+        if (sp && sp.rot === nr && Math.hypot(sp.gx - it.gx, sp.gy - it.gy) <= 1.5) { it.gx = sp.gx; it.gy = sp.gy; it.rot = nr; }
+        else { v.shake = 1; sfx(['k_err1'], { vol: 0.3 }); return; }
+      }
+    } else {
+      const s = this.slot.get(it.uid);
+      if (s && this.boardFits(it, s.bx, s.by, nr)) it.rot = nr;
+      else { const old = it.rot; it.rot = nr; const sp = this.freeBoardSlot(it); if (sp) this.slot.set(it.uid, sp); else { it.rot = old; v.shake = 1; return; } }
+    }
+    v.pop = 0.5;
+    sfx(['k_tick4', 'cloth1'], { vol: 0.4, rate: 1.1 });
+  }
+
+  private fuse(target: ItemInst, it: ItemInst) {
+    const run = this.run!;
+    const res = mergeResult(target, it);
+    if (!res) { this.returnHome(it, this.heldFrom!); return; }
+    const place = { gx: target.gx, gy: target.gy, rot: target.rot, slot: this.slot.get(target.uid) };
+    const [cx, cy] = this.targetOf(target);
+    for (const x of [target, it]) { run.removeItem(x.uid); this.vis.delete(x.uid); this.slot.delete(x.uid); }
+    const out = run.addItem(res.id);
+    out.level = res.level; out.rot = place.rot;
+    if (place.gx >= 0) {
+      const sp = findSpot(run.items, out, { gx: place.gx, gy: place.gy, rot: place.rot });
+      if (sp && Math.hypot(sp.gx - place.gx, sp.gy - place.gy) <= 1.5) { out.gx = sp.gx; out.gy = sp.gy; out.rot = sp.rot; }
+      else out.gx = -1;
+    }
+    if (out.gx < 0) this.slot.set(out.uid, place.slot && this.boardFits(out, place.slot.bx, place.slot.by, out.rot) ? place.slot : this.freeBoardSlot(out) ?? { bx: 0, by: this.L.bRows });
+    const v = this.visOf(out); v.x = cx; v.y = cy; v.pop = 0;
+    this.burst(out, '#ffe8a0', 22); this.burst(out, '#c8a0ff', 12);
+    const d = getItem(res.id);
+    const isLevel = res.id === it.id && res.id === target.id;
+    const [tx, ty] = this.targetOf(out);
+    this.toasts.push({ text: isLevel ? `LEVEL ${res.level}` : 'FUSED!', sub: d.name, x: tx + 16, y: ty - 18, t: 0, col: isLevel ? '#ffe070' : '#d8b0ff' });
+    this.game.flash?.('#fff2c8', 0.12);
+    sfx(['magic1', 'magic2', 'powerup1'], { vol: 0.7 });
+    sfx(['pickup_sparkle1', 'shimmer1'], { vol: 0.45, delay: 0.08 });
+  }
+
+  private burst(it: ItemInst, col: string, n: number) {
+    const [x, y] = this.targetOf(it);
+    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+    const cx = x + (w * C) / 2, cy = y + (h * C) / 2;
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 90; this.sparks.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, t: 0, life: 0.5 + Math.random() * 0.5, col }); }
   }
 }
 
+const SET_COL: Record<string, string> = {
+  mage: '#a88aff', warrior: '#ff8a5a', summoner: '#ffc04a', tinkerer: '#5ac8ff', rogue: '#7ae07a',
+  fire: '#ff6a3a', frost: '#8ae8ff', shock: '#ffe04a', poison: '#8af04a', water: '#4a9aff',
+};
+export type { ItemDef };

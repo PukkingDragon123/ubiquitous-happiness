@@ -8,6 +8,13 @@
 import * as THREE from 'three';
 import type { Entity, World, Team } from '../game/types';
 import { itemMesh, getItem, RARITY_COLOR } from '../game/items';
+
+/**
+ * THE one place a world-side item object is made (pickups, pedestals, shop stands). Agent L's detailed textured
+ * itemModel(id) replaces the voxel extrusion here when it lands: swap this body for `return itemModel(id, level)`.
+ * The object is centred, ~0.5 m per grid cell; callers own its transform, never its geometry (it may be cached).
+ */
+export function itemObject(id: string, level = 1): THREE.Object3D { return itemMesh(id, level); }
 import { keyModel, bombModel, pearlModel, heartModel, disposeModel } from './models';
 
 export type PickKind = 'pearl' | 'heart' | 'key' | 'bomb' | 'item';
@@ -53,7 +60,7 @@ export class Pickup implements Entity {
     this.hold = o.hold ?? 0.35;
     this.dropped = !!o.dropped;
     switch (pk) {
-      case 'item': { const m = itemMesh(o.id!, this.level); m.scale.multiplyScalar(0.85); this.model = m; this.r = 0.45; break; }
+      case 'item': { const m = itemObject(o.id!, this.level); m.scale.multiplyScalar(0.85); this.model = m; this.r = 0.45; break; }
       case 'key': this.model = keyModel(); this.model.scale.setScalar(1.25); this.r = 0.35; break;
       case 'bomb': this.model = bombModel(); this.model.scale.setScalar(1.15); this.r = 0.35; break;
       case 'heart': this.model = heartModel(this.value < 2); this.model.scale.setScalar(1.25); this.r = 0.35; break;
