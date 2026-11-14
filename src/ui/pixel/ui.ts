@@ -113,9 +113,10 @@ export function itemIconBox(id: string, w: number, h = w, level = 1): HTMLCanvas
 
 interface ListState { scroll: number; target: number; drag: number }
 
-/** the UI is laid out on a canvas about this many UI pixels tall (see PixelUI.pickScale) */
-export const UI_TARGET_H = 360;
-const UI_MIN_H = 264, UI_MIN_W = 440;
+/** the UI is laid out on a canvas about this many UI pixels tall (see PixelUI.pickScale): fine pixels, 1 UI px is
+ *  about 2 screen px on a 1080p screen */
+export const UI_TARGET_H = 540;
+const UI_MIN_H = 400, UI_MIN_W = 640;
 
 export class PixelUI {
   readonly cv: HTMLCanvasElement;
@@ -189,21 +190,17 @@ export class PixelUI {
 
   /**
    * One shared UI density for every PixelUI on screen: the integer scale that makes the canvas closest to
-   * UI_TARGET_H (360) UI pixels tall, never below UI_MIN_H. 960x540 -> 2 (480x270), 1280x720 -> 2 (640x360),
-   * 1920x1080 -> 3 (640x360), 2560x1440 -> 4, 4K -> 6. (`targetH` from the constructor is kept for API
+   * UI_TARGET_H (540) UI pixels tall, never below UI_MIN_H. 960x540 -> 1 (960x540), 1280x720 -> 1 (1280x720),
+   * 1920x1080 -> 2 (960x540), 2560x1440 -> 2 (1280x720), 4K -> 4; a 1440x900 laptop at DPR 2 -> 3. (`targetH` from the constructor is kept for API
    * compatibility but no longer changes the density, so a HUD, a toast and a panel always share one pixel size.)
    * ?uiscale=N forces a scale.
    */
   static pickScale(devW: number, devH: number): number {
     const forced = Number(new URLSearchParams(location.search).get('uiscale') || 0);
     if (forced > 0) return forced;
-    let best = 1, err = Infinity;
-    for (let s = 1; s <= 16; s++) {
-      const h = devH / s, w = devW / s;
-      if (s > 1 && (h < UI_MIN_H || w < UI_MIN_W)) break;
-      const e = Math.abs(Math.log(h / UI_TARGET_H));
-      if (e < err) { err = e; best = s; }
-    }
+    // the largest integer scale that still leaves about UI_TARGET_H rows (rounding toward MORE room)
+    let best = Math.max(1, Math.floor(devH / (UI_TARGET_H * 0.95)));
+    while (best > 1 && (devH / best < UI_MIN_H || devW / best < UI_MIN_W)) best--;
     return best;
   }
 

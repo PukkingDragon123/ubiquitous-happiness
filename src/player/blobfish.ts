@@ -49,6 +49,8 @@ export class Blobfish implements SkillCaster {
   invuln = 0;
   obj = new THREE.Group();
   model = new BlobModel();
+  /** 0..1 soft self-glow in dark water (set by the dungeon screen from depth) */
+  ambientGlow = 0;
   sb = new SoftBody(outlineAt, SB_N);
   stats!: Stats;
   intent = { x: 0, y: 0 };
@@ -397,7 +399,9 @@ export class Blobfish implements SkillCaster {
       this.puffT -= dt;
       for (const e of w.near(this.x, this.y, 0.85, 'enemy')) if (e.hit) { e.hit(1, Math.sign(e.x - this.x), 0.5, w, this, 'spike'); FX.sparks(w, e.x, e.y, 5, undefined, 3); }
     }
-    this.model.U.uGlow.value.setRGB(this.laserOn ? 0.5 : 0, this.laserOn ? 0.05 : 0, this.laserOn ? 0.1 : 0);
+    // laser eyes + a soft self-glow set by the screen in dark water (so the hero always reads against the deep)
+    const ag = this.ambientGlow;
+    this.model.U.uGlow.value.setRGB((this.laserOn ? 0.5 : 0) + ag * 0.17, (this.laserOn ? 0.05 : 0) + ag * 0.08, (this.laserOn ? 0.1 : 0) + ag * 0.09);
   }
 
   /** run a legacy ability core (called by its SKILLS entry) */

@@ -1318,8 +1318,10 @@ export class DungeonScreen implements Screen {
     if (this.lamp) {
       const I = playerLight(m);
       this.lamp.light.intensity = I * (0.92 + Math.sin(this.world.time * 7) * 0.04 + Math.sin(this.world.time * 13) * 0.03);
-      this.lamp.light.distance = 7 + I * 1.5;
+      // a lantern pool round the blobfish (quadratic falloff), not a floodlight over the whole seabed
+      this.lamp.light.distance = 5 + I * 1.4; this.lamp.light.decay = 2;
       this.lamp.set(p.x + p.facing * 0.25, p.y + 0.7, 1.4);
+      p.ambientGlow = clamp((m - 60) / 200, 0, 1);
     }
     // records
     if (this.phase === 'play' && !this.vdepth) {
