@@ -14,6 +14,11 @@
 // or wait for the medic. `iq` (0..1, mastery + wave) scales reaction time, aim error, leading, cover use,
 // flanking, dodging and retreat discipline.
 //
+// v4: souls humans are GIANTS (2.6-3x scale, ~5 m tall): towering, slow, evil and grotesque (pale gaunt faces,
+// glowing goggles, rusty kit, dead fish strung off them, a lantern and an air hose you can break: see
+// src/combat/giants.ts). Their attacks are big and slow: hook sweeps / chops (white), stomps that send
+// shockwaves along the seabed (red), the Netter's net-bag slam (red), harpoons on an aim line, the Brass
+// Hulk's grab (red), the Lamplighter's blinding lantern (red) and heals.
 // v3 (souls-like dungeon levels): `mods.souls` switches a human to the duel brain at the bottom of this class.
 // It needs no wave director or shipwreck: the human roams round its home (patrol, notice, chase within a
 // leash, return) or lives inside an Arena {x0, x1, floor, top} when one is locked. Every attack runs on the
@@ -45,12 +50,16 @@ import type { BarkEvent } from './barks';
 import { FishingLine } from '../fishing/line';
 import { clamp, damp } from '../core/math';
 import { textSprite, STYLES } from '../ui/text';
+import { POST } from '../gfx/post';
 import { EnemyCore } from '../combat/core';
 import type { MoveDef } from '../combat/core';
 import type { Arena } from '../combat/types';
 import { AimLine, glint } from '../combat/telegraph';
 import { callout } from '../combat/feel';
 import { Bolt, Net } from '../combat/projectiles';
+import { GiantKit, GroundWave } from '../combat/giants';
+import { dangerZone } from '../combat/telegraph';
+import { NetSnare } from './projectiles';
 
 export type Role = 'harpoon' | 'spear' | 'knife' | 'net' | 'medic' | 'heavy' | 'titan';
 export interface RoleDef {
@@ -86,8 +95,30 @@ const MV: Record<string, MoveDef> = {
   cannon: { id: 'cannon', windup: 1.2, active: 0.1, recover: 0.6, dmg: 2, hyper: true, tellAt: 0.3 },
   heal: { id: 'heal', windup: 1.3, active: 0.1, recover: 0.4, dmg: 0, tell: 'none' },
   flare: { id: 'flare', windup: 0.75, active: 0.1, recover: 0.8, dmg: 1, tellAt: 0.25 },
+  // ---- v4 giants: big, slow, readable
+  hookSweep: { id: 'hookSweep', windup: 0.9, active: 0.34, recover: 0.8, dmg: 1.5, kind: 'crush', knock: 9, guardDmg: 45, hyper: true, tellAt: 0.32 },
+  hookBack: { id: 'hookBack', windup: 0.5, active: 0.3, recover: 0.65, dmg: 1.5, kind: 'crush', knock: 8, guardDmg: 40, hyper: true },
+  hookChop: { id: 'hookChop', windup: 0.75, active: 0.24, recover: 1.1, dmg: 2, kind: 'crush', knock: 9, guardDmg: 60, hyper: true, tellAt: 0.3 },
+  stomp: { id: 'stomp', windup: 1.0, active: 0.2, recover: 0.9, dmg: 1.5, unblockable: true, kind: 'crush', tellAt: 0.45, hyper: true },
+  harpoon: { id: 'harpoon', windup: 1.15, active: 0.1, recover: 0.55, dmg: 2, tellAt: 0.3 },
+  netSlam: { id: 'netSlam', windup: 1.1, active: 0.26, recover: 1.0, dmg: 1, unblockable: true, kind: 'crush', tellAt: 0.48, hyper: true },
+  netThrow: { id: 'netThrow', windup: 0.95, active: 0.1, recover: 1.1, dmg: 0, unblockable: true, tellAt: 0.42 },
+  gGrab: { id: 'gGrab', windup: 1.0, active: 0.24, recover: 1.0, dmg: 1.5, unblockable: true, hyper: true, kind: 'crush', tellAt: 0.45 },
+  lanternFlash: { id: 'lanternFlash', windup: 1.05, active: 0.12, recover: 0.7, dmg: 0, unblockable: true, tellAt: 0.48 },
 };
-const POISE: Record<Role, number> = { harpoon: 12, spear: 12, knife: 18, net: 16, medic: 8, heavy: 60, titan: 140 };
+/** giant scale per role (x the human rig): ~5 m tall to a 1 m blobfish */
+const GIANT_S: Record<Role, number> = { harpoon: 2.7, spear: 2.6, knife: 2.9, net: 2.9, medic: 2.6, heavy: 2.65, titan: 2 };
+/** the evil look + the kit per role */
+const GIANT_KIT: Record<Role, { scars: string[]; weapon: WeaponKind; trophies: number; bag: boolean; lantern: 'belt' | 'hand' | null; hook: boolean }> = {
+  harpoon: { scars: ['giant', 'scar'], weapon: 'speargun', trophies: 3, bag: false, lantern: 'belt', hook: false },
+  spear: { scars: ['giant'], weapon: 'bandgun', trophies: 2, bag: false, lantern: null, hook: false },
+  knife: { scars: ['giant', 'hookHand', 'eyepatch'], weapon: 'polespear', trophies: 4, bag: false, lantern: null, hook: true },
+  net: { scars: ['giant', 'scar'], weapon: 'net', trophies: 2, bag: true, lantern: 'belt', hook: false },
+  medic: { scars: ['giant'], weapon: 'flaregun', trophies: 2, bag: false, lantern: 'hand', hook: false },
+  heavy: { scars: ['giant'], weapon: 'cannon', trophies: 4, bag: true, lantern: null, hook: false },
+  titan: { scars: ['giant'], weapon: 'cannon', trophies: 4, bag: false, lantern: null, hook: false },
+};
+const POISE: Record<Role, number> = { harpoon: 40, spear: 36, knife: 50, net: 50, medic: 30, heavy: 90, titan: 140 };
 /** one squad per world for the duel-brain humans (barks, man-down calls) */
 const duelSquads = new WeakMap<World, Squad>();
 
@@ -184,6 +215,16 @@ export class Human implements Entity, Attacker {
   private healAlly: Entity | null = null;
   private stabbed = false;
   private box: Arena = { x0: 0, x1: 0, floor: 0, top: 0 };
+  // ---- v4 giants
+  /** giant scale (1 = a normal human) */
+  S = 1;
+  kit: GiantKit | null = null;
+  private stride = 0; private footL = false;
+  private choking = false; private blinded = false;
+  private lift = 0;
+  private lastBlowT = -99;
+  /** set by a WeakPoint right before it forwards its (bonus) hit */
+  weakHit = false;
   private pendingBark: { ev: BarkEvent; t: number } | null = null;
 
   constructor(public role: Role, x: number, y: number, public squad: Squad, public area: WaveArea | null, public objective: Target | null, m: HumanMods = {}) {
@@ -204,7 +245,8 @@ export class Human implements Entity, Attacker {
     // a few looks per role (model parts are cached per arch + seed, so spawns don't hitch); nemeses are unique
     const seed = nem ? nem.seed : ((m.seed ?? Math.floor(Math.random() * 1e6)) % VARIANTS) + 1;
     const arch = (nem ? (nem.arch.split(':')[0] as DiverArch) : null) ?? this.def.arch;
-    this.rig = makeDiver(arch, seed, { weapon: this.def.weapon, scars: nem?.scars ?? [] });
+    const G = m.souls ? GIANT_KIT[role] : null;
+    this.rig = makeDiver(arch, seed, { weapon: G ? G.weapon : this.def.weapon, scars: [...(nem?.scars ?? []), ...(G ? G.scars : [])] });
     this.callsign = nem ? nem.name : this.def.name;
     this.obj = this.rig.group;
     this.r = role === 'titan' ? 1.1 : this.def.walker ? 0.7 : 0.55;
@@ -219,6 +261,15 @@ export class Human implements Entity, Attacker {
     if (m.souls) {
       this.souls = true;
       this.kind = role;
+      // a giant: towering, slow, tough; it stalks the seabed
+      this.S = GIANT_S[role] * (this.elite ? 1.12 : 1) * (1 + lvl * 0.04);
+      this.rig.group.scale.setScalar(this.S);
+      this.r = 0.42 * this.S;
+      this.maxHp = this.hp = Math.round(this.def.hp * hpK * 3.6);
+      this.speedMul *= 0.45;
+      this.rig.mode = 'walk';
+      for (const fin of this.rig.model.dive.fins) fin.visible = false;
+      this.kit = new GiantKit(this as unknown as ConstructorParameters<typeof GiantKit>[0], { trophies: G!.trophies, bag: G!.bag, lantern: G!.lantern, hose: true, hook: G!.hook });
       this.arena = m.arena ?? null;
       this.aware = !!this.arena;
       this.focus = 'player';
@@ -227,7 +278,8 @@ export class Human implements Entity, Attacker {
       this.core = new EnemyCore(this, { poise: POISE[role] * (this.elite ? 1.5 : 1) * (1 + lvl * 0.25), head: () => { const h = this.rig.headWorld(_v); return { x: h.x, y: h.y + 0.35 }; } });
       this.core.speed = (this.elite ? 1.15 : 1) * (1 + (m.iq ?? 0.4) * 0.15);
       this.core.dmgMul = this.dmgMul;
-      this.core.onStagger = (w, k) => { this.rig.play('flinch', true); this.comboLeft = 0; this.aimLine?.hide(); if (k !== 'flinch') this.say(w, 'hurt'); };
+      this.core.big = true;
+      this.core.onStagger = (w, k) => { this.rig.play('flinch', true); this.comboLeft = 0; this.aimLine?.hide(); if (this.kit) this.kit.bagInHand = false; if (k !== 'flinch') { this.say(w, 'hurt'); w.sfx('grunt', this.x, 0.8, 0.55); } };
       this.react = 0.3;
     }
   }
@@ -600,17 +652,21 @@ export class Human implements Entity, Attacker {
     const k = kind ?? 'sword';
     let d = dmg * (1 - this.def.armor) * (k === 'explosion' ? 1.25 : 1);
     if (this.souls) {
+      // one blade swing lands once on a giant however many of its hurt boxes it crosses (weak points add on)
+      if (this.S > 1 && (k === 'sword' || k === 'crush') && !this.weakHit) { if (w.time - this.lastBlowT < 0.12) return true; this.lastBlowT = w.time; }
+      this.weakHit = false;
       if (!this.aware) this.notice(w, 'hit');
+      if (this.blinded) d *= 1.25;
       d = this.core!.receive(w, d, dirX, dirY, k);
       if (d < 0) return false;
       if (this.core!.attacking && this.healAlly && this.core!.is('heal')) { callout(w, 'INTERRUPTED', this.x, this.y + 1.2, 'gold', 0.4); this.core!.stagger(w, 0.9, 'broken'); }
     } else if (this.def.walker && k === 'sword' && Math.random() < 0.35) { d *= 0.3; w.sfx('sw_clang', this.x, 0.6); w.text.pop('CLANG', this.x, this.y + 1, 'hint', { size: 0.26 }); }
     this.hp -= d;
-    const mass = this.def.mass;
+    const mass = this.def.mass * (this.S > 1 ? this.S * 3 : 1);
     this.vx += dirX * 3 / mass; this.vy += dirY * 2 / mass;
     gore(w, this.x - dirX * 0.2, this.y - dirY * 0.2 + 0.1, 0.25 + Math.min(1.2, (d / this.maxHp) * 2.5), dirX, dirY);
     this.bleedK = Math.min(1, this.bleedK + (d / this.maxHp) * 1.6);
-    if (this.souls) { if (!this.core!.attacking && !this.def.walker) this.rig.play('flinch', !this.busy || this.rig.action === 'reload'); this.lean += (this.rig.facing * dirX < 0 ? 1 : -1) * 0.25 * this.rig.facing; }
+    if (this.souls) { if (!this.core!.attacking && !this.def.walker && this.S <= 1) this.rig.play('flinch', !this.busy || this.rig.action === 'reload'); this.lean += (this.rig.facing * dirX < 0 ? 1 : -1) * (this.S > 1 ? 0.04 : 0.25) * this.rig.facing; }
     else if (!this.def.walker || d > 3) this.rig.play('flinch', !this.busy || this.rig.action === 'reload');
     if (src && (src.team === 'player' || src === (w.player as Entity))) this.provoke(w, 'hit');
     else if (k !== 'explosion') this.provoke(w, 'hit');
@@ -676,9 +732,17 @@ export class Human implements Entity, Attacker {
     bubbles(w, this.x, this.y + 0.3, 14, 1.4);
     this.aimLine?.hide();
     if (this.grabT > 0) { this.grabT = 0; w.player.hooked = false; }
+    if (this.S > 1) {
+      // the giant topples: the seabed shakes, a cloud of silt, the eyes go out
+      w.game.addShake(0.5); w.game.freeze(0.08);
+      w.sfx('thud_heavy', this.x, 1, 0.4); w.sfx('boom_uw', this.x, 0.5, 0.5);
+      silt(w, this.x, this.floorY(w) + 0.1, 30);
+      callout(w, 'FELLED', this.x, this.y + this.rig.height * this.S * 0.6, 'gold', 0.6);
+      if (this.kit) { this.kit.bagInHand = false; this.kit.lanternWP && (this.kit.lanternWP.alive = false); this.kit.hoseWP && (this.kit.hoseWP.alive = false); }
+    }
     if (this.souls) {
       // v3: the dungeon drops the loot; we only report the kill
-      w.emit('kill', { kind: this.role, x: this.x, y: this.y, elite: this.elite, nemesis: this.nemesisId ?? null });
+      w.emit('kill', { kind: this.role, x: this.x, y: this.y, elite: this.elite, size: 'giant', family: 'human', nemesis: this.nemesisId ?? null });
     } else {
       w.emit('kill', { kind: 'human:' + this.role, x: this.x, y: this.y, nemesis: this.nemesisId ?? null });
       // loot: coins + a material or two
@@ -705,6 +769,7 @@ export class Human implements Entity, Attacker {
   private corpse(dt: number, w: World) {
     this.deadT += dt;
     this.rig.update(dt, this.ragWorld);
+    if (this.kit) this.kit.update(dt, w);
     this.rig.rag.pelvisWorld(_v);
     if (this.rig.rag.active) { this.x = _v.x; this.y = _v.y; }
     if (this.deadT < 5 && Math.random() < dt * 3) bleed(w, this.x, this.y, 0.25);
@@ -800,188 +865,250 @@ export class Human implements Entity, Attacker {
     // ---- body
     this.lean = damp(this.lean, this.leanTarget(c), 10, dt);
     this.rig.group.rotation.z = this.lean;
-    if (this.def.walker) this.rig.mode = sp > 0.15 ? 'walk' : 'stand';
+    if (this.def.walker || this.S > 1) this.rig.mode = sp > 0.12 ? 'walk' : 'stand';
     else this.rig.mode = !this.aware && sp > 0.6 ? 'swim' : sp > 2.2 && !c.attacking ? 'swim' : 'tread';
     this.rig.swimAngle = Math.atan2(this.vy, Math.abs(this.vx) + 0.3);
     this.rig.speed = clamp(sp / (this.def.speed * this.speedMul), 0, 1);
     this.rig.hurt = clamp(1 - (this.hp / this.maxHp) * 1.6, 0, 0.8);
     this.rig.expr = c.phase === 'stagger' ? 'scared' : !this.aware ? 'concentrate' : this.def.weapon === 'knife' || c.phase === 'windup' ? 'angry' : 'focus';
     this.rig.update(dt);
-    this.rig.group.position.set(this.x, this.y, 0);
-    if (this.tag) { this.tag.position.set(this.x, this.y + this.rig.height * 0.75 + 0.35, 0.8); this.tag.visible = dP < 9; }
+    this.rig.group.position.set(this.x, this.y + this.lift, 0);
+    this.kit?.update(dt, w);
+    // choking on a cut hose: it drowns slowly
+    if (this.choking) { this.hp -= this.maxHp * 0.022 * dt; if (this.hp <= 0) { this.die(w, 0, 1, 'crush', null); return; } }
+    if (this.tag) { this.tag.position.set(this.x, this.y + this.rig.height * this.S * 0.75 + 0.35, 0.8); this.tag.visible = dP < 12; }
+  }
+
+  /** a weak point on the giant broke (src/combat/giants.ts) */
+  weakBroken(w: World, what: 'hose' | 'lantern') {
+    this.kit?.breakFx(w, what);
+    if (what === 'hose') { this.choking = true; this.core!.speed *= 1.2; this.core!.stagger(w, 2.4, 'broken'); this.say(w, 'hose', true); w.sfx('grunt', this.x, 1, 0.5); }
+    else { this.blinded = true; this.core!.stagger(w, 2.6, 'broken'); callout(w, 'BLINDED', this.x, this.y + this.rig.height * this.S * 0.55, 'gold', 0.5); }
+    w.emit('weakPoint', { kind: this.role, what, x: this.x, y: this.y });
   }
 
   private leanTarget(c: EnemyCore) {
-    const f = this.rig.facing;
-    if (c.phase === 'windup') return (this.core!.move?.id === 'sweep' || this.core!.move?.id === 'grab' ? 0.35 : 0.22) * f * Math.min(1, c.k * 1.5);
-    if (c.phase === 'active') return -0.3 * f;
-    if (c.phase === 'stagger') return 0.3 * f + Math.sin(c.t * 18) * 0.06;
+    const f = this.rig.facing, id = this.core!.move?.id;
+    if (c.phase === 'windup') return (id === 'hookSweep' || id === 'hookChop' || id === 'netSlam' || id === 'gGrab' ? 0.2 : id === 'stomp' ? 0.12 : 0.08) * f * Math.min(1, c.k * 1.5);
+    if (c.phase === 'active') return (id === 'harpoon' || id === 'lanternFlash' || id === 'netThrow' ? 0.04 : -0.2) * f;
+    if (c.phase === 'stagger') return 0.18 * f + Math.sin(c.t * 14) * 0.04;
     return 0;
   }
 
-  /** the spot a fighting human wants, per role: [x, y, sprint] */
+  /** the giant's footing: floor height under it and the reach / sizes in metres */
+  private gz(w: World) { const S = this.S; return { fl: this.floorY(w), S, reach: 1.45 * S, chest: 1.25 * S, top: 1.85 * S }; }
+
+  /** where a fighting giant wants to stand, per role: [x, y, sprint] */
   private duelGoal(w: World, dP: number, side: number): [number, number, number] {
-    const p = w.player;
+    const p = w.player, S = this.S;
+    void dP;
     switch (this.role) {
-      case 'knife':
-        if (this.backoff > 0) return [p.x + side * 3, p.y + 0.6, 1.1];
-        return [p.x + side * 1.05, p.y + this.circle * 0.15, 1.2];
-      case 'net': return [p.x + side * (dP < 2.5 ? 5 : 4), p.y + 0.8, 1];
-      case 'heavy': case 'titan': return [p.x + side * 1.6, this.y, 1];
+      case 'knife': return [p.x + side * (this.backoff > 0 ? 1.6 * S : 0.85 * S), this.y, 1];
+      case 'net': return [p.x + side * 1.5 * S, this.y, 1];
       case 'medic': {
-        const al = w.entities.filter((e) => e.team === 'enemy' && e !== (this as Entity) && e.alive && Math.abs(e.x - this.x) < 12);
-        if (!al.length) return [p.x + side * 7, p.y + 1.5, 1];
-        const cx = al.reduce((s, e) => s + e.x, 0) / al.length, cy = al.reduce((s, e) => s + e.y, 0) / al.length;
-        const away = Math.sign(cx - p.x) || side;
-        if (this.healAlly && this.core!.is('heal')) return [this.healAlly.x + away * 0.9, this.healAlly.y + 0.3, 1.2];
-        return [cx + away * 2.8, cy + 1, 1];
+        const al = w.entities.filter((e) => e.team === 'enemy' && e !== (this as Entity) && e.alive && (e as unknown as { kit?: unknown }).kit === undefined && e.kind !== 'hurtbox' && e.kind !== 'weakpoint' && Math.abs(e.x - this.x) < 14);
+        if (this.healAlly && this.core!.is('heal')) return [this.healAlly.x + (Math.sign(this.x - this.healAlly.x) || 1) * 2.2, this.y, 1];
+        if (!al.length) return [p.x + side * 2.2 * S, this.y, 1];
+        const cx = al.reduce((s2, e) => s2 + e.x, 0) / al.length;
+        return [cx + (Math.sign(cx - p.x) || side) * 3, this.y, 1];
       }
-      default: // harpoon / spear: keep range, a little above, back off when it closes in
-        return [p.x + side * (dP < 2.6 ? 6.5 : 5.8), p.y + 1.1, dP < 2.6 ? 1.3 : 1];
+      case 'heavy': case 'titan': return [p.x + side * 0.9 * S, this.y, 1];
+      default: return [p.x + side * 2.6 * S, this.y, 1]; // the harpooner keeps his distance
     }
   }
 
   private pickMove(w: World, dP: number, canSee: boolean): MoveDef | null {
-    const p = w.player;
-    const front = Math.sign(p.x - this.x) === this.rig.facing || Math.abs(p.x - this.x) < 0.5;
+    const p = w.player, S = this.S, f = this.rig.facing;
+    const dx = (p.x - this.x) * f, adx = Math.abs(p.x - this.x);
+    const fl = this.floorY(w);
+    const low = p.y < fl + 1.4 * S;
+    // anyone right underfoot gets stomped
+    if (adx < 0.75 * S && p.y < fl + 0.9 * S && Math.random() < 0.7) return MV.stomp;
+    const inReach = dx > -0.3 && dx < 1.35 * S && low;
     switch (this.role) {
       case 'knife':
-        if (dP < 1.75 && this.backoff <= 0) { this.comboLeft = this.elite || Math.random() < 0.45 ? 2 : 1; return MV.stab1; }
+        if (inReach) { this.comboLeft = this.elite || Math.random() < 0.45 ? 2 : 1; return MV.hookSweep; }
         return null;
       case 'net':
-        if (canSee && dP < 6.5 && dP > 1.5 && !board(w).netOn) { this.say(w, 'net'); return MV.net; }
-        if (dP < 1.4 && front) return MV.bash;
+        if (canSee && dx > 0.9 * S && dx < 1.9 * S && low) return MV.netSlam;
+        if (canSee && dP > 2.2 * S && dP < 10 && !board(w).netOn) { this.say(w, 'net'); return MV.netThrow; }
+        if (inReach) return MV.hookSweep;
         return null;
       case 'heavy': case 'titan':
-        if (dP < 2.2 && front) return Math.random() < (this.elite ? 0.4 : 0.28) ? MV.grab : MV.sweep;
-        if (dP > 4.5 && canSee && this.rig.loaded) return MV.cannon;
+        if (inReach) return dx < 0.85 * S && Math.random() < (this.elite ? 0.42 : 0.3) ? MV.gGrab : MV.hookSweep;
+        if (dP > 2.2 * S && canSee && this.rig.loaded) return MV.harpoon;
         return null;
       case 'medic': {
-        const hurt = w.entities.filter((e) => e.team === 'enemy' && e !== (this as Entity) && e.alive && e.hp !== undefined && e.maxHp !== undefined && e.hp < e.maxHp * 0.7 && Math.hypot(e.x - this.x, e.y - this.y) < 9)
+        const hurt = w.entities.filter((e) => e.team === 'enemy' && e !== (this as Entity) && e.alive && e.kind !== 'hurtbox' && e.kind !== 'weakpoint' && e.hp !== undefined && e.maxHp !== undefined && e.hp < e.maxHp * 0.7 && Math.hypot(e.x - this.x, e.y - this.y) < 12)
           .sort((a, b) => a.hp! / a.maxHp! - b.hp! / b.maxHp!)[0];
         if (hurt) { this.healAlly = hurt; this.say(w, 'heal'); return MV.heal; }
-        if (canSee && dP < 9) return MV.flare;
+        if (inReach) return MV.hookSweep;
+        if (canSee && dP < 11 && this.kit?.lanternAt()) return MV.lanternFlash;
         return null;
       }
       default:
-        if (dP < 1.6 && front) return MV.bash;
-        if (canSee && this.rig.loaded && dP < 11 && dP > 2) return MV.shot;
+        if (inReach && dx < 1.1 * S) return MV.hookSweep;
+        if (canSee && this.rig.loaded && dP < 16 && dP > 1.2 * S) return MV.harpoon;
         return null;
     }
   }
 
   private moveStart(w: World, m: MoveDef) {
     this.stabbed = false;
-    const p = w.player;
+    const p = w.player, S = this.S, f = this.rig.facing, fl = this.floorY(w);
     switch (m.id) {
-      case 'shot': case 'cannon': case 'flare': {
+      case 'harpoon': {
         this.aimLine ??= new AimLine(w.scene);
         this.lockX = p.x; this.lockY = p.y;
-        w.sfx('k_tick', this.x, 0.5, 0.7); w.sfx('rope_creak', this.x, 0.4, 1.4);
+        w.sfx('k_tick', this.x, 0.6, 0.6); w.sfx('rope_creak', this.x, 0.5, 0.9);
         break;
       }
-      case 'sweep': case 'grab': w.sfx('grunt', this.x, 0.7, 0.75); w.sfx('creak', this.x, 0.5, 0.6); break;
-      case 'net': w.sfx('rope_creak', this.x, 0.6, 1.1); break;
+      case 'hookSweep': case 'hookChop': case 'gGrab': w.sfx('grunt', this.x, 0.8, 0.55); w.sfx('creak', this.x, 0.5, 0.5); break;
+      case 'stomp': dangerZone(w, this.x, fl + 0.4, 0.95 * S, m.windup / this.core!.speed + 0.1, true); w.sfx('grunt', this.x, 0.8, 0.45); break;
+      case 'netSlam': this.kit && (this.kit.bagInHand = true); dangerZone(w, this.x + f * 1.3 * S, fl + 0.5, 0.75 * S, m.windup / this.core!.speed + 0.15, true); w.sfx('rope_creak', this.x, 0.7, 0.7); break;
+      case 'netThrow': w.sfx('rope_creak', this.x, 0.6, 1.0); break;
+      case 'lanternFlash': w.sfx('heartbeat', this.x, 0.7, 1.2); break;
       case 'heal': {
         w.sfx('shimmer', this.x, 0.5, 0.8);
         const a = this.healAlly;
         if (a) w.add(new HealLink(this, a, m.windup / this.core!.speed));
         break;
       }
-      default: w.sfx('cloth', this.x, 0.5, 1.4); break;
+      default: w.sfx('cloth', this.x, 0.5, 1.0); break;
     }
   }
 
-  /** per-frame move logic: aim lines, lunges, hitboxes, chains */
+  /** per-frame move logic: poses (via the weapon aim), hitboxes, chains */
   private runMove(dt: number, w: World, dP: number) {
-    const c = this.core!, m = c.move, p = w.player, f = this.rig.facing;
+    const c = this.core!, m = c.move, p = w.player, f = this.rig.facing, S = this.S;
+    const fl = this.floorY(w);
+    this.lift = damp(this.lift, 0, 8, dt);
     if (!m) { this.aimLine?.hide(); return; }
-    const left = m.windup / c.speed - c.t;
+    const k = c.k;
+    const ph = c.phase;
+    const dx = (p.x - this.x) * f;
     switch (m.id) {
-      case 'stab1': case 'stab2': case 'lunge': {
-        if (c.phase === 'windup') {
-          this.rig.aimAt(p.x, p.y);
-          if (left <= 0.12 && !this.stabbed) { this.stabbed = true; this.rig.play('stab', true); }
-        }
-        if (c.phase === 'active') {
-          if (c.justEntered('active')) { this.vx += f * (m.id === 'lunge' ? 6 : 3.5); w.sfx('swish_b', this.x, 0.6, m.id === 'lunge' ? 0.9 : 1.2); }
-          const tip = this.rig.muzzleWorld(_v);
-          const reach = m.id === 'lunge' ? 0.7 : 0.55;
-          if (Math.hypot(p.x - tip.x, p.y - tip.y) < reach + p.r || (Math.abs(p.y - this.y) < 0.9 && (p.x - this.x) * f > 0 && (p.x - this.x) * f < 1.4)) {
-            const r = c.strike(w, { x: this.x, y: this.y, kind: 'spike' });
-            if (r === 'hit') { gore(w, p.x, p.y, 0.4); this.dealt++; }
+      case 'hookSweep': case 'hookBack': case 'hookChop': {
+        // the hook / gun-butt / net-bag swung in a huge arc: high behind -> low in front (back: low -> high)
+        const hi = { x: this.x - f * 0.45 * S, y: fl + 2.2 * S }, lo = { x: this.x + f * 1.55 * S, y: fl + 0.1 * S };
+        const over = { x: this.x + f * 0.2 * S, y: fl + 2.4 * S };
+        let from = hi, to = lo;
+        if (m.id === 'hookBack') { from = lo; to = { x: this.x + f * 0.3 * S, y: fl + 2.0 * S }; }
+        if (m.id === 'hookChop') { from = over; to = { x: this.x + f * 1.4 * S, y: fl }; }
+        if (ph === 'windup') { const e = Math.min(1, k * 1.4); this.rig.aimAt(this.x + (from.x - this.x) * e + f * 0.6 * S * (1 - e), fl + S + (from.y - fl - S) * e); }
+        else if (ph === 'active') {
+          const e = 1 - Math.pow(1 - k, 2);
+          this.rig.aimAt(from.x + (to.x - from.x) * e, from.y + (to.y - from.y) * e);
+          if (c.justEntered('active')) { w.sfx('swish_c', this.x, 1, 0.45); this.vx += f * 1.2; }
+          if (k > 0.15 && k < 0.95 && dx > -0.4 && dx < (m.id === 'hookChop' ? 1.5 : 1.55) * S && p.y < fl + (m.id === 'hookBack' ? 2.2 : 1.7) * S) {
+            const r = c.strike(w, { x: this.x + f * 0.6 * S, y: Math.min(p.y, fl + S), kind: 'crush' });
+            if (r === 'hit') { w.game.addShake(0.25); gore(w, p.x, p.y, 0.5); }
           }
+          if (m.id === 'hookChop' && k > 0.85 && c.t - dt < m.active * 0.85) { w.game.addShake(0.35); silt(w, this.x + f * 1.4 * S, fl + 0.1, 16); w.sfx('thud_heavy', this.x, 0.9, 0.5); }
+        } else if (ph === 'recover') {
+          this.rig.aimAt(to.x, to.y);
+          // the Gutter chains: sweep -> backhand -> chop
+          if (this.comboLeft > 0 && k > 0.25 && Math.abs(p.x - this.x) < 1.7 * S) { this.comboLeft--; c.start(m.id === 'hookSweep' ? MV.hookBack : MV.hookChop); w.sfx('grunt', this.x, 0.6, 0.6); }
+          else if (k > 0.9) { this.cool = 0.9 + Math.random() * 0.7; if (this.role === 'knife') this.backoff = 1.2; }
         }
-        if (c.phase === 'recover' && c.k > 0.3 && this.comboLeft > 0) {
-          if (dP < 2.3) { this.comboLeft--; c.start(this.comboLeft === 0 && m.id !== 'stab1' || (this.comboLeft === 0 && this.elite) ? MV.lunge : MV.stab2); this.stabbed = false; }
-          else this.comboLeft = 0;
-        }
-        if (c.phase === 'recover' && this.comboLeft === 0 && c.k > 0.8) { this.backoff = 1.1; this.cool = 0.9 + Math.random() * 0.8; }
         break;
       }
-      case 'shot': case 'cannon': case 'flare': {
+      case 'stomp': {
+        // a knee comes up (the whole body rises and leans back), then crashes down
+        if (ph === 'windup') { this.lift = 0.14 * S * Math.min(1, k * 1.3); this.rig.aimAt(this.x + f * 0.5 * S, fl + 2.2 * S); }
+        else if (ph === 'active') {
+          this.lift = 0;
+          if (c.justEntered('active')) {
+            w.game.addShake(0.5); w.game.freeze(0.05);
+            w.sfx('thud_heavy', this.x, 1, 0.4); w.sfx('boom_uw', this.x, 0.6, 0.6);
+            silt(w, this.x, fl + 0.1, 26); w.fx.shockwave(this.x, fl + 0.3, 2.2, '#ffd0a0');
+            for (const dir of [1, -1]) w.add(new GroundWave(this.x + dir * 0.6 * S, fl, dir, this, MV.stomp.dmg * c.dmgMul, 6 + S));
+          }
+          if (Math.abs(p.x - this.x) < 0.8 * S && p.y < fl + 0.9 * S) c.strike(w, { x: this.x, y: fl + 0.3 });
+        }
+        break;
+      }
+      case 'harpoon': {
         const mz = this.rig.muzzleWorld(_v);
-        if (c.phase === 'windup') {
-          // the sight tracks (with a little lead) until it locks a beat before the trigger
-          if (c.k < 0.78) {
-            const tt = Math.hypot(p.x - mz.x, p.y - mz.y) / 15;
-            this.lockX = damp(this.lockX, p.x + p.vx * tt * Math.min(1, this.iq), 10, dt); this.lockY = damp(this.lockY, p.y + p.vy * tt * Math.min(1, this.iq), 10, dt);
-          } else if (c.t - dt < (m.windup / c.speed) * 0.78) w.sfx('click', this.x, 0.6, 1.6);
+        if (ph === 'windup') {
+          // the sight tracks (with a little lead, worse when blinded) until it locks a beat before the trigger
+          if (k < 0.78) {
+            const tt = Math.hypot(p.x - mz.x, p.y - mz.y) / 16;
+            const err = this.blinded ? Math.sin(w.time * 3) * 2.5 : 0;
+            this.lockX = damp(this.lockX, p.x + p.vx * tt * Math.min(1, this.iq) + err, 10, dt); this.lockY = damp(this.lockY, p.y + p.vy * tt * Math.min(1, this.iq) + err * 0.5, 10, dt);
+          } else if (c.t - dt < (m.windup / c.speed) * 0.78) w.sfx('click', this.x, 0.7, 1.2);
           this.rig.aimAt(this.lockX, this.lockY);
-          const dx = this.lockX - mz.x, dy = this.lockY - mz.y, l = Math.hypot(dx, dy) || 1;
-          const L = m.id === 'flare' ? Math.min(l, 6) : Math.min(14, l + 4);
-          this.aimLine?.show(mz.x, mz.y, mz.x + (dx / l) * L, mz.y + (dy / l) * L, c.k, w.time);
+          const ddx = this.lockX - mz.x, ddy = this.lockY - mz.y, l = Math.hypot(ddx, ddy) || 1;
+          const L = Math.min(18, l + 5);
+          this.aimLine?.show(mz.x, mz.y, mz.x + (ddx / l) * L, mz.y + (ddy / l) * L, k, w.time);
         } else this.aimLine?.hide();
         if (c.justEntered('active')) {
           const ang = Math.atan2(this.lockY - mz.y, this.lockX - mz.x);
-          const spd = m.id === 'cannon' ? 13 : m.id === 'flare' ? 11 : 17;
-          w.add(new Bolt(mz.x, mz.y, Math.cos(ang) * spd, Math.sin(ang) * spd + 0.4, Math.max(1, m.dmg * this.dmgMul), this, m.id === 'cannon' ? 'bolt' : m.id === 'flare' ? 'flare' : 'shaft'));
-          if (m.id !== 'flare') this.rig.play('fire', true); else this.rig.loaded = true;
-          muzzle(w, mz.x, mz.y, ang, m.id === 'cannon' ? 1.2 : 0.6);
-          w.sfx(m.id === 'cannon' ? 'thud_heavy' : m.id === 'flare' ? 'laser_shot' : 'rope_twang', mz.x, 0.7, m.id === 'cannon' ? 0.7 : m.id === 'flare' ? 0.6 : 1.6);
-          w.game.addShake(m.id === 'cannon' ? 0.1 : 0.03);
-          this.cool = m.id === 'flare' ? 1.4 : 0.6;
+          w.add(new Bolt(mz.x, mz.y, Math.cos(ang) * 16, Math.sin(ang) * 16 + 0.4, Math.max(1, m.dmg * this.dmgMul), this, 'bolt'));
+          this.rig.play('fire', true);
+          muzzle(w, mz.x, mz.y, ang, 1.6);
+          w.sfx('thud_heavy', mz.x, 0.8, 0.7); w.sfx('rope_twang', mz.x, 0.7, 0.8);
+          w.game.addShake(0.12);
+          this.cool = 0.8;
         }
         break;
       }
-      case 'bash': {
-        if (c.phase === 'windup') this.rig.aimAt(this.x + f, this.y + 0.6);
-        if (c.phase === 'active') {
-          this.rig.aimAt(this.x + f * 2, this.y - 0.2);
-          if (c.justEntered('active')) { this.vx += f * 3; w.sfx('swish_a', this.x, 0.5, 0.9); }
-          if (Math.abs(p.y - this.y) < 1 && (p.x - this.x) * f > -0.2 && (p.x - this.x) * f < 1.5) c.strike(w, { x: this.x, y: this.y, kind: 'crush' });
-        }
-        if (c.phase === 'recover' && c.k > 0.9) this.cool = 0.8;
-        break;
-      }
-      case 'net': {
-        if (c.phase === 'windup') { this.rig.aimAt(p.x, p.y + 0.5); if (left <= 0.36 && !this.stabbed) { this.stabbed = true; this.rig.play('throw', true); } }
-        if (c.phase === 'recover' && c.k > 0.9) this.cool = 3.5;
-        break;
-      }
-      case 'sweep': case 'grab': {
-        // the cannon swung like a club: cocked up behind, then a low arc through the front
-        const hy = this.y + this.rig.height * 0.1;
-        if (c.phase === 'windup') this.rig.aimAt(this.x - f * 1.2, hy + 2.2 * Math.min(1, c.k * 1.4));
-        else if (c.phase === 'active') {
-          this.rig.aimAt(this.x + f * (m.id === 'grab' ? 1.8 : 2.4 * c.k), hy + (m.id === 'grab' ? 0 : 1.8 - 3 * c.k));
-          if (c.justEntered('active')) { w.sfx('swish_c', this.x, 0.8, 0.6); this.vx += f * 1.5; }
-          const reach = m.id === 'grab' ? 1.7 : 2.3;
-          if ((p.x - this.x) * f > -0.4 && (p.x - this.x) * f < reach && Math.abs(p.y - hy) < 1.7) {
-            const r = c.strike(w, { x: this.x, y: hy, kind: 'crush' });
-            if (r === 'hit' && m.id === 'grab') { this.grabT = 1.0; p.hooked = true; callout(w, 'GRABBED!', p.x, p.y + 1, 'danger', 0.45); w.sfx('grunt', this.x, 0.8, 0.7); }
-            if (r === 'hit' && m.id === 'sweep') { w.game.addShake(0.2); }
+      case 'netSlam': {
+        // the net bag of dead fish hoisted overhead and slammed down in front
+        const land = { x: this.x + f * 1.3 * S, y: fl + 0.2 };
+        if (ph === 'windup') this.rig.aimAt(this.x - f * 0.3 * S, fl + 2.4 * S);
+        else if (ph === 'active') {
+          this.rig.aimAt(this.x + (land.x - this.x) * k, fl + 2.4 * S * (1 - k));
+          if (k > 0.6 && c.t - dt < m.active * 0.6) {
+            w.game.addShake(0.4); silt(w, land.x, fl + 0.1, 20); w.sfx('thud_heavy', land.x, 1, 0.55); w.sfx('net', land.x, 0.8, 0.8);
+            w.fx.debrisBurst(land.x, fl + 0.5, 10, '#c4ba96', 3, 0.05);
+            if (!c.landed && Math.abs(p.x - land.x) < 0.75 * S + p.r && p.y < fl + 1.2 * S && !board(w).netOn) {
+              const r = c.strike(w, { x: land.x, y: fl + 0.5, kind: 'crush' });
+              if (r === 'hit') { const sn = new NetSnare(this, 1.5 + this.iq); w.add(sn); board(w).netOn = sn; w.text.pop('NETTED!', p.x, p.y + 1.1, 'danger', { size: 0.5, life: 1.2 }); w.emit('netted', { by: this.callsign }); }
+            }
           }
-        } else if (c.phase === 'recover') this.rig.aimAt(this.x + f * 1.5, hy - 0.5 + c.k * 0.5);
-        if (c.phase === 'recover' && c.k > 0.9) this.cool = 0.9;
+        } else if (ph === 'recover') { this.rig.aimAt(land.x, fl + 0.4); if (k > 0.6 && this.kit) this.kit.bagInHand = false; if (k > 0.9) this.cool = 1.2; }
+        break;
+      }
+      case 'netThrow': {
+        if (ph === 'windup') { this.rig.aimAt(p.x, p.y + 0.6 * S); const left = m.windup / c.speed - c.t; if (left <= 0.36 && !this.stabbed) { this.stabbed = true; this.rig.play('throw', true); } }
+        if (ph === 'recover' && k > 0.9) this.cool = 3.2;
+        break;
+      }
+      case 'gGrab': {
+        if (ph === 'windup') this.rig.aimAt(this.x + f * 0.4 * S, fl + 1.9 * S * Math.min(1, k * 1.4));
+        else if (ph === 'active') {
+          this.rig.aimAt(this.x + f * 1.1 * S, fl + 0.5 * S);
+          if (c.justEntered('active')) { w.sfx('swish_c', this.x, 0.8, 0.5); this.vx += f * 1.5; }
+          if (dx > -0.3 && dx < 1.05 * S && p.y < fl + 1.4 * S) {
+            const r = c.strike(w, { x: this.x + f * 0.5 * S, y: fl + 0.7 * S, kind: 'crush' });
+            if (r === 'hit') { this.grabT = 1.1; p.hooked = true; (p as unknown as { grabbedBy: Entity | null }).grabbedBy = this; callout(w, 'GRABBED!', p.x, p.y + 1, 'danger', 0.5); w.sfx('grunt', this.x, 0.9, 0.5); }
+          }
+        } else if (ph === 'recover') { this.rig.aimAt(this.x + f * 0.9 * S, fl + 0.9 * S); if (k > 0.9) this.cool = 1; }
+        break;
+      }
+      case 'lanternFlash': {
+        const lp = this.kit?.lanternAt();
+        if (!lp) { c.cancel(); break; }
+        if (ph === 'windup') { this.rig.aimAt(this.x + f * 0.8 * S, fl + 2 * S); if (Math.random() < dt * 20) w.fx.emit('glow', lp.x, lp.y, { n: 1, size: 0.6 + k * 2, color: '#ffe0a0', life: 0.15 }); }
+        if (c.justEntered('active')) {
+          w.fx.emit('glow', lp.x, lp.y, { n: 1, size: 10, life: 0.35, color: '#fff0c0' });
+          w.fx.light(lp.x, lp.y, '#ffe0a0', 14, 0.3);
+          w.sfx('k_glass', this.x, 0.9, 0.45);
+          const pl = p as unknown as { facing: number; combat?: { iframes: number } };
+          const looking = Math.sign(this.x - p.x) === Math.sign(pl.facing || 1) && dP < 12;
+          if (looking && !((pl.combat?.iframes ?? 0) > 0)) { w.add(new LampBlind(1.6)); callout(w, 'BLINDED', p.x, p.y + 1, 'danger', 0.45); w.emit('blinded', {}); }
+          else callout(w, 'LOOKED AWAY', p.x, p.y + 1, 'hint', 0.32);
+        }
+        if (ph === 'recover' && k > 0.9) this.cool = 2.5;
         break;
       }
       case 'heal': {
         const a = this.healAlly;
         if (!a || !a.alive || (a as unknown as { dead?: boolean }).dead) { c.cancel(); this.healAlly = null; break; }
-        if (c.phase === 'windup') { this.rig.aimAt(a.x, a.y); if (!this.busy) this.rig.play('heal'); if (Math.random() < dt * 10) w.fx.emit('sparkle', a.x + (Math.random() - 0.5) * 0.6, a.y + (Math.random() - 0.5) * 0.8, { n: 1, color: '#7dff9a', life: 0.5 }); }
+        if (ph === 'windup') { this.rig.aimAt(a.x, a.y); if (!this.busy) this.rig.play('heal'); if (Math.random() < dt * 10) w.fx.emit('sparkle', a.x + (Math.random() - 0.5) * 0.6, a.y + (Math.random() - 0.5) * 0.8, { n: 1, color: '#7dff9a', life: 0.5 }); }
         if (c.justEntered('active')) {
-          a.hp = Math.min(a.maxHp ?? a.hp ?? 1, (a.hp ?? 0) + Math.max(2, (a.maxHp ?? 4) * 0.4));
+          a.hp = Math.min(a.maxHp ?? a.hp ?? 1, (a.hp ?? 0) + Math.max(2, (a.maxHp ?? 4) * 0.35));
           if (a instanceof Human) a.bleedK = 0;
           w.text.pop('+', a.x, a.y + 0.9, 'heal', { size: 0.5 });
           w.fx.heal(a.x, a.y, 4);
@@ -1026,18 +1153,41 @@ export class Human implements Entity, Attacker {
 
   /** move toward (gx, gy) inside the box; walkers stay on the seabed */
   private duelSteer(dt: number, w: World, gx: number, gy: number, sprint: number, box: Arena) {
-    const maxV = this.def.speed * this.speedMul * sprint * (1 - this.legLoss * 0.35);
-    gx = clamp(gx, box.x0 + 0.6, box.x1 - 0.6);
-    if (this.def.walker) {
+    const maxV = this.def.speed * this.speedMul * sprint * (1 - this.legLoss * 0.35) * (this.choking ? 1.3 : 1);
+    const mg = 0.3 * this.S + 0.3;
+    gx = clamp(gx, box.x0 + mg, box.x1 - mg);
+    if (this.def.walker || this.S > 1) {
       const dx = gx - this.x;
-      const want = Math.abs(dx) > 0.4 ? Math.sign(dx) * maxV * Math.min(1, Math.abs(dx) / 1.5) : 0;
-      this.vx += (want - this.vx) * (1 - Math.exp(-dt * 3));
+      let want = Math.abs(dx) > 0.4 ? Math.sign(dx) * maxV * Math.min(1, Math.abs(dx) / 1.5) : 0;
+      // giants keep apart from each other
+      for (const m of w.near(this.x, this.y, 2 * this.S, 'enemy')) {
+        const o = m as unknown as { S?: number };
+        if (m === (this as Entity) || !o.S || o.S <= 1) continue;
+        const sx = this.x - m.x; if (Math.abs(sx) < 1.5 * this.S) want += Math.sign(sx || (this.x > m.x ? 1 : -1)) * maxV * 1.3 * (1 - Math.abs(sx) / (1.5 * this.S));
+      }
+      this.vx += (want - this.vx) * (1 - Math.exp(-dt * 2.5));
       this.x += this.vx * dt;
-      this.x = clamp(this.x, box.x0 + 0.6, box.x1 - 0.6);
+      this.x = clamp(this.x, box.x0 + mg, box.x1 - mg);
+      // rock walls: don't walk into them
+      if (w.terrain.sdf(this.x + Math.sign(this.vx) * 0.4 * this.S, this.floorY(w) + 0.8 * this.S) < 0.2) { this.x -= this.vx * dt; this.vx = 0; }
       const fl = this.floorY(w);
-      this.y += (fl + this.rig.pivotHeight - this.y) * (1 - Math.exp(-dt * 10));
+      this.y += (fl + this.rig.pivotHeight * this.S - this.y) * (1 - Math.exp(-dt * 10));
       this.vy = 0;
-      if (Math.abs(this.vx) > 0.3 && Math.random() < dt * 3) silt(w, this.x, fl + 0.05, 2);
+      // ground-shaking footfalls
+      this.stride += Math.abs(this.vx) * dt;
+      const strideLen = this.S > 1 ? 0.62 * this.S : 0.8;
+      if (this.stride > strideLen) {
+        this.stride = 0;
+        this.footL = !this.footL;
+        const ft = this.rig.boneWorld(this.footL ? 'footL' : 'footR', _v);
+        if (this.S > 1) {
+          const near = clamp(1 - Math.hypot(w.player.x - this.x, w.player.y - this.y) / 16, 0, 1);
+          w.game.addShake(0.06 + 0.16 * near);
+          silt(w, ft.x, fl + 0.05, 8);
+          w.fx.emit('dust', ft.x, fl + 0.2, { n: 3, spread: 0.4, speed: 1.2, size: 0.7, life: 1, color: '#a89070', alpha: 0.6 });
+          w.sfx('thud_heavy', ft.x, 0.25 + near * 0.35, 0.55 + Math.random() * 0.08);
+        } else silt(w, ft.x, fl + 0.05, 2);
+      }
       return;
     }
     gy = clamp(gy, box.floor + 0.7, box.top - 0.4);
@@ -1098,9 +1248,23 @@ export class Human implements Entity, Attacker {
   dispose(w: World) {
     this.tag?.removeFromParent();
     this.aimLine?.dispose();
+    this.kit?.dispose();
+    if (this.grabT > 0 && w.player.hooked) { w.player.hooked = false; }
     if (this.hose) this.hose.alive = false;
     this.rig.dispose();
     void w;
+  }
+}
+
+/** the Lamplighter's lantern flash: a warm white-out (look away or dodge through it) */
+class LampBlind implements Entity {
+  kind = 'blind'; team: Team = 'neutral'; x = 0; y = 0; vx = 0; vy = 0; r = 0; alive = true; t = 0;
+  constructor(public dur: number) {}
+  update(dt: number) {
+    this.t += dt;
+    const k = 1 - this.t / this.dur;
+    if (k <= 0) { this.alive = false; return; }
+    POST.uFlash.value.set(1, 0.94, 0.8, Math.max(POST.uFlash.value.w, Math.min(0.9, k * 1.3)));
   }
 }
 

@@ -21,6 +21,7 @@ import { AimLine, dangerZone, glint } from '../combat/telegraph';
 import { attackPlayer } from '../combat/resolve';
 import { callout } from '../combat/feel';
 import { Bolt } from '../combat/projectiles';
+import { GiantKit } from '../combat/giants';
 import { clamp, damp } from '../core/math';
 
 const _v = new THREE.Vector3();
@@ -32,14 +33,39 @@ abstract class DiverBoss extends BossBase {
   protected walk = 0;
   constructor(kind: string, arena: Arena, o: { name: string; title: string; hp: number; poise: number; r: number }, arch: 'scuba' | 'titan', weapon: 'none' | 'cannon', scale: number) {
     super(kind, arena, o);
-    this.rig = makeDiver(arch, arch === 'titan' ? 3 : 5, { weapon, scars: arch === 'scuba' ? ['eyepatch', 'scar'] : [] });
+    this.family = 'human';
+    this.rig = makeDiver(arch, arch === 'titan' ? 3 : 5, { weapon, scars: arch === 'scuba' ? ['eyepatch', 'scar', 'giant', 'hookHand'] : ['giant'] });
     this.rig.group.scale.setScalar(scale);
     this.rig.mode = 'stand';
+    for (const fin of this.rig.model.dive.fins) fin.visible = false;
     this.obj.add(this.rig.group);
     this.y = arena.floor + this.rig.pivotHeight * scale;
     this.scale = scale;
+    // the horror kit: glowing goggles, dead fish trophies, a lantern and an air hose to break
+    this.kit = new GiantKit(this as unknown as ConstructorParameters<typeof GiantKit>[0], { trophies: 5, bag: arch === 'titan', lantern: arch === 'scuba' ? 'belt' : null, hose: true });
   }
   protected scale: number;
+  kit: GiantKit;
+  /** GiantKit host: scale, dead */
+  get S() { return this.scale * (this.rig.arch === 'titan' ? 1.55 : 1); }
+  get dead() { return this.state === 'dead' || this.state === 'dying'; }
+  weakHit = false;
+  private lastBlowT = -99;
+  private choking = false;
+  /** a weak point broke: a long stagger; the hose leaves him choking, the lantern leaves him half-blind */
+  weakBroken(w: World, what: 'hose' | 'lantern') {
+    this.kit.breakFx(w, what);
+    if (this.state === 'fight') this.core.stagger(w, 2.4, 'broken');
+    if (what === 'hose') { this.choking = true; this.core.speed *= 1.15; }
+    else this.vuln = 1.25;
+    w.emit('weakPoint', { kind: this.bossId, what, x: this.x, y: this.y });
+  }
+  hit(dmg: number, dirX: number, dirY: number, w: World, src: import('../game/types').Entity | null, kind?: import('../game/types').DamageKind): boolean {
+    // one swing lands once however many hurt boxes it crosses (weak points add on)
+    if ((kind === 'sword' || kind === 'crush') && !this.weakHit) { if (w.time - this.lastBlowT < 0.12) return true; this.lastBlowT = w.time; }
+    this.weakHit = false;
+    return super.hit(dmg, dirX, dirY, w, src, kind);
+  }
   head() { const h = this.rig.headWorld(_v); return { x: h.x, y: h.y + 0.5 }; }
   protected walkTo(dt: number, tx: number, speed: number) {
     const a = this.arena;
@@ -63,6 +89,8 @@ abstract class DiverBoss extends BossBase {
     this.rig.group.rotation.z = this.lean;
     this.rig.group.position.set(this.x, this.y, 0);
     if (Math.abs(this.vx) > 0.4 && Math.random() < dt * 4) w.fx.silt(this.x, this.arena.floor + 0.05, 3);
+    this.kit.update(dt, w);
+    if (this.choking && this.state === 'fight') { this.hp -= this.maxHp * 0.012 * dt; if (Math.random() < dt * 6) w.fx.emit('bubble', this.x, this.y + this.S * 1.4, { n: 1, vy: 2 }); }
   }
   protected staggerPose(dt: number) { this.lean = damp(this.lean, 0.25 * this.facing + Math.sin(this.core.t * 16) * 0.05, 8, dt); this.vx = damp(this.vx, 0, 4, dt); this.aimPt = { x: this.x + this.facing, y: this.y - 1 }; }
   protected introPose(dt: number, w: World, k: number) { this.lean = damp(this.lean, k > 0.4 && k < 0.8 ? -0.2 * this.facing : 0, 5, dt); this.aimPt = { x: this.x + this.facing * 2, y: this.y + 3 * Math.min(1, k * 2) }; if (k > 0.35 && k < 0.4) this.rig.play('taunt', true); void w; }
@@ -71,10 +99,11 @@ abstract class DiverBoss extends BossBase {
   protected deadPose(dt: number, w: World) {
     if (!this.rig.dead) this.rig.die(0, 0, this.facing * 2, 1);
     this.rig.update(dt, { ground: () => this.arena.floor });
+    this.kit.update(dt, w);
     if (this.st > 6) this.alive = false;
     void w;
   }
-  dispose() { this.rig.dispose(); }
+  dispose(w?: World) { super.dispose(w); this.kit.dispose(); this.rig.dispose(); }
 }
 
 // =========================================================================================== CAPTAIN GAFF
@@ -106,6 +135,8 @@ const GA: Record<string, MoveDef> = {
   chainThrow: { id: 'chainThrow', windup: 0.85, active: 1.3, recover: 0.5, dmg: 1.5, unblockable: true, kind: 'crush', knock: 6, tellAt: 0.4 },
   spin: { id: 'spin', windup: 0.85, active: 1.9, recover: 1.4, dmg: 1.5, unblockable: true, kind: 'crush', knock: 8, tellAt: 0.4, hyper: true },
 };
+/** Gaff is a giant now: his anchor and reach scale with him (x the old 1.45 rig scale) */
+const G = 2.25 / 1.45;
 export class CaptainGaff extends DiverBoss {
   cycles = [['swing', 'swing', 'overhead', 'shove', 'chainThrow'], ['swing', 'chainThrow', 'overhead', 'swing', 'shove', 'chainThrow'], ['spin', 'swing', 'overhead', 'chainThrow', 'spin', 'swing']];
   moves = GA;
@@ -115,37 +146,38 @@ export class CaptainGaff extends DiverBoss {
   private throwTo = { x: 0, y: 0 };
   private hitThisPass = false;
   constructor(arena: Arena, w: World) {
-    super('captainGaff', arena, { name: 'CAPTAIN GAFF', title: 'and his Anchor', hp: 100, poise: 130, r: 1.0 }, 'scuba', 'none', 1.45);
+    super('captainGaff', arena, { name: 'CAPTAIN GAFF', title: 'and his Anchor', hp: 110, poise: 150, r: 1.5 }, 'scuba', 'none', 2.25);
+    this.anchor.scale.setScalar(G);
     w.scene.add(this.anchor);
-    const lg = new THREE.TorusGeometry(0.07, 0.022, 4, 6), lm = rust();
+    const lg = new THREE.TorusGeometry(0.07 * G, 0.022 * G, 4, 6), lm = rust();
     for (let i = 0; i < 12; i++) { const l = new THREE.Mesh(lg, lm); l.castShadow = true; this.links.push(l); w.scene.add(l); }
-    this.anc.x = this.x - 1; this.anc.y = this.arena.floor + 0.4;
+    this.anc.x = this.x - 1; this.anc.y = this.arena.floor + 0.4 * G;
   }
   private hand() { return this.rig.boneWorld('handR', _v).clone(); }
-  protected tellPoint() { return { x: this.anc.x, y: this.anc.y - 1 }; }
+  protected tellPoint() { return { x: this.anc.x, y: this.anc.y - 1 * G }; }
   protected want(id: string, w: World) {
     const dx = Math.abs(w.player.x - this.x);
-    if (id === 'chainThrow') return dx > 2.5 && dx < 10;
-    if (id === 'spin') return dx < 6;
-    if (id === 'shove') return dx < 1.8;
-    return dx < 3.2;
+    if (id === 'chainThrow') return dx > 2.5 * G && dx < 13;
+    if (id === 'spin') return dx < 6 * G;
+    if (id === 'shove') return dx < 1.8 * G;
+    return dx < 3.2 * G;
   }
   protected approach(dt: number, w: World, next: string) {
     const p = w.player, side = Math.sign(this.x - p.x) || 1;
-    const want = next === 'chainThrow' ? p.x + side * 5 : next === 'shove' ? p.x + side * 1.2 : p.x + side * 2.4;
-    this.walkTo(dt, want, 1.6 * this.core.speed);
+    const want = next === 'chainThrow' ? p.x + side * 4.5 * G : next === 'shove' ? p.x + side * 1.2 * G : p.x + side * 2.4 * G;
+    this.walkTo(dt, want, 1.4 * this.core.speed);
     this.lean = damp(this.lean, 0, 5, dt);
     this.aimPt = null;
     // the anchor drags along the seabed behind him
     const h = this.hand();
-    this.anc.x = damp(this.anc.x, h.x - this.facing * 0.9, 4, dt); this.anc.y = damp(this.anc.y, this.arena.floor + 1.7, 4, dt); this.anc.ang = damp(this.anc.ang, -this.facing * 0.3, 4, dt);
+    this.anc.x = damp(this.anc.x, h.x - this.facing * 0.9 * G, 4, dt); this.anc.y = damp(this.anc.y, this.arena.floor + 1.7 * G, 4, dt); this.anc.ang = damp(this.anc.ang, -this.facing * 0.3, 4, dt);
   }
   protected started(w: World, m: MoveDef) {
     this.hitThisPass = false;
     if (m.id === 'chainThrow') { const p = w.player; this.throwTo = { x: p.x, y: p.y }; w.sfx('chain', this.x, 0.9, 0.8); }
-    if (m.id === 'spin') { w.sfx('chain', this.x, 1, 0.6); dangerZone(w, this.x, this.y, 2.9, m.windup / this.core.speed + m.active, true, () => ({ x: this.x, y: this.y })); }
+    if (m.id === 'spin') { w.sfx('chain', this.x, 1, 0.6); dangerZone(w, this.x, this.y, 2.9 * G, m.windup / this.core.speed + m.active, true, () => ({ x: this.x, y: this.y })); }
     if (m.id === 'overhead' || m.id === 'swing') w.sfx('grunt', this.x, 0.7, 0.7);
-    if (Math.random() < 0.3) callout(w, ['HAUL AWAY!', 'TO THE DEPTHS!', 'YOU\'RE CHUM!'][Math.floor(Math.random() * 3)], this.x, this.y + 2.4, 'danger', 0.34);
+    if (Math.random() < 0.3) callout(w, ['HAUL AWAY!', 'TO THE DEPTHS!', 'YOU\'RE CHUM!'][Math.floor(Math.random() * 3)], this.x, this.y + 2.4 * G, 'danger', 0.4);
   }
   protected run(dt: number, w: World) {
     const c = this.core, m = c.move!, ph = c.phase, k = c.k, f = this.facing;
@@ -158,66 +190,66 @@ export class CaptainGaff extends DiverBoss {
         // arc round the hand from behind-high to front-low
         const a0 = Math.PI * 0.85, a1 = -0.35;
         const ang = ph === 'windup' ? Math.PI * 0.55 + (a0 - Math.PI * 0.55) * Math.min(1, k * 1.4) : ph === 'active' ? a0 + (a1 - a0) * k : a1;
-        tx = h.x + Math.cos(ang) * 2.2 * f; ty = h.y + Math.sin(ang) * 2.2; rate = ph === 'active' ? 40 : 8;
+        tx = h.x + Math.cos(ang) * 2.2 * G * f; ty = h.y + Math.sin(ang) * 2.2 * G; rate = ph === 'active' ? 40 : 8;
         this.lean = ph === 'windup' ? 0.2 * f : ph === 'active' ? -0.2 * f : 0;
-        if (ph === 'active') { if (c.justEntered('active')) { w.sfx('swish_c', this.x, 1, 0.5); this.vx = f * 2; } this.hitCircle(w, this.anc.x, this.anc.y - 1, 1.0); }
-        this.aimPt = { x: this.x + Math.cos(ang) * 2 * f, y: this.y + Math.sin(ang) * 2 };
+        if (ph === 'active') { if (c.justEntered('active')) { w.sfx('swish_c', this.x, 1, 0.5); this.vx = f * 2; } this.hitCircle(w, this.anc.x, this.anc.y - 1 * G, 1.0 * G); }
+        this.aimPt = { x: this.x + Math.cos(ang) * 2 * G * f, y: this.y + Math.sin(ang) * 2 * G };
         break;
       }
       case 'overhead': {
-        if (ph === 'windup') { tx = h.x + f * 0.3; ty = h.y + 2.5 * Math.min(1, k * 1.3); this.lean = 0.25 * f * k; this.aimPt = { x: this.x + f * 0.4, y: this.y + 3 }; }
-        else if (ph === 'active') { tx = this.x + f * 2.7; ty = fl + 1.7; rate = 45; this.lean = -0.3 * f; this.aimPt = { x: this.x + f * 2.5, y: fl };
-          if (k > 0.5 && c.t - dt < m.active * 0.5) { w.game.addShake(0.45); w.fx.silt(this.x + f * 2.7, fl + 0.1, 22); w.fx.shockwave(this.x + f * 2.7, fl + 0.2, 1.5, '#ffd0a0'); w.sfx('thud_heavy', this.x, 1, 0.5); w.sfx('rock_hit', this.x, 0.8, 0.5); }
-          this.hitCircle(w, this.anc.x, Math.max(fl + 0.5, this.anc.y - 1.2), 1.1); }
-        else { tx = this.x + f * 2.7; ty = fl + 1.6; this.lean = -0.3 * f * (1 - k); this.aimPt = { x: this.x + f * 2.5, y: fl }; }
+        if (ph === 'windup') { tx = h.x + f * 0.3 * G; ty = h.y + 2.5 * G * Math.min(1, k * 1.3); this.lean = 0.2 * f * k; this.aimPt = { x: this.x + f * 0.4 * G, y: this.y + 3 * G }; }
+        else if (ph === 'active') { tx = this.x + f * 2.7 * G; ty = fl + 1.7 * G; rate = 45; this.lean = -0.25 * f; this.aimPt = { x: this.x + f * 2.5 * G, y: fl };
+          if (k > 0.5 && c.t - dt < m.active * 0.5) { w.game.addShake(0.5); w.fx.silt(this.x + f * 2.7 * G, fl + 0.1, 26); w.fx.shockwave(this.x + f * 2.7 * G, fl + 0.2, 2.2, '#ffd0a0'); w.sfx('thud_heavy', this.x, 1, 0.5); w.sfx('rock_hit', this.x, 0.8, 0.5); }
+          this.hitCircle(w, this.anc.x, Math.max(fl + 0.5, this.anc.y - 1.2 * G), 1.1 * G); }
+        else { tx = this.x + f * 2.7 * G; ty = fl + 1.6 * G; this.lean = -0.25 * f * (1 - k); this.aimPt = { x: this.x + f * 2.5 * G, y: fl }; }
         break;
       }
       case 'shove': {
-        tx = h.x - f * 0.8; ty = fl + 1.7;
-        this.aimPt = { x: this.x + f * 2, y: this.y + (ph === 'windup' ? 0.6 : 0) };
+        tx = h.x - f * 0.8 * G; ty = fl + 1.7 * G;
+        this.aimPt = { x: this.x + f * 2 * G, y: this.y + (ph === 'windup' ? 0.6 * G : 0) };
         this.lean = ph === 'windup' ? 0.15 * f : ph === 'active' ? -0.25 * f : 0;
-        if (ph === 'active') { if (c.justEntered('active')) this.vx = f * 4; const pl = w.player; if (!c.landed && (pl.x - this.x) * f > 0 && (pl.x - this.x) * f < 1.8 && Math.abs(pl.y - this.y) < 1.6) c.strike(w, { x: this.x, y: this.y }); }
+        if (ph === 'active') { if (c.justEntered('active')) this.vx = f * 4; const pl = w.player; if (!c.landed && (pl.x - this.x) * f > 0 && (pl.x - this.x) * f < 1.8 * G && Math.abs(pl.y - this.y) < 1.6 * G) c.strike(w, { x: this.x, y: this.y }); }
         break;
       }
       case 'chainThrow': {
         if (ph === 'windup') {
           // whirl overhead
           const ang = c.t * 12;
-          tx = h.x + Math.cos(ang) * 1.6; ty = h.y + 1.6 + Math.sin(ang) * 0.5; rate = 30;
-          this.aimPt = { x: this.x, y: this.y + 3 };
+          tx = h.x + Math.cos(ang) * 1.6 * G; ty = h.y + 1.6 * G + Math.sin(ang) * 0.5 * G; rate = 30;
+          this.aimPt = { x: this.x, y: this.y + 3 * G };
           if (Math.floor(c.t * 4) !== Math.floor((c.t - dt) * 4)) w.sfx('swish_a', this.x, 0.5, 0.7);
           if (k < 0.8) { const p = w.player; this.throwTo = { x: p.x, y: p.y }; }
         } else if (ph === 'active') {
           const out = k < 0.45 ? k / 0.45 : 1 - (k - 0.45) / 0.55;
           if (k >= 0.45 && !this.hitThisPass) { this.hitThisPass = true; c.landed = false; }
-          const dx = this.throwTo.x - h.x, dy = this.throwTo.y - h.y, l = Math.hypot(dx, dy) || 1, L = Math.min(9, l + 1);
-          tx = h.x + (dx / l) * L * out; ty = h.y + (dy / l) * L * out + 1; rate = 60;
+          const dx = this.throwTo.x - h.x, dy = this.throwTo.y - h.y, l = Math.hypot(dx, dy) || 1, L = Math.min(12, l + 1);
+          tx = h.x + (dx / l) * L * out; ty = h.y + (dy / l) * L * out + 1 * G; rate = 60;
           this.aimPt = { x: this.throwTo.x, y: this.throwTo.y };
           if (c.justEntered('active')) { w.sfx('chain', this.x, 1, 1.2); w.sfx('swish_c', this.x, 0.8, 0.8); }
-          this.hitCircle(w, this.anc.x, this.anc.y - 1, 0.9);
-          if (Math.random() < dt * 20) w.fx.emit('bubbleS', this.anc.x, this.anc.y - 1, { n: 1, spread: 0.2 });
+          this.hitCircle(w, this.anc.x, this.anc.y - 1 * G, 0.9 * G);
+          if (Math.random() < dt * 20) w.fx.emit('bubbleS', this.anc.x, this.anc.y - 1 * G, { n: 1, spread: 0.2 });
         }
         break;
       }
       case 'spin': {
-        if (ph === 'windup') { const ang = c.t * 6; tx = h.x + Math.cos(ang) * 1.2; ty = h.y + 0.8; rate = 20; this.lean = 0; }
+        if (ph === 'windup') { const ang = c.t * 6; tx = h.x + Math.cos(ang) * 1.2 * G; ty = h.y + 0.8 * G; rate = 20; this.lean = 0; }
         else if (ph === 'active') {
           const ang = c.t * 7.5 * f;
-          tx = this.x + Math.cos(ang) * 2.6; ty = this.y + 0.3 + Math.sin(ang) * 2.0; rate = 60;
+          tx = this.x + Math.cos(ang) * 2.6 * G; ty = this.y + 0.3 * G + Math.sin(ang) * 2.0 * G; rate = 60;
           this.rig.facing = Math.cos(ang) >= 0 ? 1 : -1;
           this.aimPt = { x: tx, y: ty };
           if (Math.floor(c.t * 2.4) !== Math.floor((c.t - dt) * 2.4)) { w.sfx('swish_c', this.x, 0.8, 0.6); c.landed = false; }
-          this.hitCircle(w, this.anc.x, this.anc.y - 1, 1.0);
+          this.hitCircle(w, this.anc.x, this.anc.y - 1 * G, 1.0 * G);
         } else {
           // dizzy: the punish window
-          tx = this.x + f * 1.5; ty = this.arena.floor + 1.6; this.lean = Math.sin(c.t * 9) * 0.12;
-          if (c.justEntered('recover')) callout(w, 'DIZZY', this.x, this.y + 2.4, 'gold', 0.42);
+          tx = this.x + f * 1.5 * G; ty = this.arena.floor + 1.6 * G; this.lean = Math.sin(c.t * 9) * 0.1;
+          if (c.justEntered('recover')) callout(w, 'DIZZY', this.x, this.y + 2.4 * G, 'gold', 0.5);
         }
         break;
       }
     }
     this.anc.x = damp(this.anc.x, tx, rate, dt); this.anc.y = damp(this.anc.y, ty, rate, dt);
-    this.anc.y = Math.max(this.anc.y, fl + 1.65);
+    this.anc.y = Math.max(this.anc.y, fl + 1.65 * G);
   }
   protected place(dt: number, w: World) {
     super.place(dt, w);
@@ -229,7 +261,7 @@ export class CaptainGaff extends DiverBoss {
     this.anchor.rotation.set(0, 0.5, this.anc.ang);
     for (let i = 0; i < this.links.length; i++) {
       const t = (i + 0.5) / this.links.length;
-      const sag = Math.sin(t * Math.PI) * 0.25;
+      const sag = Math.sin(t * Math.PI) * 0.25 * G;
       this.links[i].position.set(h.x + (this.anc.x - h.x) * t, h.y + (this.anc.y - h.y) * t - sag, 0.3);
       this.links[i].rotation.set(i % 2 ? Math.PI / 2 : 0, 0, Math.atan2(this.anc.y - h.y, this.anc.x - h.x));
     }
@@ -237,7 +269,7 @@ export class CaptainGaff extends DiverBoss {
     this.anchor.visible = vis; for (const l of this.links) l.visible = vis;
   }
   protected idlePose(dt: number, w: World) { this.approach(dt, w, 'swing'); this.vx = 0; }
-  dispose() { super.dispose(); this.anchor.removeFromParent(); for (const l of this.links) l.removeFromParent(); }
+  dispose(w?: World) { super.dispose(w); this.anchor.removeFromParent(); for (const l of this.links) l.removeFromParent(); }
 }
 
 // =========================================================================================== BRASS TITAN
@@ -282,6 +314,8 @@ class IceSpikes implements Entity {
     if (this.t > 1.8) this.alive = false;
   }
 }
+/** the Titan grew too (x the old 1.35 rig scale) */
+const T = 1.75 / 1.35;
 export class BrassTitan extends DiverBoss {
   cycles = [['sweep', 'cannon', 'stomp', 'sweep', 'iceSpikes'], ['cannon', 'sweep', 'iceSpikes', 'stomp', 'cannon'], ['charge', 'iceSpikes', 'cannon', 'sweep', 'iceSpikes', 'stomp']];
   moves = BT;
@@ -291,21 +325,21 @@ export class BrassTitan extends DiverBoss {
   private spikeAt: number[] = [];
   private volley = false;
   constructor(arena: Arena, w: World) {
-    super('brassTitan', arena, { name: 'THE BRASS TITAN', title: 'Iron Lung of the Floe', hp: 120, poise: 160, r: 1.5 }, 'titan', 'cannon', 1.35);
+    super('brassTitan', arena, { name: 'THE BRASS TITAN', title: 'Iron Lung of the Floe', hp: 130, poise: 180, r: 1.9 }, 'titan', 'cannon', 1.75);
     this.aimLine = new AimLine(w.scene);
   }
   protected tellPoint() { const m = this.rig.muzzleWorld(_v); return { x: m.x, y: m.y }; }
   protected want(id: string, w: World) {
     const dx = Math.abs(w.player.x - this.x);
-    if (id === 'cannon') return dx > 3;
+    if (id === 'cannon') return dx > 3 * T;
     if (id === 'iceSpikes') return true;
-    if (id === 'charge') return dx > 4;
-    if (id === 'stomp') return dx < 2.4;
-    return dx < 3;
+    if (id === 'charge') return dx > 4 * T;
+    if (id === 'stomp') return dx < 2.4 * T;
+    return dx < 3 * T;
   }
   protected approach(dt: number, w: World, next: string) {
     const p = w.player, side = Math.sign(this.x - p.x) || 1;
-    const want = next === 'cannon' || next === 'charge' ? p.x + side * 6 : p.x + side * 2;
+    const want = next === 'cannon' || next === 'charge' ? p.x + side * 6 * T : p.x + side * 2 * T;
     this.walkTo(dt, want, 1.2 * this.core.speed);
     this.lean = damp(this.lean, 0, 5, dt);
     this.aimPt = null;
@@ -331,22 +365,22 @@ export class BrassTitan extends DiverBoss {
     if (!m.id.startsWith('cannon')) this.aimLine?.hide();
     switch (m.id) {
       case 'sweep': {
-        const hy = this.y + 0.3;
-        if (ph === 'windup') { this.aimPt = { x: this.x - f * 1.5, y: hy + 2.6 * Math.min(1, k * 1.4) }; this.lean = 0.25 * f * k; }
+        const hy = this.y + 0.3 * T;
+        if (ph === 'windup') { this.aimPt = { x: this.x - f * 1.5 * T, y: hy + 2.6 * T * Math.min(1, k * 1.4) }; this.lean = 0.22 * f * k; }
         else if (ph === 'active') {
-          this.aimPt = { x: this.x + f * 3 * k, y: hy + 2.2 - 3.4 * k }; this.lean = -0.25 * f;
+          this.aimPt = { x: this.x + f * 3 * T * k, y: hy + (2.2 - 3.4 * k) * T }; this.lean = -0.22 * f;
           if (c.justEntered('active')) { w.sfx('swish_c', this.x, 1, 0.45); this.vx = f * 1.5; }
-          if ((p.x - this.x) * f > -0.5 && (p.x - this.x) * f < 3 && Math.abs(p.y - hy) < 2) c.strike(w, { x: this.x, y: hy });
-        } else { this.aimPt = { x: this.x + f * 2.5, y: fl + 0.5 }; this.lean = -0.25 * f * (1 - k); }
+          if ((p.x - this.x) * f > -0.5 && (p.x - this.x) * f < 3 * T && Math.abs(p.y - hy) < 2 * T) c.strike(w, { x: this.x, y: hy });
+        } else { this.aimPt = { x: this.x + f * 2.5 * T, y: fl + 0.5 }; this.lean = -0.22 * f * (1 - k); }
         break;
       }
       case 'stomp': {
-        if (ph === 'windup') { this.lean = 0.12 * f * k; this.aimPt = { x: this.x + f, y: this.y + 1.5 }; }
+        if (ph === 'windup') { this.lean = 0.12 * f * k; this.aimPt = { x: this.x + f * T, y: this.y + 1.5 * T }; }
         if (c.justEntered('active')) {
           w.game.addShake(0.4); w.sfx('thud_heavy', this.x, 1, 0.45); w.fx.silt(this.x, fl + 0.1, 20); w.fx.shockwave(this.x, fl + 0.2, 1.8, '#c8f0ff');
           w.fx.emit('frost', this.x, fl + 0.3, { n: 14, speed: 4, vy: 2 });
         }
-        if (ph === 'active' && Math.abs(p.x - this.x) < 2.4 && p.y < fl + 1.8) c.strike(w, { x: this.x, y: fl + 0.3 });
+        if (ph === 'active' && Math.abs(p.x - this.x) < 2.4 * T && p.y < fl + 1.8 * T) c.strike(w, { x: this.x, y: fl + 0.3 });
         break;
       }
       case 'cannon': case 'cannon2': case 'cannon3': {
@@ -378,7 +412,7 @@ export class BrassTitan extends DiverBoss {
           this.vx = this.chargeDir * 7.5; this.x += this.vx * dt; this.lean = -0.35 * this.chargeDir;
           this.rig.facing = this.chargeDir as 1 | -1;
           if (Math.random() < dt * 20) w.fx.silt(this.x - this.chargeDir, fl + 0.1, 3);
-          const r = this.hitCircle(w, this.x + this.chargeDir * 0.8, this.y, 1.3, { knock: 10 });
+          const r = this.hitCircle(w, this.x + this.chargeDir * 0.8 * T, this.y, 1.3 * T, { knock: 10 });
           if (r === 'parried') { c.cancel(); this.vx = 0; }
           if (this.x < this.arena.x0 + 1.3 || this.x > this.arena.x1 - 1.3) {
             this.x = clamp(this.x, this.arena.x0 + 1.3, this.arena.x1 - 1.3); this.vx = 0;
@@ -393,5 +427,5 @@ export class BrassTitan extends DiverBoss {
   }
   protected onPhase(_w: World, n: number) { if (n === 3) { this.core.speed = 1.18; this.core.dmgMul = 1.2; } }
   protected idlePose(dt: number) { this.vx = damp(this.vx, 0, 4, dt); this.aimPt = { x: this.x + this.facing * 2, y: this.y }; }
-  dispose() { super.dispose(); this.aimLine?.dispose(); }
+  dispose(w?: World) { super.dispose(w); this.aimLine?.dispose(); }
 }

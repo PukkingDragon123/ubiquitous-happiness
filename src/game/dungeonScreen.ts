@@ -51,6 +51,8 @@ import { ITEMS, installItemSystem, skillLevels, abilityLevels, findSpot, fits, g
 import { META, saveMeta, addMaterials, spendMaterials, stashItem, takeFromStash, returnToStash, type RunConfig, type RunResult, type RunTally } from '../meta/meta';
 import { AREAS as AREA_LIST, masteryScalars, MAX_MASTERY } from '../hideout/mastery';
 import { stationsBuilt } from '../hideout/blueprints';
+import { homeStations } from '../hideout/rebuild';
+import { homeGoals, type HomeGoal } from '../dungeon/homeGoals';
 import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, type BossEntity, type EnemyKind, type PlayerCombatHud, type Arena } from '../combat';
 import { roomBudget } from '../combat/index';
 import { board } from '../waves/board';
@@ -66,13 +68,13 @@ import { DungeonWorld } from '../dungeon/world';
 import { Pickup, type PickKind } from '../dungeon/pickups';
 import { PufferBomb } from '../dungeon/bomb';
 import { packAdd, packCells, packTotals, packLoose, packFits } from '../dungeon/pack';
-import { rollClearReward, rollGear, rollShop, rollMaterial, type Reward } from '../dungeon/rewards';
-import { stripMap } from '../dungeon/minimap';
+import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, type Reward } from '../dungeon/rewards';
+import { journeyStrip, legOf, type JourneyLeg } from '../dungeon/minimap';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
-import { Pedestal, ShopStock, ChestProp, type ShopStand } from '../dungeon/contents';
+import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 
 // ------------------------------------------------------------------ save / resume
-export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number }
+export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number; chests?: number; far?: number }
 interface FloorLoot { kind: PickKind; id?: string; x: number; y: number; n: number; level: number }
 export interface DungeonSave {
   v: 4;
@@ -85,6 +87,8 @@ export interface DungeonSave {
   areas: string[]; areaIdx: number;
   /** floors planned at the start (past them: the endless deep); the run's deepest metre */
   planned: number; maxDepth: number;
+  /** the floors already travelled (the strip map's journey) */
+  journey?: JourneyLeg[];
 }
 /** the run in progress lives in META.activeRun (v 4) like the v2 run's did, so flow's RESUME finds it */
 export function loadDungeonSave(): DungeonSave | null {
@@ -108,12 +112,16 @@ export interface DungeonResult extends RunResult {
   mailed: string[];
   /** ids brought home by a victory */
   broughtHome: string[];
+  /** metres from home at the end (the journey's length) */
+  far: number;
+  /** what the run's materials (mailed + brought home) did for the house: counts before -> after per piece */
+  home: HomeGoal[];
 }
 
 export interface DungeonEnter { cfg?: RunConfig; resume?: boolean | DungeonSave }
 
 type Phase = 'play' | 'dead' | 'descend' | 'done';
-interface Fight { arena: ArenaPlan; pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[]; ents: Entity[]; clearT: number; boss: BossEntity | null; bossDone: boolean; bossDeadT: number }
+interface Fight { arena: ArenaPlan; pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[]; ents: Entity[]; clearT: number; boss: BossEntity | null; bossDone: boolean; bossDeadT: number; t: number }
 
 const AREA_NAME = (id: string) => (isHadal(id) ? biomeDef(id).name : AREA_LIST.find((a) => a.id === id)?.name ?? biomeDef(id).name);
 const FAR = 1e9;
@@ -160,7 +168,8 @@ export class DungeonScreen implements Screen {
   private dlg!: Dialogue;
   private props: { update(dt: number): void; dispose(): void }[] = [];
   private pedestals = new Map<number, Pedestal>();
-  private chests = new Map<number, ChestProp>();
+  /** the route's chests (plan id -> entity) and any champion drops still shut */
+  private chests = new Map<number, Chest>();
   private shop: ShopStock | null = null;
   private shopPoi: PoiPlan | null = null;
   /** floors planned by the table (the run is won by surfacing after the last of them, or any rope below) */
@@ -172,6 +181,11 @@ export class DungeonScreen implements Screen {
   private lamp: LampHandle | null = null;
   private desc: { stage: 'sink' | 'dark' | 'arrive' | 'surface'; t: number; from: number; to: number } | null = null;
   private recordBefore = 0;
+  /** the journey so far: every floor left behind (metres from home, seabed, landmarks) */
+  journey: JourneyLeg[] = [];
+  /** metres from home right now (floor 1 starts at the front door) */
+  farNow() { return this.plan ? this.plan.far0 + this.player.x : 0; }
+  private vistaK = 0;
   private sky!: THREE.Object3D;
   private groups = new Map<number, Entity[]>();
   private camLook = new THREE.Vector3();
@@ -199,8 +213,9 @@ export class DungeonScreen implements Screen {
   private musicKey = '';
   private hintT = 0;
   private hintText = '';
+  private hintKey = '';
   /** a line of help at the bottom of the screen for a few seconds */
-  hint(text: string, life = 4) { this.hintText = text; this.hintT = life; }
+  hint(text: string, life = 4, key = '') { this.hintText = text; this.hintT = life; this.hintKey = key; }
   /** dev: teleport the blobfish (console: dungeon.tp(x, y?)) */
   tp(x: number, y?: number) { const p = this.player, yy = y ?? this.level!.terrain.floorUnder(x, this.plan.top) + 2.5; p.sb.place(x, yy); p.x = x; p.y = yy; this.camLook.copy(this.camTarget(1)); }
 
@@ -224,7 +239,8 @@ export class DungeonScreen implements Screen {
     const q = new URLSearchParams(location.search);
     this.dev = !d.cfg && !d.resume ? q : null;
     this.god = q.get('god') === '1';
-    this.perks = new Set(stationsBuilt());
+    // perks from home: the v3 stations and the v4 rebuilt pieces (the bed = +1 heart)
+    this.perks = new Set([...stationsBuilt(), ...homeStations()]);
     this.setupWorld();
     const save = d.resume === true ? loadDungeonSave() : d.resume || null;
     if (save) this.restore(save);
@@ -292,7 +308,8 @@ export class DungeonScreen implements Screen {
     this.run.hp = this.run.stats().maxHp;
     if (dev?.get('rich') === '1') for (const id of ['copperOre', 'driftwood', 'coralShard', 'kelp', 'scrap', 'seashell', 'ironOre', 'pearl']) for (let k = 0; k < 4; k++) packAdd(this.run, id);
     if (!dev) { META.runs++; saveMeta(); }
-    this.startFloor(this.floorIdx, null, this.floorIdx === 0 ? 0 : 70 + this.floorIdx * 78);
+    this.journey = [];
+    this.startFloor(this.floorIdx, null, this.floorIdx === 0 ? 0 : 70 + this.floorIdx * 78, this.floorIdx * 360);
   }
 
   /**
@@ -355,7 +372,8 @@ export class DungeonScreen implements Screen {
     this.scal = masteryScalars(this.cfg.mastery);
     this.installStats();
     this.run.hp = s.hp;
-    this.startFloor(s.floorIdx, s, s.plan.depth0);
+    this.journey = (s.journey ?? []).map((l) => ({ ...l, seabed: [...l.seabed], marks: [...l.marks] }));
+    this.startFloor(s.floorIdx, s, s.plan.depth0, s.plan.far0 ?? 0);
     this.player.hp = Math.max(1, Math.min(this.player.maxHp, s.hp));
   }
 
@@ -401,14 +419,15 @@ export class DungeonScreen implements Screen {
    * build floor i and drop the blobfish in. depth0 = the real depth (m) of world y = 0 on this floor (0 on the first;
    * below, chosen so the entry shaft continues the descent from the floor above without a jump in the counter)
    */
-  private startFloor(i: number, save: DungeonSave | null, depth0 = 0) {
+  private startFloor(i: number, save: DungeonSave | null, depth0 = 0, far0 = 0) {
     this.teardownLevel();
     this.floorIdx = i;
     const area = this.floors[i];
     const seed = (this.seed ^ Math.imul(i + 1, 0x2c1b3c6d)) >>> 0;
     // a rope to the surface hangs past the boss on the last planned floor, then every second floor of the deep
     const rope = i === this.planned - 1 || (i >= this.planned && (i - this.planned) % 2 === 1);
-    this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, depth0, rope });
+    this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, depth0, rope, far0 });
+    this.plan.far0 ??= far0; this.plan.chests ??= []; this.plan.signs ??= []; this.plan.vistas ??= [];
     const plan = this.plan;
     if (this.dev?.get('reveal') === '1') plan.explored.fill(1);
     const lvl = this.level = new LevelBuild(this.world, plan, { light: this.game.lowQuality && this.dev?.get('full') !== '1' });
@@ -430,6 +449,7 @@ export class DungeonScreen implements Screen {
     for (const a of plan.arenas) if (a.cleared) for (const g of lvl.gates.get(a.id) ?? []) g.drop(true);
     if (plan.arenas.find((q) => q.kind === 'boss')?.cleared) lvl.openExit();
     this.buildPois();
+    this.spawnChests();
     // the blobfish arrives: dives in from the surface / drops down the entry shaft (or back at the checkpoint)
     let x = save ? save.checkX : plan.startX;
     const at = this.dev?.get('at');
@@ -460,9 +480,11 @@ export class DungeonScreen implements Screen {
     this.after(0.6, () => {
       const deeper = i >= this.planned;
       const tx = this.camLook.x, ty = this.camLook.y + 1.6;
-      // the depth itself lives on the gauge plaque only (one number on screen); the stamp names the place
+      // a stage of the voyage: the place, then how far from home and how deep (the gauge keeps the live number)
+      const farM = Math.round(plan.far0 / 10) * 10;
       this.t3d.add(AREA_NAME(area).toUpperCase(), tx, ty, 2.2, deeper ? T3D.danger : T3D.title, { size: 0.5, life: 4, enter: 'slam', stagger: 0.04, onLand: (k) => { if (k % 4 === 0) audio.play('k_tick1', { vol: 0.25, dry: true }); } });
-      this.t3d.add(deeper ? `THE DEEP · ${ZONE_NAME[zoneOf(dTop)]}` : `FLOOR ${i + 1} OF ${this.planned} · ${ZONE_NAME[zoneOf(dTop)]}`, tx, ty - 0.7, 2.2, T3D.sub, { size: 0.2, life: 3.6, delay: 0.7, stagger: 0.012 });
+      const stage = deeper ? 'THE DEEP' : `STAGE ${i + 1} OF ${this.planned}`;
+      this.t3d.add(i === 0 && farM === 0 ? `${stage} · OUTSIDE YOUR FRONT DOOR` : `${stage} · ${farM} M FROM HOME · ${ZONE_NAME[zoneOf(dTop)]}`, tx, ty - 0.7, 2.2, T3D.sub, { size: 0.2, life: 3.6, delay: 0.7, stagger: 0.012 });
       audio.play('thud_heavy1', { vol: 0.5, dry: true });
       this.game.addShake(0.15);
     });
@@ -504,27 +526,11 @@ export class DungeonScreen implements Screen {
           break;
         }
         case 'treasure': {
-          p.items ??= p.style === 'chest' ? [rollGear(rng, luck + 1, 'treasure'), rollMaterial(rng, plan.area)] : [rollGear(rng, luck + 1, 'treasure')];
-          const fl = lvl.terrain.floorUnder(p.x, p.y + 1);
-          if (p.style === 'chest') this.addChest(p, p.x, fl, true);
-          else this.addPedestal(p, p.x, fl, p.taken ? null : p.items[0]);
-          break;
-        }
-        case 'secret': {
-          p.items ??= rng.chance(0.6) ? [rollGear(rng, luck + 1, 'treasure')] : [];
-          const fl = lvl.terrain.floorAt(p.x);
-          if (p.items.length) this.addPedestal(p, p.x - 1.5, fl, p.taken ? null : p.items[0]);
-          if (!p.done) {
-            p.done = true; // the pearl pile is placed once; later it's whatever is lying there (saved loot)
-            const pv = depthPearls(depthOf(plan, fl));
-            for (let k = 0; k < 6; k++) w.spawnPickup('pearl', p.x + 1.2 + (k % 3) * 0.5, fl + 0.6 + Math.floor(k / 3) * 0.4, { value: (k === 0 ? 5 : 1) * pv, vx: 0, vy: 0 });
-            p.done = !p.items.length;
+          // a pedestal nook (the chest nooks are route chests: plan.chests)
+          if (p.style === 'pedestal') {
+            p.items ??= [rollGear(rng, luck + 1, 'treasure')];
+            this.addPedestal(p, p.x, lvl.terrain.floorUnder(p.x, p.y + 1), p.taken ? null : p.items[0]);
           }
-          break;
-        }
-        case 'challenge': {
-          const a = plan.arenas.find((q) => q.kind === 'challenge');
-          if (a?.cleared) this.addChest(p, (a.x0 + a.x1) / 2, a.floor + 0.3, false);
           break;
         }
         case 'boss': {
@@ -544,11 +550,70 @@ export class DungeonScreen implements Screen {
     this.pedestals.set(p.id, ped);
     this.props.push({ update: (dt) => ped.update(dt, this.world), dispose: () => ped.dispose() });
   }
-  private addChest(p: PoiPlan, x: number, y: number, locked: boolean) {
-    const c = new ChestProp(x, y, !!p.taken, locked);
-    this.level!.group.add(c.group);
-    this.chests.set(p.id, c);
-    this.props.push({ update: (dt) => c.update(dt), dispose: () => c.dispose() });
+  /** the route's chests: every unopened one in the plan (a 'big' one only once its arena is cleared) */
+  private spawnChests() {
+    const plan = this.plan, T = this.level!.terrain;
+    for (const c of plan.chests) {
+      if (c.opened) continue;
+      if (c.kind === 'big' && c.arena !== undefined && !plan.arenas[c.arena]?.cleared) continue;
+      this.addChest(c, T.floorUnder(c.x, c.y + 0.6));
+    }
+  }
+  private addChest(c: { id: number; kind: Chest['ck'] } & Partial<import('../dungeon/level').ChestPlan>, y: number, fallFrom?: number): Chest {
+    const ent = new Chest(c.kind, c.x ?? this.player.x, y, { plan: c.x !== undefined && c.opened !== undefined ? (c as import('../dungeon/level').ChestPlan) : undefined, fallFrom });
+    this.world.add(ent);
+    if (ent.plan) this.chests.set(ent.plan.id, ent);
+    return ent;
+  }
+  /** a chest drops in from above and thuds onto the floor (arena clears, champions) */
+  private dropChest(kind: Chest['ck'], x: number, y: number, plan?: import('../dungeon/level').ChestPlan): Chest {
+    const T = this.level!.terrain, fl = T.floorUnder(x, y + 0.6);
+    const ent = new Chest(kind, x, fl, { plan, fallFrom: Math.min(this.plan.top - 1, Math.max(y, fl) + 5) });
+    this.world.add(ent);
+    if (plan) this.chests.set(plan.id, ent);
+    this.world.fx.emit('glow', x, Math.max(y, fl) + 4, { n: 2, size: 2.6, life: 0.6, color: '#ffe0a0' });
+    this.world.sfx('magic_whoosh1', x, 0.5);
+    return ent;
+  }
+
+  /** chests open when the blobfish touches them (a locked one spends a key, automatically); E works too */
+  private updateChests(): Prompt | null {
+    const p = this.player, w = this.world, E = this.game.input.hit('interact');
+    if (!p.alive || this.phase !== 'play') return null;
+    let prompt: Prompt | null = null;
+    for (const e of w.entities) {
+      if (!(e instanceof Chest) || e.open || !e.alive || e.falling) continue;
+      const d = Math.hypot(p.x - e.x, p.y - (e.y + 0.5));
+      if (d > e.r + 1.4) continue;
+      const touch = d < e.r + 0.55 || E;
+      if (e.locked) {
+        if (this.keys <= 0) {
+          if (touch) e.refused = 0.5;
+          prompt = { key: '', label: 'LOCKED: NEEDS A KEY', at: this.anchor(e.x, e.y + 1.6), bad: true };
+          continue;
+        }
+        if (!touch) { prompt = { key: 'E', label: 'UNLOCK (1 KEY)', at: this.anchor(e.x, e.y + 1.6) }; continue; }
+        this.keys--; e.unlockFx(w);
+      }
+      if (!touch) { prompt = { key: 'E', label: 'OPEN', at: this.anchor(e.x, e.y + 1.6) }; continue; }
+      this.openChest(e);
+    }
+    return prompt;
+  }
+
+  private openChest(c: Chest) {
+    c.openNow(this.world);
+    const plan = this.plan;
+    const pk = depthPearls(depthOf(plan, c.y));
+    const luck = this.luck(c.y);
+    const kind = c.ck === 'big' || c.ck === 'locked' || c.ck === 'sunken' || c.ck === 'elite' ? c.ck : 'small';
+    const rewards = c.plan?.items ? c.plan.items.map((id) => ({ kind: 'item' as const, id })) : rollChest(this.world.rng, kind, baseOf(plan.area), luck, pk);
+    if (c.plan?.poi !== undefined) { const poi = plan.pois[c.plan.poi]; if (poi) { poi.done = true; poi.taken = true; } }
+    // the loot bursts out a beat after the lid swings
+    this.after(0.35, () => this.spawnRewards(rewards, c.x, c.y + 0.9, true));
+    this.world.emit('chestOpened', { kind: c.ck, x: c.x, y: c.y });
+    this.tally.chests = (this.tally.chests ?? 0) + 1;
+    this.save();
   }
 
   // ================================================================ arenas
@@ -574,7 +639,7 @@ export class DungeonScreen implements Screen {
 
   private lockArena(a: ArenaPlan) {
     const lvl = this.level!, rng = new Rng((a.seed ^ 0xe7e7) >>> 0);
-    const f: Fight = this.fight = { arena: a, pending: [], ents: [], clearT: 0, boss: null, bossDone: false, bossDeadT: -1 };
+    const f: Fight = this.fight = { arena: a, pending: [], ents: [], clearT: 0, boss: null, bossDone: false, bossDeadT: -1, t: 0 };
     for (const g of lvl.gates.get(a.id) ?? []) g.raise();
     setArena(this.world, this.arenaBox(a));
     this.world.emit('arenaLock', { kind: a.kind, id: a.id });
@@ -641,6 +706,7 @@ export class DungeonScreen implements Screen {
 
   private updateFight(dt: number) {
     const f = this.fight!;
+    f.t += dt;
     for (const s of f.pending) s.t -= dt;
     const due = f.pending.filter((s) => s.t <= 0);
     f.pending = f.pending.filter((s) => s.t > 0);
@@ -651,18 +717,39 @@ export class DungeonScreen implements Screen {
         if ((b.hp ?? 1) <= 0) { if (f.bossDeadT < 0) f.bossDeadT = 0; f.bossDeadT += dt; if (f.bossDeadT > 2.5) this.bossDown(); }
         else if (!b.alive) this.bossDown();
       }
+      // safety: a boss that never turned up (spawn failed) doesn't lock the floor forever
+      if (!b && f.t > 8) this.bossDown();
       return;
     }
     if (!f.ents.length && f.pending.length) return;
-    const alive = this.alive(f.ents, f.arena.top, dt);
+    const alive = this.alive(f.ents, f.arena.top, dt, f.arena);
+    // safety: a long fight down to its last stragglers (hiding in rock, wandering off) ends with them fleeing
+    if (alive > 0 && alive <= 2 && f.t > 100 && !f.pending.length) {
+      for (const e of f.ents) if (e.alive && e.team === 'enemy') { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 14, 2); this.world.emit('escaped', { kind: e.kind, x: e.x, y: e.y }); }
+      this.hud.l.title('THEY FLED', '', '#9fe8ff', 1.6);
+    }
     if (alive === 0 && !f.pending.length) { f.clearT += dt; if (f.clearT > 0.7) this.arenaCleared(); } else f.clearT = 0;
   }
+  private away = new WeakMap<Entity, number>();
 
   /** living enemies of a list (a diver pinned under the ceiling trying to surface counts as gone after a while) */
-  private alive(ents: Entity[], top: number, dt: number): number {
+  private alive(ents: Entity[], top: number, dt: number, a?: ArenaPlan): number {
     let n = 0;
     for (const e of ents) {
       if (!e.alive || e.team !== 'enemy') continue;
+      // dying (hp gone, death anim playing) counts as dead
+      if (e.hp !== undefined && e.hp <= 0) continue;
+      // outside the arena's box (pushed through a gate, wedged in rock) for a while: back in the middle
+      if (a) {
+        const out = e.x < a.x0 - 0.5 || e.x > a.x1 + 0.5 || e.y < a.floor - 4 || e.y > top + 1 || this.world.terrain.sdf(e.x, e.y) < -0.3;
+        const t = out ? (this.away.get(e) ?? 0) + dt : 0;
+        this.away.set(e, t);
+        if (t > 2.5) {
+          const pos = this.spawnPoint(this.world.rng, e.kind as EnemyKind, a, this.player.x);
+          e.x = pos.x; e.y = pos.y; e.vx = 0; e.vy = 0; this.away.set(e, 0);
+          this.world.fx.emit('bubbleBig', e.x, e.y, { n: 8, spread: 0.5, speed: 1.6 });
+        }
+      }
       const st = (e as unknown as { state?: string }).state;
       if (st === 'retreat' || st === 'breathe') {
         const t = (this.stuck.get(e) ?? 0) + (e.y > top - 2.5 ? dt : 0);
@@ -687,10 +774,19 @@ export class DungeonScreen implements Screen {
     this.title3d(a.kind === 'challenge' ? 'CHAMPION DOWN' : 'CLEARED', '', T3D.gold, 1.8, { x: this.player.x, y: this.player.y + 2.4 });
     this.world.emit('roomCleared', { type: a.kind === 'challenge' ? 'challenge' : a.kind === 'boss' ? 'boss' : 'combat', id: a.id });
     const cx = clamp(this.player.x, a.x0 + 3, a.x1 - 3), cy = Math.min(a.top - 2, this.player.y + 1.5);
+    // the big chest drops in where the fight was
+    const big = this.plan.chests.find((c) => c.arena === a.id && c.kind === 'big' && !c.opened);
+    // (a few metres from the blobfish, so you see it land and swim over to open it)
+    if (big) {
+      const px = this.player.x, side = px + 3.4 < a.x1 - 2 ? 1 : -1;
+      const bx = Math.abs(big.x - px) > 2.6 && big.x > a.x0 + 1.5 && big.x < a.x1 - 1.5 ? big.x : clamp(px + side * 3.4, a.x0 + 2, a.x1 - 2);
+      big.x = bx;
+      this.after(0.9, () => { if (this.level === lvl) this.dropChest('big', bx, lvl.terrain.floorUnder(bx, a.top) + 0.5, big); });
+    }
     if (a.kind === 'challenge') {
-      const p = this.plan.pois.find((q) => q.kind === 'challenge')!;
-      p.items = [rollGear(this.world.rng, this.luck(a.floor) + 1, 'treasure'), rollGear(this.world.rng, this.luck(a.floor), 'room')];
-      this.addChest(p, (a.x0 + a.x1) / 2, lvl.terrain.floorAt((a.x0 + a.x1) / 2), false);
+      const p = this.plan.pois.find((q) => q.kind === 'challenge');
+      if (p) p.done = true;
+      if (big) big.items = [rollGear(this.world.rng, this.luck(a.floor) + 1, 'treasure'), rollGear(this.world.rng, this.luck(a.floor), 'room')];
     } else if (a.kind === 'arena') {
       // the reward burst: an Isaac-style clear drop, plus a guaranteed handful of pearls on the later arenas
       const pv = depthPearls(depthOf(this.plan, a.floor));
@@ -702,12 +798,19 @@ export class DungeonScreen implements Screen {
     this.save();
   }
 
-  private spawnRewards(rewards: Reward[], x: number, y: number) {
+  /** a loot burst: the pickups pop out in a fan, arc over and drift down (staggered when it's a lot) */
+  private spawnRewards(rewards: Reward[], x: number, y: number, stagger = false) {
+    const n = rewards.length;
     rewards.forEach((rw, i) => {
-      const xx = x + (i - (rewards.length - 1) / 2) * 0.7, vx = (i - (rewards.length - 1) / 2) * 1.2;
-      if (rw.kind === 'item') this.world.spawnPickup('item', xx, y, { id: rw.id, vy: 3.5, vx });
-      else if (rw.kind === 'pearl' || rw.kind === 'heart') this.world.spawnPickup(rw.kind, xx, y, { value: rw.value, vy: 3.5, vx });
-      else this.world.spawnPickup(rw.kind, xx, y, { vy: 3.5, vx });
+      const go = () => {
+        const f = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;
+        const vx = f * (1.6 + n * 0.15) + (Math.random() - 0.5) * 0.6, vy = 3.6 + Math.random() * 1.6 - Math.abs(f) * 0.6;
+        if (rw.kind === 'item') this.world.spawnPickup('item', x, y, { id: rw.id, vy, vx });
+        else if (rw.kind === 'pearl' || rw.kind === 'heart') this.world.spawnPickup(rw.kind, x, y, { value: rw.value, vy, vx });
+        else this.world.spawnPickup(rw.kind, x, y, { vy, vx });
+        if (stagger) this.world.sfx('pop_b', x, 0.35, 1 + i * 0.06);
+      };
+      if (stagger && i > 0) this.after(i * 0.07, go); else go();
     });
     if (rewards.length) {
       this.world.fx.emit('glow', x, y, { n: 2, size: 2.4, life: 0.5, color: '#ffe8a0' });
@@ -736,6 +839,9 @@ export class DungeonScreen implements Screen {
     audio.play('jin_legend', { vol: 0.6 });
     const p = this.plan.pois.find((q) => q.kind === 'boss')!;
     this.bossRewards(a, p, true);
+    const bigB = this.plan.chests.find((c) => c.arena === a.id && c.kind === 'big' && !c.opened);
+    const lvlB = this.level!;
+    if (bigB) this.after(1.4, () => { if (this.level === lvlB) this.dropChest('big', bigB.x, lvlB.terrain.floorUnder(bigB.x, a.top) + 0.5, bigB); });
     this.checkX = (a.x0 + a.x1) / 2;
     this.save();
   }
@@ -811,6 +917,8 @@ export class DungeonScreen implements Screen {
     this.fullPopT = 1.6;
     this.text.pop('PACK FULL', x, y + 0.7, 'danger', { size: 0.3, life: 1.2 });
     this.world.sfx('k_err1', x, 0.4);
+    // the way out: the pack board takes the refused item along so you can swap something out (or mail it home)
+    this.hint('PACK FULL: MAKE ROOM', 3.5, 'TAB');
     this.world.emit('packFull', { id });
   }
 
@@ -832,22 +940,6 @@ export class DungeonScreen implements Screen {
       audio.play('treasure1', { vol: 0.6 }); audio.play('jin_rare1', { vol: 0.4 });
       w.emit('itemPicked', { id, pedestal: true });
       this.installStats(); this.applyStats();
-      this.save();
-    }
-    // chests (treasure nooks are locked: a key opens them)
-    for (const [pid, ch] of this.chests) {
-      if (ch.open || Math.abs(p.x - ch.x) > 1.8 || p.y > ch.y + 2.4 || p.y < ch.y - 1) continue;
-      const poi = this.plan.pois[pid];
-      if (ch.locked) {
-        if (this.keys <= 0) return { key: '', label: 'LOCKED: NEEDS A KEY', at: this.anchor(ch.x, ch.y + 1.6), bad: true };
-        if (!E) return { key: 'E', label: 'UNLOCK (1 KEY)', at: this.anchor(ch.x, ch.y + 1.6) };
-        this.keys--; ch.unlock();
-        w.sfx('k_confirm1', ch.x, 0.7); w.sfx('clank1', ch.x, 0.6);
-      }
-      ch.open = true; poi.taken = true; poi.done = true;
-      audio.play('chest_creak', { vol: 0.7 }); audio.play('treasure1', { vol: 0.5 });
-      const items = poi.items ?? [];
-      this.after(0.5, () => this.spawnRewards([...items.map((id) => ({ kind: 'item' as const, id })), { kind: 'pearl', value: poi.kind === 'challenge' ? 5 : 1 }], ch.x, ch.y + 1.2));
       this.save();
     }
     // the shop
@@ -914,21 +1006,35 @@ export class DungeonScreen implements Screen {
 
   // ---- post office
   private mailUsed = 0;
-  static MAIL_CAPACITY = 8;
+  /** parcels per post office: a picked stack or item is one parcel, whatever its size (v4's big items fit too) */
+  static MAIL_CAPACITY = 6;
   private openMail() {
     const items = this.run.items.filter((i) => ITEMS[i.id]);
-    this.mail = { items, picked: new Set(), capacity: DungeonScreen.MAIL_CAPACITY - this.mailUsed, used: 0 };
+    this.mail = { items, picked: new Set(), capacity: DungeonScreen.MAIL_CAPACITY - this.mailUsed, used: 0, goals: homeGoals({}) };
     audio.play('page1', { vol: 0.5, dry: true });
-    if (!this.mailUsed) this.dlg.bark('manatee', 'Parcels home? Pop them in my bag, dear.', 3);
+    // (no bark here: her speech bubble would sit over the bag's title)
   }
   private mailAction(a: string) {
     const m = this.mail;
     if (!m) return;
-    if (a === 'mail:close') { this.mail = null; return; }
+    if (a === 'mail:close') { this.mail = null; audio.play('k_close1', { vol: 0.4, dry: true }); return; }
     if (a === 'mail:send') { this.sendMail(); return; }
-    const uid = Number(a.slice(5));
-    if (m.picked.has(uid)) m.picked.delete(uid); else m.picked.add(uid);
-    m.used = m.items.filter((i) => m.picked.has(i.uid)).reduce((s, i) => s + getItem(i.id).shape.length, 0);
+    if (a === 'mail:mats') {
+      // every material stack (the house's needs first), up to what her bag takes
+      const mats = m.items.filter((i) => ITEMS[i.id]?.kind === 'material' && !m.picked.has(i.uid));
+      // what any unbuilt piece of the house still needs goes in first
+      const all = homeGoals(packTotals(m.items).materials, 99);
+      const goalIds = new Set(all.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
+      mats.sort((a2, b2) => Number(goalIds.has(b2.id)) - Number(goalIds.has(a2.id)));
+      for (const i of mats) if (m.picked.size < m.capacity) m.picked.add(i.uid);
+    } else {
+      const uid = Number(a.slice(5));
+      if (m.picked.has(uid)) m.picked.delete(uid);
+      else if (m.picked.size >= m.capacity) { audio.play('k_err1', { vol: 0.4, dry: true }); this.dlg.bark('manatee', `My bag only takes ${m.capacity} more, dear.`, 2); }
+      else m.picked.add(uid);
+    }
+    m.used = m.picked.size;
+    m.goals = homeGoals(packTotals(m.items.filter((i) => m.picked.has(i.uid))).materials);
   }
   private sendMail() {
     const m = this.mail, mt = this.level?.manatee;
@@ -940,6 +1046,7 @@ export class DungeonScreen implements Screen {
     for (const g of gear) stashItem(g.id, g.level);
     META.extractions++; saveMeta();
     this.mailUsed += m.used;
+    const goals = m.goals;
     const ids = expandIds(sent);
     this.mailed.push(...ids);
     this.tally.extracted += ids.length;
@@ -951,7 +1058,19 @@ export class DungeonScreen implements Screen {
     const post = this.plan.pois.find((q) => q.kind === 'post');
     if (post && this.mailUsed >= DungeonScreen.MAIL_CAPACITY) post.done = true;
     audio.play('bag_zip1', { vol: 0.5 });
-    this.dlg.bark('manatee', 'Off they go! Safe and sound at home, dear.', 2.6);
+    // what it unlocks at home: a piece of the house that's now buildable, else the goal's progress
+    const ready = goals.find((g) => g.ready && !g.readyBefore);
+    const goal = goals.find((g) => !g.readyBefore && g.lines.some((l) => l.after > l.have));
+    const n = ids.length;
+    if (ready) {
+      this.hud.l.title('SENT HOME', `${ready.name.toUpperCase()} READY TO BUILD ✓`);
+      this.dlg.bark('manatee', `That's enough for the ${ready.name.toLowerCase()}! ${ready.unlock}`, 3.4);
+      audio.play('jin_good', { vol: 0.5, dry: true });
+    } else {
+      const g = goal && goal.lines.find((l) => l.after > l.have);
+      this.hud.l.title('SENT HOME', g ? `${goal!.name.toUpperCase()}: ${g.name.toUpperCase()} ${Math.min(g.after, g.need)}/${g.need}` : `${n} THING${n > 1 ? 'S' : ''} SAFE AT HOME`);
+      this.dlg.bark('manatee', 'Off they go! Safe and sound at home, dear.', 2.6);
+    }
     this.installStats(); this.applyStats();
     this.mail = null;
     this.save();
@@ -1036,7 +1155,8 @@ export class DungeonScreen implements Screen {
         this.mailUsed = 0; this.shopGreeted = false;
         // the next floor's entry shaft (world y = ENTRY_TOP - 1) sits at the depth we reach in the dark
         const entryY = ENTRY_TOP - 1;
-        this.startFloor(this.floorIdx + 1, null, d.to + entryY);
+        this.journey.push(legOf(this.plan));
+        this.startFloor(this.floorIdx + 1, null, d.to + entryY, this.plan.far0 + this.plan.W);
         this.vdepth = d.from + (d.to - d.from) * Math.min(1, d.t / 1.6);
       }
       if (d.t > 1.6) {
@@ -1093,6 +1213,7 @@ export class DungeonScreen implements Screen {
       won, floor: this.floorIdx + 1, floors: this.floors.length, kills: this.tally.kills,
       maxDepth: Math.round(this.maxDepth), record: Math.round(this.maxDepth) > this.recordBefore,
       packLost: won ? [] : items, mailed: [...this.mailed], broughtHome: won ? items : [],
+      far: Math.round(this.farNow()), home: [],
     };
   }
 
@@ -1112,6 +1233,8 @@ export class DungeonScreen implements Screen {
     const items = this.run.items.filter((i) => ITEMS[i.id]);
     const home = expandIds(items);
     const r = this.result(true, home);
+    const { materials: carried } = packTotals(items);
+    r.home = homeGoals(carried);
     if (!this.dev) {
       const { materials, gear } = packTotals(items);
       returnToStash(gear);
@@ -1137,6 +1260,9 @@ export class DungeonScreen implements Screen {
   }
 
   private quit() {
+    // RESUME puts you back where you left (not at the last checkpoint) when you quit out of a fight
+    const p = this.player, ex = this.plan.exit;
+    if (!this.fight && this.phase === 'play' && p.alive && !(p.x > ex.x0 - 2 && p.x < ex.x1 + 2)) this.checkX = clamp(p.x, 2, this.plan.W - 2);
     this.save();
     this.paused = false;
     this.ended = true;
@@ -1155,7 +1281,7 @@ export class DungeonScreen implements Screen {
       v: 4, cfg: this.cfg, seed: this.seed, floors: [...this.floors], floorIdx: this.floorIdx, plan: this.plan, checkX: this.checkX,
       hp: this.player?.hp ?? this.run.hp, items: this.run.items.map((i) => ({ ...i })), nextUid: this.run.nextUid,
       pearls: this.run.coins, keys: this.keys, bombs: this.bombs, tally: { ...this.tally }, mailed: [...this.mailed], loot,
-      areas: [...this.floors], areaIdx: this.floorIdx, planned: this.planned, maxDepth: Math.round(this.maxDepth),
+      areas: [...this.floors], areaIdx: this.floorIdx, planned: this.planned, maxDepth: Math.round(this.maxDepth), journey: this.journey,
     };
     META.activeRun = s as unknown as typeof META.activeRun;
     saveMeta();
@@ -1164,7 +1290,20 @@ export class DungeonScreen implements Screen {
   // ================================================================ events
   private wire() {
     const w = this.world;
-    w.on('kill', (d) => { if (d.boss) return; this.tally.kills++; this.run.kills++; });
+    w.on('kill', (d) => {
+      if (d.boss || !this.level) return;
+      this.tally.kills++; this.run.kills++;
+      // the dungeon drops the loot (K's enemies only report the kill): fish -> materials, humans -> gear and scrap
+      const x = Number(d.x) || this.player.x, y = Number(d.y) || this.player.y;
+      // size: K sends 'small' | 'medium' | 'large' (or a number)
+      const SIZE: Record<string, number> = { tiny: 0.8, small: 1, medium: 1.6, large: 2.6, giant: 2.6, huge: 3, boss: 3 };
+      const kind = String(d.kind ?? ''), sz = d.size, size = typeof sz === 'number' ? sz : SIZE[String(sz)] ?? (d.elite ? 1.6 : 1);
+      const pk = depthPearls(depthOf(this.plan, y));
+      const drops = rollKillDrops(this.world.rng, kind, size, baseOf(this.plan.area), this.luck(y), pk, typeof d.family === 'string' ? d.family : undefined);
+      if (drops.length) this.spawnRewards(drops, x, y + 0.3);
+      // a champion drops a chest
+      if (d.elite) this.after(0.4, () => { if (this.level) this.dropChest('elite', x, y); });
+    });
     w.on('hit', (d) => { if (d.crit) this.critPending = true; });
     w.on('explosion', (d) => {
       if (typeof d.x !== 'number' || typeof d.y !== 'number' || !this.level) return;
@@ -1264,9 +1403,10 @@ export class DungeonScreen implements Screen {
       if (inp.keyHit('KeyG')) this.dropBomb();
       if (inp.hit('bag')) this.openBag();
     }
-    let prompt = this.mail ? null : this.interact();
+    const chestPrompt = this.mail ? null : this.updateChests();
+    let prompt = this.mail ? null : this.interact() ?? chestPrompt;
     this.hintT -= dt;
-    if (!prompt && this.hintT > 0) prompt = { key: '', label: this.hintText };
+    if (!prompt && this.hintT > 0) prompt = { key: this.hintKey, label: this.hintText };
     // ---- camera, water, fx
     this.updateCamera(dt);
     w.water.update(this.game.renderer, dt, this.camLook.x);
@@ -1356,10 +1496,13 @@ export class DungeonScreen implements Screen {
   private camTarget(snap = 0): THREE.Vector3 {
     const p = this.player, plan = this.plan, f = this.fight;
     const fov = (this.camera.fov * Math.PI) / 360;
-    const dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5;
+    // at a vista (a big drop-off) the camera eases back and looks down over the edge
+    const nearVista = !f && plan.vistas.some((vx) => Math.abs(p.x - vx) < 7 && p.y > shelfAt(plan, vx + 6) + 1);
+    this.vistaK = damp(this.vistaK, nearVista ? 1 : 0, 1.2, 1 / 60);
+    const dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5 + this.vistaK * 4.5;
     this.camDist = snap ? dist : damp(this.camDist, dist, 2, 1 / 60);
     const halfV = this.camDist * Math.tan(fov), halfW = halfV * this.camera.aspect;
-    let tx = p.x + this.lookAhead, ty = p.y + clamp(p.vy * 0.2, -1.2, 1.2);
+    let tx = p.x + this.lookAhead + this.vistaK * 3, ty = p.y + clamp(p.vy * 0.2, -1.2, 1.2) - this.vistaK * 2.5;
     // deeper floors keep the camera under the dark ceiling; descending, it follows the blobfish down the shaft
     let x0 = 0, x1 = plan.W, y0 = plan.exit.bottom - 4, y1 = plan.top > -2.9 ? plan.top + 1.8 : plan.top - 0.3;
     if (f) { x0 = f.arena.x0 - 1.5; x1 = f.arena.x1 + 1.5; y0 = f.arena.floor - 1.5; y1 = f.arena.top + 1.8; }
@@ -1400,18 +1543,23 @@ export class DungeonScreen implements Screen {
     const combat = (p as unknown as { combat?: { hud?: () => PlayerCombatHud } }).combat?.hud?.() ?? null;
     const cells = packCells(this.run);
     const boss = this.fight?.boss && !this.fight.bossDone ? this.fight.boss.bar() : null;
+    // metres from home: agent L shows it next to the depth gauge (data.far; also strip.far)
+    const journey = { far: Math.round(this.farNow()) };
+    this.tally.far = Math.max(this.tally.far ?? 0, journey.far);
     return {
       data: {
+        ...journey,
         hp: p.hp, maxHp: p.maxHp, combat, mana: p.mana, maxMana: p.maxMana,
         pearls: this.run.coins, keys: this.keys, bombs: this.bombs,
         pack: { used: cells.used, total: cells.total, full: cells.free <= 0 },
-        strip: stripMap(this.plan, p.x, p.y, { floors: this.floors.length, revealAll: this.dev?.get('reveal') === '1' }),
+        strip: journeyStrip(this.journey, this.plan, p.x, p.y, { floors: this.floors.length, revealAll: this.dev?.get('reveal') === '1' }),
+
         boss, hidden: this.phase === 'done' || this.desc?.stage === 'surface',
         // the skills are a hand of 3D cards in L's HUD (the old 2D SkillBar overlay stays hidden)
         skills: p.skillHud(),
       },
       prompt, paused: this.paused, mail: this.mail, depth: this.depthHud(),
-      where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()} · -${Math.round(this.depthNow())} M · FLOOR ${this.floorIdx + 1}`,
+      where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()} · ${Math.round(this.farNow())} M FROM HOME · -${Math.round(this.depthNow())} M`,
     };
   }
 }

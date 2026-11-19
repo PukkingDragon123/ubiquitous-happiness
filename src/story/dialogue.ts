@@ -137,6 +137,8 @@ export class Dialogue {
   private t = 0;
   private v = new THREE.Vector3();
   private hoverChoice = -1;
+  /** where the current choice rows were drawn (UI pixels): tests and tools click these */
+  choiceRects: { x: number; y: number; w: number; h: number }[] = [];
 
   constructor(public ui: PixelUI, public cam: () => THREE.Camera) {}
 
@@ -284,6 +286,7 @@ export class Dialogue {
   draw() {
     const ui = this.ui;
     this.hoverChoice = -1;
+    this.choiceRects = [];
     for (const b of this.barks) this.bubble(b);
     if (this.cur) this.bubble(this.cur);
     void ui;
@@ -409,6 +412,7 @@ export class Dialogue {
     cs.forEach((c, i) => {
       const yy = y + i * (rowH + 2) + Math.round((1 - appear) * 6);
       const hov = ui.hover(x, yy, w, rowH);
+      this.choiceRects[i] = { x, y: yy, w, h: rowH };
       if (hov) this.hoverChoice = i;
       ui.block(x, yy, w, rowH);
       ui.frame('dark', x, yy, w, rowH, 0.94);

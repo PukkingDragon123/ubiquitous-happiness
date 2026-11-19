@@ -26,6 +26,7 @@ import { SKILLS, skillSlotsFor } from '../skills/registry';
 import { skillMods, strike } from '../skills/combat';
 import { FX } from '../skills/fx';
 import { PlayerCombat } from '../combat/moveset';
+import { board } from '../waves/board';
 
 export interface HookLink {
   /** where the line pulls toward (next line node) */
@@ -46,6 +47,9 @@ export class Blobfish implements SkillCaster {
   facing = 1;
   hooked = false;
   hook: HookLink | null = null;
+  /** an enemy holding the blobfish (grabs, constrictions): they set it with hooked = true and clear both */
+  grabbedBy: Entity | null = null;
+  private heldT = 0;
   invuln = 0;
   obj = new THREE.Group();
   model = new BlobModel();
@@ -171,6 +175,15 @@ export class Blobfish implements SkillCaster {
     const inp = w.game.input;
     const s = this.stats;
     if (!this.alive) { this.deadUpdate(dt, w); return; }
+    // stuck-state watchdog: held with no fishing line, no live grabber and no net -> free (a grabber that died
+    // or was removed mid-grab can't leave the blobfish frozen)
+    if (this.hooked && !this.hook) {
+      this.heldT += dt;
+      const g = this.grabbedBy as (Entity & { dead?: boolean; state?: string }) | null;
+      const grabOk = !!g && g.alive && !g.dead && g.state !== 'dead';
+      const netOn = (board(w).netOn?.alive ?? false);
+      if ((!grabOk && !netOn) || this.heldT > 12) { this.hooked = false; this.grabbedBy = null; if (board(w).netOn && !netOn) board(w).netOn = null; }
+    } else { this.heldT = 0; if (!this.hooked) this.grabbedBy = null; }
     // ---- input
     const ax = inp.axis();
     this.intent.x = ax.x; this.intent.y = ax.y;
@@ -400,8 +413,8 @@ export class Blobfish implements SkillCaster {
       for (const e of w.near(this.x, this.y, 0.85, 'enemy')) if (e.hit) { e.hit(1, Math.sign(e.x - this.x), 0.5, w, this, 'spike'); FX.sparks(w, e.x, e.y, 5, undefined, 3); }
     }
     // laser eyes + a soft self-glow set by the screen in dark water (so the hero always reads against the deep)
-    const ag = this.ambientGlow;
-    this.model.U.uGlow.value.setRGB((this.laserOn ? 0.5 : 0) + ag * 0.17, (this.laserOn ? 0.05 : 0) + ag * 0.08, (this.laserOn ? 0.1 : 0) + ag * 0.09);
+    const ag = this.ambientGlow, cg = this.combat.glow, gold = this.combat.dashCharge >= 1 ? 1 : 0;
+    this.model.U.uGlow.value.setRGB((this.laserOn ? 0.5 : 0) + ag * 0.17 + cg * 0.55, (this.laserOn ? 0.05 : 0) + ag * 0.08 + cg * (0.45 + gold * 0.1), (this.laserOn ? 0.1 : 0) + ag * 0.09 + cg * (0.6 - gold * 0.45));
   }
 
   /** run a legacy ability core (called by its SKILLS entry) */

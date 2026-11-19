@@ -20,7 +20,7 @@ import * as THREE from 'three';
 import type { Input } from '../../core/input';
 import { audio } from '../../audio/audio';
 import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
-import { drawText, measure, wrap, lineH, capH, type FontName, type TextOpts } from './font';
+import { drawText, measure, wrap, lineH, capH, setTextDensity, type FontName, type TextOpts } from './font';
 import { skin, btnSkin, PAD, BTN, LIP, type SkinKind, type BtnStyle, type BtnState } from './skins';
 import { icon, keycap, cursorArt, type CursorName } from './art';
 import { iconAt } from '../../backpack/icons';
@@ -124,6 +124,11 @@ export class PixelUI {
   w = 320; h = 180;
   /** device pixels per UI pixel */
   scale = 1;
+  /**
+   * canvas pixels per UI pixel (v4): 2 when the UI scale is even (1080p, 4K), so screen text (Jersey 15 / 20) and
+   * item icons get twice the pixels per glyph while every layout stays in UI pixels; 1 otherwise (720p, 1620p)
+   */
+  hd = 1;
   fixed: boolean;
   /** add to a Screen's overlays */
   layer: { scene: THREE.Scene; camera: THREE.Camera };
@@ -168,6 +173,7 @@ export class PixelUI {
     this.cv.width = this.w; this.cv.height = this.h;
     this.ctx = this.cv.getContext('2d')!;
     this.ctx.imageSmoothingEnabled = false;
+    setTextDensity(this.ctx, 1);
     this.tex = this.makeTex();
     const mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
     const g = new THREE.PlaneGeometry(1, 1); g.translate(0.5, -0.5, 0);
@@ -211,10 +217,12 @@ export class PixelUI {
     if (this.fixed) return;
     const s = PixelUI.pickScale(devW, devH);
     this.scale = s;
+    const hd = PixelUI.hdFor(s);
     const w = Math.ceil(devW / s), h = Math.ceil(devH / s);
-    if (w !== this.w || h !== this.h) {
-      this.w = w; this.h = h; this.cv.width = w; this.cv.height = h;
+    if (w !== this.w || h !== this.h || hd !== this.hd) {
+      this.w = w; this.h = h; this.hd = hd; this.cv.width = w * hd; this.cv.height = h * hd;
       this.ctx.imageSmoothingEnabled = false;
+      setTextDensity(this.ctx, hd);
       this.tex.dispose(); this.tex = this.makeTex();
       (this.quad.material as THREE.MeshBasicMaterial).map = this.tex;
     }
@@ -223,12 +231,18 @@ export class PixelUI {
   }
   private pr = 1;
   get deviceSize() { return [this.devW, this.devH] as const; }
+  /** canvas density for a UI scale: 2 for even scales (an exact half of the device grid), else 1. ?uihd=1 forces 1 */
+  static hdFor(scale: number) {
+    if (new URLSearchParams(location.search).get('uihd') === '1') return 1;
+    return scale >= 2 && scale % 2 === 0 ? 2 : 1;
+  }
 
   /** start a frame: clears the canvas and maps the mouse (map: css px -> ui px, for off-screen canvases) */
   begin(input: Input | null, dt = 1 / 60, map?: (cssX: number, cssY: number) => [number, number] | null) {
     this.input = input;
     this.t += dt;
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.setTransform(this.hd, 0, 0, this.hd, 0, 0);
+    this.ctx.imageSmoothingEnabled = false;
     this.ctx.globalAlpha = 1;
     this.ctx.clearRect(0, 0, this.w, this.h);
     this.hot = this.hotNext; this.hotNext = null;
@@ -252,7 +266,9 @@ export class PixelUI {
       this.wheel = m.wheel;
     } else { this.pressed = this.released = this.rpressed = false; this.wheel = 0; }
     if (this.pressed) this.pressOnUI = this.overUI;
-    if (!this.down && !this.pressed) this.active = null;
+    // keep the pressed widget through the RELEASE frame (v4 fix): clearing it on the release frame meant a click
+    // whose press and release landed in different frames (every real click at 60 fps) never fired
+    if (!this.down && !this.pressed && !this.released) this.active = null;
     this.cursor = 'arrow';
   }
 
@@ -296,14 +312,14 @@ export class PixelUI {
   text(str: string, x: number, y: number, o: TextOpts = {}) { return drawText(this.ctx, str, x, y, o); }
   /** wrapped text block; returns its height */
   textBox(str: string, x: number, y: number, w: number, o: TextOpts = {}) {
-    const f = o.font ?? 'body', lh = lineH(f);
-    const lines = wrap(str, f, w);
+    const f = o.font ?? 'body', lh = lineH(f, this.hd);
+    const lines = wrap(str, f, w, this.hd);
     lines.forEach((l, i) => drawText(this.ctx, l, o.align === 'center' ? x + w / 2 : o.align === 'right' ? x + w : x, y + i * lh, o));
     return lines.length * lh;
   }
-  measure(str: string, font: FontName = 'body') { return measure(str, font); }
-  lh(font: FontName = 'body') { return lineH(font); }
-  cap(font: FontName = 'body') { return capH(font); }
+  measure(str: string, font: FontName = 'body') { return measure(str, font, this.hd); }
+  lh(font: FontName = 'body') { return lineH(font, this.hd); }
+  cap(font: FontName = 'body') { return capH(font, this.hd); }
   img(cv: CanvasImageSource & { width: number; height: number }, x: number, y: number, o: { w?: number; h?: number; alpha?: number; flipX?: boolean } = {}) {
     const c = this.ctx;
     if (o.alpha !== undefined) c.globalAlpha = o.alpha;
@@ -314,7 +330,11 @@ export class PixelUI {
   }
   icon(name: string, x: number, y: number, alpha = 1) { const i = icon(name); this.img(i, x, y, { alpha }); return i.width; }
   /** item icon fitted to a size box (nearest-safe downsample) */
-  item(id: string, x: number, y: number, w: number, h = w, level = 1, alpha = 1) { this.img(itemIconBox(id, w, h, level), x, y, { alpha }); }
+  item(id: string, x: number, y: number, w: number, h = w, level = 1, alpha = 1) {
+    // rendered at the canvas density: a 24 UI px slot gets a 48 px model icon on a 2x canvas
+    const hd = this.hd;
+    this.img(itemIconBox(id, Math.round(w * hd), Math.round(h * hd), level), x, y, { alpha, w, h });
+  }
   keycap(label: string, x: number, y: number, dark = false) { const k = keycap(label, dark); this.img(k, x, y); return k.width; }
   clip(x: number, y: number, w: number, h: number) { const c = this.ctx; c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip(); }
   unclip() { this.ctx.restore(); }
@@ -331,10 +351,10 @@ export class PixelUI {
     if (title) {
       const isBp = kind === 'blueprint' || kind === 'card';
       const st: TextOpts = o.titleStyle ?? (kind === 'wood' ? { font: 'title', color: '#ffe7b0', color2: '#f0b860', shadow: '#1a0c04' } : isBp ? { font: 'title', color: '#ffffff', color2: '#cfe6ff', shadow: '#0a2046' } : kind === 'tv' ? { font: 'title', color: '#ffffff', color2: '#ffe060', shadow: '#000a30' } : { font: 'title', color: '#ffffff', shadow: '#000' });
-      const tw = measure(title, st.font ?? 'title');
+      const tw = measure(title, st.font ?? 'title', this.hd);
       if (kind === 'wood') {
         // a brass plaque hanging on the top frame
-        const pw = tw + 16, ph = capH(st.font ?? 'title') + 10;
+        const pw = tw + 16, ph = capH(st.font ?? 'title', this.hd) + 10;
         this.frame('plaque', x + Math.round((w - pw) / 2), y - Math.round(ph / 2) + 2, pw, ph);
         this.text(title, x + w / 2, y - Math.round(ph / 2) + 7, { ...st, color: '#3a2408', color2: '#3a2408', shadow: '#f8e0a0', align: 'center' });
       } else this.text(title, x + PAD[kind][0] + 2, y + PAD[kind][1] + 1, st);
@@ -367,12 +387,12 @@ export class PixelUI {
     const dy = state === 'down' || state === 'on' ? LIP : 0;
     const font = o.font ?? 'body';
     const faceH = h - LIP;
-    const ty = y + dy + Math.round((faceH - capH(font)) / 2);
+    const ty = y + dy + Math.round((faceH - capH(font, this.hd)) / 2);
     let cx = x + 5;
     const ic = typeof o.icon === 'string' ? icon(o.icon) : o.icon;
     const kc = o.key && (o.keyLabel ?? labelForKey(o.key));
     const kcW = kc ? keycap(kc, st === 'gold').width : 0;
-    const tw = label ? measure(label, font) : 0;
+    const tw = label ? measure(label, font, this.hd) : 0;
     const total = (ic ? ic.width + (label ? 3 : 0) : 0) + tw;
     if (o.align !== 'left') cx = x + Math.round((w - total - (kc ? kcW + 3 : 0)) / 2);
     if (ic) { this.img(ic, cx, y + dy + Math.round((faceH - ic.height) / 2), { alpha: o.disabled ? 0.5 : 1 }); cx += ic.width + 3; }
@@ -394,7 +414,7 @@ export class PixelUI {
     let cx = x;
     const h = o.h ?? 16;
     labels.forEach((l, i) => {
-      const w = o.w ?? measure(l, o.font ?? 'body') + 12;
+      const w = o.w ?? measure(l, o.font ?? 'body', this.hd) + 12;
       if (this.button(id + ':' + i, l, cx, y, w, h, { style: o.style ?? 'wood', on: i === sel, sfx: 'tab1', font: o.font })) { sel = i; }
       cx += w + (o.gap ?? 1);
     });
@@ -427,7 +447,7 @@ export class PixelUI {
 
   /** a labelled checkbox; returns the new state */
   toggle(id: string, on: boolean, label: string, x: number, y: number, o: { style?: BtnStyle; font?: FontName } = {}): boolean {
-    const w = 10 + 4 + measure(label, o.font ?? 'body');
+    const w = 10 + 4 + measure(label, o.font ?? 'body', this.hd);
     const { over, clicked } = this.interact(id, x, y, w, 12);
     this.img(btnSkin(o.style ?? 'wood', on ? 'on' : over ? 'hover' : 'normal', 10, 12), x, y);
     if (on) this.icon('check', x + 1, y + 2 + LIP);
@@ -443,7 +463,7 @@ export class PixelUI {
     if (this.button(id + ':l', '', x, y, 14, 16, { style: st, icon: 'left', disabled: o.canL === false, sfx: 'k_tick4' })) r = -1;
     if (this.button(id + ':r', '', x + w - 14, y, 14, 16, { style: st, icon: 'right', disabled: o.canR === false, sfx: 'k_tick4' })) r = 1;
     const font = o.font ?? 'title';
-    this.text(value, x + w / 2, y + Math.round((14 - capH(font)) / 2), { font, color: o.color ?? '#ffffff', shadow: '#000', align: 'center' });
+    this.text(value, x + w / 2, y + Math.round((14 - capH(font, this.hd)) / 2), { font, color: o.color ?? '#ffffff', shadow: '#000', align: 'center' });
     if (this.hover(x, y, w, 16) && this.wheel) r = this.wheel > 0 ? 1 : -1;
     return r;
   }
@@ -457,12 +477,12 @@ export class PixelUI {
       const rows: { text: string; color?: string; font: FontName; icon?: HTMLCanvasElement; gap: number }[] = [];
       for (const l of L) {
         const f = l.font ?? 'body';
-        const ws = wrap(l.text, f, maxW - (l.icon ? l.icon.width + 3 : 0));
+        const ws = wrap(l.text, f, maxW - (l.icon ? l.icon.width + 3 : 0), this.hd);
         ws.forEach((t, i) => rows.push({ text: t, color: l.color, font: f, icon: i === 0 ? l.icon : undefined, gap: i === 0 ? l.gap ?? 0 : 0 }));
       }
       const pad = PAD[kind];
-      const w = Math.min(maxW, Math.max(...rows.map((r) => measure(r.text, r.font) + (r.icon ? r.icon.width + 3 : 0)))) + pad[0] + pad[2] + 2;
-      const h = rows.reduce((a, r) => a + Math.max(lineH(r.font), r.icon ? r.icon.height + 1 : 0) + r.gap, 0) + pad[1] + pad[3];
+      const w = Math.min(maxW, Math.max(...rows.map((r) => measure(r.text, r.font, this.hd) + (r.icon ? r.icon.width + 3 : 0)))) + pad[0] + pad[2] + 2;
+      const h = rows.reduce((a, r) => a + Math.max(lineH(r.font, this.hd), r.icon ? r.icon.height + 1 : 0) + r.gap, 0) + pad[1] + pad[3];
       let x = o.at ? o.at[0] : this.mx + 12, y = o.at ? o.at[1] : this.my + 10;
       if (x + w > this.w - 2) x = (o.at ? x : this.mx - 6) - w;
       if (y + h > this.h - 2) y = this.h - 2 - h;
@@ -475,8 +495,8 @@ export class PixelUI {
         let cx = x + pad[0] + 1;
         if (r.icon) { this.img(r.icon, cx, cy); cx += r.icon.width + 3; }
         const ih = r.icon ? r.icon.height : 0;
-        this.text(r.text, cx, cy + Math.max(0, Math.round((ih - capH(r.font)) / 2)), { font: r.font, color: r.color ?? (dark ? '#2a1808' : '#f0f4ff'), shadow: dark ? null : '#000' });
-        cy += Math.max(lineH(r.font), ih + 1);
+        this.text(r.text, cx, cy + Math.max(0, Math.round((ih - capH(r.font, this.hd)) / 2)), { font: r.font, color: r.color ?? (dark ? '#2a1808' : '#f0f4ff'), shadow: dark ? null : '#000' });
+        cy += Math.max(lineH(r.font, this.hd), ih + 1);
       }
     });
   }
@@ -506,7 +526,7 @@ export class PixelUI {
       this.item(id, cx, y, size, size);
       const label = o.showHave && o.have ? `${Math.min(have, 999)}/${n}` : `${n}`;
       const col = ok ? (o.dark ? '#ffffff' : '#ffffff') : '#ff5a4a';
-      const tw = this.text(label, cx + size + 1, y + Math.round((size - capH(font)) / 2), { font, color: col, outline: ok ? '#0a1a34' : '#3a0404' });
+      const tw = this.text(label, cx + size + 1, y + Math.round((size - capH(font, this.hd)) / 2), { font, color: col, outline: ok ? '#0a1a34' : '#3a0404' });
       if (hov && ITEMS[id]) this.tooltip([{ text: getItem(id).name, font: 'body', color: '#2a1808' }, { text: o.have ? `have ${o.have[id] ?? 0} · need ${n}` : `need ${n}`, font: 'small', color: ok ? '#2a5a2a' : '#a01010' }]);
       cx += size + tw + (o.gap ?? 5);
     }
@@ -516,7 +536,7 @@ export class PixelUI {
   /** width costRow() would take */
   costWidth(cost: Record<string, number>, o: { have?: Record<string, number>; size?: number; font?: FontName; gap?: number; showHave?: boolean } = {}) {
     const size = o.size ?? 16; let w = 0;
-    for (const [id, n] of Object.entries(cost)) { const have = o.have?.[id] ?? 0; w += size + 1 + measure(o.showHave && o.have ? `${Math.min(have, 999)}/${n}` : `${n}`, o.font ?? 'small') + (o.gap ?? 5); }
+    for (const [id, n] of Object.entries(cost)) { const have = o.have?.[id] ?? 0; w += size + 1 + measure(o.showHave && o.have ? `${Math.min(have, 999)}/${n}` : `${n}`, o.font ?? 'small', this.hd) + (o.gap ?? 5); }
     return w;
   }
 
@@ -594,6 +614,60 @@ export class PixelUI {
   resetList(id: string) { this.lists.delete(id); }
 
   /** a bar (hp, progress) */
+  /**
+   * v4: a goal / objective line, the shared language for "what to do next" (home goal board, run goals, tutorials).
+   * A parchment strip pinned by a brass tack: the text, and when given a progress (0..1 or [have, need]) a count on
+   * the right and an ink-ruled bar along the bottom. Done goals get a green check and a struck line.
+   *
+   *   ui.objective('Rebuild the workbench', [3, 5])                  top centre, auto width
+   *   ui.objective('Find the Harpoon King', undefined, { x: 8, y: 40, w: 180 })
+   *   const h = ui.objective('Driftwood', [2, 5], { x, y, w, icon: 'driftwood' })   with an item icon
+   *
+   * Returns the strip's height (stack goals by adding it + 2). Hovering it marks the UI as over (no world clicks).
+   */
+  objective(text: string, progress?: number | [number, number], o: { x?: number; y?: number; w?: number; done?: boolean; icon?: string; id?: string; pulse?: boolean; small?: boolean } = {}): number {
+    const F: FontName = o.small ? 'small' : 'body';
+    const frac = progress === undefined ? -1 : Array.isArray(progress) ? Math.min(1, progress[0] / Math.max(1, progress[1])) : Math.max(0, Math.min(1, progress));
+    const done = o.done ?? frac >= 1;
+    const count = Array.isArray(progress) ? `${Math.min(progress[0], 9999)}/${progress[1]}` : progress !== undefined ? `${Math.round(frac * 100)}%` : '';
+    const iconW = o.icon ? 14 : 0;
+    const cw = count ? this.measure(count, F) + 8 : 0;
+    const w = Math.round(o.w ?? Math.min(this.w - 16, 24 + iconW + this.measure(text, F) + cw + 10));
+    const h = (progress !== undefined ? 22 : 18) - (o.small ? 4 : 0);
+    const x = Math.round(o.x ?? (this.w - w) / 2), y = Math.round(o.y ?? 8);
+    const P = ['#3a2410', '#8a6a44', '#c8aa7a', '#e8d4a8', '#f8ecd0'];
+    // drop shadow, parchment body with a torn right end and a lit top edge
+    this.fill(x + 2, y + 2, w, h, '#000000', 0.35);
+    this.fill(x, y, w, h, P[3]);
+    this.fill(x, y, w, 1, P[4]); this.fill(x, y + h - 1, w, 1, P[1]); this.fill(x, y, 1, h, P[2]);
+    for (let yy = 0; yy < h; yy += 2) this.fill(x + w - 1 - ((yy * 7) % 3), y + yy, 1 + ((yy * 7) % 3), 2, P[2]);
+    this.fill(x + 6, y + 4, w - 20, 1, P[2]);
+    if (o.pulse && !done) { const a = 0.25 + 0.25 * Math.sin(this.t * 5); this.rect(x - 1, y - 1, w + 2, h + 2, '#ffe070'); this.fill(x, y, w, h, '#fff4b0', a * 0.4); }
+    // the brass tack (or a green check when done)
+    const tx = x + 9, ty = y + Math.round(h / 2) - 1;
+    if (done) {
+      for (const [dx, dy] of [[-3, 0], [-2, 1], [-1, 2], [0, 1], [1, 0], [2, -1], [3, -2], [4, -3]]) { this.fill(tx + dx, ty + dy, 2, 2, '#1a5a1a'); this.fill(tx + dx, ty + dy - 1, 1, 1, '#5ae04a'); }
+    } else {
+      this.fill(tx - 3, ty - 2, 6, 5, '#5a3a0c'); this.fill(tx - 2, ty - 3, 4, 7, '#5a3a0c');
+      this.fill(tx - 2, ty - 2, 4, 4, '#d8a038'); this.fill(tx - 2, ty - 2, 2, 2, '#fff0b0'); this.fill(tx + 1, ty + 1, 1, 1, '#8a5a18');
+    }
+    let cx = x + 18;
+    if (o.icon) { this.item(o.icon, cx, y + Math.round((h - 12) / 2) - (progress !== undefined ? 2 : 0), 12, 12); cx += iconW; }
+    const ty2 = y + (progress !== undefined ? 4 : Math.round((h - capH(F, this.hd)) / 2));
+    const tw = this.text(text, cx, ty2, { font: F, color: done ? '#7a6a50' : '#2a1808', shadow: null });
+    if (done) this.fill(cx, ty2 + Math.round(capH(F, this.hd) / 2), tw, 1, '#7a2a1a');
+    if (count) this.text(count, x + w - 8, ty2, { font: F, color: done ? '#1a6a1a' : '#6a3a10', shadow: null, align: 'right' });
+    if (progress !== undefined) {
+      const bx = cx, bw = x + w - 8 - bx, by = y + h - 6;
+      this.fill(bx, by, bw, 3, P[1]); this.fill(bx + 1, by + 1, bw - 2, 1, '#5a4430');
+      const fw = Math.round((bw - 2) * frac);
+      if (fw > 0) { this.fill(bx + 1, by, fw, 3, done ? '#3aa83a' : '#c8762a'); this.fill(bx + 1, by, fw, 1, done ? '#8af07a' : '#f8c060'); }
+    }
+    if (this.hover(x, y, w, h)) this.overNext = true;
+    if (o.id) this.rectsNext.set(o.id, [x, y, w, h]);
+    return h;
+  }
+
   bar(x: number, y: number, w: number, h: number, v: number, col: string, back = '#1a1018') {
     this.fill(x, y, w, h, '#0e0a14');
     this.fill(x + 1, y + 1, w - 2, h - 2, back);

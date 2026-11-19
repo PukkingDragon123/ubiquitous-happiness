@@ -31,7 +31,7 @@ export function attackPlayer(w: World, a: AttackSpec): DefenseResult {
     if (a.projectile?.deflect) { const dx = a.x - p.x, dy = a.y - p.y, l = Math.hypot(dx, dy) || 1; a.projectile.deflect(w, dx / l, dy / l); }
     else if (src?.onParried) src.onParried(w);
     else (src as unknown as { core?: { parried?(w: World): void } } | null)?.core?.parried?.(w);
-    w.emit('parry', { perfect: true, by: src?.kind ?? null });
+    w.emit('parry', { perfect: true, by: src?.kind ?? null, x: p.x, y: p.y });
   } else if (res === 'blocked') {
     const src = a.src as (Entity & Parryable) | null;
     if (src?.onBlocked) src.onBlocked(w); else (src as unknown as { core?: { blocked?(w: World): void } } | null)?.core?.blocked?.(w);

@@ -158,8 +158,9 @@ function buildManatee(scen: Scenery): ManateeParts {
   for (let i = 0; i < 3; i++) { const x = -0.18 + i * 0.13; P.bag.quad([x, 0.12, 0.06 + i * 0.02], [x + 0.16, 0.12, 0.06 + i * 0.02], [x + 0.16 + 0.02 * i, 0.28, 0.06 + i * 0.02], [x + 0.02 * i, 0.28, 0.06 + i * 0.02], R.env); }
   // strap: a loop over the back
   const strap: V3[] = [];
-  for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI; strap.push([0.1, Math.sin(a) * 0.62 - 0.02, Math.cos(a) * 0.64]); }
-  P.bag.tube(strap.map((q) => [q[0] - 0.0, q[1], q[2] - 0.64 * 0] as V3).map((q) => [q[0], q[1] - 0.0, q[2]] as V3), () => 0.025, 3, R.leather);
+  // (bag-local: the bag hangs at z = 0.6 on the flank, so the loop is centred 0.6 back, over the body's middle)
+  for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI; strap.push([0.1, 0.14 + Math.sin(a) * 0.6, Math.cos(a) * 0.66 - 0.6]); }
+  P.bag.tube(strap, () => 0.025, 3, R.leather);
   P.flap.box([-0.26, -0.02, 0.0], [0.52, 0.04, 0.2], R.leather);
   return P;
 }
@@ -188,6 +189,12 @@ export class Manatee {
   private flapOpen = 0;
   private happy = 0;
   private meshes: THREE.Mesh[] = [];
+  /** post-office mode (the dungeon): hover by this point instead of under a buoy */
+  anchor: { x: number; y: number } | null = null;
+  /** the highest she swims (the surface, or a ceiling of dark water in the deep) */
+  ceiling = -0.55;
+  private faceSide = 1;
+  private faceHold = 0;
 
   constructor(scen: Scenery) {
     const P = buildManatee(scen);
@@ -206,7 +213,7 @@ export class Manatee {
     this.front.add(this.cap);
     const bag = new THREE.Group(); mk(P.bag, bag);
     mk(P.flap, this.flap); this.flap.position.set(0, 0.18, 0.0); bag.add(this.flap);
-    bag.position.set(0.15, -0.12, 0.5); bag.rotation.set(0.15, 0, 0.1);
+    bag.position.set(0.12, -0.14, 0.6); bag.rotation.set(0.12, 0, 0.08);
     this.front.add(bag);
     this.yawG.add(this.front, this.rear);
     this.yawG.scale.setScalar(0.9);
@@ -230,7 +237,14 @@ export class Manatee {
     const p = w.player;
     const waitX = buoyX - 1.6, waitY = Math.min(-2.4, buoyY - 2.6);
     if (this.state === 'arriving') { if (this.swim(dt, waitX, waitY, 2.2) < 0.4) this.state = 'waiting'; }
-    else if (this.state === 'waiting') {
+    else if (this.state === 'waiting' && this.anchor) {
+      // post-office hours (the dungeon): she hovers by her pillar box, a slow lazy figure-eight, no trips to the
+      // surface; she turns to the blobfish only when it settles on her other side (no flip-flopping)
+      const a = this.anchor;
+      this.swim(dt, a.x + Math.sin(this.t * 0.31) * 0.45, a.y + Math.sin(this.t * 0.62) * 0.16, 0.7);
+      const near = Math.hypot(p.x - this.x, p.y - this.y) < 5;
+      if (near && this.wave <= 0 && Math.random() < dt * 0.35) this.wave = 2;
+    } else if (this.state === 'waiting') {
       // hang under the buoy; come up for air every so often; turn to face the blobfish
       this.breathe -= dt;
       const ty = this.breathe < 0 && this.breathe > -3 ? -0.75 : waitY;
@@ -245,15 +259,21 @@ export class Manatee {
       if (Math.abs(this.x - out) < 3 || Math.abs(this.x - buoyX) > 45) this.state = 'away';
     }
     this.x += this.vx * dt; this.y += this.vy * dt;
-    this.y = Math.min(this.y, -0.55);
+    this.y = Math.min(this.y, this.ceiling);
+    // the seabed pushes her up softly (a hard clamp made her pop on uneven sand)
     const fl = w.terrain.floorAt(this.x) + 0.9;
-    if (this.y < fl) { this.y = fl; this.vy = Math.max(0, this.vy); }
-    // facing: turn slowly, through the camera
+    if (this.y < fl) { this.vy = Math.max(this.vy, (fl - this.y) * 3); this.y = Math.max(this.y, fl - 0.15); }
+    // facing: turn slowly, through the camera. While waiting she faces the blobfish, with hysteresis: the side has
+    // to change by more than a metre and stay changed for half a second before she turns round
     const sp = Math.hypot(this.vx, this.vy);
-    let face = this.vx;
-    if (this.state === 'waiting' && sp < 0.6) face = p.x - this.x;
-    const tgt = face >= 0 ? 0 : Math.PI;
-    if (Math.abs(face) > 0.05) this.yaw = dampAngle(this.yaw, tgt, 1.6, dt);
+    let side = this.faceSide;
+    if (this.state === 'waiting' && sp < 0.6) {
+      const dx = p.x - this.x;
+      const want = dx > 1.1 ? 1 : dx < -1.1 ? -1 : side;
+      if (want !== side) { this.faceHold += dt; if (this.faceHold > 0.5) { side = want; this.faceHold = 0; } } else this.faceHold = 0;
+    } else if (Math.abs(this.vx) > 0.15) { side = this.vx > 0 ? 1 : -1; this.faceHold = 0; }
+    this.faceSide = side;
+    this.yaw = dampAngle(this.yaw, side > 0 ? 0 : Math.PI, 1.4, dt);
     // swim cycle: the tail paddle beats up and down, the body follows; flippers scull
     const beat = 0.5 + Math.min(1.4, sp * 0.6);
     this.phase += dt * beat * 2.2;
@@ -286,6 +306,14 @@ export class Manatee {
     this.breathe = 6;
   }
   leave() { if (this.state !== 'away') this.state = 'leaving'; }
+  /** post-office mode: waiting at (x, y) from the start, no arrival swim, never surfacing above `ceiling` */
+  station(x: number, y: number, ceiling = -0.55) {
+    this.anchor = { x, y }; this.ceiling = ceiling;
+    this.state = 'waiting'; this.x = x; this.y = y; this.vx = 0; this.vy = 0;
+    this.faceSide = -1; this.yaw = Math.PI;
+    this.root.visible = true;
+    this.root.position.set(x, y, this.z);
+  }
   celebrate() { this.happy = 2.2; this.rollT = 0; }
   dispose() { for (const m of this.meshes) m.geometry.dispose(); }
 }

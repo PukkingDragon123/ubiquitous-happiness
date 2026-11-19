@@ -10,6 +10,7 @@
 //   m6x11plus 18 (Daniel Linssen) – body, hints; m5x7 16 (Daniel Linssen) – small labels.
 import * as THREE from 'three';
 import { easeOutBack, clamp01 } from '../core/math';
+import { calibrateFonts } from './pixel/font';
 
 export interface TextStyle {
   font: string;      // css family
@@ -189,6 +190,14 @@ export class FloatText {
 
 /** wait for every bundled font so canvas text never falls back */
 export async function loadFonts() {
-  const fams = ['Alagard', 'Goofy', 'Jacquard', 'M6x11', 'M5x7', 'Tiny5', 'Pixelify'];
+  // v4 screen fonts (Jersey 10 / 15 / 20, OFL): registered here rather than in index.html
+  const base = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? './';
+  for (const n of [10, 15, 20]) {
+    const fam = 'Jersey' + n;
+    if ([...document.fonts].some((f) => f.family.replace(/['"]/g, '') === fam)) continue;
+    try { const ff = new FontFace(fam, `url(${base}fonts/Jersey${n}.woff2) format('woff2')`); document.fonts.add(ff); await ff.load(); } catch { /* fall back */ }
+  }
+  const fams = ['Alagard', 'Goofy', 'Jacquard', 'M6x11', 'M5x7', 'Tiny5', 'Pixelify', 'Jersey10', 'Jersey15', 'Jersey20'];
   await Promise.all(fams.map((f) => document.fonts.load(`16px '${f}'`).catch(() => null)));
+  calibrateFonts();
 }

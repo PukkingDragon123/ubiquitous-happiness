@@ -10,11 +10,37 @@ export type FloorId = 'reef' | 'kelp' | 'graveyard' | 'arctic' | 'abyss';
 
 /** every regular enemy kind spawnEnemy() knows */
 export type EnemyKind =
-  | 'harpoon' | 'knife' | 'net' | 'heavy' | 'medic'                     // divers (src/waves/human.ts brains)
+  | 'harpoon' | 'knife' | 'net' | 'heavy' | 'medic'                     // giant evil humans (src/waves/human.ts)
   | 'moray' | 'crab' | 'puffer' | 'jelly' | 'angler' | 'barracuda'       // hostile sea life
+  | 'lionfish' | 'stonefish' | 'mantis'                                  // v4 sea life
   | 'dummy';                                                             // training dummy (preview / hideout)
 
-export const ENEMY_KINDS: EnemyKind[] = ['harpoon', 'knife', 'net', 'heavy', 'medic', 'moray', 'crab', 'puffer', 'jelly', 'angler', 'barracuda', 'dummy'];
+export const ENEMY_KINDS: EnemyKind[] = ['harpoon', 'knife', 'net', 'heavy', 'medic', 'moray', 'crab', 'puffer', 'jelly', 'angler', 'barracuda', 'lionfish', 'stonefish', 'mantis', 'dummy'];
+
+export type EnemySize = 'small' | 'medium' | 'large' | 'giant' | 'boss';
+export type EnemyFamily = 'fish' | 'human' | 'prop';
+/**
+ * per kind: what it is (fish drop materials: scales, pearls, shells; humans drop gear and scrap), how big
+ * (drop amount), its display name, and `cost`: how many regular spawns it is worth in a room budget (giants
+ * count for several).
+ */
+export const ENEMY_INFO: Record<EnemyKind, { name: string; family: EnemyFamily; size: EnemySize; cost: number }> = {
+  crab: { name: 'Shell Crab', family: 'fish', size: 'medium', cost: 1 },
+  puffer: { name: 'Pufferfish', family: 'fish', size: 'small', cost: 1 },
+  moray: { name: 'Moray', family: 'fish', size: 'medium', cost: 1 },
+  jelly: { name: 'Jellyfish', family: 'fish', size: 'small', cost: 1 },
+  barracuda: { name: 'Barracuda', family: 'fish', size: 'medium', cost: 1 },
+  angler: { name: 'Anglerfish', family: 'fish', size: 'medium', cost: 1.5 },
+  lionfish: { name: 'Lionfish', family: 'fish', size: 'small', cost: 1 },
+  stonefish: { name: 'Stonefish', family: 'fish', size: 'medium', cost: 1 },
+  mantis: { name: 'Mantis Shrimp', family: 'fish', size: 'small', cost: 1 },
+  harpoon: { name: 'The Harpooner', family: 'human', size: 'giant', cost: 3 },
+  knife: { name: 'The Gutter', family: 'human', size: 'giant', cost: 3 },
+  net: { name: 'The Netter', family: 'human', size: 'giant', cost: 3 },
+  heavy: { name: 'The Brass Hulk', family: 'human', size: 'giant', cost: 4 },
+  medic: { name: 'The Lamplighter', family: 'human', size: 'giant', cost: 3 },
+  dummy: { name: 'Training Dummy', family: 'prop', size: 'medium', cost: 1 },
+};
 
 export interface SpawnOpts {
   /** a stronger variant: more hp + poise, faster wind-ups, longer combos, a gold shimmer */

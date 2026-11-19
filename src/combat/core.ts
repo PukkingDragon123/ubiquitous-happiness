@@ -10,7 +10,7 @@
 import type { Entity, World, DamageKind } from '../game/types';
 import type { AttackSpec, DefenseResult } from './types';
 import { attackPlayer } from './resolve';
-import { glint, stunStars } from './telegraph';
+import { glint, stunStars, keyHint } from './telegraph';
 import { clang, callout, dmgNumber } from './feel';
 
 /** one enemy attack */
@@ -73,6 +73,8 @@ export class EnemyCore {
   /** last time a blow was blocked by the guard (for the player's recoil) */
   lastBlocked = -99;
   hitFlash = 0;
+  /** a giant (bigger tells) */
+  big = false;
 
   constructor(public owner: Entity, o: { poise?: number; regen?: number; head?: () => { x: number; y: number } } = {}) {
     this.poise = this.poiseMax = o.poise ?? 20;
@@ -115,7 +117,11 @@ export class EnemyCore {
         if (!this.told && left <= (m!.tellAt ?? 0.28) && m!.tell !== 'none') {
           this.told = true;
           const p = tellAt ? tellAt() : this.head();
-          glint(w, p.x, p.y, { red: m!.unblockable || m!.tell === 'red', size: this.owner.isBoss ? 1.3 : 0.9 });
+          const red = !!m!.unblockable || m!.tell === 'red';
+          glint(w, p.x, p.y, { red, size: this.owner.isBoss ? 1.4 : this.big ? 1.25 : 0.95 });
+          // the first few times, show the key for it over the blobfish
+          const pl = w.player;
+          if (pl.alive && Math.hypot(pl.x - this.owner.x, pl.y - this.owner.y) < 12) keyHint(w, red ? 'dodge' : 'parry');
         }
         if (left <= 0) this.set('active');
         break;

@@ -9,6 +9,8 @@ import { PixelUI } from '../ui/pixel/ui';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
 import { UiStage } from '../ui/obj/stage';
 import { SkillCard3D } from '../ui/obj/cards';
+import { CodexBook, codexSeen } from '../ui/codex';
+import { RunSummaryCard } from '../ui/runSummary';
 
 function backdrop(): THREE.Texture {
   // a stand-in for a lit reef room: bands of sand, rock and kelp-green with bright speckles (busy on purpose)
@@ -48,6 +50,13 @@ export default function make(game: Game): Screen {
   const big = showCards ? ['manaBolt', 'frostNova', 'chainZap'].map((id) => new SkillCard3D(id, { w: 120 })) : [];
   let open = -1;
   let t = Number(q.get('t') || 0);
+  // &demo=goals | codex | summary | pickup: the v4 UI pieces (objective lines, the codex book, the run summary card,
+  // item pickup cards)
+  const demo = q.get('demo') || '';
+  const book = new CodexBook();
+  if (demo === 'codex') { for (const id of ['barracuda', 'pufferfish', 'moray', 'lionfish', 'sardine', 'fisherman', 'diver']) codexSeen(id, 40); book.open(); }
+  let summary: RunSummaryCard | null = demo === 'summary' ? new RunSummaryCard({ result: 'extracted', depth: 182, distance: 940, time: 412, floors: 3, kills: { fish: 31, giants: 2 }, loot: ['amethyst', 'giantClam', 'pearl', 'harpoonGun', 'rustyHook', 'copperOre', 'kelp', 'shipWheel'], pearls: 37, record: true, cause: 'Sent home with the manatee' }) : null;
+  if (summary) summary.t = Number(q.get('st') || 0);
   const combat: PlayerCombatHud = { stamina: 100, staminaMax: 100, staminaDelay: 0, flasks: 2, flasksMax: 3, drinking: 0, guard: 'idle', parryWindow: 0, lastParry: null, lastParryAge: 9, charge: 0, move: null, iframes: false };
   const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null,
     skills: { sel: 1, mana: 40, maxMana: 60, slots: [{ id: 'manaBolt', name: 'Mana Volley', cd: 0, cdMax: 4, mana: 10, color: '#6a9aff' }, { id: 'frostNova', name: 'Frost Nova', cd: 2, cdMax: 6, mana: 20, color: '#8ae8ff' }, null, { id: 'chainZap', name: 'Chain', cd: 0, cdMax: 5, mana: 80, color: '#ffe04a' }] } };
@@ -75,9 +84,19 @@ export default function make(game: Game): Screen {
       s.pack = { used: 14 + (Math.floor(t / 3) % 12), total: 25 };
       STRIP.player = 20 + ((t * 9) % 300);
       s.boss = q.get('boss') === '0' ? null : { name: 'The Harpoon King', title: 'Terror of the Reef', hp: 1000 - ((t * 60) % 1000), max: 1000, phase: 1 + Math.floor(((t * 60) % 1000) / 340), phases: 3, poise: 0.6, visible: true };
-      if (Math.floor(t / 6) !== Math.floor((t - dt) / 6)) hud.pickup('pearl');
+      if (demo === 'pickup') { if (Math.floor(t / 1.1) !== Math.floor((t - dt) / 1.1)) hud.pickup(['giantClam', 'amethyst', 'harpoonGun', 'pearl', 'shipWheel'][Math.floor(t / 1.1) % 5]); }
+      else if (Math.floor(t / 6) !== Math.floor((t - dt) / 6)) hud.pickup('pearl');
       hud.draw(dt, s, game.input);
       sheetUi.begin(game.input, dt);
+      if (demo === 'goals') {
+        let gy = 120;
+        gy += sheetUi.objective('Rebuild the workbench', [3, 5], { y: gy, icon: 'driftwood' }) + 3;
+        gy += sheetUi.objective('Find the Harpoon King', undefined, { y: gy, pulse: true }) + 3;
+        gy += sheetUi.objective('Dive below -200 m', 0.62, { y: gy }) + 3;
+        sheetUi.objective('Mend the bed with Mr. Crab', [4, 4], { y: gy, icon: 'kelp' });
+      }
+      if (book.isOpen) book.draw(sheetUi, dt);
+      if (summary && summary.draw(sheetUi, dt) === 'continue') summary = null;
       if (showCards) {
         cardStage.attach(sheetUi);
         big.forEach((c, i) => {

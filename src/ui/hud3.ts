@@ -24,9 +24,10 @@ import * as THREE from 'three';
 import { PixelUI } from './pixel/ui';
 import type { Input } from '../core/input';
 import type { PlayerCombatHud, BossBar } from '../combat/types';
-import { ITEMS } from '../game/items';
+import { ITEMS, RARITY_COLOR, statLines } from '../game/items';
 import type { SkillHudState } from '../skills/hud';
-import { UiStage, contactShadow } from './obj/stage';
+import { UiStage, contactShadow, canvasPlane } from './obj/stage';
+import { pixelize } from './obj/pixtex';
 import { BlobAvatar } from './obj/blobAvatar';
 import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
@@ -142,10 +143,27 @@ function brassTex(w: number, h: number, label?: string) {
   if (!t) { t = new THREE.CanvasTexture(brassPage(w, h, label)); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; brassTexCache.set(k, t); }
   return t;
 }
+/** the pickup card face (2x pixels): parchment, a border in the rarity colour with darker bevel, corner rivets */
+const cardArtCache = new Map<string, HTMLCanvasElement>();
+function itemCardArt(col: string): HTMLCanvasElement {
+  let cv = cardArtCache.get(col);
+  if (cv) return cv;
+  cv = document.createElement('canvas'); cv.width = 264; cv.height = 76;
+  const x = cv.getContext('2d')!, W = 264, H = 76;
+  const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+  f(0, 0, W, H, '#1a0e06'); f(2, 2, W - 4, H - 4, col); f(2, 2, W - 4, 2, '#ffffff'); f(4, H - 6, W - 8, 2, '#00000080');
+  f(6, 6, W - 12, H - 12, '#3a2410'); f(8, 8, W - 16, H - 16, '#ecd8ac');
+  for (let yy = 12; yy < H - 10; yy += 4) f(80, yy, W - 92, 1, yy % 8 ? '#e2cc9c' : '#dcc490');
+  f(8, 8, W - 16, 2, '#fff4d8'); f(8, H - 10, W - 16, 2, '#c8aa7a');
+  f(10, 10, 62, H - 20, '#d8c090'); f(10, 10, 62, 2, '#c4a878'); f(10, 10, 2, H - 20, '#c4a878');
+  for (const [rx, ry] of [[4, 4], [W - 8, 4], [4, H - 8], [W - 8, H - 8]]) { f(rx, ry, 4, 4, '#5a3a0c'); f(rx, ry, 2, 2, '#fff0b0'); }
+  cardArtCache.set(col, cv);
+  return cv;
+}
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
-interface Card { title: string; sub: string; icon?: string; t: number; life: number; color: string; model?: THREE.Object3D }
+interface Card { title: string; sub: string; icon?: string; t: number; life: number; color: string; model?: THREE.Object3D; board?: THREE.Object3D; kind?: string }
 
 // ------------------------------------------------------------------ materials
 const glassMat = () => new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, depthWrite: false });
@@ -157,10 +175,10 @@ const grooveMat = new THREE.MeshStandardMaterial({ color: '#1a0c0a', roughness: 
 /** a heart split down the middle so halves can be full or empty */
 function heartHalf(side: -1 | 1, mat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), mat); lobe.position.set(side * 0.2, 0.12, 0);
+  const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.27, 7, 5), mat); lobe.position.set(side * 0.2, 0.12, 0);
   const tip = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.55, 10, 1, false, side < 0 ? Math.PI : 0, Math.PI), mat);
   tip.position.set(0, -0.25, 0); tip.rotation.x = Math.PI; tip.scale.z = 0.7;
-  const fillL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8, side < 0 ? Math.PI : 0, Math.PI), mat); fillL.position.set(0, 0.02, 0);
+  const fillL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 5, side < 0 ? Math.PI : 0, Math.PI), mat); fillL.position.set(0, 0.02, 0);
   g.add(lobe, tip, fillL);
   return g;
 }
@@ -191,21 +209,21 @@ class Tube3D {
   readonly len: number; private r: number;
   constructor(len: number, r: number, color: string, crystal = false) {
     this.len = len; this.r = r;
-    const sides = crystal ? 6 : 10;
+    const sides = crystal ? 6 : 8;
     const glass = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, sides, 1, true), glassMat()); glass.rotation.z = Math.PI / 2;
     this.liqMat = new THREE.MeshStandardMaterial({ color, roughness: 0.25, emissive: color, emissiveIntensity: 0.35, flatShading: crystal });
     this.liquid = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, 1, sides), this.liqMat); this.liquid.rotation.z = Math.PI / 2;
-    this.meniscus = new THREE.Mesh(new THREE.SphereGeometry(r * 0.78, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, transparent: true, opacity: 0.55, emissive: color, emissiveIntensity: 0.4 }));
+    this.meniscus = new THREE.Mesh(new THREE.SphereGeometry(r * 0.78, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, transparent: true, opacity: 0.55, emissive: color, emissiveIntensity: 0.4 }));
     this.meniscus.rotation.z = -Math.PI / 2; this.meniscus.scale.y = 0.35; this.root.add(this.meniscus);
     this.chip = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.76, r * 0.76, 1, sides), new THREE.MeshStandardMaterial({ color: '#fff4d8', emissive: '#fff0c0', emissiveIntensity: 0.5, transparent: true, opacity: 0.7 })); this.chip.rotation.z = Math.PI / 2;
     for (const sx of [-1, 1]) {
-      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.3, r * 1.3, r * 1.4, 12), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : new THREE.MeshStandardMaterial({ map: brassTex(24, 8), roughness: 0.35, metalness: 0.6 }));
+      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.3, r * 1.3, r * 1.4, 8), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : new THREE.MeshStandardMaterial({ map: brassTex(24, 8), roughness: 0.35, metalness: 0.6 }));
       cap.rotation.z = sx * Math.PI / 2; cap.position.x = sx * (len / 2 + (crystal ? r * 0.9 : r * 0.45));
       this.root.add(cap);
       if (!crystal) {
         // a collar band and a domed screw cap with a rivet
         const band = new THREE.Mesh(new THREE.TorusGeometry(r * 1.32, r * 0.18, 4, 14), brassMat); band.rotation.y = Math.PI / 2; band.position.x = sx * (len / 2 - r * 0.15); this.root.add(band);
-        const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 1.0, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), brassMat); dome.rotation.z = -sx * Math.PI / 2; dome.position.x = sx * (len / 2 + r * 1.15); dome.scale.y = 0.5; this.root.add(dome);
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 1.0, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), brassMat); dome.rotation.z = -sx * Math.PI / 2; dome.position.x = sx * (len / 2 + r * 1.15); dome.scale.y = 0.5; this.root.add(dome);
       }
     }
     for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(r * 0.22, 5, 4), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 })); this.bubbles.push(b); this.root.add(b); }
@@ -230,8 +248,8 @@ class Flask3D {
   private full = 1; private slosh = 0; private t = Math.random() * 6;
   constructor() {
     const prof = [[0, -0.42], [0.3, -0.38], [0.36, -0.1], [0.28, 0.16], [0.12, 0.26], [0.12, 0.42], [0, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
-    const glass = new THREE.Mesh(new THREE.LatheGeometry(prof, 10), glassMat());
-    this.liq = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 6, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: '#3a9a1a', roughness: 0.2, emissive: '#2a8a14', emissiveIntensity: 0.45 }));
+    const glass = new THREE.Mesh(new THREE.LatheGeometry(prof, 7), glassMat());
+    this.liq = new THREE.Mesh(new THREE.SphereGeometry(0.33, 7, 4, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: '#3a9a1a', roughness: 0.2, emissive: '#2a8a14', emissiveIntensity: 0.45 }));
     this.liq.position.y = -0.1;
     const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.14, 8), new THREE.MeshStandardMaterial({ color: '#b07a44', roughness: 0.9, flatShading: true })); cork.position.y = 0.48;
     this.surf = new THREE.Mesh(new THREE.CircleGeometry(0.3, 12), new THREE.MeshStandardMaterial({ color: '#8ae860', roughness: 0.15, emissive: '#4ab830', emissiveIntensity: 0.5, side: THREE.DoubleSide }));
@@ -422,8 +440,8 @@ class DepthGauge {
   readonly R = 24;
   constructor() {
     const R = this.R;
-    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R + 1.5, 3, 6, 28), brassMat);
-    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3, R + 3, 5, 28), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -3;
+    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R + 1.5, 3, 4, 16), brassMat);
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3, R + 3, 5, 16), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -3;
     for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const b = new THREE.Mesh(new THREE.SphereGeometry(1.1, 6, 4), brassMat); b.position.set(Math.cos(a) * (R + 1.5), Math.sin(a) * (R + 1.5), 2.6); this.root.add(b); }
     const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(0, R + 6, 0);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(3.4, 1.1, 4, 10), brassMat); ring.position.set(0, R + 11, 0);
@@ -443,7 +461,7 @@ class DepthGauge {
     const rm = new THREE.Mesh(new THREE.ConeGeometry(2, 4.5, 3), new THREE.MeshStandardMaterial({ color: '#e83030', emissive: '#801010', emissiveIntensity: 0.5, flatShading: true }));
     rm.position.y = R - 2.5; rm.rotation.z = Math.PI; this.rec.add(rm); this.rec.position.z = 1.4;
     // the glass cover with a moving glint
-    const glass = new THREE.Mesh(new THREE.SphereGeometry(R, 20, 6, 0, Math.PI * 2, 0, Math.PI * 0.18), new THREE.MeshStandardMaterial({ color: '#e8f8ff', roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }));
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(R, 12, 3, 0, Math.PI * 2, 0, Math.PI * 0.18), new THREE.MeshStandardMaterial({ color: '#e8f8ff', roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }));
     glass.rotation.x = Math.PI / 2; glass.scale.set(1, 0.35, 1); glass.position.z = -R * 0.3 + 3;
     this.glint = new THREE.Mesh(new THREE.PlaneGeometry(3, R * 1.1), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false }));
     this.glint.position.set(-6, 4, 4.5); this.glint.rotation.z = -0.6;
@@ -494,6 +512,7 @@ class DepthGauge {
 }
 
 export class Hud {
+  private pixT = 0;
   ui = new PixelUI();
   get layer(): { scene: THREE.Scene; camera: THREE.Camera } { return this.ui.layer; }
   stage = new UiStage();
@@ -526,6 +545,7 @@ export class Hud {
     const S = this.stage;
     S.ui.add(this.avatar.root, this.avatarShadow);
     this.avatar.root.scale.setScalar(28);
+    this.avatar.root.userData.noPixel = true; // the blobfish keeps its own soft skin shading
     this.avatarShadow.rotation.x = -1.2;
     S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque);
     this.pouch.scale.multiplyScalar(13);
@@ -543,13 +563,21 @@ export class Hud {
   /** a centred title card (floor / area names) */
   title(title: string, sub = '', color = C.white, life = 3) { this.cardsT = this.cardsT.filter((c) => c.icon); this.cardsT.push({ title, sub, t: 0, life, color }); }
   /** an item pickup streak: the item's model turning on a ribbon, name + one line (defaults from ITEMS) */
+  /**
+   * v4 item pickup card: a parchment card with a rarity-metal border slides in on the right, the item's model turning
+   * in front of it, the name in its rarity colour, the kind and the first stat line. Up to three stack; the oldest
+   * leaves first.
+   */
   pickup(itemId: string, name?: string, sub?: string) {
     const d = ITEMS[itemId];
-    for (const c of this.cardsT) if (c.model) c.model.removeFromParent();
-    this.cardsT = this.cardsT.filter((c) => !c.icon);
+    const icons = this.cardsT.filter((c) => c.icon);
+    if (icons.length >= 3) { const old = icons[0]; old.model?.removeFromParent(); old.board?.removeFromParent(); this.cardsT = this.cardsT.filter((c) => c !== old); }
     const model = itemModel(itemId);
-    this.stage.ui.add(model);
-    this.cardsT.push({ title: name ?? d?.name ?? itemId, sub: sub ?? d?.desc ?? '', icon: itemId, t: 0, life: 3.2, color: '#fff2c8', model });
+    const col = d ? RARITY_COLOR[d.rarity] : '#fff2c8';
+    const board = canvasPlane(itemCardArt(col), 132, 38);
+    this.stage.ui.add(model, board);
+    const line = sub ?? (d ? (statLines(itemId, 1)[0]?.text ?? d.desc) : '');
+    this.cardsT.push({ title: name ?? d?.name ?? itemId, sub: line, icon: itemId, t: 0, life: 3.6, color: col, model, board, kind: d ? `${d.rarity} ${d.kind}`.toUpperCase() : '' });
   }
   /** bounce / flash a counter */
   flash(what: Counter) { this.pop[what] = 1; }
@@ -570,6 +598,8 @@ export class Hud {
     const ui = this.d;
     ui.k = Math.max(1, pui.h / 360);
     this.stage.ui.scale.setScalar(ui.k);
+    // v4: the pixel treatment (painted pages + banded ramp light) on every HUD object, new children included
+    if ((this.pixT -= dt) <= 0) { this.pixT = 0.5; pixelize(this.stage.ui); }
     this.animate(dt, s);
     const on = !s.hidden;
     for (const o of this.stage.ui.children) o.visible = on || o === this.ribbon;
@@ -773,29 +803,31 @@ export class Hud {
   // ---------------------------------------------------------------- title cards / pickup streaks
   private drawCards(ui: DUi, dt: number) {
     for (const c of this.cardsT) c.t += dt;
-    for (const c of this.cardsT) if (c.t >= c.life && c.model) c.model.removeFromParent();
+    for (const c of this.cardsT) if (c.t >= c.life) { c.model?.removeFromParent(); c.board?.removeFromParent(); }
     this.cardsT = this.cardsT.filter((c) => c.t < c.life);
     this.ribbon.visible = false;
     for (const c of this.cardsT) {
       const a = clamp01(Math.min(c.t * 5, (c.life - c.t) * 2.5));
       const slide = Math.round((1 - Math.min(1, c.t * 5)) ** 2 * 14);
       if (c.icon) {
-        const y = 52;
-        const sub = c.sub.length > 64 ? c.sub.slice(0, 62) + '…' : c.sub;
-        const tw = Math.max(ui.measure(c.title, 'title'), ui.measure(sub, 'small'));
-        const w = Math.min(ui.w - 20, tw + 64), x = Math.round((ui.w - w) / 2);
-        this.ribbon.visible = true;
-        this.ribbon.scale.set(w, 1, 1);
-        this.ribbon.children.forEach((ch) => { const m = (ch as THREE.Mesh).material as THREE.Material; m.opacity = a * 0.8; m.transparent = true; });
-        this.stage.put(this.ribbon, ui.w / 2, y + 20, -30);
+        // right edge, under the depth gauge, newest at the bottom; slides in from the right and back out
+        const idx = this.cardsT.filter((q) => q.icon).indexOf(c);
+        const cw = 132, ch = 38;
+        const inK = Math.min(1, c.t * 4), outK = clamp01((c.t - c.life + 0.35) / 0.35);
+        const slideX = Math.round((1 - inK) ** 3 * (cw + 20) + outK ** 2 * (cw + 20));
+        const x = ui.w - cw - 8 + slideX, y = 158 + idx * (ch + 4);
+        if (c.board) { c.board.visible = true; this.stage.put(c.board, x + cw / 2, y + ch / 2, -20); c.board.rotation.set(0, -0.12 * (1 - inK), 0); }
         if (c.model) {
-          const sc = 28 * Math.min(1, c.t * 4);
-          c.model.scale.setScalar(sc);
-          c.model.rotation.set(0.25, this.t * 2.2, Math.sin(this.t * 3) * 0.1);
-          this.stage.put(c.model, x + 22, y + 20, 30);
+          const fitK = 26 / Math.max(1, ...((c.model.userData.cells as number[] | undefined) ?? [1]));
+          c.model.scale.setScalar(fitK * (0.6 + 0.4 * Math.min(1, c.t * 3)) * (1 + Math.max(0, 0.25 - c.t) * 1.6));
+          c.model.rotation.set(0.3, -0.6 + Math.sin(this.t * 1.6) * 0.5, 0);
+          this.stage.put(c.model, x + 20, y + ch / 2, 30);
         }
-        ui.text(c.title, x + 46 - slide, y + 9, { font: 'title', color: c.color, outline: '#1a0e04', alpha: a });
-        if (sub) ui.text(sub, x + 46 + slide, y + 13 + ui.cap('title'), { font: 'small', color: '#d8d0c0', alpha: a });
+        const tx = x + 40;
+        ui.text(c.title, tx, y + 5, { font: 'title', color: c.color, outline: '#1a0e04', alpha: 1 - outK });
+        if (c.kind) ui.text(c.kind, tx, y + 7 + ui.cap('title'), { font: 'small', color: '#7a5a3a', shadow: null, alpha: 1 - outK });
+        const sub = c.sub.length > 34 ? c.sub.slice(0, 33) + '…' : c.sub;
+        if (sub) ui.text(sub, tx, y + 18 + ui.cap('title'), { font: 'small', color: '#2a6a1a', shadow: null, alpha: 1 - outK });
       } else {
         // top centre, between the health corner and the strip map: never over the play area
         const y = 10;

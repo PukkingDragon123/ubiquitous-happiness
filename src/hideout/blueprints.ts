@@ -1,4 +1,5 @@
-// The hideout BLUEPRINTS catalog: cosy furniture, lights, decor and functional stations, their footprints on the
+// The v3 furniture catalog (the prop models in models.ts are still built from it; v4 rebuilds the home from the
+// PIECES in rebuild.ts). The hideout BLUEPRINTS catalog: cosy furniture, lights, decor and functional stations, their footprints on the
 // floor grid, material costs (item ids of kind 'material'), unlock rules and the perks stations grant.
 //
 //   BLUEPRINTS.sofa                      the def
@@ -8,6 +9,7 @@
 //   defaultLayout()                      the starting placements (core furniture)
 import { META, saveMeta, type Placement } from '../meta/meta';
 import { ITEMS } from '../game/items';
+import { homeStations } from './rebuild';
 
 export type BpCat = 'core' | 'cozy' | 'light' | 'decor' | 'station';
 export type Arch = 'mage' | 'warrior' | 'summoner' | 'tinkerer' | 'rogue' | 'any';
@@ -175,96 +177,16 @@ export function isUnlocked(id: string): boolean {
   return false;
 }
 
-/** ids of functional stations currently built */
-export function stationsBuilt(): string[] {
-  const ids = new Set(META.built.map((p) => p.bp));
-  return [...ids].filter((id) => BLUEPRINTS[id]?.station);
-}
-/** everything the built stations give: item ids unlocked for loot/crafting, perk lines, archetypes covered */
+/** ids of the home's working stations (v4: the rebuilt pieces, src/hideout/rebuild.ts; the bed is 'bunk' = +1 heart) */
+export function stationsBuilt(): string[] { return homeStations(); }
+/** what the rebuilt home gives the runs: perk lines, and (once the workbench is back) every archetype's gear */
 export function stationPerks(): { unlocks: string[]; perks: string[]; arch: Arch[] } {
-  const unlocks = new Set<string>(), perks: string[] = [], arch = new Set<Arch>();
-  for (const id of stationsBuilt()) {
-    const s = BLUEPRINTS[id].station!;
-    perks.push(`${BLUEPRINTS[id].name}: ${s.perk}`);
-    arch.add(s.arch);
-    for (const u of s.unlocks ?? []) if (ITEMS[u]) unlocks.add(u);
-  }
-  return { unlocks: [...unlocks], perks, arch: [...arch] };
+  const b = homeStations();
+  const perks: string[] = [];
+  if (b.includes('bunk')) perks.push('Bed: +1 heart on every run');
+  if (b.includes('workbench')) perks.push('Workbench: archetype gear can turn up on runs');
+  const arch: Arch[] = b.includes('workbench') ? ['mage', 'warrior', 'summoner', 'tinkerer', 'rogue'] : [];
+  return { unlocks: [], perks, arch };
 }
-
-// ------------------------------------------------------------------ the floor grid
-export const GRID_W = 10, GRID_D = 8;
-/** cells kept clear in front of the door (x = 0 wall) */
-export const DOOR_CELLS: [number, number][] = [[0, 5], [0, 6], [1, 5], [1, 6]];
-/** cells taken by fixed set pieces (solid): the sea-vent stove, the wardrobe mirror, the blueprint easel */
-export const FIXED_CELLS: [number, number][] = [[0, 0], [9, 1], [9, 5]];
-/** cells kept walkable but unbuildable: the loft steps, the trophy niche, the map room's mouth */
-export const CLEAR_CELLS: [number, number][] = [[1, 0], [2, 0], [3, 0], [6, 0], [7, 0], [8, 0], [0, 1], [0, 2], [0, 3]];
 
 export function footprint(bp: Blueprint, rot: number): [number, number] { return rot % 2 ? [bp.size[1], bp.size[0]] : [bp.size[0], bp.size[1]]; }
-export function cellsOf(p: Placement): [number, number][] {
-  const bp = BLUEPRINTS[p.bp]; if (!bp) return [];
-  const [w, d] = footprint(bp, p.rot);
-  const out: [number, number][] = [];
-  for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) out.push([p.x + i, p.z + j]);
-  return out;
-}
-/** grid cell -> world xz of the cell's corner */
-export const cellX = (x: number) => x - GRID_W / 2;
-export const cellZ = (z: number) => z - GRID_D / 2;
-/** placement centre in world xz */
-export function placementCentre(p: { bp: string; x: number; z: number; rot: number }): [number, number] {
-  const bp = BLUEPRINTS[p.bp];
-  const [w, d] = footprint(bp, p.rot);
-  return [cellX(p.x) + w / 2, cellZ(p.z) + d / 2];
-}
-
-/** the starting hideout: the sofa + CRT corner under the round window, the chest, the bench, the locker by the hatch */
-export function defaultLayout(): Placement[] {
-  let uid = 1;
-  const P = (bp: string, x: number, z: number, rot: number): Placement => ({ uid: uid++, bp, x, z, rot });
-  return [
-    P('tv', 4, 0, 0),
-    P('rug', 3, 1, 0),
-    P('sofa', 4, 3, 2),
-    P('coffeeTable', 6, 2, 0),
-    P('lamp', 6, 3, 0),
-    P('storage', 2, 7, 2),
-    P('locker', 0, 4, 1),
-    P('workbench', 9, 3, 3),
-    P('plant', 9, 0, 0),
-    P('armchair', 7, 2, 3),
-    P('aquarium', 7, 7, 2),
-  ];
-}
-const LAYOUT_KEY = 'blobfish.hideout.v3';
-/** cells a placement may not use at all (fixed pieces, kept-clear walkways, the door for solid pieces) */
-function blockedCell(bp: Blueprint, x: number, z: number) {
-  const hit = (l: [number, number][]) => l.some(([a, b]) => a === x && b === z);
-  return hit(FIXED_CELLS) || (!bp.floor && (hit(CLEAR_CELLS) || hit(DOOR_CELLS)));
-}
-export function ensureLayout() {
-  // v3 rebuilt the cave round its new nooks: lay the hideout out afresh once, keeping any extra pieces that still fit
-  let migrated = true;
-  try { migrated = localStorage.getItem(LAYOUT_KEY) === '1'; } catch { /* storage blocked */ }
-  if (!META.built.length || !migrated) {
-    const old = META.built;
-    const fresh = defaultLayout();
-    const taken = new Set<string>();
-    for (const p of fresh) for (const [x, z] of cellsOf(p)) if (!BLUEPRINTS[p.bp].floor) taken.add(x + ',' + z);
-    let uid = fresh.length + 1;
-    for (const p of old) {
-      const bp = BLUEPRINTS[p.bp];
-      if (!bp || fresh.some((q) => q.bp === p.bp && (bp.core || bp.unique))) continue;
-      const cells = cellsOf(p);
-      if (cells.some(([x, z]) => x < 0 || z < 0 || x >= GRID_W || z >= GRID_D || blockedCell(bp, x, z) || (!bp.floor && taken.has(x + ',' + z)))) continue;
-      if (!bp.floor) for (const [x, z] of cells) taken.add(x + ',' + z);
-      fresh.push({ ...p, uid: uid++ });
-    }
-    META.built = fresh; saveMeta();
-    try { localStorage.setItem(LAYOUT_KEY, '1'); } catch { /* storage blocked */ }
-  }
-  // core furniture must always exist (older saves)
-  for (const p of defaultLayout()) if (BLUEPRINTS[p.bp].core && !META.built.some((q) => q.bp === p.bp)) META.built.push({ ...p, uid: nextUid() });
-}
-export function nextUid() { return META.built.reduce((m, p) => Math.max(m, p.uid), 0) + 1; }

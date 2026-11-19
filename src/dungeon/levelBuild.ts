@@ -32,7 +32,7 @@ import type { LampHandle } from '../gfx/lighting';
 import { LevelTerrain } from './terrain';
 import { ArenaGate, CrackedLid } from './gates';
 import { bedAt, sandAt, shelfAt, depthOf, type LevelPlan } from './level';
-import { grateModel, ropeModel, postBox, disposeModel } from './models';
+import { grateModel, ropeModel, postBox, signpostModel, disposeModel } from './models';
 
 type Rig = { lamp(x: number, y: number, z: number, color: string, intensity?: number, distance?: number): LampHandle | null } | null;
 
@@ -133,8 +133,8 @@ export class LevelBuild {
     if (post) {
       this.postX = post.x; this.postY = sand.heightAt(post.x);
       const m = this.manatee = new Manatee(scen);
-      m.arrive(post.x + 3, post.x); m.state = 'waiting';
-      m.x = post.x + 1.2; m.y = this.postY + 4.2;
+      // she keeps office hours beside her pillar box, low over the sand (not drifting up into the water column)
+      m.station(post.x + 1.4, this.postY + 2.3, plan.top - 1.4);
     }
     this.detail = new Detail(scen, world, plan.seed);
     scen.finish();
@@ -158,6 +158,20 @@ export class LevelBuild {
       this.rope = ropeModel(h);
       this.rope.root.position.set(plan.ropeX, fl + 1.2, -0.3);
       this.group.add(this.rope.root);
+    }
+    // signposts: how far from home, which way is onward (distances burnt into the boards)
+    for (const sg of plan.signs) {
+      const far = Math.round((plan.far0 + sg.x) / 5) * 5;
+      const d = Math.round(depthOf(plan, sg.y));
+      const boards: { text: string; dir: -1 | 0 | 1 }[] = sg.kind === 'home'
+        ? [{ text: 'HOME', dir: -1 }, { text: 'THE DEEP', dir: 1 }]
+        : sg.kind === 'mile' ? [{ text: `HOME ${far} M`, dir: -1 }, { text: a.name.toUpperCase(), dir: 1 }]
+          : [{ text: `HOME ${far} M`, dir: -1 }, { text: `DEEPER  -${d + 6} M`, dir: 1 }];
+      const sp = signpostModel(boards);
+      sp.position.set(sg.x, sand.heightAt(sg.x) - 0.1, -1.3);
+      sp.rotation.y = 0.12;
+      this.group.add(sp); this.props3d.push(sp);
+      this.signLamps.push(sp.getObjectByName('lamp') as THREE.Mesh);
     }
     // god-ray sheets (landmark shafts): remembered so the depth can dim them
     this.group.traverse((o) => { const m = o as THREE.Mesh; const mt = m.material as THREE.MeshBasicMaterial; if (m.isMesh && mt.blending === THREE.AdditiveBlending && mt.isMeshBasicMaterial && !mt.userData.shared) this.shafts.push(m); });
@@ -264,6 +278,7 @@ export class LevelBuild {
   }
 
   private props3d: THREE.Object3D[] = [];
+  private signLamps: THREE.Mesh[] = [];
   /** the boss is down: the grate swings open over the pit */
   openExit() { this.exitOpen = true; }
   private roof = new Soup();
@@ -350,15 +365,13 @@ export class LevelBuild {
     const m = this.manatee;
     if (m) {
       m.update(dt, w, this.postX + 1.6, this.postY + 6.8);
-      m.state = 'waiting';
-      m.y = Math.max(this.postY + 2.6, Math.min(m.y, Math.min(this.plan.top - 1.6, this.postY + 6)));
-      m.root.position.y = m.y;
     }
     if (this.grate) {
       this.grateA += ((this.exitOpen ? 1 : 0) - this.grateA) * (1 - Math.exp(-dt * 2.2));
       const [l, r] = this.grate.leaves;
       l.rotation.z = -this.grateA * 1.7; r.rotation.z = this.grateA * 1.7;
     }
+    for (const [i, l] of this.signLamps.entries()) if (l) { const k = 0.8 + Math.sin(t * 2.3 + i) * 0.15 + Math.sin(t * 7.1 + i * 3) * 0.05; (l.material as THREE.MeshBasicMaterial).color.setRGB(2.2 * k, 1.8 * k, 1.1 * k); }
     if (this.rope) { this.rope.root.rotation.z = Math.sin(t * 0.7) * 0.02; const k = 0.75 + Math.sin(t * 3) * 0.25; (this.rope.lamp.material as THREE.MeshBasicMaterial).color.setRGB(2.4 * k, 2.0 * k, 1.3 * k); }
     if (this.glowLamps.length) {
       let nn = 0;

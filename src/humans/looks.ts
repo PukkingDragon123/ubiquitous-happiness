@@ -343,3 +343,31 @@ export function makeLook(arch: Archetype, seed: number): Look {
   F.cheek *= 1 + (r.next() - 0.5) * 0.04;
   return L;
 }
+
+/**
+ * v4 giants: the evil, grotesque version of a diver look ("giant" scar). Corpse-pale gaunt faces (sunken
+ * cheeks, a heavy jaw and brow, old), a hunched hulking frame with big hands, and rusted, grimy dive kit;
+ * the lenses are painted a sickly glow (the kit swaps in an emissive glass on top).
+ */
+export function evilLook(L: Look) {
+  L.skin = [184, 192, 176]; L.skinDark = 0; L.age = 0.9;
+  const F = L.face;
+  F.cheek *= 0.82; F.jaw *= 1.16; F.chin *= 1.1; F.brow = 1.45; F.browCol = [40, 44, 36]; F.eyeR *= 0.86;
+  F.blush = 0; F.sunburn = 0; F.freckles = 0; F.nose = { ...F.nose, len: F.nose.len * 1.2, bulb: 0.45, red: 0.05 };
+  L.facial = 'stubble'; L.facialCol = [48, 50, 42];
+  L.build = { ...L.build, hunch: Math.max(L.build.hunch, 0.16), mass: L.build.mass * 0.94, headS: L.build.headS * 1.04, shoulders: L.build.shoulders * 1.08, handS: L.build.handS * 1.22, armLen: L.build.armLen * 1.06 };
+  if (L.dive) {
+    const D = L.dive;
+    const canvas = D.suit === 'canvas';
+    D.col = canvas ? [92, 78, 60] : [60, 58, 52];
+    D.col2 = canvas ? [64, 50, 38] : [134, 70, 36];
+    D.col3 = canvas ? [150, 88, 40] : [146, 138, 108];
+    D.pattern = canvas ? 'plain' : 'panels';
+    D.tankCol = [128, 68, 36];
+    D.finCol = [40, 38, 34];
+    D.lens = [200, 255, 90];
+    D.cross = false;
+    L.top = { ...L.top, col: D.col, col2: D.col2, col3: D.col3 };
+    L.legs = { ...L.legs, col: D.col, col2: D.col2 };
+  }
+}

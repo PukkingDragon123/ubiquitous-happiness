@@ -9,7 +9,7 @@
 //
 // `y` is the top of the cap height, so text lines up with boxes regardless of the font's internal metrics.
 
-export type FontName = 'body' | 'small' | 'tiny' | 'title' | 'fancy' | 'big';
+export type FontName = 'body' | 'small' | 'tiny' | 'title' | 'fancy' | 'big' | 'hd10' | 'hd15' | 'hd20';
 
 export interface PxFont {
   family: string;
@@ -24,6 +24,8 @@ export interface PxFont {
   lh: number;
   /** extra letter spacing (px) */
   track: number;
+  /** a screen font drawn at this many canvas px per UI px (PixelUI's `hd`): its glyphs are blitted untransformed */
+  dev?: number;
 }
 
 const def = (family: string, px: number, track = 0): PxFont => ({ family, px, capTop: 0, cap: Math.round(px * 0.6), desc: 2, lh: px, track });
@@ -39,6 +41,11 @@ const def = (family: string, px: number, track = 0): PxFont => ({ family, px, ca
  *   title  Alagard 16     headings, names, big numbers                             cap 11
  *   fancy  Alagard 16     (alias; Jacquard 24 has no integer native size)
  *   big    Alagard 32     splash titles (exact 2x)
+ *
+ * v4 SCREEN fonts: a PixelUI draws body / small text in Jersey (OFL) instead, at twice the pixels per glyph when its
+ * canvas is 2 px per UI px (1080p, 4K): body -> Jersey 20 (cap 20 canvas px = 10 UI px), small -> Jersey 15; at
+ * 1 px per UI px (720p) body -> Jersey 10. Same footprints as m6x11 / m5x7, so layouts hold. Textures and sprites
+ * (unregistered canvases) keep the classic fonts. Titles stay Alagard everywhere.
  */
 export const FONTS: Record<FontName, PxFont> = {
   body: def('M6x11', 18),
@@ -47,7 +54,28 @@ export const FONTS: Record<FontName, PxFont> = {
   title: def('Alagard', 16),
   fancy: def('Alagard', 16),
   big: def('Alagard', 32),
+  // v4 screen fonts: Jersey 10 / 15 / 20 (Sarah Cadigan-Fried, OFL) at their exact native sizes. A PixelUI swaps
+  // body / small text to these (see screenFont): at 2 canvas px per UI px Jersey 20 has m6x11's footprint (cap 10
+  // UI px, ~6.8 px a letter) with twice the pixels per glyph; Jersey 15 replaces m5x7 the same way.
+  hd10: def('Jersey10', 56 / 3),
+  hd15: { ...def('Jersey15', 27), dev: 2 },
+  hd20: { ...def('Jersey20', 34), dev: 2 },
 };
+
+/**
+ * Text density per canvas: PixelUI registers its context with its `hd` (canvas px per UI px). Unregistered canvases
+ * (3D textures, sprites) keep the classic fonts at 1:1.
+ */
+const density = new WeakMap<CanvasRenderingContext2D, number>();
+export function setTextDensity(ctx: CanvasRenderingContext2D, hd: number) { density.set(ctx, hd); }
+/** the font actually used for a role on a canvas of this density (0 = unregistered) */
+export function screenFont(font: FontName = 'body', hd = 0): FontName {
+  if (!hd) return font;
+  if (hd >= 2) return font === 'body' ? 'hd20' : font === 'small' || font === 'tiny' ? 'hd15' : font;
+  return font === 'body' ? 'hd10' : font;
+}
+/** UI px per font px for a role at a density (hd fonts are measured in canvas px) */
+function devDiv(f: FontName, hd: number) { const d = FONTS[f].dev; return d && hd >= d ? hd : 1; }
 
 let calibrated = false;
 const meas = (() => { const c = document.createElement('canvas'); c.width = c.height = 4; return c.getContext('2d')!; })();
@@ -96,14 +124,15 @@ const masks = new Map<string, { m: Uint8Array; w: number; h: number }>();
 
 function fontOf(n: FontName | undefined) { return FONTS[n ?? 'body']; }
 
-export function measure(str: string, font: FontName = 'body'): number {
+export function measure(str: string, font: FontName = 'body', hd = 0): number {
   if (!str) return 0;
+  if (hd) { const f2 = screenFont(font, hd); if (f2 !== font) return measure(str, f2) / devDiv(f2, hd); }
   const f = fontOf(font);
   meas.font = `${f.px}px '${f.family}'`;
   return Math.ceil(meas.measureText(str).width) + f.track * Math.max(0, str.length - 1);
 }
-export function lineH(font: FontName = 'body') { if (!calibrated) calibrateFonts(); return fontOf(font).lh; }
-export function capH(font: FontName = 'body') { if (!calibrated) calibrateFonts(); return fontOf(font).cap; }
+export function lineH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); const f2 = screenFont(font, hd); return fontOf(f2).lh / devDiv(f2, hd); }
+export function capH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); const f2 = screenFont(font, hd); return fontOf(f2).cap / devDiv(f2, hd); }
 
 /** hard-pixel glyph mask for a string; row 0 is the cap top */
 function mask(str: string, font: FontName) {
@@ -188,6 +217,24 @@ function withAutoShadow(o: TextOpts): TextOpts {
 /** draw text with its cap top at y; returns the drawn width */
 export function drawText(ctx: CanvasRenderingContext2D, str: string, x: number, y: number, o: TextOpts = {}): number {
   if (!str) return 0;
+  const hd = density.get(ctx);
+  if (hd) {
+    const f2 = screenFont(o.font ?? 'body', hd);
+    if (f2 !== (o.font ?? 'body')) {
+      const div = devDiv(f2, hd);
+      if (div === 1) return drawText1(ctx, str, x, y, { ...o, font: f2 });
+      // a high-density screen font: blit its glyphs 1:1 onto the canvas (map the UI position through the current
+      // transform, then draw untransformed), so each glyph pixel is one canvas pixel
+      const m = ctx.getTransform();
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const w = drawText1(ctx, str, Math.round(m.a * x + m.e), Math.round(m.d * y + m.f), { ...o, font: f2 });
+      ctx.restore();
+      return w / div;
+    }
+  }
+  return drawText1(ctx, str, x, y, o);
+}
+function drawText1(ctx: CanvasRenderingContext2D, str: string, x: number, y: number, o: TextOpts): number {
   o = withAutoShadow(o);
   const g = glyphs(str, o);
   const tw = g.w - (o.outline ? 2 : 0) - (o.shadow ? 1 : 0);
@@ -200,13 +247,13 @@ export function drawText(ctx: CanvasRenderingContext2D, str: string, x: number, 
 }
 
 /** greedy word wrap to maxW pixels (explicit \n respected) */
-export function wrap(str: string, font: FontName, maxW: number): string[] {
+export function wrap(str: string, font: FontName, maxW: number, hd = 0): string[] {
   const out: string[] = [];
   for (const para of str.split('\n')) {
     let cur = '';
     for (const word of para.split(' ')) {
       const t = cur ? cur + ' ' + word : word;
-      if (measure(t, font) > maxW && cur) { out.push(cur); cur = word; } else cur = t;
+      if (measure(t, font, hd) > maxW && cur) { out.push(cur); cur = word; } else cur = t;
     }
     out.push(cur);
   }

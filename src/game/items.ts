@@ -330,6 +330,29 @@ const DEFS: ItemDef[] = [
     hook: (run, it) => run.on('kill', (d) => { if (chance(0.1 * (it.level || 1))) { run.coins++; proc(run, it.id, 'Yoink! +1', d); } }) },
   { id: 'boneDice', name: 'Bone Dice', kind: 'trinket', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 3, tags: ['rogue'],
     desc: 'Carved from a fish ear-bone. Always rolls a six. Usually.', stats: (s, l) => { s.crit += 0.05 * l; s.luck += 0.2 * l; } },
+
+  // ---------------------------------------------------------------- v4: the big ones (3x3 to 4x4). They eat half a
+  // pack, so each one is a build in itself.
+  { id: 'giantClam', name: 'Giant Clam', kind: 'armor', rarity: 'legendary', maxLevel: 3, tags: ['warrior', 'water'], look: 'soft',
+    shape: [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2], [1, 3], [2, 3]],
+    desc: 'You live in it now. It has opinions about the rent.',
+    stats: (s, l) => { s.armor += 0.08 + 0.04 * l; s.maxHp += 2; s.pressureResist += 0.15 * l; } },
+  { id: 'shipWheel', name: "Ship's Wheel", kind: 'trinket', rarity: 'epic', maxLevel: 3, tags: ['tinkerer'], look: 'wood',
+    shape: [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
+    desc: 'Steer your fate. It only turns left, but so does the current.',
+    stats: (s, l) => { s.cdr += 0.06 * l; s.speed += 0.3; s.gadgetPower += 0.1 * l; } },
+  { id: 'rustAnchor', name: 'Rusted Anchor', kind: 'weapon', rarity: 'epic', maxLevel: 3, tags: ['warrior', 'metal'], look: 'metal',
+    shape: [[0, 0], [1, 0], [2, 0], [1, 1], [1, 2], [0, 3], [1, 3], [2, 3]],
+    desc: 'Heavy. Very heavy. Swing it once and the sea floor apologises.',
+    stats: (s, l) => { s.swordDmg += 0.35 * l; s.reelResist += 0.1 * l; s.speed -= 0.25; } },
+  { id: 'sunkenChest', name: 'Sunken Chest', kind: 'trinket', rarity: 'legendary', maxLevel: 3, tags: ['rogue'], look: 'wood',
+    shape: [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2]],
+    desc: 'Still locked. Still rattling. You carry it everywhere, just in case.',
+    stats: (s, l) => { s.luck += 0.6 * l; s.magnet += 0.5; s.crit += 0.04 * l; } },
+  { id: 'harpoonGun', name: 'Harpoon Gun', kind: 'weapon', rarity: 'epic', maxLevel: 3, tags: ['tinkerer', 'warrior', 'metal'], look: 'metal',
+    shape: [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1]],
+    desc: 'Confiscated from a giant. He wants it back. He cannot have it back.',
+    stats: (s, l) => { s.crit += 0.06 * l; s.swordReach += 0.25; s.gadgetPower += 0.15 * l; } },
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(DEFS.map((d) => [d.id, d]));
@@ -492,7 +515,14 @@ export function rollItem(rng: Rng, pool: Pool = 'loot', luck = 0): string {
 }
 
 // ------------------------------------------------------------------ grid geometry
-export const GRID = 5;
+/** the pack grid (v4): 8 columns x 6 rows, so a 4x4 clam still leaves room for a build around it */
+export const GRID_W = 8;
+export const GRID_H = 6;
+export const GRID_CELLS = GRID_W * GRID_H;
+/** @deprecated the pack is no longer square: use GRID_W / GRID_H (kept = GRID_W for old callers) */
+export const GRID = GRID_W;
+/** true when a pack cell is inside the grid */
+export const inGrid = (x: number, y: number) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 
 /** shape cells after `rot` clockwise quarter turns, normalised to start at 0,0 */
 export function rotCells(shape: Cell[], rot: number): Cell[] {
@@ -508,19 +538,25 @@ export function shapeSize(shape: Cell[]): { w: number; h: number } {
 export function instCells(it: ItemInst, rot = it.rot, gx = it.gx, gy = it.gy): Cell[] {
   return rotCells(getItem(it.id).shape, rot).map(([x, y]) => [gx + x, gy + y] as Cell);
 }
-/** 5x5 occupancy: uid per cell (0 = empty) */
+/** GRID_H rows x GRID_W columns occupancy: uid per cell (0 = empty), indexed [y][x] */
 export function occupancy(items: ItemInst[], skipUid = -1): number[][] {
-  const g = Array.from({ length: GRID }, () => new Array(GRID).fill(0));
+  const g = Array.from({ length: GRID_H }, () => new Array(GRID_W).fill(0));
   for (const it of items) {
     if (it.gx < 0 || it.uid === skipUid || !ITEMS[it.id]) continue;
-    for (const [x, y] of instCells(it)) if (x >= 0 && y >= 0 && x < GRID && y < GRID) g[y][x] = it.uid;
+    for (const [x, y] of instCells(it)) if (inGrid(x, y)) g[y][x] = it.uid;
   }
   return g;
+}
+/** used / free pack cells */
+export function packCells(items: ItemInst[]): { used: number; free: number; total: number } {
+  let used = 0;
+  for (const row of occupancy(items)) for (const u of row) if (u) used++;
+  return { used, free: GRID_CELLS - used, total: GRID_CELLS };
 }
 export function fits(items: ItemInst[], it: ItemInst, gx: number, gy: number, rot: number): boolean {
   const occ = occupancy(items, it.uid);
   for (const [x, y] of instCells(it, rot, gx, gy)) {
-    if (x < 0 || y < 0 || x >= GRID || y >= GRID || occ[y][x]) return false;
+    if (!inGrid(x, y) || occ[y][x]) return false;
   }
   return true;
 }
@@ -529,9 +565,9 @@ export function findSpot(items: ItemInst[], it: ItemInst, prefer?: { gx: number;
   if (prefer && fits(items, it, prefer.gx, prefer.gy, prefer.rot)) return prefer;
   const rots = prefer ? [prefer.rot, (prefer.rot + 1) % 4, (prefer.rot + 2) % 4, (prefer.rot + 3) % 4] : [it.rot, (it.rot + 1) % 4, (it.rot + 2) % 4, (it.rot + 3) % 4];
   const cands: { gx: number; gy: number; rot: number; d: number }[] = [];
-  for (const rot of rots) for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+  for (const rot of rots) for (let gy = 0; gy < GRID_H; gy++) for (let gx = 0; gx < GRID_W; gx++) {
     if (!fits(items, it, gx, gy, rot)) continue;
-    cands.push({ gx, gy, rot, d: prefer ? Math.hypot(gx - prefer.gx, gy - prefer.gy) + (rot !== prefer.rot ? 0.5 : 0) : gy * GRID + gx });
+    cands.push({ gx, gy, rot, d: prefer ? Math.hypot(gx - prefer.gx, gy - prefer.gy) + (rot !== prefer.rot ? 0.5 : 0) : gy * GRID_W + gx });
   }
   cands.sort((a, b) => a.d - b.d);
   return cands[0] ?? null;
@@ -543,7 +579,7 @@ export function neighbours(items: ItemInst[], it: ItemInst): ItemInst[] {
   const out = new Set<number>();
   for (const [x, y] of instCells(it)) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nx = x + dx, ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+    if (!inGrid(nx, ny)) continue;
     const u = occ[ny][nx];
     if (u && u !== it.uid) out.add(u);
   }

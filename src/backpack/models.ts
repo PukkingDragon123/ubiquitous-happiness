@@ -20,6 +20,7 @@ import { buildWeapon, type WeaponId } from '../player/gear';
 import { inkBombMesh, mineMesh, turretMesh, ballistaMesh, crabMesh, netTrapMesh } from '../skills/models';
 import { voxelMesh } from './voxel';
 import { paintIconAt } from './icons';
+import { pagePainted, pixelShade, type PageKind } from '../ui/obj/pixtex';
 
 type V2 = [number, number];
 type V3 = [number, number, number];
@@ -37,10 +38,18 @@ function M(key: string, o: MO | (() => MO)): THREE.MeshStandardMaterial {
   let m = matCache.get(key);
   if (!m) {
     const v = typeof o === 'function' ? o() : o;
+    // v4: no flat colours. A part without a painted page gets one made from its colour (bevelled face edges,
+    // brushed metal, wood grain or enamel shine, all on a hue-shifted ramp); glass stays clear
+    let map = v.map ?? null, color = v.color ?? '#ffffff';
+    if (!map && v.opacity === undefined && v.color) {
+      const kind: PageKind = (v.metal ?? 0) >= 0.3 ? 'metal' : /wood|oak|drift|plank|stock|handle|shaft/i.test(key) ? 'wood' : (v.rough ?? 0.78) <= 0.35 ? 'enamel' : /soft|cloth|flesh|kelp|sponge|jelly/i.test(key) ? 'soft' : 'matte';
+      map = pagePainted(v.color, kind); color = '#ffffff';
+    }
     m = new THREE.MeshStandardMaterial({
-      map: v.map ?? null, color: v.color ?? '#ffffff', flatShading: !v.smooth, roughness: v.rough ?? 0.78, metalness: v.metal ?? 0,
+      map, color, flatShading: !v.smooth, roughness: v.rough ?? 0.78, metalness: v.metal ?? 0,
       side: v.side ?? THREE.FrontSide, transparent: v.opacity !== undefined, opacity: v.opacity ?? 1,
     });
+    pixelShade(m);
     if (v.emissive) { m.emissive = new THREE.Color(v.emissive); m.emissiveIntensity = v.emissiveK ?? 0.6; if (v.map) m.emissiveMap = v.map; }
     m.userData.shared = true;
     matCache.set(key, m);
@@ -49,47 +58,98 @@ function M(key: string, o: MO | (() => MO)): THREE.MeshStandardMaterial {
 }
 const shade = (c: RGB, k: number): RGB => (k >= 0 ? [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k] : [c[0] * (1 + k), c[1] * (1 + k), c[2] * (1 + k)]);
 
-// painted pages ---------------------------------------------------------------
-/** faceted stone: clean worley patches in the stone tones, a few crack lines */
-const STONE = (key: string, ts: Tones, seed = 1) => tex('stone:' + key, 32, 32, (p) => {
-  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const [d, , id] = worley(x, y, 8, seed, 32); p.set(x, y, tone(ts, 1.4 + (id % 3) * 0.8 - (d > 0.75 ? 1 : 0))); }
-  for (const [x, y, l] of [[5, 7, 7], [20, 18, 9], [12, 25, 5]] as V3[]) for (let i = 0; i < l; i++) p.set(x + i, y + Math.round(Math.sin(i * 0.9) * 1.2), tone(ts, 0));
-});
-/** ore: stone plus mineral veins and bright flecks */
-const ORE = (key: string, ts: Tones, vein: Tones, seed = 2) => tex('ore:' + key, 32, 32, (p) => {
-  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const [d, , id] = worley(x, y, 7, seed, 32); p.set(x, y, tone(ts, 1.3 + (id % 3) * 0.7 - (d > 0.78 ? 1 : 0))); }
-  for (const [x0, y0, dx, dy, l] of [[2, 5, 1, 0.45, 26], [4, 20, 1, -0.3, 22], [14, 2, 0.2, 1, 24]] as number[][]) for (let i = 0; i < l; i++) {
-    const x = Math.round(x0 + dx * i + Math.sin(i * 0.5) * 1.1), y = Math.round(y0 + dy * i);
-    p.set(x & 31, y & 31, tone(vein, 2)); p.set((x + 1) & 31, y & 31, tone(vein, 3)); if (i % 5 === 0) p.set(x & 31, (y - 1) & 31, tone(vein, 4));
+// painted pages (v4: 64 px, 5-tone ramps, light from the top-left, wear placed by rule, never noise) ------------
+/** id map helper: worley cells over a wrapped page */
+function cells(S: number, cell: number, seed: number) {
+  const id = new Int32Array(S * S), dd = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const [d, , k] = worley(x, y, cell, seed, S); id[y * S + x] = k; dd[y * S + x] = d; }
+  return { id, dd, at: (x: number, y: number) => id[((y + S) % S) * S + ((x + S) % S)] };
+}
+/** faceted stone: cobbles with a lit top-left lip, a dark seam and a shaded bottom-right edge; a few clean cracks */
+const STONE = (key: string, ts: Tones, seed = 1) => tex('stone:' + key, 64, 64, (p) => {
+  const c = cells(64, 14, seed);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const k = c.at(x, y);
+    let t = 1.7 + (k % 3) * 0.55;
+    if (k !== c.at(x + 1, y) || k !== c.at(x, y + 1)) t = 0.4;
+    else if (k !== c.at(x - 1, y) || k !== c.at(x, y - 1)) t = 3.7;
+    else if (k !== c.at(x + 2, y + 2)) t -= 0.7;
+    else if (k !== c.at(x - 2, y - 2)) t += 0.6;
+    p.set(x, y, tone(ts, t));
   }
-  for (const [x, y] of [[9, 12], [24, 8], [27, 26], [6, 28], [17, 15]] as V2[]) { p.set(x, y, '#ffffff'); p.set(x + 1, y, tone(vein, 4)); }
+  for (const [x, y, l] of [[9, 13, 11], [38, 34, 14], [22, 50, 8]] as V3[]) for (let i = 0; i < l; i++) { const yy = y + Math.round(Math.sin(i * 0.8) * 1.4); p.set(x + i, yy, tone(ts, 0)); p.set(x + i, yy + 1, tone(ts, 3.4)); }
 });
-/** wood with long grain, a knot and worm holes; tones run along u (the length) */
-const GRAIN = (key: string, ts: Tones, holes = true) => tex('grain:' + key, 64, 16, (p) => {
-  for (let y = 0; y < 16; y++) for (let x = 0; x < 64; x++) {
-    const g = Math.sin(y * 1.7 + Math.sin(x * 0.11 + y) * 1.4) * 0.5 + 0.5;
-    p.set(x, y, tone(ts, 1.6 + g * 1.6 - (y < 2 || y > 13 ? 0.6 : 0)));
+/** ore: cobbled stone plus a thick mineral vein with a lit edge and four-point sparkles */
+const ORE = (key: string, ts: Tones, vein: Tones, seed = 2) => tex('ore:' + key, 64, 64, (p) => {
+  const c = cells(64, 13, seed);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const k = c.at(x, y);
+    let t = 1.5 + (k % 3) * 0.5;
+    if (k !== c.at(x + 1, y) || k !== c.at(x, y + 1)) t = 0.4; else if (k !== c.at(x - 1, y) || k !== c.at(x, y - 1)) t = 3.4;
+    p.set(x, y, tone(ts, t));
   }
-  for (let x = 0; x < 64; x += 9) p.set(x, 5 + (x % 7), tone(ts, 0));
-  p.ellipse(40, 8, 3, 2, (nx, ny) => hex(Math.hypot(nx, ny) > 0.6 ? ts[0] : ts[1]));
-  if (holes) for (const [x, y] of [[12, 4], [26, 11], [52, 6], [58, 12]] as V2[]) { p.set(x, y, '#140c08'); p.set(x + 1, y, '#140c08'); p.set(x, y - 1, tone(ts, 4)); }
+  for (const [x0, y0, dx, dy, l] of [[2, 10, 1, 0.42, 58], [6, 44, 1, -0.28, 50], [30, 2, 0.18, 1, 50]] as number[][]) for (let i = 0; i < l; i++) {
+    const x = Math.round(x0 + dx * i + Math.sin(i * 0.33) * 2), y = Math.round(y0 + dy * i);
+    p.set(x & 63, y & 63, tone(vein, 2)); p.set((x + 1) & 63, y & 63, tone(vein, 2.6)); p.set(x & 63, (y + 1) & 63, tone(vein, 1));
+    p.set(x & 63, (y - 1) & 63, tone(vein, 3.6)); if (i % 7 === 0) p.set((x + 1) & 63, (y - 1) & 63, tone(vein, 4));
+  }
+  for (const [x, y] of [[14, 22], [46, 14], [52, 50], [10, 54], [33, 31]] as V2[]) { p.set(x, y, '#ffffff'); p.set(x - 1, y, tone(vein, 4)); p.set(x + 1, y, tone(vein, 4)); p.set(x, y - 1, tone(vein, 4)); p.set(x, y + 1, tone(vein, 4)); }
 });
-const RINGS = (key: string, ts: Tones) => tex('rings:' + key, 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.hypot(x - 7.5, y - 7.5); p.set(x, y, d > 7.2 ? tone(ts, 0) : tone(ts, 2 + (Math.floor(d) % 2) * 1.2)); } p.set(7, 7, tone(ts, 0)); });
-const RUSTY = (key: string, ts: Tones) => tex('rusty:' + key, 32, 32, (p) => {
-  bevel(p, 0, 0, 32, 32, ts, 2);
-  for (const [x, y, r] of [[8, 9, 4], [23, 20, 5], [12, 26, 3], [27, 5, 3]] as V3[]) p.ellipse(x, y, r, r * 0.8, (nx, ny) => hex(Math.hypot(nx, ny) > 0.7 ? '#7a3a14' : ny < 0 ? '#c0702c' : '#a0521c'));
-  for (const [x, y, l] of [[6, 13, 6], [21, 25, 5]] as V3[]) rust(p, x, y, l);
+/** wood: long wavy grain, a ringed knot, worm holes with a lit rim, bevelled plank edges; tones run along u */
+const GRAIN = (key: string, ts: Tones, holes = true) => tex('grain:' + key, 128, 32, (p) => {
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 128; x++) {
+    const dk = Math.hypot((x - 82) / 2.2, y - 15);
+    const g = Math.sin(y * 0.9 + Math.sin(x * 0.05 + y * 0.3) * 1.6 + (dk < 12 ? 6 / (dk + 1.5) : 0));
+    let t = 2.1 + (g > 0.75 ? -0.8 : g < -0.85 ? 0.9 : 0);
+    if (y < 2) t = 3.8; else if (y < 3) t = 3.1; else if (y > 29) t = 0.5; else if (y > 28) t = 1.2;
+    p.set(x, y, tone(ts, t));
+  }
+  p.ellipse(82, 15, 5, 3, (nx, ny) => hex(Math.hypot(nx, ny) > 0.75 ? ts[0] : Math.hypot(nx, ny) > 0.4 ? ts[1] : ts[2]));
+  for (let x = 0; x < 128; x += 23) { p.set(x, 7 + (x % 11), tone(ts, 0)); p.set(x + 1, 7 + (x % 11), tone(ts, 0.6)); }
+  if (holes) for (const [x, y] of [[18, 9], [44, 21], [104, 11], [118, 23]] as V2[]) { p.set(x, y, '#140c08'); p.set(x + 1, y, '#140c08'); p.set(x, y + 1, tone(ts, 0.6)); p.set(x, y - 1, tone(ts, 4)); p.set(x + 1, y - 1, tone(ts, 3.4)); }
 });
-const METAL = (key: string, ts: Tones) => tex('metal:' + key, 16, 16, (p) => { bevel(p, 0, 0, 16, 16, ts, 2); rect(p, 2, 3, 9, 1, tone(ts, 4)); rect(p, 3, 4, 3, 1, tone(ts, 4)); });
-const GEM = (key: string, ts: Tones) => tex('gem:' + key, 16, 16, (p) => gemFacets(p, 0, 0, 16, 16, ts));
-const RIBS = (key: string, ts: Tones, n = 8) => tex('ribs:' + key, 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const k = (x * n / 32) % 1; p.set(x, y, tone(ts, (k < 0.2 ? 4 : k < 0.6 ? 3 : 2) - (y > 26 ? 1 : 0))); } for (let x = 0; x < 32; x += 6) p.set(x, 30, tone(ts, 0)); });
-const ROPE = (key: string, ts: Tones) => tex('rope:' + key, 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = ((x + y * 2) % 6) / 6; p.set(x, y, tone(ts, k < 0.3 ? 3 : k < 0.7 ? 2 : 1)); } });
-const CLOTH = (key: string, ts: Tones, pat?: string) => tex('cloth:' + key, 32, 32, (p) => {
-  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, tone(ts, 2 + ((x + y) % 4 === 0 ? -0.6 : 0) + ((x - y + 64) % 4 === 0 ? 0.6 : 0)));
-  stitches(p, 1, 1, 30, 1, tone(ts, 4) as unknown as string, '#1a0c08'); stitches(p, 1, 30, 30, 30, tone(ts, 4) as unknown as string, '#1a0c08');
-  if (pat) for (let y = 6; y < 28; y += 8) for (let x = 6; x < 28; x += 8) p.set(x, y, pat);
+const RINGS = (key: string, ts: Tones) => tex('rings:' + key, 32, 32, (p) => {
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const d = Math.hypot(x - 15.5, y - 15.5) + Math.sin(Math.atan2(y - 15.5, x - 15.5) * 5) * 0.5; p.set(x, y, d > 15 ? tone(ts, 0) : d > 14 ? tone(ts, 1.2) : tone(ts, 2.2 + (Math.floor(d / 2) % 2) * 1.1 - (x + y > 40 ? 0.5 : 0))); }
+  for (let i = 0; i < 9; i++) p.set(16 + i, 16 - Math.round(i * 0.4), tone(ts, 0));
+  p.set(15, 15, tone(ts, 0)); p.set(16, 15, tone(ts, 0));
 });
-const PAPER = () => tex('paper', 32, 32, (p) => { bevel(p, 0, 0, 32, 32, ['#5a4630', '#8a7050', '#c8b088', '#e8d8b0', '#fff4d8'], 3); for (let y = 6; y < 28; y += 4) rect(p, 4, y, 20 - (y % 8), 1, '#6a5038'); rect(p, 20, 18, 6, 6, '#a82020'); });
+/** rusty iron: bevelled plate, rust blooms (dark rim, orange body, a lit top), drip runs, pitting */
+const RUSTY = (key: string, ts: Tones) => tex('rusty:' + key, 64, 64, (p) => {
+  bevel(p, 0, 0, 64, 64, ts, 2, 2);
+  for (let y = 4; y < 60; y += 6) rect(p, 3, y, 58, 1, tone(ts, 1.6));
+  for (const [x, y, r] of [[16, 18, 8], [46, 40, 10], [24, 52, 6], [54, 10, 6]] as V3[]) p.ellipse(x, y, r, r * 0.8, (nx, ny) => { const d = Math.hypot(nx, ny); return hex(d > 0.82 ? '#5a2a10' : ny < -0.3 && d < 0.6 ? '#e08a3a' : ny < 0 ? '#c0702c' : '#9a4a18'); });
+  for (const [x, y, l] of [[12, 26, 12], [42, 50, 10], [30, 8, 7]] as V3[]) { rust(p, x, y, l); rust(p, x + 1, y + 2, l - 3); }
+  for (const [x, y] of [[8, 40], [36, 22], [56, 56], [20, 34], [48, 26]] as V2[]) { p.set(x, y, tone(ts, 0)); p.set(x + 1, y, tone(ts, 0)); p.set(x, y + 1, tone(ts, 3.6)); }
+});
+/** worked metal: brushed bands, a diagonal polished stripe, engraved border line, corner rivets, two scratches */
+const METAL = (key: string, ts: Tones) => tex('metal:' + key, 64, 64, (p) => {
+  bevel(p, 0, 0, 64, 64, ts, 2, 2);
+  for (let y = 4; y < 60; y += 4) rect(p, 3, y, 58, 1, tone(ts, y % 8 ? 2.4 : 1.7));
+  for (let i = 0; i < 60; i++) { const x = 6 + i, y = 58 - Math.round(i * 0.9); if (y > 3 && y < 60 && x < 60) { rect(p, x, y, 5, 1, tone(ts, 3.6)); p.set(x + 2, y, tone(ts, 4)); } }
+  for (let i = 6; i < 58; i++) { p.set(i, 6, tone(ts, 1)); p.set(i, 57, tone(ts, 3.4)); p.set(6, i, tone(ts, 1)); p.set(57, i, tone(ts, 3.4)); }
+  for (const [x, y] of [[8, 8], [53, 8], [8, 53], [53, 53]] as V2[]) rivet(p, x, y, ts);
+  for (const [x, y, l] of [[18, 24, 10], [34, 42, 8]] as V3[]) { rect(p, x, y, l, 1, tone(ts, 4)); rect(p, x + 1, y + 1, l - 2, 1, tone(ts, 0.8)); }
+});
+const GEM = (key: string, ts: Tones) => tex('gem:' + key, 32, 32, (p) => { gemFacets(p, 0, 0, 32, 32, ts); for (const [x, y] of [[8, 7], [9, 6], [9, 7], [10, 7], [9, 8]] as V2[]) p.set(x, y, '#ffffff'); });
+const RIBS = (key: string, ts: Tones, n = 8) => tex('ribs:' + key, 64, 64, (p) => {
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const k = (x * n / 64) % 1; p.set(x, y, tone(ts, (k < 0.12 ? 4 : k < 0.3 ? 3.3 : k < 0.7 ? 2.4 : k < 0.88 ? 1.5 : 0.7) - (y > 54 ? 0.8 : 0) + (y < 4 ? 0.6 : 0))); }
+  for (let x = 0; x < 64; x += 64 / n) { p.set(Math.round(x) + 2, 60, tone(ts, 0)); p.set(Math.round(x) + 3, 59, tone(ts, 0)); }
+});
+/** rope: twisted strands, each with a lit crown and a dark groove */
+const ROPE = (key: string, ts: Tones) => tex('rope:' + key, 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const k = ((x + y * 2) % 10) / 10; p.set(x, y, tone(ts, k < 0.12 ? 0.5 : k < 0.3 ? 3.8 : k < 0.6 ? 2.8 : k < 0.85 ? 2 : 1.2)); } });
+const CLOTH = (key: string, ts: Tones, pat?: string) => tex('cloth:' + key, 64, 64, (p) => {
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const wv = ((x >> 1) + (y >> 1)) % 2; p.set(x, y, tone(ts, 2 + (wv ? 0.35 : -0.25) + ((x * 3 + y) % 17 === 0 ? -0.6 : 0))); }
+  for (const [y, l] of [[18, 22], [40, 30]] as V2[]) for (let i = 0; i < l; i++) p.set(10 + i, y + Math.round(Math.sin(i * 0.4)), tone(ts, 0.9));
+  stitches(p, 2, 2, 61, 2, tone(ts, 4) as unknown as string, '#1a0c08'); stitches(p, 2, 61, 61, 61, tone(ts, 4) as unknown as string, '#1a0c08');
+  rect(p, 40, 30, 14, 12, tone(ts, 1.4)); stitches(p, 40, 30, 53, 30, '#e8d0a0', tone(ts, 0) as unknown as string); stitches(p, 40, 41, 53, 41, '#e8d0a0', tone(ts, 0) as unknown as string);
+  if (pat) for (let y = 10; y < 58; y += 14) for (let x = 10; x < 58; x += 14) { p.set(x, y, pat); p.set(x + 1, y, pat); p.set(x, y + 1, pat); p.set(x + 1, y + 1, pat); }
+});
+const PAPER = () => tex('paper', 64, 64, (p) => {
+  bevel(p, 0, 0, 64, 64, ['#5a4630', '#8a7050', '#c8b088', '#e8d8b0', '#fff4d8'], 3, 2);
+  for (let y = 12; y < 52; y += 6) rect(p, 8, y, 38 - (y % 12), 1, '#6a5038');
+  for (const [x, y] of [[44, 14], [12, 46]] as V2[]) p.ellipse(x, y, 5, 4, (nx, ny) => (Math.hypot(nx, ny) > 0.75 ? hex('#c8a878') : null));
+  p.ellipse(46, 44, 6, 6, (nx, ny) => hex(Math.hypot(nx, ny) > 0.8 ? '#5a0a0a' : ny < -0.2 ? '#e04848' : '#a81c20'));
+});
 const LABEL = (key: string, bg: string, fg: string, txt: (p: Px) => void) => tex('label:' + key, 32, 16, (p) => { rect(p, 0, 0, 32, 16, bg); rect(p, 0, 0, 32, 1, fg); rect(p, 0, 15, 32, 1, fg); txt(p); });
 
 // geometry ---------------------------------------------------------------------
@@ -124,9 +184,9 @@ function frontUV(g: THREE.BufferGeometry, s = 1) {
 const cyl = (r0: number, r1: number, h: number, n = 7) => new THREE.CylinderGeometry(r1, r0, h, n, 1);
 function tubeGeo(pts: V3[], r: number, segs = 6, closed = false): THREE.BufferGeometry {
   const c = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)), closed);
-  return new THREE.TubeGeometry(c, Math.max(8, pts.length * 4), r, segs, closed);
+  return new THREE.TubeGeometry(c, Math.max(6, pts.length * 3), r, Math.min(segs, 5), closed);
 }
-function latheGeo(prof: V2[], n = 10) { return new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), n); }
+function latheGeo(prof: V2[], n = 7) { return new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), n); }
 function extrudeGeo(pts: V2[], depth: number, bevel = 0.02) {
   const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
   const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1, curveSegments: 6 });
@@ -187,6 +247,87 @@ const SILVER: Tones = ['#1a1c2a', '#40465e', '#7a8298', '#b4bccc', '#e4eaf2'];
 
 type Build = (b: B, d: ItemDef) => void;
 const MODELS: Record<string, Build> = {
+  // ================================================================ v4 big items (3x3 .. 4x4)
+  giantClam(b) {
+    // two ribbed, scalloped valves hinged at the back, the lid lifted; a frilled violet mantle and the pearl
+    const shellM = M('gclamS', () => ({ map: RIBS('gclamS', ['#3a2236', '#7a4a6a', '#b88aa4', '#e8c4d4', '#fff0f6'], 12), rough: 0.6, side: THREE.DoubleSide }));
+    const valve = () => {
+      const g = new THREE.SphereGeometry(1, 12, 4, 0, TAU, 0, Math.PI / 2);
+      const pos = g.attributes.position as THREE.BufferAttribute;
+      for (let k = 0; k < pos.count; k++) { const x = pos.getX(k), z = pos.getZ(k), a = Math.atan2(x, z); const sc = 1 + Math.abs(Math.sin(a * 6)) * 0.09; pos.setXYZ(k, x * sc, pos.getY(k), z * sc); }
+      return g;
+    };
+    b.add(valve(), shellM, [0, -0.25, 0], [Math.PI, 0, 0], [1.75, 0.55, 1.25]);
+    b.add(valve(), shellM, [0, -0.1, -0.55], [-0.62, 0, 0], [1.72, 0.6, 1.22]);
+    b.add(new THREE.TorusGeometry(1.5, 0.12, 4, 14), M('gclamMantle', { color: '#7a3aa8', rough: 0.8 }), [0, -0.22, 0.05], [Math.PI / 2, 0, 0], [1.08, 0.78, 1]);
+    b.add(new THREE.TorusGeometry(1.42, 0.06, 3, 18), M('gclamFrill', { color: '#3ab8c8', rough: 0.7, emissive: '#0a4a5a', emissiveK: 0.4 }), [0, -0.14, 0.08], [Math.PI / 2, 0, 0], [1.08, 0.78, 1]);
+    b.add(new THREE.SphereGeometry(0.42, 8, 6), M('gclamPearl', { color: '#f4eef8', rough: 0.25, metal: 0.1, emissive: '#c8b8ff', emissiveK: 0.45 }), [0.1, 0.18, 0.35]);
+    for (const [x, z] of [[-1.2, 0.5], [1.3, 0.2], [-0.6, 0.95]] as V2[]) b.add(new THREE.ConeGeometry(0.1, 0.16, 5), mFlat('#d8d0c0', 0.9), [x, -0.72, z], [Math.PI, 0, 0]);
+    // gape at the viewer: the mouth faces +Z, the hinge at the top, so the 4x4 footprint reads as one round clam
+    b.g.rotation.x = Math.PI / 2 - 0.45;
+  },
+  shipWheel(b) {
+    // turned oak spokes through a brass-banded rim, a hub with a brass boss
+    const oak = M('wheelOak', () => ({ map: GRAIN('wheelOak', T.oak, false), rough: 0.8 }));
+    const brass = M('wheelBrass', () => ({ map: METAL('wheelBrass', T.brass), rough: 0.35, metal: 0.6 }));
+    b.add(new THREE.TorusGeometry(1.0, 0.11, 4, 16), oak);
+    b.add(new THREE.TorusGeometry(1.0, 0.125, 4, 16), brass, [0, 0, 0], [0, 0, 0], [1, 1, 0.35]);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * TAU;
+      b.add(cyl(0.05, 0.05, 1.0, 5), oak, [Math.sin(a) * 0.5, Math.cos(a) * 0.5, 0], [0, 0, -a]);
+      b.add(latheGeo([[0, 0], [0.06, 0.02], [0.08, 0.12], [0.05, 0.2], [0.075, 0.3], [0.03, 0.36], [0, 0.37]], 6), oak, [Math.sin(a) * 1.1, Math.cos(a) * 1.1, 0], [0, 0, -a]);
+    }
+    b.add(cyl(0.24, 0.24, 0.22, 8), oak, [0, 0, 0], [Math.PI / 2, 0, 0]);
+    b.add(cyl(0.15, 0.17, 0.1, 8), brass, [0, 0, 0.14], [Math.PI / 2, 0, 0]);
+    b.add(new THREE.SphereGeometry(0.07, 5, 3), brass, [0, 0, 0.2]);
+  },
+  rustAnchor(b) {
+    // shank, stock, curved arms with spade flukes, a ring with a frayed rope, barnacles
+    const iron = mRust('anchor', T.iron);
+    b.add(new THREE.BoxGeometry(0.2, 2.2, 0.2), iron, [0, 0.1, 0]);
+    b.add(new THREE.BoxGeometry(1.5, 0.16, 0.16), iron, [0, 0.95, 0]);
+    for (const sx of [-1, 1]) b.add(new THREE.SphereGeometry(0.11, 5, 3), iron, [sx * 0.78, 0.95, 0]);
+    b.add(new THREE.TorusGeometry(0.22, 0.06, 4, 10), iron, [0, 1.38, 0]);
+    b.add(tubeGeo([[-1.0, -0.45, 0], [-0.7, -0.9, 0], [0, -1.05, 0], [0.7, -0.9, 0], [1.0, -0.45, 0]], 0.09, 5), iron);
+    for (const sx of [-1, 1]) b.add(extrudeGeo([[0, 0.32], [0.2, -0.05], [0.08, -0.12], [-0.12, 0.0]], 0.08, 0.02), iron, [sx * 1.0, -0.42, 0], [0, sx < 0 ? Math.PI : 0, sx * 0.25]);
+    b.add(new THREE.ConeGeometry(0.14, 0.28, 5), iron, [0, -1.12, 0], [Math.PI, 0, 0]);
+    b.add(tubeGeo([[0.2, 1.42, 0.08], [0.45, 1.25, 0.14], [0.55, 0.9, 0.12], [0.42, 0.55, 0.16], [0.6, 0.2, 0.1]], 0.045, 4), M('anchorRope', () => ({ map: ROPE('anchorRope', ['#3a2a14', '#6a5030', '#a08050', '#d0b080', '#f0e0b0']), rough: 0.9 })));
+    for (const [x, y] of [[0.12, -0.3], [-0.1, 0.4], [-0.6, -0.95], [0.5, -0.98]] as V2[]) b.add(new THREE.ConeGeometry(0.06, 0.08, 5), mFlat('#d0c8b8', 0.9), [x, y, 0.12], [-Math.PI / 2, 0, 0]);
+  },
+  sunkenChest(b) {
+    // oak planks, a barrel lid, black iron straps and corner brackets, a brass lock plate, kelp draped over
+    const oak = M('chestOak', () => ({ map: GRAIN('chestOak', ['#2a1a0e', '#4e3220', '#74502e', '#9a7242', '#c49c62']), rough: 0.85 }));
+    const iron = mRust('chestIron', T.iron);
+    const brass = M('chestBrass', () => ({ map: METAL('chestBrass', T.brass), rough: 0.35, metal: 0.6 }));
+    b.add(new THREE.BoxGeometry(2.6, 1.1, 1.3), oak, [0, -0.35, 0]);
+    const lid = new THREE.CylinderGeometry(0.66, 0.66, 2.6, 8, 1, false, 0, Math.PI);
+    b.add(lid, oak, [0, 0.2, 0], [0, 0, Math.PI / 2], [1, 1, 0.98]);
+    for (const x of [-0.95, 0, 0.95]) {
+      b.add(new THREE.BoxGeometry(0.14, 1.14, 1.34), iron, [x, -0.35, 0]);
+      b.add(new THREE.CylinderGeometry(0.68, 0.68, 0.14, 8, 1, false, 0, Math.PI), iron, [x, 0.2, 0], [0, 0, Math.PI / 2]);
+    }
+    for (const [x, y] of [[-1.25, -0.85], [1.25, -0.85], [-1.25, 0.15], [1.25, 0.15]] as V2[]) b.add(new THREE.BoxGeometry(0.16, 0.22, 1.36), iron, [x, y, 0]);
+    b.add(new THREE.BoxGeometry(0.42, 0.5, 0.06), brass, [0, 0.05, 0.68]);
+    b.add(new THREE.TorusGeometry(0.11, 0.035, 4, 8), brass, [0, -0.25, 0.72]);
+    b.add(new THREE.BoxGeometry(0.06, 0.14, 0.04), mFlat('#140c06'), [0, 0.04, 0.72]);
+    b.add(tubeGeo([[-1.3, 0.8, 0.3], [-0.8, 0.86, 0.5], [-0.4, 0.6, 0.66], [-0.3, 0.1, 0.7], [-0.45, -0.3, 0.72]], 0.06, 4), M('chestKelp', { color: '#4a8a2a', rough: 0.8 }));
+    for (const [x, y] of [[0.8, -0.7], [1.0, 0.45], [-0.9, -0.2]] as V2[]) b.add(new THREE.ConeGeometry(0.07, 0.1, 5), mFlat('#d8d0c0', 0.9), [x, y, 0.68], [-Math.PI / 2, 0, 0]);
+  },
+  harpoonGun(b) {
+    // an oak stock with a pistol grip, a blued barrel with brass bands, the barbed harpoon loaded, a line coil
+    const oak = M('hgOak', () => ({ map: GRAIN('hgOak', T.oak, false), rough: 0.8 }));
+    const steel = mMetal('hgSteel', T.steel, 0.55);
+    const brass = M('hgBrass', () => ({ map: METAL('hgBrass', T.brass), rough: 0.35, metal: 0.6 }));
+    b.add(extrudeGeo([[-1.8, 0.1], [-0.6, 0.18], [-0.2, 0.12], [-0.2, -0.12], [-0.55, -0.16], [-0.62, -0.75], [-0.9, -0.78], [-0.92, -0.2], [-1.8, -0.22]], 0.26, 0.04), oak);
+    b.add(cyl(0.11, 0.11, 2.3, 7), steel, [0.85, 0.04, 0], [0, 0, Math.PI / 2]);
+    for (const x of [-0.15, 0.6, 1.5]) b.add(cyl(0.135, 0.135, 0.1, 7), brass, [x, 0.04, 0], [0, 0, Math.PI / 2]);
+    b.add(cyl(0.035, 0.035, 2.6, 5), steel, [0.6, 0.2, 0], [0, 0, Math.PI / 2]);
+    b.add(new THREE.ConeGeometry(0.09, 0.32, 4), steel, [2.02, 0.2, 0], [0, 0, -Math.PI / 2]);
+    for (const sy of [-1, 1]) b.add(new THREE.ConeGeometry(0.035, 0.18, 3), steel, [1.85, 0.2 + sy * 0.07, 0], [0, 0, sy > 0 ? Math.PI * 0.75 : Math.PI * 0.25]);
+    b.add(new THREE.TorusGeometry(0.12, 0.025, 3, 8, Math.PI), steel, [-0.42, -0.2, 0], [0, 0, Math.PI]);
+    b.add(new THREE.BoxGeometry(0.04, 0.14, 0.05), steel, [-0.4, -0.18, 0]);
+    b.add(new THREE.TorusGeometry(0.18, 0.05, 4, 10), M('hgRope', () => ({ map: ROPE('hgRope', ['#3a2a14', '#6a5030', '#a08050', '#d0b080', '#f0e0b0']), rough: 0.9 })), [-1.35, -0.42, 0.12]);
+  },
   // ================================================================ materials
   copperOre(b) {
     b.add(rockGeo(0.32, 3, [1.1, 0.9, 0.85]), mOre('cu', ['#3a3034', '#5a4e50', '#7c6c6a', '#a08c84', '#c8b4a8'], COPPER));
@@ -202,8 +343,10 @@ const MODELS: Record<string, Build> = {
     b.add(rockGeo(0.12, 23, [1, 1, 1], 0, 0.3), M('goldN', { map: METAL('gold', GOLD), rough: 0.3, metal: 0.65 }), [0.24, -0.14, 0.05]);
   },
   riverStone(b) {
-    b.addSmooth(rockGeo(0.3, 31, [1.25, 0.72, 0.9], 1, 0.08), M('pebble', () => ({ map: STONE('pebble', ['#3a3640', '#5e5a66', '#86828c', '#aeaab2', '#d6d2d8'], 4), rough: 0.6, smooth: true })));
-    b.add(cyl(0.302, 0.302, 0.03, 12), mFlat('#d8d4cc', 0.6), [0, 0.02, 0], [0.2, 0, 1.4], [1.22, 1, 0.88]);
+    // a water-worn pebble: faceted but rounded, banded with two quartz stripes, a wet highlight
+    b.add(rockGeo(0.3, 31, [1.3, 0.7, 0.95], 1, 0.06), M('pebble', () => ({ map: STONE('pebble', ['#3a3640', '#5e5a66', '#86828c', '#aeaab2', '#d6d2d8'], 4), rough: 0.6 })));
+    for (const [y, r] of [[0.06, 0.0], [-0.08, 0.25]] as V2[]) b.add(cyl(0.305, 0.305, 0.035, 8), M('quartz', { color: '#e8e4dc', rough: 0.5 }), [0, y, 0], [0.15 + r, 0, 1.45], [1.3, 1, 0.95]);
+    b.add(new THREE.BoxGeometry(0.14, 0.03, 0.02), M('wetGlint', { color: '#ffffff', rough: 0.2, emissive: '#ffffff', emissiveK: 0.4 }), [-0.14, 0.15, 0.22], [0, 0, 0.3]);
   },
   lodestone(b) {
     b.add(rockGeo(0.3, 41, [1, 0.9, 0.85], 0, 0.25), mStone('lode', ['#060608', '#14141c', '#22222e', '#34364a', '#545872'], 5));
@@ -213,13 +356,13 @@ const MODELS: Record<string, Build> = {
   },
   pearl(b) {
     const sh = M('shellIn', () => ({ map: RIBS('clam', SHELL, 9), rough: 0.6, side: THREE.DoubleSide }));
-    const half = new THREE.SphereGeometry(0.34, 10, 5, 0, TAU, 0, Math.PI / 2);
+    const half = new THREE.SphereGeometry(0.34, 6, 3, 0, TAU, 0, Math.PI / 2);
     b.add(half, sh, [0, -0.1, 0], [Math.PI, 0, 0], [1, 0.38, 0.85]);
     b.add(half, sh, [0, -0.04, -0.2], [-0.35, 0, 0], [1, 0.38, 0.85]);
     b.addSmooth(new THREE.IcosahedronGeometry(0.17, 3), M('pearl', { color: '#f4ecf2', rough: 0.18, metal: 0.15, smooth: true, emissive: '#3a2a3a', emissiveK: 0.2 }), [0, 0.06, 0.08]);
   },
   seashell(b) {
-    const g = new THREE.SphereGeometry(0.34, 12, 6, Math.PI * 0.08, Math.PI * 0.84, 0, Math.PI / 2);
+    const g = new THREE.SphereGeometry(0.34, 7, 4, Math.PI * 0.08, Math.PI * 0.84, 0, Math.PI / 2);
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), a = Math.atan2(x, z); const k = 1 + Math.abs(Math.sin(a * 9)) * 0.06; pos.setXYZ(i, x * k, pos.getY(i), z * k); }
     b.add(g, M('cockle', () => ({ map: RIBS('cockle', SHELL, 10), rough: 0.65, side: THREE.DoubleSide })), [0, -0.12, 0], [-1.2, 0, 0], [1, 1.1, 0.5]);
@@ -228,10 +371,18 @@ const MODELS: Record<string, Build> = {
   spiralShell(b) {
     const m = M('whelk', () => ({ map: RIBS('whelk', ['#4a2a24', '#8a5a4a', '#c89480', '#ecc0a8', '#fff0e0'], 4), rough: 0.6 }));
     for (let i = 0; i < 6; i++) { const t = i / 5; b.add(new THREE.ConeGeometry(0.2 * (1 - t * 0.75), 0.22, 8, 1), m, [-0.12 + t * 0.32, -0.08 + t * 0.26, 0], [0, 0, -0.9 + t * 0.1]); }
-    b.add(new THREE.SphereGeometry(0.12, 8, 6), M('whelkLip', { color: '#f0a0a8', rough: 0.5 }), [-0.18, -0.12, 0.08], [0, 0, 0], [1, 0.7, 0.4]);
+    b.add(new THREE.SphereGeometry(0.12, 5, 4), M('whelkLip', { color: '#f0a0a8', rough: 0.5 }), [-0.18, -0.12, 0.08], [0, 0, 0], [1, 0.7, 0.4]);
   },
   sharkTooth(b) {
-    b.add(extrudeGeo([[0, 0.34], [0.2, -0.16], [0.12, -0.22], [0, -0.18], [-0.12, -0.22], [-0.2, -0.16]], 0.08, 0.025), M('tooth', () => ({ map: tex('tooth', 16, 16, (p) => { bevel(p, 0, 0, 16, 16, IVORY, 3); rect(p, 0, 12, 16, 4, tone(IVORY, 1)); }), rough: 0.5 })));
+    // a serrated ivory blade (sawtooth edges), a dark root with two prongs, a polished ridge down the middle
+    const edge: V2[] = [[0, 0.4]];
+    for (let i = 1; i <= 5; i++) { const k = i / 5; edge.push([0.2 * k + (i % 2 ? 0.025 : 0), 0.4 - 0.52 * k]); }
+    const left = edge.slice(1).reverse().map(([x, y]) => [-x, y] as V2);
+    const blade = [...edge, [0.12, -0.16], [-0.12, -0.16], ...left] as V2[];
+    const ivory = M('toothIv', () => ({ map: tex('toothIv', 32, 32, (p) => { bevel(p, 0, 0, 32, 32, IVORY, 3, 2); for (let y = 4; y < 28; y += 5) rect(p, 6, y, 20, 1, tone(IVORY, 2.4)); rect(p, 15, 2, 2, 26, tone(IVORY, 4)); }), rough: 0.45 }));
+    b.add(extrudeGeo(blade, 0.1, 0.02), ivory, [0, 0.08, 0]);
+    b.add(extrudeGeo([[0.14, -0.08], [0.16, -0.26], [0.04, -0.3], [0, -0.22], [-0.04, -0.3], [-0.16, -0.26], [-0.14, -0.08]], 0.12, 0.015), M('toothRoot', { color: '#6a4a2a', rough: 0.9 }), [0, -0.02, 0]);
+    b.add(new THREE.BoxGeometry(0.03, 0.42, 0.04), M('toothRidge', { color: '#fffaec', rough: 0.3 }), [0, 0.16, 0.05]);
   },
   coralShard(b) {
     const m = M('coral', () => ({ map: tex('coralT', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, tone(CORAL, 2.4 + ((x * 3 + y) % 5 === 0 ? 1.4 : 0) - (y > 13 ? 1 : 0))); }), rough: 0.85 }));
@@ -253,8 +404,8 @@ const MODELS: Record<string, Build> = {
       for (let j = 0; j < pos.count; j++) { const y = pos.getY(j), x = pos.getX(j); pos.setXYZ(j, x * (1 - Math.abs(y) * 0.5) + Math.sin(y * 4 + i) * 0.07, y, Math.sin(y * 3 + i * 1.7) * 0.05 + Math.abs(x) * 0.3); }
       b.add(g, m, [-0.12 + i * 0.08, 0, 0.02 * i], [0, 0, (i - 1.5) * 0.08]);
     }
-    for (const y of [-0.42, 0.1, 0.48]) b.add(new THREE.SphereGeometry(0.06, 6, 4), M('bladder', { color: '#9a8a2c', rough: 0.5 }), [0.02, y, 0.08]);
-    b.add(new THREE.TorusGeometry(0.14, 0.03, 4, 10), M('twine', () => ({ map: ROPE('twine', T.rope), rough: 0.9 })), [0, -0.2, 0], [Math.PI / 2, 0, 0], [1, 1, 0.6]);
+    for (const y of [-0.42, 0.1, 0.48]) b.add(new THREE.SphereGeometry(0.06, 5, 3), M('bladder', { color: '#9a8a2c', rough: 0.5 }), [0.02, y, 0.08]);
+    b.add(new THREE.TorusGeometry(0.14, 0.03, 4, 6), M('twine', () => ({ map: ROPE('twine', T.rope), rough: 0.9 })), [0, -0.2, 0], [Math.PI / 2, 0, 0], [1, 1, 0.6]);
   },
   driftwood(b) {
     const m = M('drift', () => ({ map: GRAIN('drift', DRIFT), rough: 0.9 }));
@@ -270,14 +421,14 @@ const MODELS: Record<string, Build> = {
   },
   lineScrap(b) {
     const m = M('mono', { color: '#9cd8e2', rough: 0.25, metal: 0.1, emissive: '#2e6274', emissiveK: 0.2 });
-    for (let i = 0; i < 4; i++) b.add(new THREE.TorusGeometry(0.22 - i * 0.02, 0.018, 4, 16), m, [Math.sin(i) * 0.04, Math.cos(i * 2) * 0.03, i * 0.02], [0.4 + i * 0.5, i * 0.6, 0]);
+    for (let i = 0; i < 4; i++) b.add(new THREE.TorusGeometry(0.22 - i * 0.02, 0.018, 4, 10), m, [Math.sin(i) * 0.04, Math.cos(i * 2) * 0.03, i * 0.02], [0.4 + i * 0.5, i * 0.6, 0]);
     b.add(tubeGeo([[0.18, -0.1, 0], [0.32, -0.25, 0.02], [0.28, -0.38, 0]], 0.016, 4), m);
     b.add(new THREE.IcosahedronGeometry(0.04, 0), mMetal('lead', LEAD), [0.28, -0.4, 0]);
   },
   rustyHook(b) {
     const pts: V3[] = [[0, 0.36, 0], [0, -0.06, 0], [-0.04, -0.24, 0], [-0.18, -0.3, 0], [-0.28, -0.18, 0], [-0.26, 0.0, 0]];
     b.add(tubeGeo(pts, 0.04, 6), mRust('hook', T.iron));
-    b.add(new THREE.TorusGeometry(0.07, 0.03, 5, 10), mRust('hook', T.iron), [0, 0.42, 0]);
+    b.add(new THREE.TorusGeometry(0.07, 0.03, 4, 6), mRust('hook', T.iron), [0, 0.42, 0]);
     b.add(new THREE.ConeGeometry(0.05, 0.12, 4), mRust('hook', T.iron), [-0.26, 0.06, 0], [0, 0, -0.3]);
   },
   rustyNail(b) {
@@ -311,8 +462,8 @@ const MODELS: Record<string, Build> = {
     b.add(cyl(0.09, 0.08, 0.14, 8), M('twine', () => ({ map: ROPE('twine', T.rope), rough: 0.9 })), [0, -0.32, 0]);
   },
   glassLens(b) {
-    b.add(new THREE.TorusGeometry(0.26, 0.045, 5, 16), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }));
-    b.addSmooth(new THREE.SphereGeometry(0.26, 14, 6), mGlass('#b8ecec'), [0, 0, 0], [0, 0, 0], [1, 1, 0.18]);
+    b.add(new THREE.TorusGeometry(0.26, 0.045, 4, 10), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }));
+    b.addSmooth(new THREE.SphereGeometry(0.26, 8, 4), mGlass('#b8ecec'), [0, 0, 0], [0, 0, 0], [1, 1, 0.18]);
     b.add(new THREE.BoxGeometry(0.02, 0.2, 0.01), mFlat('#ffffff', 0.2), [-0.04, 0.02, 0.06], [0, 0, 0.5]);
     b.add(tubeGeo([[0.24, -0.1, 0], [0.34, -0.2, 0], [0.42, -0.36, 0]], 0.02, 4), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }));
   },
@@ -333,7 +484,7 @@ const MODELS: Record<string, Build> = {
     const m = M('tackle', () => ({ map: tex('tackleT', 32, 16, (p) => { bevel(p, 0, 0, 32, 16, T.green, 2); rect(p, 0, 5, 32, 1, tone(T.green, 0)); rect(p, 22, 8, 7, 5, '#f0f0f0'); rect(p, 24, 10, 3, 1, '#2650a8'); }), rough: 0.55, metal: 0.25 }));
     b.add(new THREE.BoxGeometry(2.4, 1.1, 0.6), m, [0, -0.15, 0]);
     b.add(new THREE.BoxGeometry(2.45, 0.3, 0.65), m, [0, 0.48, 0]);
-    b.add(new THREE.TorusGeometry(0.28, 0.05, 4, 10, Math.PI), mFlat('#222630', 0.6), [0, 0.64, 0]);
+    b.add(new THREE.TorusGeometry(0.28, 0.05, 4, 6, Math.PI), mFlat('#222630', 0.6), [0, 0.64, 0]);
     for (const x of [-0.9, 0, 0.9]) b.add(new THREE.BoxGeometry(0.16, 0.2, 0.05), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [x, 0.32, 0.33]);
   },
   lineSpool(b) {
@@ -341,13 +492,13 @@ const MODELS: Record<string, Build> = {
     for (const x of [-0.27, 0.27]) b.add(cyl(0.32, 0.32, 0.05, 12), M('spoolEnd', () => ({ map: RINGS('spool', T.oak), rough: 0.8 })), [x, 0, 0], [0, 0, Math.PI / 2]);
   },
   corkBobber(b) {
-    b.addSmooth(new THREE.SphereGeometry(0.3, 10, 8, 0, TAU, 0, Math.PI / 2), M('bobRed', { color: '#d8382e', rough: 0.45, smooth: true }), [0, 0.0, 0], [0, 0, 0], [1, 1.5, 1]);
-    b.addSmooth(new THREE.SphereGeometry(0.3, 10, 8, 0, TAU, Math.PI / 2, Math.PI / 2), M('bobWhite', { color: '#f2f0ea', rough: 0.45, smooth: true }), [0, 0.0, 0], [0, 0, 0], [1, 1.3, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.3, 6, 5, 0, TAU, 0, Math.PI / 2), M('bobRed', { color: '#d8382e', rough: 0.45, smooth: true }), [0, 0.0, 0], [0, 0, 0], [1, 1.5, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.3, 6, 5, 0, TAU, Math.PI / 2, Math.PI / 2), M('bobWhite', { color: '#f2f0ea', rough: 0.45, smooth: true }), [0, 0.0, 0], [0, 0, 0], [1, 1.3, 1]);
     b.add(cyl(0.022, 0.022, 1.3, 5), M('stick', () => ({ map: GRAIN('oak', T.oak, false), rough: 0.8 })));
   },
   leadSinker(b) {
     b.add(latheGeo([[0, -0.3], [0.2, -0.22], [0.24, -0.05], [0.16, 0.14], [0.05, 0.26], [0, 0.28]], 8), mMetal('lead', LEAD, 0.45));
-    b.add(new THREE.TorusGeometry(0.07, 0.022, 4, 10), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, 0.36, 0]);
+    b.add(new THREE.TorusGeometry(0.07, 0.022, 4, 6), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, 0.36, 0]);
   },
   reelGear(b) {
     const pts: V2[] = [];
@@ -366,15 +517,15 @@ const MODELS: Record<string, Build> = {
   },
   rubberDuck(b) {
     const m = M('duck', { color: '#f8c828', rough: 0.4, smooth: true });
-    b.addSmooth(new THREE.SphereGeometry(0.3, 12, 8), m, [0.04, -0.1, 0], [0, 0, 0], [1.25, 0.8, 1]);
-    b.addSmooth(new THREE.SphereGeometry(0.19, 12, 8), m, [-0.14, 0.22, 0.02]);
+    b.addSmooth(new THREE.SphereGeometry(0.3, 7, 5), m, [0.04, -0.1, 0], [0, 0, 0], [1.25, 0.8, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.19, 7, 5), m, [-0.14, 0.22, 0.02]);
     b.add(new THREE.ConeGeometry(0.08, 0.16, 6), M('beak', { color: '#f07a20', rough: 0.5 }), [-0.36, 0.2, 0.02], [0, 0, Math.PI / 2], [1, 1, 0.6]);
-    for (const z of [0.12]) b.add(new THREE.SphereGeometry(0.035, 6, 4), mFlat('#141418', 0.3), [-0.22, 0.28, z]);
+    for (const z of [0.12]) b.add(new THREE.SphereGeometry(0.035, 5, 3), mFlat('#141418', 0.3), [-0.22, 0.28, z]);
     b.add(new THREE.ConeGeometry(0.1, 0.18, 5), m, [0.36, 0.0, 0], [0, 0, -0.9]);
   },
   teacup(b) {
     b.add(latheGeo([[0, -0.2], [0.14, -0.2], [0.2, -0.1], [0.26, 0.12], [0.24, 0.13], [0.18, -0.08], [0, -0.12]], 14), M('china', () => ({ map: tex('china', 32, 16, (p) => { rect(p, 0, 0, 32, 16, '#f2f5ff'); for (let x = 0; x < 32; x += 4) { rect(p, x, 6, 2, 2, '#2650a8'); p.set(x + 1, 9, '#3f80dc'); } rect(p, 0, 13, 32, 1, '#d8b040'); }), rough: 0.3 })));
-    b.add(new THREE.TorusGeometry(0.08, 0.025, 4, 8), mFlat('#f2f5ff', 0.3), [0.28, 0.0, 0]);
+    b.add(new THREE.TorusGeometry(0.08, 0.025, 4, 6), mFlat('#f2f5ff', 0.3), [0.28, 0.0, 0]);
     b.add(new THREE.CircleGeometry(0.2, 14), mFlat('#8a4a1c', 0.2), [0, 0.08, 0], [-Math.PI / 2, 0, 0]);
     b.add(cyl(0.36, 0.3, 0.04, 16), mFlat('#eef2fa', 0.35), [0, -0.22, 0]);
   },
@@ -389,7 +540,7 @@ const MODELS: Record<string, Build> = {
   },
   crabClaw(b) {
     const m = M('claw', { color: '#d03a2a', rough: 0.45 });
-    b.addSmooth(new THREE.SphereGeometry(0.26, 10, 8), m, [-0.04, -0.02, 0], [0, 0, 0.5], [1.2, 0.8, 0.6]);
+    b.addSmooth(new THREE.SphereGeometry(0.26, 6, 5), m, [-0.04, -0.02, 0], [0, 0, 0.5], [1.2, 0.8, 0.6]);
     b.add(new THREE.ConeGeometry(0.1, 0.42, 6), m, [0.22, 0.24, 0], [0, 0, -0.5]);
     b.add(new THREE.ConeGeometry(0.08, 0.36, 6), m, [0.3, 0.06, 0], [0, 0, -1.1]);
     b.add(cyl(0.07, 0.09, 0.34, 6), m, [-0.3, -0.22, 0], [0, 0, 0.9]);
@@ -400,16 +551,16 @@ const MODELS: Record<string, Build> = {
     b.add(new THREE.CircleGeometry(0.25, 16), M('compFace', () => ({ map: tex('compT', 16, 16, (p) => { rect(p, 0, 0, 16, 16, '#e8d8b0'); for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; p.set(Math.round(7.5 + Math.cos(a) * 6), Math.round(7.5 + Math.sin(a) * 6), '#5a4630'); } }), rough: 0.6 })), [0, 0, 0.052]);
     b.add(new THREE.ConeGeometry(0.04, 0.2, 3), mFlat('#c8302a'), [0, 0.09, 0.06]);
     b.add(new THREE.ConeGeometry(0.04, 0.2, 3), mFlat('#4a5062'), [0, -0.09, 0.06], [0, 0, Math.PI]);
-    b.add(new THREE.TorusGeometry(0.06, 0.02, 4, 8), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, 0.36, 0]);
+    b.add(new THREE.TorusGeometry(0.06, 0.02, 4, 6), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, 0.36, 0]);
   },
   brassKey(b) {
     const br = M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 });
     b.add(cyl(0.035, 0.035, 0.5, 6), br, [0.08, -0.08, 0], [0, 0, 0.8]);
-    for (const a of [0, Math.PI]) b.add(new THREE.SphereGeometry(0.15, 8, 5), br, [-0.16 + Math.cos(a + 2.4) * 0.13, 0.14 + Math.sin(a + 2.4) * 0.13, 0], [0, 0, a + 2.4], [1, 0.6, 0.35]);
+    for (const a of [0, Math.PI]) b.add(new THREE.SphereGeometry(0.15, 5, 3), br, [-0.16 + Math.cos(a + 2.4) * 0.13, 0.14 + Math.sin(a + 2.4) * 0.13, 0], [0, 0, a + 2.4], [1, 0.6, 0.35]);
     b.add(new THREE.BoxGeometry(0.1, 0.1, 0.1), br, [0.26, -0.26, 0], [0, 0, 0.8]);
   },
   spinnerSpoon(b) {
-    b.addSmooth(new THREE.SphereGeometry(0.22, 10, 6), M('spoon', { color: '#d8dee8', rough: 0.15, metal: 0.7, smooth: true }), [-0.05, 0.08, 0], [0, 0, 0.35], [0.6, 1, 0.15]);
+    b.addSmooth(new THREE.SphereGeometry(0.22, 6, 4), M('spoon', { color: '#d8dee8', rough: 0.15, metal: 0.7, smooth: true }), [-0.05, 0.08, 0], [0, 0, 0.35], [0.6, 1, 0.15]);
     b.add(cyl(0.012, 0.012, 0.8, 4), mMetal('steel', T.steel));
     b.add(new THREE.IcosahedronGeometry(0.05, 0), mFlat('#d8382e', 0.4), [0, -0.26, 0]);
     for (const a of [-0.6, 0.6]) b.add(tubeGeo([[0, -0.38, 0], [Math.sin(a) * 0.08, -0.46, 0], [Math.sin(a) * 0.1, -0.38, 0]], 0.012, 3), mMetal('steel', T.steel));
@@ -420,7 +571,7 @@ const MODELS: Record<string, Build> = {
     b.add(cyl(0.12, 0.12, 0.6, 8), M('scroll', () => ({ map: PAPER(), rough: 0.8 })), [-0.12, 0, 0], [0, 0, Math.PI / 2]);
   },
   sharkNecklace(b) {
-    b.add(new THREE.TorusGeometry(0.62, 0.02, 4, 24, Math.PI), M('cord', () => ({ map: ROPE('cord', T.rope), rough: 0.9 })), [0, 0.32, 0], [0, 0, Math.PI]);
+    b.add(new THREE.TorusGeometry(0.62, 0.02, 4, 14, Math.PI), M('cord', () => ({ map: ROPE('cord', T.rope), rough: 0.9 })), [0, 0.32, 0], [0, 0, Math.PI]);
     for (let i = 0; i < 6; i++) { const a = Math.PI * (0.12 + i * 0.152); b.add(new THREE.IcosahedronGeometry(0.05, 0), mFlat(i % 2 ? '#2fc8b6' : '#e8603a', 0.4), [Math.cos(a) * 0.62, 0.32 - Math.sin(a) * 0.62, 0.02]); }
     b.add(extrudeGeo([[0, -0.2], [0.11, 0.08], [-0.11, 0.08]], 0.05, 0.015), M('tooth2', { color: '#ece4d0', rough: 0.5 }), [0, -0.38, 0.02]);
   },
@@ -433,60 +584,64 @@ const MODELS: Record<string, Build> = {
     b.add(extrudeGeo(pts, 0.04, 0.03), M('scale', () => ({ map: tex('scaleT', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = (x + y) / 30; p.set(x, y, hex(k < 0.33 ? '#6a9cff' : k < 0.66 ? '#3ccab8' : '#e47c9a')); } }), rough: 0.25, metal: 0.4, emissive: '#2a6a8a', emissiveK: 0.2 })));
   },
   cutpursePouch(b) {
-    b.addSmooth(new THREE.SphereGeometry(0.32, 10, 8), M('pouch', () => ({ map: CLOTH('pouch', T.leather), rough: 0.85 })), [0, -0.08, 0], [0, 0, 0], [1, 0.9, 0.8]);
+    b.addSmooth(new THREE.SphereGeometry(0.32, 6, 5), M('pouch', () => ({ map: CLOTH('pouch', T.leather), rough: 0.85 })), [0, -0.08, 0], [0, 0, 0], [1, 0.9, 0.8]);
     b.add(new THREE.ConeGeometry(0.16, 0.2, 8, 1, true), M('pouch', () => ({ map: CLOTH('pouch', T.leather), rough: 0.85 })), [0, 0.3, 0], [Math.PI, 0, 0]);
-    b.add(new THREE.TorusGeometry(0.1, 0.025, 4, 10), M('twine', () => ({ map: ROPE('twine', T.rope), rough: 0.9 })), [0, 0.22, 0], [Math.PI / 2, 0, 0]);
+    b.add(new THREE.TorusGeometry(0.1, 0.025, 4, 6), M('twine', () => ({ map: ROPE('twine', T.rope), rough: 0.9 })), [0, 0.22, 0], [Math.PI / 2, 0, 0]);
     for (const [x, y] of [[-0.08, 0.36], [0.08, 0.34]] as V2[]) b.add(cyl(0.07, 0.07, 0.02, 10), M('coin', { map: METAL('gold', GOLD), rough: 0.3, metal: 0.65 }), [x, y, 0.02], [1.2, 0, x]);
   },
-  inkSac(b) { b.addSmooth(new THREE.SphereGeometry(0.3, 10, 8), M('inkS', { color: '#3a2a6a', rough: 0.2, smooth: true }), [0, -0.05, 0], [0, 0, 0], [0.9, 1.1, 0.8]); b.add(cyl(0.04, 0.06, 0.2, 6), M('flesh', { color: '#62346a', rough: 0.6 }), [0.05, 0.36, 0], [0, 0, -0.3]); },
+  inkSac(b) { b.addSmooth(new THREE.SphereGeometry(0.3, 6, 5), M('inkS', { color: '#3a2a6a', rough: 0.2, smooth: true }), [0, -0.05, 0], [0, 0, 0], [0.9, 1.1, 0.8]); b.add(cyl(0.04, 0.06, 0.2, 6), M('flesh', { color: '#62346a', rough: 0.6 }), [0.05, 0.36, 0], [0, 0, -0.3]); },
   pufferSpines(b) { puffer(b, 0.3); },
   // ================================================================ tools (v3 detail pass: no voxel stand-ins left)
   scissors(b) {
     const steel = mMetal('steel', T.steel, 0.55), handle = M('rubberRed', { color: '#c8302a', rough: 0.5 });
     for (const sy of [-1, 1]) {
       b.add(extrudeGeo([[-0.05, 0], [0.95, sy * 0.06], [0.95, sy * 0.1], [0.08, sy * 0.16]], 0.04, 0.012), steel, [0, 0, sy * 0.02], [0, 0, sy * 0.1]);
-      b.add(new THREE.TorusGeometry(0.17, 0.06, 6, 14), handle, [-0.32, sy * 0.2, 0], [0, 0, 0], [1, 0.8, 1]);
+      b.add(new THREE.TorusGeometry(0.17, 0.06, 4, 8), handle, [-0.32, sy * 0.2, 0], [0, 0, 0], [1, 0.8, 1]);
       b.add(cyl(0.05, 0.05, 0.3, 6), handle, [-0.14, sy * 0.1, 0], [0, 0, Math.PI / 2 - sy * 0.4]);
     }
     b.add(cyl(0.05, 0.05, 0.1, 8), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0.02, 0, 0], [Math.PI / 2, 0, 0]);
-    for (const [x, y] of [[0.45, 0.06], [0.7, -0.07]] as V2[]) b.add(new THREE.SphereGeometry(0.035, 6, 4), M('rustSpot', { color: '#a0521c', rough: 0.9 }), [x, y, 0.03]);
+    for (const [x, y] of [[0.45, 0.06], [0.7, -0.07]] as V2[]) b.add(new THREE.SphereGeometry(0.035, 5, 3), M('rustSpot', { color: '#a0521c', rough: 0.9 }), [x, y, 0.03]);
   },
   whetstone(b) {
     b.add(new THREE.BoxGeometry(1.7, 0.2, 0.5), M('whetTray', () => ({ map: GRAIN('oakT', T.oak, false), rough: 0.85 })), [0, -0.2, 0]);
     b.add(new THREE.BoxGeometry(0.8, 0.22, 0.42), mStone('coarse', T.slate, 7), [-0.4, 0.02, 0]);
     b.add(new THREE.BoxGeometry(0.8, 0.22, 0.42), mStone('fine', SAND, 8), [0.4, 0.02, 0]);
     b.add(new THREE.BoxGeometry(0.02, 0.23, 0.43), mFlat('#2a2018'), [0, 0.02, 0]);
+    // a few drops of honing oil and the blade's scratch on the fine side; brass corner pins on the tray
+    for (const x of [-0.78, 0.78]) b.add(cyl(0.035, 0.035, 0.22, 6), M('whetPin', { color: '#d8a038', rough: 0.35, metal: 0.6 }), [x, -0.2, 0.26], [Math.PI / 2, 0, 0]);
+    b.add(new THREE.BoxGeometry(0.5, 0.01, 0.04), M('whetScratch', { color: '#fff4d8', rough: 0.3 }), [0.4, 0.135, 0.05], [0, 0.3, 0]);
+    b.add(new THREE.SphereGeometry(0.04, 5, 3), M('whetOil', { color: '#c8a030', rough: 0.15, emissive: '#5a3a08', emissiveK: 0.3 }), [-0.3, 0.14, 0.08], [0, 0, 0], [1, 0.3, 1]);
   },
   luckyLure(b) {
     const body = latheGeo([[0, -0.75], [0.14, -0.6], [0.22, -0.2], [0.22, 0.25], [0.12, 0.6], [0, 0.72]], 10);
     b.add(body, M('lureGold', () => ({ map: tex('lureT', 16, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 16; x++) p.set(x, y, tone(GOLD, 2.6 + ((x + (y >> 1)) % 4 === 0 ? 1 : 0) - (x > 12 ? 1 : 0))); rect(p, 0, 26, 16, 6, '#c8302a'); }), rough: 0.3, metal: 0.55 })), [0, 0, 0], [0, 0, Math.PI / 2], [1, 1, 0.75]);
     b.add(new THREE.ConeGeometry(0.2, 0.3, 4), M('lureFin', { color: '#d8302a', rough: 0.5 }), [0.85, 0, 0], [0, 0, Math.PI / 2], [1, 1, 0.3]);
     b.add(new THREE.BoxGeometry(0.3, 0.02, 0.18), mGlass('#c8f0f0'), [-0.82, -0.12, 0], [0, 0, 0.5]);
-    for (const z of [0.16, -0.16]) { b.add(new THREE.SphereGeometry(0.07, 8, 6), mFlat('#ffffff', 0.3), [-0.5, 0.06, z]); b.add(new THREE.SphereGeometry(0.035, 6, 4), mFlat('#101014', 0.2), [-0.53, 0.06, z * 1.25]); }
-    for (const x of [-0.25, 0.35]) { b.add(cyl(0.01, 0.01, 0.14, 4), mMetal('steel', T.steel), [x, -0.28, 0]); for (const a of [0, 2.1, 4.2]) b.add(new THREE.TorusGeometry(0.06, 0.012, 4, 8, Math.PI * 1.3), mMetal('steel', T.steel), [x + Math.cos(a) * 0.05, -0.38, Math.sin(a) * 0.05], [0, a, Math.PI]); }
+    for (const z of [0.16, -0.16]) { b.add(new THREE.SphereGeometry(0.07, 5, 4), mFlat('#ffffff', 0.3), [-0.5, 0.06, z]); b.add(new THREE.SphereGeometry(0.035, 5, 3), mFlat('#101014', 0.2), [-0.53, 0.06, z * 1.25]); }
+    for (const x of [-0.25, 0.35]) { b.add(cyl(0.01, 0.01, 0.14, 4), mMetal('steel', T.steel), [x, -0.28, 0]); for (const a of [0, 2.1, 4.2]) b.add(new THREE.TorusGeometry(0.06, 0.012, 4, 6, Math.PI * 1.3), mMetal('steel', T.steel), [x + Math.cos(a) * 0.05, -0.38, Math.sin(a) * 0.05], [0, a, Math.PI]); }
   },
   grappleHook(b) {
     const st = mMetal('steel', T.steel, 0.55);
     b.add(cyl(0.05, 0.05, 0.7, 6), st, [-0.15, -0.05, 0], [0, 0, 0.6]);
-    b.add(new THREE.TorusGeometry(0.09, 0.03, 5, 10), st, [0.08, 0.26, 0]);
+    b.add(new THREE.TorusGeometry(0.09, 0.03, 4, 6), st, [0.08, 0.26, 0]);
     for (const a of [0, 2.1, 4.2]) {
       const arm = tubeGeo([[0, 0, 0], [0.18, -0.08, 0], [0.32, 0.05, 0], [0.3, 0.2, 0]], 0.035, 5);
       b.add(arm, st, [-0.38, -0.36, 0], [0, a, 0.6]);
     }
-    b.add(new THREE.TorusGeometry(0.3, 0.035, 4, 20), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0.35, 0.4, -0.05], [0.9, 0.3, 0]);
+    b.add(new THREE.TorusGeometry(0.3, 0.035, 4, 12), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0.35, 0.4, -0.05], [0.9, 0.3, 0]);
     b.add(tubeGeo([[0.08, 0.32, 0], [0.2, 0.4, 0], [0.18, 0.55, 0]], 0.03, 4), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })));
   },
   netShard(b) {
     const m = M('netRope', () => ({ map: ROPE('net', T.rope), rough: 0.9 }));
     for (let i = -3; i <= 3; i++) { b.add(cyl(0.012, 0.012, 1.4, 4), m, [i * 0.16, 0.1, 0], [0, 0, 0.78]); b.add(cyl(0.012, 0.012, 1.4, 4), m, [i * 0.16, 0.1, 0.01], [0, 0, -0.78]); }
     for (let x = -3; x <= 3; x++) for (let y = -3; y <= 3; y++) if ((x + y) % 2 === 0 && Math.abs(x) + Math.abs(y) < 5) b.add(new THREE.IcosahedronGeometry(0.025, 0), M('knot', { color: '#8e6a3a' }), [x * 0.113, 0.1 + y * 0.113, 0.02]);
-    b.add(new THREE.SphereGeometry(0.16, 10, 8), M('float', { color: '#f08a26', rough: 0.45 }), [0.42, 0.42, 0.06], [0, 0, 0], [1.3, 1, 1]);
+    b.add(new THREE.SphereGeometry(0.16, 6, 5), M('float', { color: '#f08a26', rough: 0.45 }), [0.42, 0.42, 0.06], [0, 0, 0], [1.3, 1, 1]);
     b.add(cyl(0.165, 0.165, 0.06, 10), mFlat('#f2f0ea', 0.5), [0.42, 0.42, 0.06], [0, 0, Math.PI / 2], [1, 1, 1.3]);
     b.g.children.forEach((c) => { c.position.x -= 0.1; });
   },
   rodTip(b) {
     b.add(cyl(0.03, 0.06, 2.6, 6), M('carbon', () => ({ map: tex('carbonT', 8, 8, (p) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) p.set(x, y, (x + y) % 4 < 2 ? '#22242e' : '#383c4c'); }), rough: 0.35, metal: 0.3 })));
-    for (const [y, r] of [[1.0, 0.06], [0.4, 0.07], [-0.3, 0.08], [-0.9, 0.09]] as V2[]) { b.add(new THREE.TorusGeometry(r, 0.012, 4, 10), mMetal('steel', T.steel), [r + 0.05, y, 0], [0, Math.PI / 2, 0]); b.add(cyl(0.065, 0.065, 0.06, 8), mFlat('#c8302a', 0.5), [0, y, 0]); }
+    for (const [y, r] of [[1.0, 0.06], [0.4, 0.07], [-0.3, 0.08], [-0.9, 0.09]] as V2[]) { b.add(new THREE.TorusGeometry(r, 0.012, 4, 6), mMetal('steel', T.steel), [r + 0.05, y, 0], [0, Math.PI / 2, 0]); b.add(cyl(0.065, 0.065, 0.06, 8), mFlat('#c8302a', 0.5), [0, y, 0]); }
     b.add(cyl(0.065, 0.06, 0.12, 6), mFlat('#2a2c38'), [0, -1.32, 0]);
     for (const a of [0, 1.6, 3.3, 4.8]) b.add(new THREE.ConeGeometry(0.02, 0.16, 3), mFlat('#4a4e62'), [Math.cos(a) * 0.04, -1.42, Math.sin(a) * 0.04], [Math.PI, 0, 0.3]);
   },
@@ -501,7 +656,7 @@ const MODELS: Record<string, Build> = {
   harpoonTip(b) {
     const iron = mRust('harp', T.iron);
     b.add(cyl(0.09, 0.1, 1.0, 7), M('oar', () => ({ map: GRAIN('oak', T.oak), rough: 0.85 })), [0, -0.45, 0]);
-    for (let i = 0; i < 4; i++) b.add(new THREE.TorusGeometry(0.11, 0.025, 4, 10), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0, -0.05 - i * 0.06, 0], [Math.PI / 2, 0, 0]);
+    for (let i = 0; i < 4; i++) b.add(new THREE.TorusGeometry(0.11, 0.025, 4, 6), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0, -0.05 - i * 0.06, 0], [Math.PI / 2, 0, 0]);
     b.add(cyl(0.035, 0.035, 0.4, 6), iron, [0, 0.2, 0]);
     b.add(extrudeGeo([[0, 0.48], [0.14, 0.12], [0.2, -0.05], [0.04, 0.08], [-0.04, 0.08], [-0.2, -0.05], [-0.14, 0.12]], 0.05, 0.02), iron, [0, 0.42, 0]);
   },
@@ -510,14 +665,14 @@ const MODELS: Record<string, Build> = {
     b.add(new THREE.CircleGeometry(0.34, 12), M('chum', { color: '#8a2a2a', rough: 0.5 }), [0, 0.3, 0], [-Math.PI / 2, 0, 0]);
     for (const [x, z] of [[-0.1, 0.05], [0.12, -0.08], [0.02, 0.12]] as V2[]) b.add(new THREE.IcosahedronGeometry(0.07, 0), M('chunk', { color: '#c84a3a', rough: 0.5 }), [x, 0.34, z]);
     b.add(new THREE.ConeGeometry(0.08, 0.32, 4), mMetal('fishTail', T.steel), [0.15, 0.5, 0], [0, 0, -0.5], [1, 1, 0.3]);
-    b.add(new THREE.TorusGeometry(0.38, 0.015, 4, 16, Math.PI), mMetal('steel', T.steel), [0, 0.34, 0], [0.3, 0, 0]);
+    b.add(new THREE.TorusGeometry(0.38, 0.015, 4, 10, Math.PI), mMetal('steel', T.steel), [0, 0.34, 0], [0.3, 0, 0]);
   },
   // ================================================================ trinkets
   oldBoot(b) {
     const lea = M('boot', () => ({ map: CLOTH('bootL', T.leather), rough: 0.85 }));
     b.add(new THREE.BoxGeometry(0.62, 1.1, 0.5), lea, [-0.3, 0.2, 0]);
     b.add(new THREE.BoxGeometry(1.05, 0.5, 0.52), lea, [0.06, -0.38, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.28, 8, 6), lea, [0.56, -0.38, 0], [0, 0, 0], [1, 0.9, 0.95]);
+    b.addSmooth(new THREE.SphereGeometry(0.28, 5, 4), lea, [0.56, -0.38, 0], [0, 0, 0], [1, 0.9, 0.95]);
     b.add(new THREE.BoxGeometry(1.4, 0.12, 0.58), mFlat('#2a1a10', 0.9), [0.1, -0.68, 0]);
     for (let i = 0; i < 5; i++) b.add(new THREE.BoxGeometry(0.3, 0.03, 0.02), mFlat('#e8dcc0', 0.8), [-0.3, 0.5 - i * 0.14, 0.27], [0, 0, (i % 2 ? 1 : -1) * 0.4]);
     b.add(new THREE.BoxGeometry(0.2, 0.18, 0.04), M('patch', { color: '#5e4a62', rough: 0.9 }), [0.25, -0.3, 0.27]);
@@ -536,7 +691,7 @@ const MODELS: Record<string, Build> = {
     const m = M('conch', () => ({ map: RIBS('conch', SHELL, 6), rough: 0.6 }));
     b.add(new THREE.ConeGeometry(0.34, 1.3, 9), m, [0.2, 0, 0], [0, 0, -Math.PI / 2]);
     for (let i = 0; i < 5; i++) b.add(new THREE.ConeGeometry(0.06, 0.18, 4), m, [-0.1 + i * 0.18, 0.28 - i * 0.03, 0], [0, 0, -0.2]);
-    b.addSmooth(new THREE.SphereGeometry(0.3, 10, 8), M('conchLip', { color: '#f0a0a8', rough: 0.5, smooth: true }), [-0.45, -0.08, 0.06], [0, 0, 0], [0.8, 1, 0.6]);
+    b.addSmooth(new THREE.SphereGeometry(0.3, 6, 5), M('conchLip', { color: '#f0a0a8', rough: 0.5, smooth: true }), [-0.45, -0.08, 0.06], [0, 0, 0], [0.8, 1, 0.6]);
     b.add(cyl(0.06, 0.08, 0.14, 8), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0.9, 0, 0], [0, 0, Math.PI / 2]);
   },
   clockworkHeart(b) {
@@ -544,12 +699,12 @@ const MODELS: Record<string, Build> = {
     b.add(rockGeo(0.4, 81, [1, 1, 0.7], 1, 0.02), brass, [-0.25, 0.1, 0]);
     b.add(rockGeo(0.4, 82, [1, 1, 0.7], 1, 0.02), brass, [0.25, 0.1, 0]);
     b.add(new THREE.ConeGeometry(0.62, 0.75, 10), brass, [0, -0.4, 0], [Math.PI, 0, 0], [1, 1, 0.55]);
-    b.addSmooth(new THREE.SphereGeometry(0.2, 12, 8), M('heartCore', { color: '#e82a3a', rough: 0.2, smooth: true, emissive: '#a01020', emissiveK: 0.7 }), [0, 0, 0.26]);
-    b.add(new THREE.TorusGeometry(0.22, 0.03, 4, 14), mMetal('steel', T.steel), [0, 0, 0.27]);
+    b.addSmooth(new THREE.SphereGeometry(0.2, 7, 5), M('heartCore', { color: '#e82a3a', rough: 0.2, smooth: true, emissive: '#a01020', emissiveK: 0.7 }), [0, 0, 0.26]);
+    b.add(new THREE.TorusGeometry(0.22, 0.03, 4, 8), mMetal('steel', T.steel), [0, 0, 0.27]);
     const pts: V2[] = []; for (let i = 0; i < 10; i++) for (const [da, r] of [[0, 0.16], [0.15, 0.21], [0.5, 0.21], [0.65, 0.16]] as V2[]) { const a = ((i + da) / 10) * TAU; pts.push([Math.cos(a) * r, Math.sin(a) * r]); }
     b.add(extrudeGeo(pts, 0.05, 0.01), mMetal('steel', T.steel), [0.42, 0.42, 0.1]);
     b.add(cyl(0.03, 0.03, 0.3, 5), brass, [-0.1, 0.62, 0]);
-    for (const x of [-0.24, 0.04]) b.add(new THREE.SphereGeometry(0.1, 8, 5), brass, [x, 0.8, 0], [0, 0, 0], [1.2, 0.7, 0.4]);
+    for (const x of [-0.24, 0.04]) b.add(new THREE.SphereGeometry(0.1, 5, 3), brass, [x, 0.8, 0], [0, 0, 0], [1.2, 0.7, 0.4]);
   },
   manaGeode(b) {
     b.add(rockGeo(0.72, 91, [1, 1, 0.55], 1, 0.12), mStone('geode', T.slate, 12), [0, 0, -0.12]);
@@ -564,32 +719,32 @@ const MODELS: Record<string, Build> = {
     b.add(new THREE.BoxGeometry(1.52, 0.45, 0.6), M('toyFlap', () => ({ map: CLOTH('toyF', ['#2a1408', '#4a2812', '#6e3e1c', '#94582a', '#b8783c']), rough: 0.85 })), [0, 0.5, 0.02]);
     for (const x of [-0.38, 0.38]) { b.add(new THREE.BoxGeometry(0.55, 0.5, 0.1), lea, [x, -0.3, 0.32]); b.add(new THREE.BoxGeometry(0.1, 0.12, 0.05), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [x, -0.06, 0.38]); }
     for (const [x, c] of [[-0.4, '#d8382e'], [-0.15, '#f0c030'], [0.3, '#3f80dc']] as [number, string][]) { b.add(cyl(0.025, 0.025, 0.4, 5), mMetal('steel', T.steel), [x, 0.85, 0], [0, 0, x * 0.4]); b.add(cyl(0.045, 0.045, 0.16, 6), mFlat(c, 0.5), [x - x * 0.08, 0.68, 0], [0, 0, x * 0.4]); }
-    b.add(new THREE.TorusGeometry(0.35, 0.05, 4, 12, Math.PI), lea, [0, 0.72, -0.2]);
+    b.add(new THREE.TorusGeometry(0.35, 0.05, 4, 7, Math.PI), lea, [0, 0.72, -0.2]);
   },
   brassGoggles(b) {
     const brass = M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 });
     for (const x of [-0.25, 0.25]) {
       b.add(cyl(0.2, 0.22, 0.16, 12), brass, [x, 0, 0], [Math.PI / 2, 0, 0]);
-      b.addSmooth(new THREE.SphereGeometry(0.17, 12, 6, 0, TAU, 0, Math.PI / 2), M('lensOr', { color: '#f09030', rough: 0.1, smooth: true, emissive: '#a04a10', emissiveK: 0.4 }), [x, 0, 0.08], [Math.PI / 2, 0, 0], [1, 0.35, 1]);
+      b.addSmooth(new THREE.SphereGeometry(0.17, 7, 4, 0, TAU, 0, Math.PI / 2), M('lensOr', { color: '#f09030', rough: 0.1, smooth: true, emissive: '#a04a10', emissiveK: 0.4 }), [x, 0, 0.08], [Math.PI / 2, 0, 0], [1, 0.35, 1]);
       for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; b.add(new THREE.SphereGeometry(0.025, 5, 3), brass, [x + Math.cos(a) * 0.205, Math.sin(a) * 0.205, 0.09]); }
     }
     b.add(new THREE.BoxGeometry(0.16, 0.06, 0.06), brass, [0, 0.03, 0]);
-    b.add(new THREE.TorusGeometry(0.62, 0.05, 4, 20, Math.PI), M('strapL', () => ({ map: CLOTH('strap', T.leather), rough: 0.85 })), [0, 0.02, -0.1], [0, 0, Math.PI], [1, 0.5, 1]);
+    b.add(new THREE.TorusGeometry(0.62, 0.05, 4, 12, Math.PI), M('strapL', () => ({ map: CLOTH('strap', T.leather), rough: 0.85 })), [0, 0.02, -0.1], [0, 0, Math.PI], [1, 0.5, 1]);
   },
   // ================================================================ abilities / summons
   laserLens(b) {
     b.add(cyl(0.11, 0.11, 1.3, 8), M('laserBody', () => ({ map: tex('laserT', 16, 16, (p) => { bevel(p, 0, 0, 16, 16, T.steel, 2); rect(p, 0, 7, 16, 2, tone(T.steel, 0)); }), rough: 0.35, metal: 0.55 })));
     b.add(cyl(0.12, 0.12, 0.25, 8), mFlat('#1a1a22', 0.6), [0, 0.6, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.1, 10, 6, 0, TAU, 0, Math.PI / 2), M('laserLensR', { color: '#ff3a2a', rough: 0.1, smooth: true, emissive: '#ff2010', emissiveK: 1.5 }), [0, 0.73, 0]);
+    b.addSmooth(new THREE.SphereGeometry(0.1, 6, 4, 0, TAU, 0, Math.PI / 2), M('laserLensR', { color: '#ff3a2a', rough: 0.1, smooth: true, emissive: '#ff2010', emissiveK: 1.5 }), [0, 0.73, 0]);
     b.add(new THREE.BoxGeometry(0.06, 0.12, 0.05), mFlat('#d8302a', 0.4), [0, 0.15, 0.11]);
     b.add(new THREE.BoxGeometry(0.03, 0.5, 0.03), mMetal('silver', SILVER), [0.14, 0.25, 0]);
     b.add(cyl(0.012, 0.012, 1.0, 4), M('beam', { color: '#ff6a5a', emissive: '#ff3020', emissiveK: 2, opacity: 0.7 }), [0, 1.25, 0]);
   },
   bubbleWand(b) {
     b.add(cyl(0.035, 0.04, 1.3, 6), M('wandPink', { color: '#e47c9a', rough: 0.45 }), [0, -0.3, 0]);
-    b.add(new THREE.TorusGeometry(0.22, 0.04, 6, 16), M('wandPink', { color: '#e47c9a', rough: 0.45 }), [0, 0.55, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.2, 12, 8), mGlass('#c8f0ff'), [0, 0.55, 0], [0, 0, 0], [1, 1, 0.25]);
-    for (const [x, y, r] of [[0.3, 0.9, 0.12], [-0.22, 0.95, 0.08], [0.25, 1.15, 0.06]] as V3[]) b.addSmooth(new THREE.SphereGeometry(r, 10, 6), mGlass('#d8f8ff'), [x, y, 0]);
+    b.add(new THREE.TorusGeometry(0.22, 0.04, 4, 10), M('wandPink', { color: '#e47c9a', rough: 0.45 }), [0, 0.55, 0]);
+    b.addSmooth(new THREE.SphereGeometry(0.2, 7, 5), mGlass('#c8f0ff'), [0, 0.55, 0], [0, 0, 0], [1, 1, 0.25]);
+    for (const [x, y, r] of [[0.3, 0.9, 0.12], [-0.22, 0.95, 0.08], [0.25, 1.15, 0.06]] as V3[]) b.addSmooth(new THREE.SphereGeometry(r, 6, 4), mGlass('#d8f8ff'), [x, y, 0]);
   },
   eelBattery(b) {
     b.add(cyl(0.3, 0.3, 1.4, 12), M('eelWrap', () => ({ map: tex('eelT', 32, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, tone(['#071612', '#123a2a', '#1e6646', '#2f9a5c', '#6ccc7a'], 2.2 + (((x >> 1) + (y >> 1)) % 2) * 0.8)); rect(p, 12, 4, 8, 8, '#f0c030'); }), rough: 0.5 })), [0, 0, 0], [0, 0, Math.PI / 2]);
@@ -605,32 +760,32 @@ const MODELS: Record<string, Build> = {
   },
   windUpMegalodon(b) {
     const tin = M('tin', () => ({ map: tex('tinT', 32, 16, (p) => { bevel(p, 0, 0, 32, 16, T.shark, 2); rect(p, 0, 11, 32, 5, '#e8eef2'); for (let x = 4; x < 32; x += 8) rivet(p, x, 3, T.steel); rect(p, 16, 0, 1, 16, tone(T.shark, 0)); }), rough: 0.4, metal: 0.5 }));
-    b.addSmooth(new THREE.SphereGeometry(0.42, 12, 8), tin, [0, 0, 0], [0, 0, Math.PI / 2], [0.7, 1.9, 0.75]);
+    b.addSmooth(new THREE.SphereGeometry(0.42, 7, 5), tin, [0, 0, 0], [0, 0, Math.PI / 2], [0.7, 1.9, 0.75]);
     b.add(new THREE.ConeGeometry(0.28, 0.4, 4), tin, [0.9, 0, 0], [0, 0, -Math.PI / 2], [1, 1, 0.3]);
     b.add(new THREE.ConeGeometry(0.18, 0.35, 4), tin, [-0.05, 0.38, 0], [0, 0, 0.3], [1, 1, 0.3]);
     for (let i = 0; i < 6; i++) b.add(new THREE.ConeGeometry(0.025, 0.06, 3), mFlat('#ffffff', 0.4), [-0.6 + i * 0.04, -0.1, 0.12], [Math.PI, 0, 0]);
-    for (const z of [0.18, -0.18]) b.add(new THREE.SphereGeometry(0.035, 6, 4), mFlat('#101014', 0.2), [-0.52, 0.1, z]);
+    for (const z of [0.18, -0.18]) b.add(new THREE.SphereGeometry(0.035, 5, 3), mFlat('#101014', 0.2), [-0.52, 0.1, z]);
     for (const x of [-0.35, 0.35]) b.add(cyl(0.1, 0.1, 0.06, 10), mFlat('#1a1a22', 0.6), [x, -0.36, 0.2], [Math.PI / 2, 0, 0]);
     b.add(cyl(0.025, 0.025, 0.2, 5), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0.15, 0.42, 0]);
-    for (const x of [0.04, 0.26]) b.add(new THREE.SphereGeometry(0.09, 8, 5), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [x, 0.55, 0], [0, 0, 0], [1.2, 0.7, 0.35]);
+    for (const x of [0.04, 0.26]) b.add(new THREE.SphereGeometry(0.09, 5, 3), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [x, 0.55, 0], [0, 0, 0], [1.2, 0.7, 0.35]);
   },
   piranhaJar(b) {
     b.addSmooth(cyl(0.38, 0.38, 1.2, 14), mGlass('#b8ecf0'), [0, -0.05, 0]);
     b.add(cyl(0.34, 0.34, 0.9, 14), M('jarWater', { color: '#3a80c8', rough: 0.3, opacity: 0.6 }), [0, -0.15, 0]);
     b.add(cyl(0.41, 0.41, 0.16, 14), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, 0.62, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.2, 10, 8), M('piranha', { color: '#7a8496', rough: 0.4, smooth: true }), [0, -0.1, 0.05], [0, 0, 0], [1.4, 1, 0.6]);
-    b.add(new THREE.SphereGeometry(0.12, 8, 5, 0, TAU, Math.PI / 2, Math.PI / 2), M('piranhaBelly', { color: '#d8302a', rough: 0.4 }), [0, -0.12, 0.06], [0, 0, 0], [2, 1, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.2, 6, 5), M('piranha', { color: '#7a8496', rough: 0.4, smooth: true }), [0, -0.1, 0.05], [0, 0, 0], [1.4, 1, 0.6]);
+    b.add(new THREE.SphereGeometry(0.12, 5, 3, 0, TAU, Math.PI / 2, Math.PI / 2), M('piranhaBelly', { color: '#d8302a', rough: 0.4 }), [0, -0.12, 0.06], [0, 0, 0], [2, 1, 1]);
     b.add(new THREE.ConeGeometry(0.12, 0.2, 4), M('piranha', { color: '#7a8496', rough: 0.4, smooth: true }), [0.32, -0.1, 0.05], [0, 0, -Math.PI / 2], [1, 1, 0.3]);
     for (let i = 0; i < 4; i++) b.add(new THREE.ConeGeometry(0.018, 0.05, 3), mFlat('#ffffff'), [-0.25 + i * 0.03, -0.14, 0.15], [Math.PI, 0, 0]);
   },
   octopusPal(b) {
     const m = M('octo', { color: '#963a90', rough: 0.45 });
-    b.addSmooth(new THREE.SphereGeometry(0.36, 12, 10), m, [-0.35, 0.18, 0], [0, 0, 0.2], [1, 1.1, 0.95]);
+    b.addSmooth(new THREE.SphereGeometry(0.36, 7, 6), m, [-0.35, 0.18, 0], [0, 0, 0.2], [1, 1.1, 0.95]);
     for (let i = 0; i < 6; i++) {
       const y0 = -0.05 - (i % 3) * 0.04, z = (i - 2.5) * 0.06;
       b.add(tubeGeo([[-0.3, y0, z], [-0.05, -0.2, z], [0.3 + i * 0.05, -0.12 + Math.sin(i) * 0.1, z], [0.6 + (i % 2) * 0.1, 0.05, z], [0.55, 0.15, z]], 0.06 - i * 0.004, 5), m);
     }
-    for (const z of [0.14, -0.14]) { b.add(new THREE.SphereGeometry(0.09, 8, 6), mFlat('#ffffff', 0.3), [-0.12, 0.26, z + 0.22]); b.add(new THREE.SphereGeometry(0.045, 6, 4), mFlat('#101014', 0.2), [-0.06, 0.26, z + 0.29]); }
+    for (const z of [0.14, -0.14]) { b.add(new THREE.SphereGeometry(0.09, 5, 4), mFlat('#ffffff', 0.3), [-0.12, 0.26, z + 0.22]); b.add(new THREE.SphereGeometry(0.045, 5, 3), mFlat('#101014', 0.2), [-0.06, 0.26, z + 0.29]); }
   },
   // ================================================================ mage gear
   frostTome(b) { tome3d(b, ['#0a2238', '#1e5a86', '#3a9ad0', '#7ad4f4', '#c8f4ff'], '#d8f4ff', 'frost'); },
@@ -639,9 +794,9 @@ const MODELS: Record<string, Build> = {
     const sh = M('whelkPipe', () => ({ map: RIBS('whelkP', SHELL, 5), rough: 0.6 }));
     b.add(latheGeo([[0, -0.22], [0.2, -0.2], [0.26, 0.05], [0.24, 0.22], [0.18, 0.24], [0.16, 0.0], [0, -0.05]], 10), sh, [-0.55, 0, 0]);
     b.add(tubeGeo([[-0.42, -0.12, 0], [0.0, -0.08, 0], [0.4, 0.0, 0], [0.75, 0.12, 0]], 0.045, 6), M('pipeStem', { color: '#c89480', rough: 0.5 }));
-    for (const [x, y, r] of [[-0.55, 0.42, 0.1], [-0.4, 0.62, 0.07], [-0.62, 0.72, 0.05]] as V3[]) b.addSmooth(new THREE.SphereGeometry(r, 10, 6), mGlass('#d8f8ff'), [x, y, 0]);
+    for (const [x, y, r] of [[-0.55, 0.42, 0.1], [-0.4, 0.62, 0.07], [-0.62, 0.72, 0.05]] as V3[]) b.addSmooth(new THREE.SphereGeometry(r, 6, 4), mGlass('#d8f8ff'), [x, y, 0]);
   },
-  kelpRobe(b) { garment(b, KELP, 'robe', true); b.add(new THREE.TorusGeometry(0.42, 0.05, 4, 16), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0, -0.05, 0], [Math.PI / 2, 0, 0], [1, 1, 0.35]); b.add(new THREE.OctahedronGeometry(0.08, 0), mGem('mana', MANA, 0.6), [0, -0.05, 0.18]); },
+  kelpRobe(b) { garment(b, KELP, 'robe', true); b.add(new THREE.TorusGeometry(0.42, 0.05, 4, 10), M('rope', () => ({ map: ROPE('rope', T.rope), rough: 0.9 })), [0, -0.05, 0], [Math.PI / 2, 0, 0], [1, 1, 0.35]); b.add(new THREE.OctahedronGeometry(0.08, 0), mGem('mana', MANA, 0.6), [0, -0.05, 0.18]); },
   chainmail(b) { garment(b, T.steel, 'mail', false); for (const [x, y] of [[-0.3, 0.2], [0.25, -0.2], [0.1, 0.45]] as V2[]) b.add(new THREE.ConeGeometry(0.06, 0.08, 6), mFlat('#e8ecf2', 0.6), [x, y, 0.17], [Math.PI / 2, 0, 0]); },
   wizardHat(b) {
     const m = M('wizHat', () => ({ map: tex('wizT', 16, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 16; x++) p.set(x, y, tone(['#06082a', '#101a5a', '#1e2e90', '#3248c0', '#5a7ae8'], 2.2 + (x < 5 ? 0.8 : 0) + ((x * 5 + y * 3) % 23 === 0 ? 2 : 0))); rect(p, 0, 26, 16, 3, '#f0c040'); }), rough: 0.7 }));
@@ -651,25 +806,25 @@ const MODELS: Record<string, Build> = {
     for (let i = 0; i < pos.count; i++) { const y = pos.getY(i) + 0.65; pos.setX(i, pos.getX(i) + Math.pow(y / 1.3, 2.4) * 0.4); }
     b.add(cone, m, [0, 0.05, 0]);
     for (const [x, y] of [[-0.12, -0.2], [0.1, 0.15], [0.05, -0.45]] as V2[]) b.add(new THREE.OctahedronGeometry(0.05, 0), M('starG', { color: '#ffe86a', emissive: '#f0c040', emissiveK: 0.8 }), [x, y, 0.28]);
-    b.add(new THREE.SphereGeometry(0.06, 6, 4), M('starG', { color: '#ffe86a', emissive: '#f0c040', emissiveK: 0.8 }), [0.4, 0.68, 0]);
+    b.add(new THREE.SphereGeometry(0.06, 5, 3), M('starG', { color: '#ffe86a', emissive: '#f0c040', emissiveK: 0.8 }), [0.4, 0.68, 0]);
   },
   // ================================================================ warrior / rogue gear
   turtleShell(b) {
-    b.addSmooth(new THREE.SphereGeometry(0.75, 14, 8, 0, TAU, 0, Math.PI / 2), M('carapace', () => ({ map: tex('scutes', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const [d] = worley(x, y, 10, 3, 32); p.set(x, y, tone(['#1a2a10', '#2c4a1a', '#46722a', '#6a9a3a', '#9ac85a'], d > 0.78 ? 0.6 : 2.6 - d)); } }), rough: 0.55 })), [0, -0.2, 0], [Math.PI / 2, 0, 0], [1, 0.42, 0.9]);
-    b.add(new THREE.TorusGeometry(0.74, 0.07, 4, 20), M('shellRim', { color: '#6a5a2a', rough: 0.6 }), [0, -0.2, 0], [0, 0, 0], [1, 0.9, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.75, 8, 5, 0, TAU, 0, Math.PI / 2), M('carapace', () => ({ map: tex('scutes', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const [d] = worley(x, y, 10, 3, 32); p.set(x, y, tone(['#1a2a10', '#2c4a1a', '#46722a', '#6a9a3a', '#9ac85a'], d > 0.78 ? 0.6 : 2.6 - d)); } }), rough: 0.55 })), [0, -0.2, 0], [Math.PI / 2, 0, 0], [1, 0.42, 0.9]);
+    b.add(new THREE.TorusGeometry(0.74, 0.07, 4, 12), M('shellRim', { color: '#6a5a2a', rough: 0.6 }), [0, -0.2, 0], [0, 0, 0], [1, 0.9, 1]);
     for (const [x, y] of [[-0.82, 0.2], [0.82, 0.2], [-0.82, -0.6], [0.82, -0.6]] as V2[]) b.add(new THREE.BoxGeometry(0.2, 0.1, 0.06), M('strapL', () => ({ map: CLOTH('strap', T.leather), rough: 0.85 })), [x, y, 0]);
   },
   clamShield(b) {
-    const g = new THREE.SphereGeometry(0.62, 14, 6, Math.PI * 0.05, Math.PI * 0.9, 0, Math.PI / 2);
+    const g = new THREE.SphereGeometry(0.62, 8, 4, Math.PI * 0.05, Math.PI * 0.9, 0, Math.PI / 2);
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), a = Math.atan2(x, z); const k = 1 + Math.abs(Math.sin(a * 8)) * 0.07; pos.setXYZ(i, x * k, pos.getY(i), z * k); }
     b.add(g, M('clamS', () => ({ map: RIBS('clamS', SHELL, 9), rough: 0.6, side: THREE.DoubleSide })), [0, 0.1, 0], [-0.35, 0, 0], [1, 1.25, 0.6]);
     b.add(cyl(0.08, 0.08, 0.6, 6), M('grip', () => ({ map: ROPE('grip', T.leather), rough: 0.9 })), [0, -0.75, 0]);
-    b.add(new THREE.SphereGeometry(0.1, 8, 5), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, -1.06, 0]);
+    b.add(new THREE.SphereGeometry(0.1, 5, 3), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [0, -1.06, 0]);
   },
   plumedHelm(b) {
     const br = M('bronzeHelm', { map: METAL('bronze', ['#2a1006', '#5e2c0e', '#9a5a1e', '#d08a3a', '#f0c070']), rough: 0.3, metal: 0.6 });
-    b.addSmooth(new THREE.SphereGeometry(0.42, 12, 8, 0, TAU, 0, Math.PI * 0.62), br, [0, 0, 0], [0, 0, 0], [1, 1.1, 1]);
+    b.addSmooth(new THREE.SphereGeometry(0.42, 7, 5, 0, TAU, 0, Math.PI * 0.62), br, [0, 0, 0], [0, 0, 0], [1, 1.1, 1]);
     for (const sx of [-1, 1]) b.add(new THREE.BoxGeometry(0.12, 0.38, 0.3), br, [sx * 0.3, -0.25, 0.12]);
     b.add(new THREE.BoxGeometry(0.4, 0.06, 0.1), mFlat('#1a0c06'), [0, -0.08, 0.38]);
     b.add(new THREE.BoxGeometry(0.06, 0.3, 0.08), br, [0, -0.2, 0.4]);
@@ -686,21 +841,21 @@ const MODELS: Record<string, Build> = {
   tideCrown(b) {
     const gold = M('goldC', { map: METAL('gold', GOLD), rough: 0.3, metal: 0.65 });
     b.add(cyl(0.5, 0.5, 0.26, 16, ), gold, [0, -0.2, 0]);
-    for (let i = 0; i < 7; i++) { const a = (i / 7) * TAU; b.add(new THREE.ConeGeometry(0.09, 0.32, 4), gold, [Math.cos(a) * 0.48, 0.06, Math.sin(a) * 0.48]); b.add(new THREE.SphereGeometry(0.05, 6, 4), M('pearl', { color: '#f4ecf2', rough: 0.18, metal: 0.15, smooth: true }), [Math.cos(a) * 0.48, 0.24, Math.sin(a) * 0.48]); }
+    for (let i = 0; i < 7; i++) { const a = (i / 7) * TAU; b.add(new THREE.ConeGeometry(0.09, 0.32, 4), gold, [Math.cos(a) * 0.48, 0.06, Math.sin(a) * 0.48]); b.add(new THREE.SphereGeometry(0.05, 5, 3), M('pearl', { color: '#f4ecf2', rough: 0.18, metal: 0.15, smooth: true }), [Math.cos(a) * 0.48, 0.24, Math.sin(a) * 0.48]); }
     for (const a of [-0.5, 0, 0.5]) b.add(new THREE.OctahedronGeometry(0.07, 0), mGem('aqua', AQUA, 0.5), [Math.sin(a) * 0.5, -0.2, Math.cos(a) * 0.5]);
   },
   scubaTank(b) {
     b.add(cyl(0.34, 0.34, 1.3, 14), M('tank', () => ({ map: tex('tankT', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, tone(['#3a1804', '#86460a', '#cc8a12', '#f6c21e', '#ffe86a'], 2.6 + (x > 6 && x < 10 ? 1 : 0) - (x > 26 ? 1 : 0))); rect(p, 0, 7, 32, 2, '#1a1a22'); rect(p, 0, 23, 32, 2, '#1a1a22'); rect(p, 10, 12, 12, 8, '#f0f0f0'); rect(p, 12, 14, 8, 1, '#5a6282'); rect(p, 12, 17, 6, 1, '#5a6282'); }), rough: 0.4, metal: 0.3 })), [0, -0.1, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.34, 12, 6, 0, TAU, 0, Math.PI / 2), M('tankTop', { color: '#f6c21e', rough: 0.4, smooth: true }), [0, 0.55, 0]);
+    b.addSmooth(new THREE.SphereGeometry(0.34, 7, 4, 0, TAU, 0, Math.PI / 2), M('tankTop', { color: '#f6c21e', rough: 0.4, smooth: true }), [0, 0.55, 0]);
     b.add(cyl(0.08, 0.1, 0.2, 8), mMetal('silver', SILVER), [0, 0.92, 0]);
     b.add(new THREE.BoxGeometry(0.3, 0.1, 0.12), mMetal('silver', SILVER), [0.1, 1.02, 0]);
     b.add(tubeGeo([[0.22, 1.02, 0], [0.4, 1.0, 0], [0.45, 0.7, 0.05], [0.42, 0.3, 0.05]], 0.03, 5), mFlat('#1a1a22', 0.6));
   },
   shadowHood(b) {
     const m = M('hood', () => ({ map: CLOTH('hoodC', ['#06100c', '#0e2418', '#183a28', '#24543a', '#357a52']), rough: 0.8 }));
-    b.addSmooth(new THREE.SphereGeometry(0.5, 12, 8, 0, TAU, 0, Math.PI * 0.75), m, [0, 0.05, 0], [0, 0, 0], [1, 1.15, 0.95]);
+    b.addSmooth(new THREE.SphereGeometry(0.5, 7, 5, 0, TAU, 0, Math.PI * 0.75), m, [0, 0.05, 0], [0, 0, 0], [1, 1.15, 0.95]);
     b.add(new THREE.CircleGeometry(0.3, 12), mFlat('#030406', 0.9), [0, -0.05, 0.42], [0, 0, 0], [1, 1.2, 1]);
-    for (const x of [-0.11, 0.11]) b.add(new THREE.SphereGeometry(0.04, 6, 4), M('eyeGlow', { color: '#a8ff6a', emissive: '#7ad040', emissiveK: 2 }), [x, 0.0, 0.44]);
+    for (const x of [-0.11, 0.11]) b.add(new THREE.SphereGeometry(0.04, 5, 3), M('eyeGlow', { color: '#a8ff6a', emissive: '#7ad040', emissiveK: 2 }), [x, 0.0, 0.44]);
     b.add(new THREE.ConeGeometry(0.62, 0.4, 12, 1, true), m, [0, -0.55, 0], [0, 0, 0], [1, 1, 0.7]);
   },
   // ================================================================ gadgets & summons (skill props)
@@ -771,7 +926,7 @@ function puffer(b: B, r: number, fuse = false) {
     const e = new THREE.Euler().setFromQuaternion(q);
     b.add(cone, spike, [d.x * r * 1.05, d.y * r * 1.05, d.z * r * 1.05], [e.x, e.y, e.z]);
   }
-  for (const z of [-1, 1]) { b.add(new THREE.SphereGeometry(r * 0.2, 8, 6), mFlat('#ffffff', 0.3), [-r * 0.55, r * 0.25, z * r * 0.62]); b.add(new THREE.SphereGeometry(r * 0.1, 6, 4), mFlat('#101014', 0.2), [-r * 0.68, r * 0.25, z * r * 0.72]); }
+  for (const z of [-1, 1]) { b.add(new THREE.SphereGeometry(r * 0.2, 5, 4), mFlat('#ffffff', 0.3), [-r * 0.55, r * 0.25, z * r * 0.62]); b.add(new THREE.SphereGeometry(r * 0.1, 5, 3), mFlat('#101014', 0.2), [-r * 0.68, r * 0.25, z * r * 0.72]); }
   if (fuse) {
     b.add(cyl(0.05, 0.06, 0.08, 6), M('brass', { map: METAL('brass', T.brass), rough: 0.35, metal: 0.6 }), [r * 0.3, r * 0.95, 0], [0, 0, -0.4]);
     b.add(tubeGeo([[r * 0.34, r * 1.0, 0], [r * 0.5, r * 1.35, 0.02], [r * 0.75, r * 1.4, 0]], 0.02, 4), mFlat('#c8a060', 0.9));
@@ -780,7 +935,7 @@ function puffer(b: B, r: number, fuse = false) {
 }
 function vial(b: B, liquid: string, dark: string) {
   b.add(latheGeo([[0, -0.32], [0.22, -0.28], [0.26, -0.05], [0.2, 0.14], [0.08, 0.22], [0.08, 0.34], [0, 0.34]], 10), mGlass('#c8f0e8'));
-  b.addSmooth(new THREE.SphereGeometry(0.22, 10, 6, 0, TAU, Math.PI * 0.42, Math.PI * 0.58), M('liq' + liquid, { color: liquid, rough: 0.2, smooth: true, emissive: dark, emissiveK: 0.6 }), [0, -0.06, 0]);
+  b.addSmooth(new THREE.SphereGeometry(0.22, 6, 4, 0, TAU, Math.PI * 0.42, Math.PI * 0.58), M('liq' + liquid, { color: liquid, rough: 0.2, smooth: true, emissive: dark, emissiveK: 0.6 }), [0, -0.06, 0]);
   b.add(cyl(0.09, 0.08, 0.1, 8), M('cork', () => ({ map: STONE('corkB', ['#3a2410', '#6a4420', '#a07040', '#c89a62', '#ecc890'], 9), rough: 0.95 })), [0, 0.38, 0]);
 }
 
@@ -788,15 +943,15 @@ function vial(b: B, liquid: string, dark: string) {
 const HUD_MODELS: Record<string, (b: B) => void> = {
   heart(b) {
     const m = M('heartJelly', { color: '#ff4a6a', rough: 0.25, smooth: true, emissive: '#a01030', emissiveK: 0.35 });
-    b.addSmooth(new THREE.SphereGeometry(0.22, 12, 8), m, [-0.15, 0.08, 0]);
-    b.addSmooth(new THREE.SphereGeometry(0.22, 12, 8), m, [0.15, 0.08, 0]);
+    b.addSmooth(new THREE.SphereGeometry(0.22, 7, 5), m, [-0.15, 0.08, 0]);
+    b.addSmooth(new THREE.SphereGeometry(0.22, 7, 5), m, [0.15, 0.08, 0]);
     b.addSmooth(new THREE.ConeGeometry(0.33, 0.42, 12), m, [0, -0.2, 0], [Math.PI, 0, 0], [1, 1, 0.66]);
-    b.add(new THREE.SphereGeometry(0.06, 6, 4), mFlat('#ffffff', 0.1), [-0.2, 0.18, 0.18]);
+    b.add(new THREE.SphereGeometry(0.06, 5, 3), mFlat('#ffffff', 0.1), [-0.2, 0.18, 0.18]);
   },
-  pearlCoin(b) { b.addSmooth(new THREE.IcosahedronGeometry(0.3, 3), M('pearl', { color: '#f4ecf2', rough: 0.18, metal: 0.15, smooth: true, emissive: '#3a2a3a', emissiveK: 0.2 })); b.add(new THREE.SphereGeometry(0.07, 6, 4), mFlat('#ffffff', 0.1), [-0.12, 0.12, 0.24]); },
+  pearlCoin(b) { b.addSmooth(new THREE.IcosahedronGeometry(0.3, 3), M('pearl', { color: '#f4ecf2', rough: 0.18, metal: 0.15, smooth: true, emissive: '#3a2a3a', emissiveK: 0.2 })); b.add(new THREE.SphereGeometry(0.07, 5, 3), mFlat('#ffffff', 0.1), [-0.12, 0.12, 0.24]); },
   key(b) {
     const m = mRust('key', T.brass);
-    b.add(new THREE.TorusGeometry(0.16, 0.06, 6, 12), m, [0, 0.3, 0]);
+    b.add(new THREE.TorusGeometry(0.16, 0.06, 4, 7), m, [0, 0.3, 0]);
     b.add(cyl(0.05, 0.05, 0.62, 6), m, [0, -0.15, 0]);
     for (const y of [-0.4, -0.28]) b.add(new THREE.BoxGeometry(0.16, 0.07, 0.07), m, [0.1, y, 0]);
   },

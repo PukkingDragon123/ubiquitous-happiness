@@ -24,6 +24,7 @@ import { damp, clamp01 } from '../core/math';
 import { TravelSet, floorAt } from './travel';
 import type { BoardId } from './sign';
 import { SettingsPanel } from './pages';
+import { Tag } from '../hideout/tag';
 
 export interface TitleOpts {
   /** NEW GAME */ onNew: () => void;
@@ -86,7 +87,7 @@ export class TitleScreen implements Screen {
   private yaw = 0;
 
   constructor(private game: Game, private opts: TitleOpts) {
-    this.scene.add(this.set.group);
+    this.scene.add(this.set.group, this.confirmTag.mesh);
     this.scene.background = new THREE.Color('#06223a');
     this.ui.drawCursor = true;
     this.set.onWhale = () => audio.play('whale' + (1 + Math.floor(Math.random() * 3)), { vol: 0.3 });
@@ -112,7 +113,7 @@ export class TitleScreen implements Screen {
     this.rest.set(s.x - 3.35, floorAt(s.x - 3.35, 0) + 1.95, 0.4);
     this.hx = this.rest.x - (d.quick ? 13 : 30); this.hy = this.rest.y + 1.4; this.vx = 3.6;
     this.phase = 'travel'; this.phaseT = 0; this.t = 0;
-    this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false;
+    this.hot = null; this.kbdSel = null; this.lastHot = null; this.leaving = null; this.settingsOpen = false; this.confirmT = 0;
     this.yaw = 0;
     this.set.sign.setEnabled('resume', this.opts.hasSave());
     const h = this.set.hero;
@@ -208,6 +209,12 @@ export class TitleScreen implements Screen {
       if (look) h.setExpression(look === 'new' ? 'brave' : look === 'resume' ? 'happy' : 'focus');
     }
     this.set.sign.update(dt, this.t, this.leaving ? this.leaving.id : this.settingsOpen ? 'gear' : look);
+    // the 'start over?' note pinned beside the NEW GAME board
+    this.confirmT -= dt;
+    if (this.confirmT > 0 && !this.leaving) {
+      this.confirmTag.show([{ text: 'START OVER?', font: 'title', color: '#8a1a14' }, { text: 'Your home and stash are lost.', color: '#3a2810' }, { text: 'click NEW GAME again', color: '#1a4a7a', gap: 2 }]);
+      this.confirmTag.place(this.camera, this.set.sign.tipWorld('new'), this.game.post.h, [0, -12], dt);
+    } else this.confirmTag.hide();
     const lp = this.set.sign.lanternWorld();
     if (this.set.lamp) { this.set.lamp.set(lp.x, lp.y, lp.z); this.set.lamp.light.intensity = 3.2 * this.set.sign.lanternK; }
     ui.drawCursor = this.phase === 'idle' && !this.leaving;
@@ -254,6 +261,9 @@ export class TitleScreen implements Screen {
     else if ((input.keyHit('Enter') || input.keyHit('Space')) && !this.kbdSel && this.phaseT > 0.2) this.kbdSel = 'new';
   }
   private lastHotSfx: BoardId | null = null;
+  /** NEW GAME over a save: the 'start over?' note is up for this long */
+  private confirmT = 0;
+  private confirmTag = new Tag('paper', 150);
   private lastM: [number, number] = [-1, -1];
 
   private activate(id: BoardId) {
@@ -264,6 +274,13 @@ export class TitleScreen implements Screen {
       audio.play('wood_knock1', { vol: 0.35, rate: 0.7 });
       const p = sign.boardWorld(id);
       for (let i = 0; i < 14; i++) this.set.bubbles.emit(p.x + (Math.random() - 0.5) * 2, p.y + Math.random() * 0.3, p.z + 0.2, { vy: 0.1, life: 2, size: 0.03 });
+      return;
+    }
+    // NEW GAME over a save starts over: the first click asks (a pinned note), a second click within a few seconds goes
+    if (id === 'new' && this.opts.hasSave() && this.confirmT <= 0) {
+      this.confirmT = 4;
+      sign.knock('new', 0.9);
+      audio.play('page1', { vol: 0.4, dry: true }); audio.play('wood_knock1', { vol: 0.3, rate: 0.85 });
       return;
     }
     if (id === 'gear') { this.settingsOpen = true; this.settings.open(); sign.knock('gear', 1); audio.play('k_open1', { vol: 0.4, dry: true }); audio.play('wood_knock1', { vol: 0.25 }); return; }

@@ -17,7 +17,14 @@ import type { ItemInst } from '../game/run';
 
 export interface HudAnchor { x: number; y: number; on: boolean }
 export interface Prompt { key: string; label: string; at?: HudAnchor; bad?: boolean }
-export interface MailState { items: ItemInst[]; picked: Set<number>; capacity: number; used: number }
+/** the post office: what's in the pack, what's picked, how many parcels her bag still takes, and what it builds */
+export interface MailState {
+  items: ItemInst[]; picked: Set<number>;
+  /** parcels (picked stacks / items, any size) her bag still takes this floor, and how many are picked */
+  capacity: number; used: number;
+  /** the house's goals with this parcel counted in (src/dungeon/homeGoals.ts) */
+  goals: import('./homeGoals').HomeGoal[];
+}
 
 /** the depth gauge's data (metres, positive down) */
 export interface DepthHud {
@@ -158,9 +165,11 @@ export class DungeonHud {
   private mailPicker(m: MailState): string | null {
     const ui = this.ui;
     this.build();
-    const cols = 6, cell = 30;
+    // the bag grows sideways for a big pack (v4's larger grid) so it never runs off the screen
+    const cols = Math.min(10, Math.max(6, Math.ceil(m.items.length / 6))), cell = 30;
+    const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
     const rows = Math.max(1, Math.ceil(m.items.length / cols));
-    const w = cols * cell + 32, h = rows * cell + 86;
+    const w = Math.max(250, cols * cell + 32), h = rows * cell + 86;
     const x = Math.round((ui.w - w) / 2), y = Math.round((ui.h - h) / 2) + 8;
     const st = this.l.stage, k = this.k;
     (this.bag.getObjectByName('body') as THREE.Mesh).scale.set(w / k, h / k, 1);
@@ -171,24 +180,27 @@ export class DungeonHud {
     this.bag.rotation.set(-0.06 + Math.sin(this.t * 0.9) * 0.01, Math.sin(this.t * 0.7) * 0.02, 0);
     st.put(this.bag, (x + w / 2) / k, (y + h / 2) / k, 80);
     ui.text('THE MANATEE\'S MAILBAG', x + w / 2, y - 26, { font: 'title', color: '#ffe8c0', outline: '#1a0c04', align: 'center' });
-    ui.text(`${m.used}/${m.capacity} CELLS · CLICK TO PICK`, x + w / 2, y + 9, { font: 'small', color: m.used > m.capacity ? '#c8283a' : '#3a2410', shadow: null, align: 'center' });
+    ui.text(`${m.used}/${m.capacity} PARCELS · CLICK TO PICK`, x + w / 2, y + 9, { font: 'small', color: m.used > m.capacity ? '#c8283a' : '#3a2410', shadow: null, align: 'center' });
     let out: string | null = null;
     m.items.forEach((it, i) => {
-      const ix = x + 16 + (i % cols) * cell, iy = y + 30 + Math.floor(i / cols) * cell;
+      const ix = x + (w - cols * cell) / 2 + (i % cols) * cell, iy = y + 30 + Math.floor(i / cols) * cell;
       const on = m.picked.has(it.uid);
       const hov = ui.hover(ix, iy, cell - 2, cell - 2);
       let mo = this.mailModels.get(it.uid);
       if (!mo) { mo = itemModel(it.id); const sh = contactShadow(1.0, 0.8, 0.5); sh.position.set(0.08, -0.08, -0.4); mo.add(sh); this.mailModels.set(it.uid, mo); }
       const d = getItem(it.id);
       const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
+      mo.visible = true; // (the HUD hides every stage child while a menu is up: the bag shows its own)
       mo.scale.setScalar(((cell - 6) / Math.max(cw, ch) / k) * (hov ? 1.12 : 1));
       mo.rotation.set(0.3, -0.3 + (hov || on ? Math.sin(this.t * 2.5) * 0.4 : 0), 0);
       st.put(mo, (ix + cell / 2 - 1) / k, (iy + cell / 2 - 1 - (on ? 3 : 0)) / k, 100 + (on ? 10 : 0));
       if (on) { ui.fill(ix + cell - 16, iy + cell - 11, 15, 9, '#c8202a', 0.92); ui.text('POST', ix + cell - 15, iy + cell - 10, { font: 'small', color: '#fff0d8', shadow: null }); }
       if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + 1, iy + cell - 10, { font: 'small', color: '#3a2410', shadow: null });
+      // a little house mark on materials the house still needs
+      if (needs.has(it.id)) { ui.fill(ix + 1, iy + 1, 9, 7, '#2a7a24', 0.9); ui.fill(ix + 3, iy - 1, 5, 2, '#2a7a24', 0.9); ui.fill(ix + 4, iy + 4, 3, 4, '#ecdcb4'); }
       if (hov) {
         const cells = d.shape.length;
-        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [`${cells} cell${cells > 1 ? 's' : ''} · ${ITEMS[it.id]?.kind === 'material' ? 'to your materials' : 'to your stash'}`]));
+        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [`${cells} cell${cells > 1 ? 's' : ''} · ${ITEMS[it.id]?.kind === 'material' ? 'builds the house' : 'to your stash'}`]));
         if (ui.pressed) { out = 'mail:' + it.uid; audio.play('k_click1', { vol: 0.3, dry: true }); }
       }
     });
@@ -196,6 +208,39 @@ export class DungeonHud {
     const by = y + h - 28;
     if (ui.button('mail:send', `SEND ${m.picked.size} HOME`, x + 14, by, w / 2 - 18, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
     if (ui.button('mail:close', 'DONE', x + w / 2 + 4, by, w / 2 - 18, 18, { style: 'wood', key: 'Escape' })) out = 'mail:close';
+    if (m.items.some((i) => ITEMS[i.id]?.kind === 'material') && ui.button('mail:mats', 'ALL MATERIALS', x + w / 2 - 50, y + h + 4, 100, 16, { style: 'wood', key: 'KeyA' })) out = 'mail:mats';
+    // what the parcel builds at home: the house's goal (and anything else it helps), counts before -> after
+    const gx = x + w + 10, gw = Math.min(170, ui.w - gx - 6);
+    if (m.goals.length && gw > 90) {
+      const lineH = 11;
+      const gh = 24 + m.goals.reduce((n, g) => n + 14 + g.lines.length * lineH, 0);
+      const gy = Math.max(6, y + h / 2 - gh / 2);
+      ui.fill(gx + 3, gy + 3, gw, gh, '#000000', 0.3);
+      ui.fill(gx, gy, gw, gh, '#ecdcb4'); ui.fill(gx, gy, gw, 1, '#fff4d8'); ui.fill(gx, gy + gh - 1, gw, 1, '#b89a6a');
+      ui.fill(gx + gw / 2 - 1, gy - 1, 3, 3, '#a81c24');
+      ui.text('BUILDS AT HOME', gx + gw / 2, gy + 5, { font: 'small', color: '#7a2a10', shadow: null, align: 'center' });
+      let yy = gy + 18;
+      for (const g of m.goals) {
+        const tag = g.ready && !g.readyBefore ? '  READY!' : g.readyBefore ? '  (READY)' : g.goal ? '  - GOAL' : '';
+        const tw = ui.text(g.name.toUpperCase() + tag, gx + 6, yy, { font: 'small', color: g.ready ? '#2a7a24' : '#3a2410', shadow: null });
+        if (g.ready) ui.icon('check', gx + 8 + (typeof tw === 'number' ? tw : ui.measure(g.name.toUpperCase() + tag, 'small')), yy - 1);
+        yy += 12;
+        for (const l of g.lines) {
+          const done = l.after >= l.need, add = l.after - l.have;
+          ui.text(l.name.toUpperCase(), gx + 10, yy, { font: 'small', color: '#5a3a1c', shadow: null });
+          const cnt = `${Math.min(l.after, l.need)}/${l.need}${add > 0 ? `  +${add}` : ''}`;
+          ui.text(cnt, gx + gw - (done ? 16 : 6), yy, { font: 'small', color: done ? '#2a7a24' : add > 0 ? '#a86a10' : '#7a5a3a', shadow: null, align: 'right' });
+          if (done) ui.icon('check', gx + gw - 14, yy - 1);
+          // a little bar: before (dark) and what this parcel adds (gold)
+          const bw = gw - 20, b0 = Math.min(1, l.have / l.need), b1 = Math.min(1, l.after / l.need);
+          ui.fill(gx + 10, yy + 9, bw, 1, '#c8b08a'); ui.fill(gx + 10, yy + 9, Math.round(bw * b1), 1, done ? '#3a9a2a' : '#d89a20'); ui.fill(gx + 10, yy + 9, Math.round(bw * b0), 1, '#5a3a1c');
+          yy += lineH;
+        }
+        yy += 2;
+      }
+      // clicking outside the bag and the note closes the picker (no way to get stuck in it)
+      if (ui.pressed && !ui.hover(x - 6, y - 30, w + 12, h + 56) && !ui.hover(gx, gy, gw, gh)) out = out ?? 'mail:close';
+    } else if (ui.pressed && !ui.hover(x - 6, y - 30, w + 12, h + 56)) out = out ?? 'mail:close';
     return out;
   }
 

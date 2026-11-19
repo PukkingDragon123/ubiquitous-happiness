@@ -2,6 +2,7 @@
 // (player, enemies, bosses) lands with the same weight.
 import type { World } from '../game/types';
 import { gore as waveGore } from '../waves/fx';
+import { parryStar } from './telegraph';
 
 export type Weight = 'light' | 'heavy' | 'crit' | 'riposte';
 const STOP: Record<Weight, number> = { light: 0.055, heavy: 0.1, crit: 0.12, riposte: 0.16 };
@@ -32,15 +33,17 @@ export function clang(w: World, x: number, y: number, ang: number, big = false) 
 
 /** the perfect parry: bright clang, long hit-stop, a white screen flash, a ring of sparks */
 export function parryFlash(w: World, x: number, y: number, ang: number) {
-  w.game.freeze(0.16);
-  w.game.addShake(0.22);
-  w.game.flash('#ffffff', 0.6);
+  w.game.freeze(0.22);
+  w.game.addShake(0.32);
+  w.game.flash('#ffffff', 0.8);
   w.fx.hit(x, y, 'crit', ang, '#ffffff');
-  w.fx.emit('ring', x, y, { size: 0.5, size1: 2.6, life: 0.35, color: '#ffffff', spread: 0, add: true, z: 0.6 });
-  w.fx.emit('shock', x, y, { size: 1.6, life: 0.3, color: '#d8f0ff', spread: 0, z: 0.5 });
-  w.fx.sparks(x, y, 26, ang + Math.PI, 9, '#fff6d0');
-  w.fx.light(x, y, '#ffffff', 9, 0.18);
-  w.sfx('sw_parry', x, 1, 1.05); w.sfx('sw_clang', x, 0.8, 1.6); w.sfx('k_glass', x, 0.5, 2);
+  parryStar(w, x, y);
+  w.fx.emit('ring', x, y, { size: 0.5, size1: 3.8, life: 0.42, color: '#ffffff', spread: 0, add: true, z: 0.6 });
+  w.fx.emit('shock', x, y, { size: 2.4, life: 0.34, color: '#d8f0ff', spread: 0, z: 0.5 });
+  w.fx.sparks(x, y, 40, ang + Math.PI, 11, '#fff6d0');
+  w.fx.sparks(x, y, 16, ang, 6, '#bfefff');
+  w.fx.light(x, y, '#ffffff', 12, 0.24);
+  w.sfx('sw_parry', x, 1, 1.0); w.sfx('sw_clang', x, 0.9, 1.6); w.sfx('bell', x, 0.7, 1.25); w.sfx('k_glass', x, 0.5, 2);
 }
 
 /** a damage number (3D when world.text is a Float3D) */

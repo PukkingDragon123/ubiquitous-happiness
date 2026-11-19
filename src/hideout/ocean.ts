@@ -282,8 +282,11 @@ export class OceanOutside {
     // corals and sponges scattered on the sand and rocks
     for (let i = 0; i < 26; i++) {
       const a = hash2(i, 9, 2) * Math.PI * 2, r = 8.5 + hash2(i, 10, 2) * 10;
+      const cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+      // keep the porch and the camera's view of it clear (the house's front door faces +z)
+      if (Math.abs(cx) < 6.5 && cz > 3) continue;
       const c = coral(i % 4, i);
-      c.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+      c.position.set(cx, 0, cz);
       c.rotation.y = hash2(i, 11, 2) * 6.28;
       c.scale.setScalar(0.7 + hash2(i, 12, 2) * 1.0);
       this.group.add(c);

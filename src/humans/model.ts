@@ -3,7 +3,7 @@
 // (geometry, page texture) so a crowd of the same fisherman costs one build.
 import * as THREE from 'three';
 import type { Archetype, Look } from './looks';
-import { makeLook } from './looks';
+import { evilLook, makeLook } from './looks';
 import type { Dims, BoneName } from './rig';
 import { rigDims, makeSkeleton, BI, DETAIL } from './rig';
 import { buildBody } from './body';
@@ -33,6 +33,7 @@ export function modelParts(arch: Archetype, seed: number, scars: readonly string
     look.scars = [...scars];
     if (scars.includes('eyepatch')) look.face.eyepatch = 'L';
     if (scars.includes('scar')) look.face.scar = 1;
+    if (scars.includes('giant')) evilLook(look);
   }
   const dims = rigDims(look.build);
   const body = buildBody(look, dims);

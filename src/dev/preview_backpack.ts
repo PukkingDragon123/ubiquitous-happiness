@@ -40,16 +40,19 @@ function sheet(game: Game): Screen {
 }
 
 export function makeRun(seed: number): Run {
+  const q0 = new URLSearchParams(location.search);
   const run = new Run(seed);
   const rng = new Rng(seed ^ 0x5eed);
   // a few guaranteed fusable pairs so merging can be tried right away
   const ids = ['rustyHook', 'lineScrap', 'scissors', 'scissors', 'seaGlass', 'seaGlass'];
-  while (ids.length < 13) ids.push(rollItem(rng, 'loot', 1.5));
+  // &big=1 (default): one of the v4 big items in the bag and another loose on the seabed
+  if (q0.get('big') !== '0') ids.unshift('giantClam', 'harpoonGun', 'shipWheel');
+  while (ids.length < 16) ids.push(rollItem(rng, 'loot', 1.5));
   ids.forEach((id, k) => {
     const it = run.addItem(id);
     if (k % 3 !== 1) {
       it.rot = rng.int(0, 3);
-      const spot = findSpot(run.items, it, { gx: rng.int(0, 4), gy: rng.int(0, 4), rot: it.rot });
+      const spot = findSpot(run.items, it, { gx: rng.int(0, 7), gy: rng.int(0, 5), rot: it.rot });
       if (spot) { it.gx = spot.gx; it.gy = spot.gy; it.rot = spot.rot; }
     }
     if (rng.chance(0.15) && id !== 'scissors') it.level = 2;

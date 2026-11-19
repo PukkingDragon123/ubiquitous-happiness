@@ -1,13 +1,15 @@
 // Story props for the prologue, PS2-style: blocky flat-shaded low-poly with small clean painted pages (flat tones,
-// deliberate shapes, no noise): Dad's sailor cap, Mom's shell necklace, the bread on its hook, driftwood training
-// dummies, dash hoops and the trawl net that takes Mom and Dad. (Mr. Crab and his shop: src/story/crab.ts.)
+// deliberate shapes, no noise): Dad's sailor cap, Mom's shell necklace, the bread on its hook, giant glass bottles
+// (human trash) to smash, Mr. Crab's training shell (the parry lesson), the dash ring, the trawl net that takes Mom
+// and Dad, and the ruined home the tutorial ends at. (Mr. Crab and his shop: src/story/crab.ts.)
 import * as THREE from 'three';
 import { psxMat, mesh, facet } from '../player/psx';
-import { ctex, T, tone, rect, planks } from '../skills/texkit';
+import { ctex, T, rect, planks } from '../skills/texkit';
 import { bodyPoint } from '../player/blobShape';
 import { buildHook } from '../fishing/bait';
 import { TAU } from '../core/math';
 import type { Entity, World, Team } from '../game/types';
+import { attackPlayer } from '../combat/resolve';
 
 const flat = (color: string, o: { rough?: number; metal?: number; emissive?: string; emissiveK?: number; side?: THREE.Side } = {}) => psxMat(null, { color, rough: o.rough ?? 0.75, metal: o.metal, emissive: o.emissive, emissiveK: o.emissiveK, side: o.side });
 const M = <G extends THREE.BufferGeometry>(g: G, m: THREE.Material, shadow = true) => mesh(facet(g), m, shadow);
@@ -98,75 +100,282 @@ export function buildBread(): { group: THREE.Group; bread: THREE.Group } {
   return { group, bread };
 }
 
-// ------------------------------------------------------------------ driftwood training dummies
-const dummyTex = () => ctex('story.dummy', 32, 32, (p) => {
-  planks(p, 0, 0, 32, 32, T.drift, { plank: 8, seed: 11, vertical: true });
-  // a painted red-and-white target on the chest
-  p.ellipse(16, 18, 8.5, 8.5, '#f4ece0'); p.ellipse(16, 18, 6.5, 6.5, '#c83a2e'); p.ellipse(16, 18, 4.5, 4.5, '#f4ece0'); p.ellipse(16, 18, 2.3, 2.3, '#c83a2e');
+// ------------------------------------------------------------------ glass bottles (human trash) to smash
+export type BottleKind = 'beer' | 'jar' | 'soda';
+const BOTTLE: Record<BottleKind, { glass: string; tint: string; shard: string; h: number; r: number; lean: number }> = {
+  beer: { glass: '#6a3a14', tint: '#b8742e', shard: '#c88a3a', h: 1.55, r: 0.24, lean: 0.32 },
+  jar: { glass: '#7aa89a', tint: '#d8f0e4', shard: '#c8f0e0', h: 0.95, r: 0.36, lean: -0.08 },
+  soda: { glass: '#5aa89a', tint: '#bff0e0', shard: '#9ae8d8', h: 1.35, r: 0.22, lean: -0.22 },
+};
+/** glass: a tinted body with two painted highlight streaks and a darker rim (alpha carries the see-through) */
+const glassTex = (k: BottleKind) => ctex('story.glass.' + k, 32, 32, (p) => {
+  const g = BOTTLE[k];
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, g.glass, 150);
+  for (let y = 0; y < 32; y++) { p.set(5, y, '#ffffff', 235); p.set(6, y, g.tint, 210); if (y > 4 && y < 26) p.set(10, y, '#ffffff', 150); p.set(27, y, g.tint, 120); }
+  for (let x = 0; x < 32; x++) { p.set(x, 0, g.tint, 220); p.set(x, 31, g.glass, 230); }
 });
-const dummyFace = () => ctex('story.dummyFace', 16, 16, (p) => {
-  rect(p, 0, 0, 16, 16, tone(T.drift, 3));
-  rect(p, 0, 0, 16, 4, '#2a3a5a');                       // a fisherman's cap
-  rect(p, 0, 4, 16, 1, '#1a2440');
-  rect(p, 4, 7, 2, 2, '#1a1010'); rect(p, 10, 7, 2, 2, '#1a1010');   // dot eyes
-  rect(p, 3, 6, 4, 1, '#3a2a1a'); rect(p, 9, 6, 4, 1, '#3a2a1a');   // angry brows
-  rect(p, 4, 11, 8, 2, '#5a3a2a'); rect(p, 5, 13, 6, 1, '#5a3a2a'); // a mustache
+/** a beer label: cream paper, a red anchor badge and a dark band (pixel art, no letters needed to read "beer") */
+const labelTex = () => ctex('story.label', 32, 16, (p) => {
+  rect(p, 0, 0, 32, 16, '#e8d8b0'); rect(p, 0, 0, 32, 2, '#7a1a14'); rect(p, 0, 14, 32, 2, '#7a1a14');
+  p.ellipse(16, 8, 4.5, 4.5, '#c83a2a'); p.ellipse(16, 8, 3, 3, '#e8d8b0');
+  rect(p, 15, 5, 2, 6, '#2a1a10'); rect(p, 13, 6, 6, 1, '#2a1a10'); rect(p, 13, 10, 2, 1, '#2a1a10'); rect(p, 17, 10, 2, 1, '#2a1a10');
+  for (let x = 2; x < 10; x += 2) rect(p, x, 7, 1, 2, '#5a4a3a');
+  for (let x = 23; x < 30; x += 2) rect(p, x, 7, 1, 2, '#5a4a3a');
+});
+const crackTex = () => ctex('story.crack', 32, 32, (p) => {
+  // a starburst of hairline cracks (white with a dark edge), the rest see-through
+  const lines: [number, number, number][] = [[0.2, 14, 0], [1.4, 12, 1], [2.6, 15, 2], [3.7, 11, 3], [4.9, 13, 4], [5.8, 9, 5]];
+  for (const [a, len, sd] of lines) {
+    let x = 16, y = 16, aa = a;
+    for (let i = 0; i < len; i++) { aa += (((i * 7 + sd * 13) % 5) - 2) * 0.12; x += Math.cos(aa); y += Math.sin(aa); p.set(Math.round(x), Math.round(y), '#ffffff'); p.set(Math.round(x) + 1, Math.round(y), '#3a4a48'); }
+  }
+  p.ellipse(16, 16, 2, 2, '#ffffff');
 });
 
-/** a driftwood human cutout on a post: wobbles when hit, splinters at 0 hp and drops driftwood */
-export class Dummy implements Entity {
-  kind = 'dummy'; team: Team = 'neutral';
-  x: number; y: number; vx = 0; vy = 0; r = 0.55; alive = true;
-  hp = 3; maxHp = 3;
+/** a giant glass bottle stuck in the sand: the first hit cracks it (clink), the second shatters it into shards */
+export class GlassBottle implements Entity {
+  kind = 'bottle'; team: Team = 'enemy';
+  x: number; y: number; vx = 0; vy = 0; r: number; alive = true;
+  hp = 2; maxHp = 2;
   obj = new THREE.Group();
-  private wob = 0; private wobV = 0;
-  private flash = 0;
-  private parts: THREE.Mesh[] = [];
-  onBreak?: (d: Dummy) => void;
-  constructor(public name: string, x: number, floor: number, private seed = 1) {
-    this.x = x; this.y = floor + 1.0;
-    const wood = psxMat(dummyTex(), { rough: 0.9 }), driftM = flat('#8a7a64', { rough: 0.9 }), face = psxMat(dummyFace(), { rough: 0.9 });
-    const post = M(new THREE.CylinderGeometry(0.05, 0.06, 1.1, 5), driftM);
-    post.position.y = 0.4;
-    const torso = M(new THREE.BoxGeometry(0.6, 0.7, 0.07), wood);
-    torso.position.y = 0.95;
-    const head = new THREE.Mesh(facet(new THREE.CylinderGeometry(0.2, 0.2, 0.07, 8)), [driftM, face, driftM]);
-    head.rotation.x = Math.PI / 2; head.position.y = 1.5;
-    const armL = M(new THREE.BoxGeometry(0.5, 0.11, 0.06), driftM);
-    armL.position.set(-0.45, 1.1, 0); armL.rotation.z = 0.5 + (seed % 3) * 0.2;
-    const armR = M(new THREE.BoxGeometry(0.5, 0.11, 0.06), driftM);
-    armR.position.set(0.45, 1.1, 0); armR.rotation.z = -0.4 - (seed % 2) * 0.5;
-    this.parts = [torso, head, armL, armR, post];
-    this.obj.add(post, torso, head, armL, armR);
-    this.obj.position.set(x, floor - 0.25, 0.2);
-    this.obj.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = true; });
+  private body = new THREE.Group();
+  private crack: THREE.Mesh;
+  private wob = 0; private wobV = 0; private flash = 0;
+  onBreak?: (b: GlassBottle) => void;
+  constructor(public type: BottleKind, x: number, floor: number) {
+    const g = BOTTLE[type];
+    this.x = x; this.y = floor + g.h * 0.45; this.r = g.r + 0.32;
+    const glass = new THREE.MeshStandardMaterial({ map: glassTex(type), transparent: true, roughness: 0.08, metalness: 0.25, emissive: g.tint, emissiveIntensity: 0.06, side: THREE.DoubleSide });
+    const H = g.h, R = g.r;
+    let prof: [number, number][];
+    if (type === 'beer') prof = [[0, 0], [R, 0], [R, H * 0.55], [R * 0.95, H * 0.62], [R * 0.45, H * 0.72], [R * 0.3, H * 0.78], [R * 0.3, H * 0.97], [R * 0.36, H * 0.98], [R * 0.36, H], [0, H]];
+    else if (type === 'jar') prof = [[0, 0], [R * 0.92, 0], [R, H * 0.06], [R, H * 0.8], [R * 0.86, H * 0.88], [R * 0.86, H], [0, H]];
+    else prof = [[0, 0], [R * 0.9, 0], [R, H * 0.12], [R * 0.82, H * 0.3], [R, H * 0.45], [R * 0.9, H * 0.6], [R * 0.42, H * 0.8], [R * 0.28, H * 0.95], [R * 0.32, H], [0, H]];
+    const lathe = new THREE.LatheGeometry(prof.map(([px, py]) => new THREE.Vector2(px, py)), 9);
+    const bodyM = new THREE.Mesh(facet(lathe), glass);
+    bodyM.castShadow = true; bodyM.renderOrder = 2;
+    this.body.add(bodyM);
+    if (type === 'beer') {
+      const label = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.02, R * 1.02, H * 0.26, 9, 1, true, -0.4, Math.PI * 1.1), psxMat(labelTex(), { rough: 0.8 }));
+      label.position.y = H * 0.3; label.rotation.y = 0.2;
+      const cap = M(new THREE.CylinderGeometry(R * 0.4, R * 0.42, H * 0.04, 9), flat('#d8a838', { metal: 0.35, rough: 0.35 }));
+      cap.position.y = H * 1.01;
+      this.body.add(label, cap);
+    } else if (type === 'jar') {
+      const lid = M(new THREE.CylinderGeometry(R * 0.9, R * 0.9, H * 0.1, 9), psxMat(ctex('story.lid', 16, 16, (p) => { rect(p, 0, 0, 16, 16, '#8a5a2a'); for (let x = 0; x < 16; x += 3) rect(p, x, 0, 1, 16, '#5a3414'); p.set(4, 5, '#c87a3a'); p.set(11, 9, '#3a1a08'); }), { metal: 0.3, rough: 0.6 }));
+      lid.position.y = H * 1.03; lid.rotation.z = 0.12;
+      // something pickled in there
+      const pickle = M(new THREE.CapsuleGeometry(R * 0.32, H * 0.45, 2, 6), flat('#6a8a2a', { rough: 0.5 }));
+      pickle.position.set(0.04, H * 0.42, 0); pickle.rotation.z = 0.5;
+      this.body.add(lid, pickle);
+    } else {
+      const cap = M(new THREE.CylinderGeometry(R * 0.36, R * 0.38, H * 0.05, 9), flat('#c8281e', { rough: 0.45 }));
+      cap.position.y = H * 1.01;
+      this.body.add(cap);
+    }
+    // the crack decal: a starburst on the camera side, shown after the first hit
+    this.crack = new THREE.Mesh(new THREE.PlaneGeometry(R * 2.2, R * 2.2), new THREE.MeshBasicMaterial({ map: crackTex(), transparent: true, alphaTest: 0.5, depthWrite: false }));
+    this.crack.position.set(0, H * (type === 'jar' ? 0.5 : 0.35), R * 1.04);
+    this.crack.visible = false;
+    this.body.add(this.crack);
+    this.body.rotation.z = g.lean;
+    this.obj.add(this.body);
+    this.obj.position.set(x, floor - 0.12, 0.15);
   }
   update(dt: number) {
-    this.wobV += (-this.wob * 140 - this.wobV * 7) * dt;
+    this.wobV += (-this.wob * 160 - this.wobV * 6) * dt;
     this.wob += this.wobV * dt;
-    this.obj.rotation.z = this.wob;
+    this.body.rotation.z = BOTTLE[this.type].lean + this.wob;
     this.flash = Math.max(0, this.flash - dt * 6);
-    this.obj.scale.set(1 + this.flash * 0.08, 1 - this.flash * 0.06, 1);
+    this.body.scale.set(1 + this.flash * 0.05, 1 - this.flash * 0.04, 1 + this.flash * 0.05);
   }
-  hit(dmg: number, dx: number, _dy: number, w: World): boolean {
+  hit(_dmg: number, dx: number, _dy: number, w: World): boolean {
     if (!this.alive) return false;
-    this.hp -= dmg;
-    this.wobV += -Math.sign(dx || 1) * 5;
+    this.hp -= 1;
+    this.wobV += -Math.sign(dx || 1) * 3.5;
     this.flash = 1;
-    w.fx.debrisBurst(this.x, this.y + 0.2, 5, '#a89a80', 2.5, 0.05);
-    w.sfx('wood_knock', this.x, 0.7, 1 + Math.random() * 0.2);
-    if (this.hp <= 0) this.smash(w);
+    const g = BOTTLE[this.type];
+    w.fx.burst('spark', this.x, this.y + 0.2, 5, 2.5, { color: '#ffffff' });
+    w.fx.debrisBurst(this.x, this.y + 0.2, 3, g.shard, 2, 0.04);
+    w.sfx('k_glass', this.x, 0.75, 1.1 + Math.random() * 0.25);
+    if (this.hp <= 0) this.shatter(w);
+    else { this.crack.visible = true; w.sfx('ice', this.x, 0.4, 1.6); }
     return true;
   }
-  private smash(w: World) {
+  private shatter(w: World) {
     this.alive = false;
-    w.fx.debrisBurst(this.x, this.y, 18, '#9a8a70', 5, 0.09);
-    w.fx.emit('bubbleBig', this.x, this.y, { n: 10, spread: 0.5, speed: 2 });
-    w.sfx('rock_crumble', this.x, 0.6, 1.4); w.sfx('wood_close', this.x, 0.6);
-    w.game.addShake(0.12);
+    const g = BOTTLE[this.type];
+    // shards everywhere: glass-coloured chunks, white glints, a spray of bubbles, sand where they land
+    w.fx.debrisBurst(this.x, this.y, 22, g.shard, 5, 0.07);
+    w.fx.debrisBurst(this.x, this.y + 0.3, 10, '#f4fff8', 4, 0.04);
+    w.fx.burst('spark', this.x, this.y, 14, 4.5, { color: '#ffffff' });
+    w.fx.emit('star', this.x, this.y + 0.2, { n: 6, speed: 3, life: 0.6, size: 0.2 });
+    w.fx.emit('bubbleBig', this.x, this.y, { n: 12, spread: 0.6, speed: 2 });
+    w.sfx('k_glass3', this.x, 0.9, 1.0); w.sfx('k_glass4', this.x, 0.8, 1.2); w.sfx('ice_big', this.x, 0.55, 1.3);
+    w.game.addShake(0.12); w.game.freeze(0.05);
     this.onBreak?.(this);
   }
-  dispose() { for (const p of this.parts) p.geometry.dispose(); }
+  dispose() { this.obj.removeFromParent(); }
+}
+
+// ------------------------------------------------------------------ Mr. Crab's training shell
+const shellTex = () => ctex('story.cone', 32, 32, (p) => {
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    const band = (y + Math.floor(x / 4)) % 8;
+    p.set(x, y, band < 2 ? '#7a3a1e' : band < 3 ? '#b86a3a' : y > 26 ? '#fff0dc' : '#f0d8b8');
+  }
+});
+/**
+ * a cone shell Mr. Crab lobs at the kid: it homes in slowly, FLASHES just before it arrives (the parry cue) and is
+ * resolved by the combat resolver (attackPlayer), so a parry, a block, a dodge or a hit all behave like the real
+ * thing. onResolve reports the outcome; a parried shell flies back to the thrower.
+ */
+export class ShellShot implements Entity {
+  kind = 'shellShot'; team: Team = 'neutral';
+  x: number; y: number; vx = 0; vy = 0; r = 0.2; alive = true;
+  obj = new THREE.Group();
+  private mesh: THREE.Mesh;
+  private mat: THREE.MeshStandardMaterial;
+  private t = 0;
+  private flashed = false;
+  private state: 'in' | 'back' | 'loose' = 'in';
+  private looseT = 0;
+  onFlash?: () => void;
+  onResolve?: (res: string) => void;
+  constructor(x: number, y: number, private home: () => { x: number; y: number }, private speed = 2.3, private cue: (w: World, s: ShellShot) => void = () => {}) {
+    this.x = x; this.y = y;
+    this.mat = psxMat(shellTex(), { rough: 0.45, emissive: '#ffffff', emissiveK: 0 });
+    const g = new THREE.ConeGeometry(0.11, 0.3, 7, 3);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) { const yy = pos.getY(i); const k = 1 + Math.sin(yy * 30) * 0.12; pos.setX(i, pos.getX(i) * k); pos.setZ(i, pos.getZ(i) * k); }
+    this.mesh = new THREE.Mesh(facet(g), this.mat);
+    this.mesh.castShadow = true;
+    this.obj.add(this.mesh);
+  }
+  update(dt: number, w: World) {
+    this.t += dt;
+    const p = w.player;
+    if (this.state === 'in') {
+      const dx = p.x - this.x, dy = p.y - this.y, d = Math.hypot(dx, dy) || 1;
+      // a lazy homing lob: steer toward the kid, a little arc on the way
+      const want = this.speed;
+      this.vx += ((dx / d) * want - this.vx) * Math.min(1, dt * 3);
+      this.vy += ((dy / d) * want - this.vy) * Math.min(1, dt * 3) + Math.sin(this.t * 3) * dt * 0.6;
+      if (!this.flashed && d / want < 0.5) { this.flashed = true; this.cue(w, this); this.onFlash?.(); }
+      if (d < p.r + 0.3) this.resolve(w);
+    } else if (this.state === 'back') {
+      const h = this.home(), dx = h.x - this.x, dy = h.y - this.y, d = Math.hypot(dx, dy) || 1;
+      this.vx = (dx / d) * 7; this.vy = (dy / d) * 7;
+      if (d < 0.4) { this.alive = false; w.sfx('clank', this.x, 0.6, 1.5); w.fx.burst('spark', this.x, this.y, 8, 3); }
+    } else {
+      this.looseT += dt;
+      this.vy -= 3 * dt;
+      if (this.looseT > 1.4) this.alive = false;
+    }
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.obj.position.set(this.x, this.y, 0.25);
+    this.mesh.rotation.set(this.t * 7, 0, this.t * 11);
+    this.mat.emissiveIntensity = this.flashed && this.state === 'in' ? 0.6 + Math.sin(this.t * 40) * 0.4 : 0;
+    this.obj.scale.setScalar(this.state === 'loose' ? Math.max(0.01, 1 - this.looseT / 1.4) : 1);
+  }
+  private resolve(w: World) {
+    const res = attackPlayer(w, { src: null, dmg: 1, x: this.x, y: this.y, kind: 'crush', projectile: this, knock: 3, name: 'a training shell', guardDmg: 10 });
+    if (res === 'parried') this.state = 'back';
+    else if (res === 'hit') { this.alive = false; w.fx.debrisBurst(this.x, this.y, 6, '#f0d8b8', 2.5, 0.04); w.sfx('crunch', this.x, 0.6, 1.3); }
+    else { this.state = 'loose'; this.vx *= -0.5; this.vy = 2; if (res === 'blocked') w.sfx('clank', this.x, 0.6, 1.3); }
+    this.onResolve?.(res);
+  }
+  /** the resolver deflects a parried projectile: home to the thrower */
+  deflect() { this.state = 'back'; }
+  dispose() { this.obj.removeFromParent(); }
+}
+
+// ------------------------------------------------------------------ the ruined home (the tutorial ends at its door)
+const stoneTex = () => ctex('story.stone', 64, 64, (p) => {
+  const S = ['#2a3036', '#3c444c', '#4e5862', '#626c76', '#7a8590', '#96a0aa'];
+  rect(p, 0, 0, 64, 64, S[0]);
+  // running-bond blocks, each its own tone, a lit top edge and a mortar shadow
+  for (let row = 0; row < 7; row++) {
+    const y0 = row * 9 + 1, off = (row % 2) * 9;
+    for (let x0 = -off; x0 < 64; x0 += 18) {
+      const t = 2 + ((row * 3 + Math.floor((x0 + 18) / 18)) % 3);
+      rect(p, Math.max(0, x0 + 1), y0, Math.min(16, 64 - Math.max(0, x0 + 1)), 7, S[t]);
+      rect(p, Math.max(0, x0 + 1), y0, Math.min(16, 64 - Math.max(0, x0 + 1)), 1, S[t + 1]);
+      if (x0 + 16 < 64 && x0 + 16 >= 0) rect(p, x0 + 16, y0, 1, 7, S[1]);
+    }
+  }
+  // cracks and moss creeping up from the bottom
+  for (const [x0, y0, len] of [[12, 10, 14], [44, 30, 12], [28, 46, 10]] as [number, number, number][]) for (let i = 0; i < len; i++) p.set(x0 + Math.round(Math.sin(i * 0.9) * 1.5), y0 + i, '#14181c');
+  for (let x = 0; x < 64; x++) { const h = 5 + Math.round((Math.sin(x * 0.35) + 1) * 3 + ((x * 7) % 5)); for (let y = 64 - h; y < 64; y++) p.set(x, y, y > 64 - h * 0.5 ? '#2e4a22' : '#466a2c'); p.set(x, 63 - h, '#6a8a3a'); }
+});
+const boardTex = () => ctex('story.board', 32, 32, (p) => planks(p, 0, 0, 32, 32, T.drift, { plank: 8, seed: 21, vertical: true }));
+
+/** a small abandoned stone house: a broken roof, a door hanging off one hinge, an empty window, rubble and kelp */
+export class RuinedHome {
+  group = new THREE.Group();
+  /** where the kid swims in (local, the doorway's middle) */
+  door = new THREE.Vector3(-0.55, 1.0, 1.55);
+  private hangDoor: THREE.Object3D;
+  private kelp: { m: THREE.Mesh; base: Float32Array; ph: number }[] = [];
+  private t = 0;
+  constructor() {
+    const g = this.group;
+    const stone = psxMat(stoneTex(), { rough: 0.9 }), board = psxMat(boardTex(), { rough: 0.85 }), dark = flat('#06080c', { rough: 1 });
+    const W = 4.4, H = 3.0, D = 3.0;
+    const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, rz = 0) => {
+      const geo = new THREE.BoxGeometry(w, h, d);
+      const uv = geo.attributes.uv as THREE.BufferAttribute;
+      const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+      for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) { const i = f * 4 + k; uv.setXY(i, uv.getX(i) * dims[f][0] * 0.6, uv.getY(i) * dims[f][1] * 0.6); }
+      const me = M(geo, m); me.position.set(x, y, z); me.rotation.z = rz; g.add(me); return me;
+    };
+    // walls: back, a full left side, a broken-down right side, the front with a doorway and a window hole
+    box(W, H, 0.35, 0, H / 2, -D / 2, stone);
+    box(0.35, H, D, -W / 2, H / 2, 0, stone);
+    box(0.35, H * 0.62, D * 0.7, W / 2, H * 0.31, -D * 0.15, stone);
+    box(0.35, H * 0.35, D * 0.3, W / 2, H * 0.175, D * 0.35, stone, 0.08);
+    box(1.0, H, 0.35, -W / 2 + 0.5, H / 2, D / 2, stone);                     // left of the door
+    box(W - 2.1, H * 0.42, 0.35, W / 2 - (W - 2.1) / 2, H * 0.21, D / 2, stone); // under the window
+    box(W - 2.1, H * 0.22, 0.35, W / 2 - (W - 2.1) / 2, H * 0.89, D / 2, stone); // over the window
+    box(0.45, H * 0.36, 0.35, W / 2 - 0.22, H * 0.6, D / 2, stone);           // window jamb
+    box(1.3, 0.4, 0.4, -0.55, H - 0.2, D / 2, stone);                          // the lintel over the door
+    // dark inside (seen through the doorway and the window)
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.4, H - 0.2), dark); inside.position.set(0, H / 2, -D / 2 + 0.2); g.add(inside);
+    // the roof: slanted boards with gaps, one fallen and leaning on the wall
+    for (let i = 0; i < 7; i++) {
+      if (i === 2 || i === 5) continue;
+      const b = box(0.5, 0.08, D + 0.6, -W / 2 + 0.3 + i * 0.62, H + 0.25 - Math.abs(i - 3) * 0.09, 0, board);
+      b.rotation.x = 0.05; b.rotation.z = (i - 3) * 0.04;
+    }
+    const fallen = box(0.5, 0.08, 2.4, W / 2 + 0.55, 1.1, 0.6, board); fallen.rotation.set(0.9, 0.2, 0.3);
+    // the door, hanging off its top hinge
+    const hinge = new THREE.Group(); hinge.position.set(-1.15, H - 0.45, D / 2 + 0.2);
+    const door = new THREE.Mesh(facet(new THREE.BoxGeometry(1.0, 2.0, 0.08)), board); door.position.set(0.5, -1.0, 0); door.castShadow = true;
+    hinge.add(door); hinge.rotation.set(0.15, 0.5, -0.55);
+    g.add(hinge); this.hangDoor = hinge;
+    // rubble at the foot of the broken wall, barnacles, kelp from the roof
+    for (let i = 0; i < 9; i++) {
+      const rk = M(new THREE.DodecahedronGeometry(0.16 + (i % 3) * 0.08, 0), stone);
+      rk.position.set(W / 2 + 0.3 + (i % 4) * 0.35, 0.12 + Math.floor(i / 4) * 0.15, D * 0.2 + (i % 3) * 0.3); rk.rotation.set(i, i * 2, i * 3);
+      g.add(rk);
+    }
+    const kelpM = psxMat(ctex('story.kelp', 16, 64, (p) => { for (let y = 0; y < 64; y++) for (let x = 0; x < 16; x++) { const w = 5 + Math.sin(y * 0.25) * 2; if (Math.abs(x - 7.5) <= w) p.set(x, y, Math.abs(x - 7.5) < 1 ? '#6a6a20' : '#4e6a1e'); } }), { side: THREE.DoubleSide, alphaTest: 0.5 });
+    for (const [x, z, h] of [[-1.6, 1.0, 1.6], [0.9, -0.8, 2.1], [1.8, 0.6, 1.3]] as [number, number, number][]) {
+      const kg = new THREE.PlaneGeometry(0.22, h, 1, 8); kg.translate(0, h / 2, 0);
+      const km = new THREE.Mesh(kg, kelpM); km.position.set(x, H + 0.3, z); g.add(km);
+      this.kelp.push({ m: km, base: new Float32Array((kg.attributes.position as THREE.BufferAttribute).array), ph: x * 2 });
+    }
+    g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m !== inside) { m.castShadow = true; m.receiveShadow = true; } });
+  }
+  update(dt: number) {
+    this.t += dt;
+    this.hangDoor.rotation.z = -0.55 + Math.sin(this.t * 0.9) * 0.04;
+    for (const k of this.kelp) {
+      const p = k.m.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) { const y = k.base[i * 3 + 1]; p.setX(i, k.base[i * 3] + Math.sin(this.t * 1.3 + y * 1.6 + k.ph) * 0.12 * y); }
+      p.needsUpdate = true;
+    }
+  }
 }
 
 // ------------------------------------------------------------------ dash hoops

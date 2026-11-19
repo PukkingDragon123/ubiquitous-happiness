@@ -54,6 +54,13 @@ export interface DipPlan { x0: number; x1: number; depth: number; ramp: number }
 /** a drop-off between two shelves (the terrace profile) */
 export interface StepPlan { x0: number; x1: number; drop: number; kind: 'cliff' | 'slope' | 'shaft' | 'steps' }
 export interface GroupPlan { id: number; x: number; n: number; seed: number; spawned: boolean; cleared: boolean }
+/**
+ * a chest along the route: 'small' (no key), 'locked' (a key), 'big' (after each arena: hidden until it's cleared),
+ * 'sunken' (the treasure in a secret pit). y = the floor it sits on (world).
+ */
+export interface ChestPlan { id: number; kind: 'small' | 'locked' | 'big' | 'sunken'; x: number; y: number; opened: boolean; arena?: number; poi?: number; items?: string[] }
+/** a wooden signpost: distances home and onward, painted on its boards (at vistas and the floor's start) */
+export interface SignPlan { x: number; y: number; kind: 'home' | 'mile' | 'vista' }
 
 export interface LevelPlan {
   n: number; area: string; seed: number;
@@ -78,9 +85,15 @@ export interface LevelPlan {
   exit: { x0: number; x1: number; top: number; bottom: number };
   /** where the surface rope hangs (only on the floor that ends the planned run / a hadal rope point) */
   ropeX: number | null;
+  /** metres from home at x = 0 (the journey: floor 1 starts at the front door) */
+  far0: number;
+  chests: ChestPlan[];
+  signs: SignPlan[];
+  /** cliff edges with a view down: the camera pulls back here */
+  vistas: number[];
 }
 
-export interface LevelOpts { n: number; area: string; seed: number; mastery?: number; depth0?: number; rope?: boolean }
+export interface LevelOpts { n: number; area: string; seed: number; mastery?: number; depth0?: number; rope?: boolean; far0?: number }
 
 export const BIN = 4;
 export const ARENA_W = 26;
@@ -100,8 +113,9 @@ export function genLevel(o: LevelOpts): LevelPlan {
   const plan: LevelPlan = {
     n: o.n, area: o.area, seed: o.seed, W: 0, base, amp: Math.min(a.amp, 2.6), top, depth0: o.depth0 ?? 0,
     arenas: [], pois: [], solids: [], dips: [], groups: [], steps: [], flats: [], lanes: [], explored: [], startX: 8.5, bossX0: 0,
-    exit: { x0: 0, x1: 0, top: 0, bottom: 0 }, ropeX: null,
+    exit: { x0: 0, x1: 0, top: 0, bottom: 0 }, ropeX: null, far0: o.far0 ?? 0, chests: [], signs: [], vistas: [],
   };
+  const chest = (kind: ChestPlan['kind'], cx: number, cy: number, extra: Partial<ChestPlan> = {}) => { plan.chests.push({ id: plan.chests.length, kind, x: cx, y: cy, opened: false, ...extra }); };
   let x = 0, level = base;
   const poi = (kind: PoiKind, px: number, py: number, extra: Partial<PoiPlan> = {}) => { const p: PoiPlan = { id: plan.pois.length, kind, x: px, y: py, known: kind !== 'secret', done: false, ...extra }; plan.pois.push(p); return p; };
   const solid = (kind: SolidPlan['kind'], x0: number, x1: number, y0: number, y1: number, poiId?: number) => { plan.solids.push({ id: plan.solids.length, kind, x0, x1, y0, y1, poi: poiId }); };
@@ -131,11 +145,12 @@ export function genLevel(o: LevelOpts): LevelPlan {
   // ---- segments
   const seg = {
     start: () => {
-      if (first) { poi('start', 8, base + 4, { done: true }); plan.flats.push([0, 17]); x = 18; return; }
+      if (first) { poi('start', 8, base + 4, { done: true }); plan.signs.push({ x: 5, y: base, kind: 'home' }); plan.flats.push([0, 17]); x = 18; return; }
       // the entry shaft: rock walls either side from the shelf up to the ceiling; you drop in from the top
       poi('start', 8.5, base + 4, { done: true });
       solid('wall', 0, 4.2, base - 1, top + 3);
       solid('wall', 12.8, 16, base + 4.5, top + 3);
+      plan.signs.push({ x: 18, y: base, kind: 'mile' });
       plan.flats.push([0, 22]);
       x = 22;
     },
@@ -151,23 +166,37 @@ export function genLevel(o: LevelOpts): LevelPlan {
         plan.steps.push({ x0: sx, x1: sx + w, drop, kind });
         // a shaft: an overhanging lip narrows the top of the drop, so you swim over it and down
         if (kind === 'shaft') solid('lip', sx - 3.2, sx + w * 0.35, level - 0.6, level + 0.9);
+        // a big drop is a vista: the camera pulls back over the edge and a signpost marks how far you've come
+        if (drop >= 4.5) { plan.vistas.push(sx); plan.signs.push({ x: sx - 2.6, y: level, kind: 'vista' }); }
       }
       const upper = level, lower = level - drop;
       const f = r.next();
       if (f < 0.35 && L2 >= 20) {
-        // a mid-water ledge over the lower shelf: an upper lane
+        // a mid-water ledge over the lower shelf: an upper lane (often with a chest up top)
         const lx0 = sx + w + 2, lx1 = Math.min(x0 + L2 - 2, lx0 + r.range(8, 13)), ly = lower + r.range(5, 6.5);
-        if (lx1 - lx0 > 5) { solid('ledge', lx0, lx1, ly, ly + r.range(1.2, 1.8)); plan.lanes.push({ kind: 'upper', x0: lx0, x1: lx1 }); }
+        if (lx1 - lx0 > 5) {
+          const t = ly + r.range(1.2, 1.8);
+          solid('ledge', lx0, lx1, ly, t); plan.lanes.push({ kind: 'upper', x0: lx0, x1: lx1 });
+          if (r.chance(0.55)) chest(r.chance(0.35) ? 'locked' : 'small', (lx0 + lx1) / 2 + r.range(-1.5, 1.5), t);
+        }
       } else if (f < 0.6 && sx - x0 > 9) {
         solid('mound', x0 + 2, x0 + 7, upper - 1, upper + r.range(2, 3.2));
       } else if (f < 0.75 && x0 + L2 - (sx + w) > 12) {
         plan.dips.push({ x0: sx + w + 2, x1: x0 + L2 - 1, depth: r.range(2, 3), ramp: 4 });
       }
+      // small chests along the way (no key), on the shelf before or after the drop
+      if (r.chance(0.5)) { const cx = r.chance(0.5) && sx - x0 > 6 ? x0 + r.range(2, sx - x0 - 2) : Math.min(x0 + L2 - 2, sx + w + r.range(2, 5)); chest('small', cx, cx < sx ? upper : lower); }
       if (group) plan.groups.push({ id: plan.groups.length, x: sx + w + 5, n: r.int(2, 3), seed: (o.seed ^ Math.imul(plan.groups.length + 11, 0x27d4eb2f)) >>> 0, spawned: false, cleared: false });
       level = lower;
       x = x0 + L2;
     },
-    arena: () => { const x0 = x + 2, x1 = x0 + ARENA_W; arena('arena', x0, x1, level - 0.3, arenaTop(level)); plan.flats.push([x0 - 2, x1 + 2]); x = x1 + 2; },
+    arena: () => {
+      const x0 = x + 2, x1 = x0 + ARENA_W;
+      arena('arena', x0, x1, level - 0.3, arenaTop(level));
+      // the big chest that drops in when the arena is cleared
+      chest('big', (x0 + x1) / 2 + r.range(-2, 2), level, { arena: plan.arenas.length - 1 });
+      plan.flats.push([x0 - 2, x1 + 2]); x = x1 + 2;
+    },
     branch: () => {
       // the seabed dips into a cave; a lid of rock roofs it, the challenge arena inside
       const x0 = x, L = 46, x1 = x0 + L, depth = 7.5;
@@ -177,6 +206,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
       plan.flats.push([x0 + 8, x1 - 8]);
       const ax0 = lid0 + 1.5, ax1 = lid1 - 1.5;
       arena('challenge', ax0, ax1, level - depth - 0.3, ly0);
+      chest('big', (ax0 + ax1) / 2, level - depth, { arena: plan.arenas.length - 1 });
       poi('challenge', (ax0 + ax1) / 2, level - depth + 1, {});
       plan.lanes.push({ kind: 'cave', x0: x0 + 6, x1: x1 - 6 });
       x = x1;
@@ -188,6 +218,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
       const ly = level + r.range(4, 5.5), lx0 = x + 3, lx1 = x + 12;
       const p = poi('treasure', (lx0 + lx1) / 2, ly + 1.3, { style });
       solid('ledge', lx0, lx1, ly - 1.4, ly, p.id);
+      if (style === 'chest') chest('locked', (lx0 + lx1) / 2, ly, { poi: p.id });
       plan.lanes.push({ kind: 'upper', x0: lx0, x1: lx1 });
       plan.flats.push([x + 1, x + 14]);
       x += 15;
@@ -196,6 +227,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
       const px0 = x + 4, px1 = x + 13;
       plan.dips.push({ x0: px0, x1: px1, depth: 5.5, ramp: 1.4 });
       const p = poi('secret', (px0 + px1) / 2, level - 4, { opened: false });
+      chest('sunken', (px0 + px1) / 2 + 1.6, level - 5.5, { poi: p.id });
       solid('cracked', px0 - 0.8, px1 + 0.8, level - 0.9, level + 0.35, p.id);
       plan.flats.push([x + 1, x + 16]);
       x += 17;
@@ -204,6 +236,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
       plan.bossX0 = x + 2;
       const x0 = x + 5, x1 = x0 + 34;
       arena('boss', x0, x1, level - 0.3, arenaTop(level));
+      chest('big', (x0 + x1) / 2 + 4, level, { arena: plan.arenas.length - 1 });
       poi('boss', (x0 + x1) / 2, level + 5);
       // the exit pit, past the boss: a shaft down under an iron grate
       const ex0 = x1 + 2, ex1 = ex0 + 5.2;

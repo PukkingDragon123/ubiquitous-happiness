@@ -4,6 +4,7 @@ import type { World, Entity } from '../game/types';
 import type { EnemyKind, SpawnOpts, Arena } from './types';
 import { CombatMoray, CombatCrab, CombatPuffer, CombatJelly, CombatAngler, CombatBarracuda } from './sealife';
 import { TrainingDummy } from './dummy';
+import { CombatLionfish, CombatStonefish, CombatMantis } from './reeflife';
 import { Human } from '../waves/human';
 import type { Role } from '../waves/human';
 import { META } from '../meta/meta';
@@ -20,6 +21,9 @@ export function buildEnemy(w: World, kind: EnemyKind, x: number, y: number, o: S
     case 'jelly': return new CombatJelly(x, y, fo);
     case 'angler': return new CombatAngler(x, y, fo);
     case 'barracuda': return new CombatBarracuda(x, y, fo);
+    case 'lionfish': return new CombatLionfish(x, y, fo);
+    case 'stonefish': return new CombatStonefish(x, y, fo);
+    case 'mantis': { const m = new CombatMantis(x, y, fo); m.y = Math.max(o.arena?.floor ?? -1e9, w.terrain.floorAt(x)) + 0.22; return m; }
     case 'dummy': return new TrainingDummy(x, y, o.arena ?? arenaOf(w));
   }
   const role = DIVERS[kind];

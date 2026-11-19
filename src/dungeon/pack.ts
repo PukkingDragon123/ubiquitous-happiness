@@ -12,7 +12,7 @@
 // The backpack screen (agent L draws it) edits run.items directly: placing, rotating, fusing. Its board (gx < 0)
 // is "the floor at your fins": the run screen drops whatever is left on it back into the water when the bag closes.
 import type { Run, ItemInst } from '../game/run';
-import { ITEMS, GRID, findSpot, stackCap, stackRoom, getItem } from '../game/items';
+import { ITEMS, findSpot, stackCap, stackRoom, getItem, occupancy } from '../game/items';
 
 /** what went in: the instance that took the last unit, whether it was a stack top-up, and how many did NOT fit */
 export interface PackAdd { inst: ItemInst; stacked: boolean; left: number }
@@ -79,9 +79,14 @@ export function packTotals(items: ItemInst[]): { materials: Record<string, numbe
   return { materials, gear };
 }
 
-export function packCells(run: Run): { used: number; free: number; total: number } {
+export function packCells(run: Run): { used: number; free: number; total: number; w: number; h: number } {
+  // the grid's size comes from the item system itself (agent L sizes it in items.ts; it may grow or be non-square)
+  const occ = occupancy(run.items);
+  const h = occ.length, w = occ[0]?.length ?? 0;
   let used = 0;
-  for (const it of run.items) if (it.gx >= 0 && ITEMS[it.id]) used += getItem(it.id).shape.length;
-  const total = GRID * GRID;
-  return { used, free: total - used, total };
+  for (const row of occ) for (const c of row) if (c) used++;
+  return { used, free: w * h - used, total: w * h, w, h };
 }
+
+/** the biggest footprint (cells) any item can have: the rules never assume small items */
+export const cellsOf = (id: string) => (ITEMS[id] ? getItem(id).shape.length : 1);

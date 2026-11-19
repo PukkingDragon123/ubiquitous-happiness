@@ -1,6 +1,6 @@
-// The cosy reveal after the prologue: a modal over the live hideout (like the result card). The room fades in,
-// Mr. Crab (off screen, at the door) says "This is your home now", the kid answers, and HOME floats up over the
-// sofa in 3D. Then the hideout is yours.
+// The arrival after the prologue: a modal over the live home (like the result card). The ruined room fades in,
+// Mr. Crab (off screen, in the doorway) points the kid at the rebuild, the kid answers, and HOME floats up in 3D.
+// Then the home is yours (the goal board and the build-with-Mr.-Crab scenes take over: src/hideout).
 //
 //   game.register(new WelcomeHome(game, hideout)); game.go('hideout', {}); game.openModal('welcome');
 import * as THREE from 'three';
@@ -57,9 +57,9 @@ export class WelcomeHome implements Screen {
     if (this.phase === 'in' && this.t > 1.4) {
       this.phase = 'talk';
       this.dlg.play([
-        { who: 'crab', text: 'This is your home now.' },
-        { who: 'crab', text: 'Rest up, kid. When you\'re ready, the TV knows the way out.' },
-        { who: 'kid', text: '...{p=0.3}Home.' },
+        { who: 'crab', text: 'Welcome home, kid. Mind the loose boards.' },
+        { who: 'crab', text: 'The board shows what we fix first. Bring the stuff, I\'ll swing the hammer.' },
+        { who: 'kid', text: '...{p=0.3}Let\'s get to work.' },
       ]).then(() => {
         this.phase = 'home';
         const p = this.sofa();

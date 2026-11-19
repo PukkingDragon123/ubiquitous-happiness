@@ -65,59 +65,77 @@ function glyphMask(ch: string, font: FontName): { m: Uint8Array; w: number; h: n
 }
 
 /**
- * extrude a classified pixel mask into voxel columns. The back of every column sits on z = 0; the face goes to
- * z = depth, the outline to depth - 1. Faces between columns of different depth get side walls. Runs of equal
- * pixels in a row are merged into one quad. Origin: bottom centre of the mask (so letters squash from their feet).
+ * extrude a classified pixel mask into voxel columns (v4: a deeper, bevelled letter). Per pixel:
+ *   face core      depth D, a 4-step top-to-bottom gradient (st.top -> st.bottom), the top rim lit near-white
+ *   face bevel     depth D - 1: the ring of face pixels touching the outline, lit on the top / left, shaded on the
+ *                  bottom / right, so every letter has a stepped chamfer
+ *   outline        depth D - 2, the dark ring
+ * Side walls appear wherever a column stands above its neighbour (darker, lit from above). Runs of equal pixels in
+ * a row merge into one quad. Origin: bottom centre of the mask (letters squash from their feet).
  */
 function extrude(mask: { m: Uint8Array; w: number; h: number }, st: T3DStyle): THREE.BufferGeometry | null {
   const { m, w, h } = mask;
-  const D = st.depth ?? 3;
-  const depthOf = [0, D, D, D - 1];
-  const front = [new THREE.Color(), new THREE.Color(st.top), new THREE.Color(st.bottom), new THREE.Color(st.edge)];
-  const sideK = [0, 0.55, 0.5, 0.75];
+  const D = st.depth ?? 5;
+  const isFace = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && (m[y * w + x] === 1 || m[y * w + x] === 2);
+  const any = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && m[y * w + x] > 0;
+  // face rows span (for the gradient)
+  let fy0 = h, fy1 = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (isFace(x, y)) { fy0 = Math.min(fy0, y); fy1 = Math.max(fy1, y); }
+  const top = new THREE.Color(st.top), bot = new THREE.Color(st.bottom), edge = new THREE.Color(st.edge), white = new THREE.Color('#ffffff');
+  const dep = new Float32Array(w * h), col: THREE.Color[] = new Array(w * h), key = new Array<string>(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    if (!any(x, y)) continue;
+    let c: THREE.Color, d: number;
+    if (!isFace(x, y)) { c = edge.clone(); d = D - 2; }
+    else {
+      const k = fy1 > fy0 ? Math.min(3, Math.floor(((y - fy0) / (fy1 - fy0 + 1)) * 4)) / 3 : 0;
+      c = top.clone().lerp(bot, k);
+      // pixel fonts have 1-2 px strokes, so a per-pixel bevel would just stripe them: the chamfer is the 2-voxel step
+      // down to the outline (its walls are lit / shaded below); the face gets a lit top rim and a soft left edge
+      const core = isFace(x - 1, y) && isFace(x + 1, y) && isFace(x, y - 1) && isFace(x, y + 1);
+      if (!isFace(x, y - 1)) c.lerp(white, 0.5);
+      else if (!isFace(x - 1, y)) c.lerp(white, 0.12);
+      d = core ? D : D - 0.5;
+    }
+    dep[i] = d; col[i] = c; key[i] = c.getHexString() + d;
+  }
   const P: number[] = [], N: number[] = [], C: number[] = [];
-  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : m[y * w + x]);
-  const dep = (x: number, y: number) => depthOf[at(x, y)];
+  const depAt = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h || !col[y * w + x] ? 0 : dep[y * w + x]);
   const ox = -w / 2;
-  // pixel (x, y) with y down -> mesh x = x + ox, mesh y = h - 1 - y (bottom row at 0)
-  const quad = (a: number[], b: number[], c: number[], d: number[], n: number[], col: THREE.Color) => {
-    for (const v of [a, b, c, a, c, d]) { P.push(v[0], v[1], v[2]); N.push(n[0], n[1], n[2]); C.push(col.r, col.g, col.b); }
+  const quad = (a: number[], b2: number[], c: number[], d: number[], n: number[], cc: THREE.Color) => {
+    for (const v of [a, b2, c, a, c, d]) { P.push(v[0], v[1], v[2]); N.push(n[0], n[1], n[2]); C.push(cc.r, cc.g, cc.b); }
   };
-  const tmp = new THREE.Color();
-  const back = new THREE.Color(st.edge).multiplyScalar(0.5);
+  const back = edge.clone().multiplyScalar(0.5);
   for (let y = 0; y < h; y++) {
     const yb = h - 1 - y, yt = yb + 1;
     let x = 0;
     while (x < w) {
-      const c = at(x, y);
-      if (!c) { x++; continue; }
+      const i0 = y * w + x;
+      if (!col[i0]) { x++; continue; }
       let e = x + 1;
-      while (e < w && at(e, y) === c) e++;
-      const d = depthOf[c];
+      while (e < w && key[y * w + e] === key[i0]) e++;
+      const d = dep[i0], cc = col[i0];
       const x0 = x + ox, x1 = e + ox;
-      // face + back
-      quad([x0, yb, d], [x1, yb, d], [x1, yt, d], [x0, yt, d], [0, 0, 1], front[c]);
+      quad([x0, yb, d], [x1, yb, d], [x1, yt, d], [x0, yt, d], [0, 0, 1], cc);
       quad([x1, yb, 0], [x0, yb, 0], [x0, yt, 0], [x1, yt, 0], [0, 0, -1], back);
-      tmp.copy(front[c]).multiplyScalar(sideK[c]);
-      // left / right walls (only the run ends can be exposed)
-      const dl = dep(x - 1, y), dr = dep(e, y);
-      if (dl < d) quad([x0, yb, dl], [x0, yb, d], [x0, yt, d], [x0, yt, dl], [-1, 0, 0], tmp);
-      if (dr < d) quad([x1, yb, d], [x1, yb, dr], [x1, yt, dr], [x1, yt, d], [1, 0, 0], tmp);
-      // top / bottom walls: strips of pixels with the same exposed depth
+      const wall = cc.clone().multiplyScalar(0.5);
+      const dl = depAt(x - 1, y), dr = depAt(e, y);
+      if (dl < d) quad([x0, yb, dl], [x0, yb, d], [x0, yt, d], [x0, yt, dl], [-1, 0, 0], wall.clone().multiplyScalar(1.1));
+      if (dr < d) quad([x1, yb, d], [x1, yb, dr], [x1, yt, dr], [x1, yt, d], [1, 0, 0], wall.clone().multiplyScalar(0.8));
       for (const dir of [-1, 1]) {
         let i = x;
         while (i < e) {
-          const nd = dep(i, y + dir);
+          const nd = depAt(i, y + dir);
           if (nd >= d) { i++; continue; }
           let j = i + 1;
-          while (j < e && dep(j, y + dir) === nd) j++;
+          while (j < e && depAt(j, y + dir) === nd) j++;
           const a0 = i + ox, a1 = j + ox;
-          const top = dir < 0;
-          const yy = top ? yt : yb;
-          const k = top ? 1.15 : 0.7; // lit from above
-          const col = tmp.clone().multiplyScalar(k);
-          if (top) quad([a0, yy, d], [a1, yy, d], [a1, yy, nd], [a0, yy, nd], [0, 1, 0], col);
-          else quad([a0, yy, nd], [a1, yy, nd], [a1, yy, d], [a0, yy, d], [0, -1, 0], col);
+          const isTop = dir < 0;
+          const yy = isTop ? yt : yb;
+          const c2 = wall.clone().multiplyScalar(isTop ? 1.5 : 0.65);
+          if (isTop) quad([a0, yy, d], [a1, yy, d], [a1, yy, nd], [a0, yy, nd], [0, 1, 0], c2);
+          else quad([a0, yy, nd], [a1, yy, nd], [a1, yy, d], [a0, yy, d], [0, -1, 0], c2);
           i = j;
         }
       }
@@ -129,13 +147,15 @@ function extrude(mask: { m: Uint8Array; w: number; h: number }, st: T3DStyle): T
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-  // centre the depth on z = 0 so the letter turns about its middle
   g.translate(0, 0, -D / 2);
   g.computeBoundingSphere();
   return g;
 }
 
-function styleKey(st: T3DStyle) { return [st.font, st.top, st.bottom, st.edge, st.depth ?? 3].join('|'); }
+/** a soft drop shadow behind every letter (same geometry, flat dark, offset down-right and back) */
+const shadowMat = new THREE.MeshBasicMaterial({ color: '#02060c', transparent: true, opacity: 0.42, depthWrite: false });
+
+function styleKey(st: T3DStyle) { return [st.font, st.top, st.bottom, st.edge, st.depth ?? 5].join('|'); }
 
 function glyphGeo(ch: string, st: T3DStyle): GlyphGeo {
   const key = ch + '\u0000' + styleKey(st);
@@ -199,7 +219,7 @@ export interface T3DOpts {
   onLand?: (i: number) => void;
 }
 
-interface Letter { mesh: THREE.Mesh; i: number; sy: number; vy: number; landed: boolean; base: number }
+interface Letter { mesh: THREE.Mesh; i: number; sy: number; vy: number; landed: boolean; base: number; ry: number; vry: number }
 
 export class Text3D {
   group = new THREE.Group();
@@ -246,11 +266,15 @@ export class Text3D {
         const mesh = new THREE.Mesh(g.geo, mat);
         mesh.castShadow = this.o.shadow;
         mesh.receiveShadow = false;
+        const drop = new THREE.Mesh(g.geo, shadowMat);
+        drop.position.set(1.1, -1.1, -(st.depth ?? 5) * 0.9);
+        drop.renderOrder = -1;
+        mesh.add(drop);
         // glyph canvases start one pixel left of the pen (the outline)
         mesh.position.set((x0 - 1 + g.w / 2 - lw / 2) * this.vox, ((lines.length - 1 - li) * lh - (cap.h - capPx - 1)) * this.vox, 0);
         mesh.scale.setScalar(this.vox);
         this.inner.add(mesh);
-        this.letters.push({ mesh, i: idx++, sy: 0, vy: 0, landed: false, base: mesh.position.y });
+        this.letters.push({ mesh, i: idx++, sy: 0, vy: 0, landed: false, base: mesh.position.y, ry: 0, vry: 0 });
       }
     });
     this.width = maxW * this.vox;
@@ -309,13 +333,20 @@ export class Text3D {
       } else {
         allGone = false;
         // in: a spring on the letter's height; width keeps the volume (squash & stretch for free)
-        if (!L.landed && L.sy === 0 && L.vy === 0) { L.vy = o.enter === 'slam' ? 0 : o.enter === 'drop' ? 4 : 16; L.sy = o.enter === 'slam' ? 1.6 : 0.02; }
+        if (!L.landed && L.sy === 0 && L.vy === 0) {
+          L.vy = o.enter === 'slam' ? 0 : o.enter === 'drop' ? 4 : 16; L.sy = o.enter === 'slam' ? 1.6 : 0.02;
+          // each letter flips in from a quarter turn and settles on a spring (alternating sides, a little overshoot)
+          L.ry = o.enter === 'slam' ? 0 : (L.i % 2 ? -1 : 1) * 1.1; L.vry = 0;
+        }
         const kk = o.enter === 'slam' ? 260 : 170, c = o.enter === 'slam' ? 11 : 9;
         L.vy += (-(L.sy - 1) * kk - L.vy * c) * dt;
         L.sy += L.vy * dt;
+        L.vry += (-L.ry * 140 - L.vry * 9) * dt; L.ry += L.vry * dt;
         if (!L.landed && li > 0.12) { L.landed = true; o.onLand?.(L.i); }
         sy = Math.max(0.02, L.sy);
-        if (o.enter === 'drop') drop = Math.max(0, 1 - li / 0.25) * 1.2;
+        // drop: falls in and bounces twice; slam: a heavy fall with one hard bounce
+        const bounce = (k: number) => { const t2 = 1 - k; return Math.abs(Math.cos(t2 * Math.PI * 1.5)) * t2 * t2; };
+        if (o.enter === 'drop') drop = li < 0.45 ? bounce(Math.min(1, li / 0.45)) * 1.4 : 0;
         if (o.enter === 'slam') drop = Math.max(0, 1 - li / 0.12) * 2.5;
       }
       const sx = 1 / Math.sqrt(Math.max(0.3, sy));
@@ -324,6 +355,7 @@ export class Text3D {
       m.scale.set(this.vox * sx * Math.min(1, sy * 3), this.vox * sy, this.vox * sx * Math.min(1, sy * 3));
       m.position.y = L.base + bob + drop * o.size + sh;
       m.rotation.z = Math.sin(this.t * 1.7 - L.i * 0.8) * 0.05 + (o.shake ? (Math.random() - 0.5) * o.shake * 0.08 : 0);
+      m.rotation.y = this.outT >= 0 ? 0 : L.ry;
     }
     if (allGone && this.outT >= 0) { this.dead = true; this.group.visible = false; }
   }

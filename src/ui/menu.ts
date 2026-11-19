@@ -250,6 +250,7 @@ const CREDITS: [string, string][] = [
   ['Fonts', ''],
   ['Alagard — Hewett Tsoi', ''],
   ['m6x11plus, m5x7 — Daniel Linssen (managore)', ''],
+  ['Jersey 10 / 15 / 20 — Sarah Cadigan-Fried (OFL)', ''],
   ['Jacquard 24, Tiny5, Pixelify Sans — SIL OFL', ''],
   ['TBME Goofy — from Chewy by Font Diner (Apache 2.0)', ''],
   ['Sound & music: CC0 / public domain', ''],

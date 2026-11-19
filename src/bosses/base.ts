@@ -34,6 +34,8 @@ export abstract class BossBase implements BossEntity {
   phaseAt: number[] = [0.66, 0.33];
   onDefeated?: () => void;
   facing = -1;
+  /** what it drops ('fish' materials or 'human' gear) */
+  family: 'fish' | 'human' = 'fish';
   /** the move cycle per phase (learnable patterns) */
   abstract cycles: string[][];
   abstract moves: Record<string, MoveDef>;
@@ -152,6 +154,8 @@ export abstract class BossBase implements BossEntity {
     return true;
   }
   onParried(w: World) { this.core.parried(w); }
+  /** removed mid-death (the level was torn down): never leave the game in slow motion */
+  dispose(w?: World) { if (w && this.state === 'dying') w.game.timeScale = 1; }
   protected onStagger(_w: World, _k: EnemyCore['staggerKind']) {}
   protected onHurt(_w: World, _d: number, _dx: number, _dy: number, _k?: DamageKind) {}
   protected onPhase(_w: World, _n: number) {}
@@ -178,7 +182,7 @@ export abstract class BossBase implements BossEntity {
       const cx = (this.arena.x0 + this.arena.x1) / 2;
       w.text.pop(this.bossName + ' FELLED', cx, this.arena.floor + (this.arena.top - this.arena.floor) * 0.6, 'gold', { size: 0.9, life: 3.5, vy: 0.05 });
       w.run.kills++;
-      w.emit('kill', { kind: this.bossId, x: this.x, y: this.y, boss: true, elite: true });
+      w.emit('kill', { kind: this.bossId, x: this.x, y: this.y, boss: true, elite: true, size: 'boss', family: this.family });
       w.emit('bossDefeated', { id: this.bossId, name: this.bossName });
       this.state = 'dead'; this.st = 0;
       this.onDefeated?.();

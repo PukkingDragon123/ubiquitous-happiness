@@ -1,0 +1,138 @@
+// The BUILD SCENE: a short animated rebuild of one piece. The camera pushes in on the spot; Mr. Crab scuttles over
+// and the blobfish waddles up; planks and stones fly in on arcs and thunk into place (dust, a knock, a little
+// shake) while the crab hammers with his big claw; the piece grows out of its blueprint ghost, pops, sparkles and a
+// paper card says what it unlocks. Click / Esc / Space skips to the end; it always finishes (nothing to get stuck in).
+//
+//   const b = new BuildScene(...); b.start('stash');  each frame: if (b.active) b.update(dt)
+//   b.onDone = () => ...   (the piece is already built in the save when the scene starts)
+import * as THREE from 'three';
+import { Kit } from './kit';
+import { MAT } from './tex';
+import type { House } from './house';
+import type { HubPlayer } from './player';
+import type { MrCrab } from '../story/crab';
+import type { CamRig } from './camera';
+import type { Motes } from './ocean';
+import { PIECE } from './rebuild';
+import { Tag } from './tag';
+import { audio } from '../audio/audio';
+import { clamp01, easeOutBack } from '../core/math';
+
+interface Flyer { m: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; t0: number; dur: number; spin: THREE.Vector3; landed: boolean }
+
+export class BuildScene {
+  active = false;
+  id = '';
+  phase: 'gather' | 'hammer' | 'done' = 'done';
+  private t = 0;
+  private pt = 0;
+  private flyers: Flyer[] = [];
+  private nextFly = 0;
+  private nextHit = 0;
+  private card = new Tag('paper', 170);
+  private crabFrom = new THREE.Vector3();
+  private crabTo = new THREE.Vector3();
+  onDone?: () => void;
+  onShake?: (k: number) => void;
+
+  constructor(private house: House, private player: HubPlayer, private crab: MrCrab, private rig: CamRig, private dust: Motes, private sparks: Motes, private cam: THREE.PerspectiveCamera, private internalH: () => number) {
+    house.group.add(this.card.mesh);
+  }
+
+  start(id: string) {
+    const s = this.house.spots.get(id); if (!s) return;
+    this.id = id; this.active = true; this.phase = 'gather'; this.t = 0; this.pt = 0; this.nextFly = 0; this.nextHit = 0;
+    this.house.setGrow(id, 0);
+    // the camera pushes in on the spot
+    const c = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 0.7, s.piece.z);
+    this.rig.shot = { target: c.clone().lerp(s.stand, 0.35), yaw: s.piece.x > 3 ? -0.35 : s.piece.x < -3 ? 0.35 : 0, pitch: 0.82, dist: 7.2, fov: 30 };
+    this.rig.k = 2.4;
+    // the blobfish and the crab walk up (the crab to the far side of the stand point)
+    const path = this.house.path(this.player.hero.root.position.clone(), s.stand);
+    if (path.length) this.player.goTo(path); else this.player.hero.root.position.copy(s.stand);
+    this.crabFrom.copy(this.crab.group.position);
+    const side = new THREE.Vector3(s.stand.x - s.piece.x, 0, s.stand.z - s.piece.z).normalize();
+    const perp = new THREE.Vector3(-side.z, 0, side.x);
+    this.crabTo.copy(s.stand).addScaledVector(perp, 1.05).addScaledVector(side, -0.15);
+    if (!this.house.walkable(this.crabTo.x, this.crabTo.z)) this.crabTo.copy(s.stand).addScaledVector(perp, -1.05);
+    audio.play('k_confirm1', { vol: 0.4, dry: true }); audio.play('crab_click1', { vol: 0.4 });
+    this.card.hide();
+  }
+  skip() { if (this.active && this.phase !== 'done') this.finish(); }
+
+  private finish() {
+    this.phase = 'done'; this.pt = 0;
+    this.house.setGrow(this.id, 1);
+    for (const f of this.flyers) f.m.removeFromParent();
+    this.flyers = [];
+    const s = this.house.spots.get(this.id)!;
+    const c = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 0.9, s.piece.z);
+    for (let i = 0; i < 26; i++) this.sparks.emit(c.x, c.y, c.z, { vx: (Math.random() - 0.5) * 3.5, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 3.5, life: 0.7 + Math.random() * 0.5, size: 0.11 });
+    audio.play('jin_good', { vol: 0.45, dry: true }); audio.play('pickup_sparkle1', { vol: 0.35, dry: true });
+    this.player.hero.play?.('hop'); this.player.hero.expression?.('happy');
+    const p = PIECE[this.id];
+    this.card.show([{ text: `${p.name.toUpperCase()} BUILT`, font: 'title', color: '#2a1808' }, { text: p.unlock, color: '#1a4a7a' }]);
+  }
+
+  update(dt: number) {
+    if (!this.active) return;
+    this.t += dt; this.pt += dt;
+    const s = this.house.spots.get(this.id)!;
+    const cr = this.crab.group.position;
+    // the crab scuttles (sideways) toward his work spot, and home again at the end
+    const goal = this.phase === 'done' && this.pt > 0.9 ? this.crabFrom : this.crabTo;
+    const d = goal.clone().sub(cr).setY(0), L = d.length();
+    if (L > 0.05) { const sp = Math.min(L, 3.2 * dt); cr.addScaledVector(d.normalize(), sp); this.crab.move = (d.x >= 0 ? 1 : -1) * Math.min(1, L * 2); } else this.crab.move = 0;
+    this.crab.lookX = s.piece.x;
+    const target = new THREE.Vector3(s.piece.x, 0.4, s.piece.z);
+    if (this.phase === 'gather') {
+      this.player.face(target, dt);
+      if ((L < 0.1 && !this.player.walking) || this.pt > 2.4) { this.phase = 'hammer'; this.pt = 0; this.player.stop(); }
+    } else if (this.phase === 'hammer') {
+      this.player.face(target, dt);
+      const dur = 2.8;
+      const k = clamp01(this.pt / dur);
+      // planks and stones fly in on arcs and thunk into place
+      this.nextFly -= dt;
+      if (this.nextFly <= 0 && this.pt < dur - 0.6) {
+        this.nextFly = 0.28;
+        const kit = new Kit();
+        if (Math.random() < 0.6) kit.box(MAT.wood(['pine', 'oak', 'drift'][Math.floor(Math.random() * 3)]), 0.9, 0.06, 0.18, 0, 0, 0);
+        else kit.box(MAT.rock(), 0.28, 0.2, 0.24, 0, 0, 0);
+        const m = kit.build();
+        const a = Math.random() * Math.PI * 2;
+        const from = new THREE.Vector3(s.piece.x + Math.cos(a) * 4.5, 3.5 + Math.random() * 1.5, s.piece.z + Math.sin(a) * 3 + 1.5);
+        const to = new THREE.Vector3(s.piece.x + (Math.random() - 0.5) * s.piece.w * 0.7, (s.piece.wall ?? 0) + 0.2 + Math.random() * 0.7, s.piece.z + (Math.random() - 0.5) * s.piece.d * 0.6);
+        m.position.copy(from);
+        this.house.group.add(m);
+        this.flyers.push({ m, from, to, t0: this.pt, dur: 0.45, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8), landed: false });
+        audio.play('swish_a', { vol: 0.12, rate: 1.3 + Math.random() * 0.3 });
+      }
+      for (const f of this.flyers) {
+        const u = clamp01((this.pt - f.t0) / f.dur);
+        if (!f.landed) {
+          f.m.position.lerpVectors(f.from, f.to, u); f.m.position.y += Math.sin(u * Math.PI) * 1.2;
+          f.m.rotation.set(f.spin.x * u, f.spin.y * u, f.spin.z * u);
+          if (u >= 1) {
+            f.landed = true;
+            audio.play(Math.random() < 0.5 ? 'wood_knock1' : 'thud_heavy1', { vol: 0.32, rate: 0.9 + Math.random() * 0.3 });
+            for (let i = 0; i < 6; i++) this.dust.emit(f.to.x, f.to.y, f.to.z, { vx: (Math.random() - 0.5) * 1.6, vy: Math.random() * 0.8, vz: (Math.random() - 0.5) * 1.6, life: 0.8, size: 0.12 });
+            this.onShake?.(0.05);
+          }
+        } else f.m.scale.multiplyScalar(Math.exp(-dt * 6));
+      }
+      this.flyers = this.flyers.filter((f) => { if (f.landed && f.m.scale.x < 0.05) { f.m.removeFromParent(); return false; } return true; });
+      // the crab hammers with his claw, the blobfish hops along
+      this.nextHit -= dt;
+      if (this.nextHit <= 0) { this.nextHit = 0.36; this.crab.snip(); audio.play('clank2', { vol: 0.16, rate: 1.2 + Math.random() * 0.4 }); if (Math.random() < 0.35) this.player.hero.play?.('hop'); }
+      this.house.setGrow(this.id, easeOutBack(k, 1.2) * 0.98);
+      if (this.pt > dur) this.finish();
+    } else {
+      // done: the card floats over the new piece, the camera eases back out
+      const at = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 1.6, s.piece.z);
+      this.card.place(this.cam, at, this.internalH(), [0, -6], dt);
+      if (this.pt > 0.9) { this.rig.shot = null; this.rig.k = 2.2; }
+      if (this.pt > 2.4) { this.active = false; this.card.hide(); this.crab.move = 0; this.onDone?.(); }
+    }
+  }
+}

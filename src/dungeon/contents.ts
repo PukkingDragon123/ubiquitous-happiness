@@ -11,7 +11,9 @@ import { itemObject } from './pickups';
 import { Text3DLayer, T3D, type Text3D } from '../ui/text3d';
 import { MrCrab, CrabShop } from '../story/crab';
 import type { ShopSlot } from './level';
-import { pedestalModel, chestModel, floorHatch, keyModel, bombModel, heartModel, padlock, disposeModel, type ChestModel, type FloorHatch } from './models';
+import { pedestalModel, chestModel, floorHatch, keyModel, bombModel, heartModel, disposeModel, type ChestKind, type FloorHatch } from './models';
+import type { ChestPlan } from './level';
+import type { Entity, Team } from '../game/types';
 import type { LampHandle } from '../gfx/lighting';
 
 type Rig = { lamp(x: number, y: number, z: number, color: string, intensity?: number, distance?: number): LampHandle | null } | null;
@@ -116,34 +118,81 @@ export class ShopStock {
   dispose() { this.stall.release(); for (const s of this.stands) s.tag?.hide(); this.group.removeFromParent(); }
 }
 
-// ------------------------------------------------------------------ chest
-export class ChestProp {
-  m: ChestModel;
+// ------------------------------------------------------------------ chests
+/**
+ * A chest in the world (an Entity, so it lives with the pickups): route chests from the plan, the big chest that
+ * drops in when an arena is cleared, a champion's dropped chest. It sits on the floor (or falls to it); the run opens
+ * it when the blobfish touches it (a locked one takes a key, automatically). Big and locked chests glint while shut.
+ */
+export class Chest implements Entity {
+  kind = 'chest'; team: Team = 'neutral';
+  x: number; y: number; vx = 0; vy = 0; r = 0.8; alive = true;
+  obj = new THREE.Group();
+  m: ReturnType<typeof chestModel>;
   open = false;
   locked: boolean;
-  private lock: THREE.Group | null = null;
+  /** the plan entry (route chests) */
+  plan: ChestPlan | null;
+  /** falling into place (dropped / dropped in) */
+  falling: boolean;
+  /** the run refused it for now (locked, no key): a little shake */
+  refused = 0;
   private t = 0;
   private lidA = 0;
-  constructor(public x: number, public y: number, opened: boolean, locked = false) {
-    this.m = chestModel();
-    this.m.root.position.set(x, y - 0.05, -0.1);
-    this.m.root.scale.setScalar(1.25);
-    this.open = opened;
-    this.locked = locked && !opened;
-    if (opened) this.lidA = 1.9;
-    if (this.locked) { this.lock = padlock(); this.lock.position.set(0, 0.36, 0.42); this.lock.scale.setScalar(0.8); this.m.root.add(this.lock); }
+  private landed = false;
+  constructor(public ck: ChestKind, x: number, y: number, o: { plan?: ChestPlan; opened?: boolean; fallFrom?: number } = {}) {
+    this.m = chestModel(ck);
+    this.obj.add(this.m.root);
+    this.x = x; this.y = o.fallFrom ?? y;
+    this.plan = o.plan ?? null;
+    this.open = !!o.opened;
+    this.locked = ck === 'locked' && !this.open;
+    this.falling = o.fallFrom !== undefined;
+    const sc = ck === 'big' ? 1.25 : ck === 'small' ? 1.05 : 1.15;
+    this.m.root.scale.setScalar(sc);
+    this.r = ck === 'big' ? 1.1 : 0.8;
+    if (this.open) { this.lidA = 1.9; if (this.m.lock) this.m.lock.visible = false; }
+    this.obj.position.set(this.x, this.y, -0.15);
   }
-  unlock() { this.locked = false; if (this.lock) this.lock.visible = false; }
-  get group() { return this.m.root; }
-  update(dt: number) {
+  /** the run opened it */
+  openNow(w: World) {
+    if (this.open) return;
+    this.open = true; this.locked = false;
+    if (this.m.lock) this.m.lock.visible = false;
+    if (this.plan) this.plan.opened = true;
+    w.sfx('chest_creak', this.x, 0.7); w.sfx(this.ck === 'big' ? 'jin_rare1' : 'treasure1', this.x, 0.55);
+    w.fx.emit('glow', this.x, this.y + 0.8, { n: 2, size: this.ck === 'big' ? 3.2 : 2.2, life: 0.6, color: '#ffe0a0' });
+    w.fx.burst('star', this.x, this.y + 0.9, this.ck === 'big' ? 22 : 12, 3, { color: '#fff2b0' });
+  }
+  unlockFx(w: World) {
+    const lp = new THREE.Vector3(); this.m.lock?.getWorldPosition(lp);
+    w.fx.burst('spark', lp.x || this.x, lp.y || this.y + 0.4, 14, 2.6, { color: '#ffe07a' });
+    w.sfx('k_confirm1', this.x, 0.7); w.sfx('clank1', this.x, 0.6);
+  }
+  update(dt: number, w: World) {
     this.t += dt;
+    this.refused = Math.max(0, this.refused - dt);
+    if (this.falling) {
+      this.vy -= 14 * dt;
+      this.y += this.vy * dt;
+      const fl = (w.terrain as { floorUnder?: (x: number, y: number) => number }).floorUnder?.(this.x, this.y + 0.5) ?? w.terrain.floorAt(this.x);
+      if (this.y <= fl) {
+        this.y = fl; this.falling = false; this.vy = 0;
+        if (!this.landed) { this.landed = true; w.fx.touch(this.x, fl, 1.6); w.fx.debrisBurst(this.x, fl + 0.1, 10, '#c8b48e', 3, 0.06); w.sfx('thud_heavy1', this.x, 0.7, 0.9); w.game.addShake(0.12); }
+      }
+    }
     const tgt = this.open ? 1.9 : 0;
-    this.lidA += (tgt - this.lidA) * (1 - Math.exp(-dt * 5));
+    this.lidA += (tgt - this.lidA) * (1 - Math.exp(-dt * (this.open ? 7 : 4)));
     this.m.lid.rotation.x = -this.lidA;
-    if (!this.open) this.m.root.rotation.z = Math.sin(this.t * 7) * 0.012;
-    if (this.lock && this.lock.visible) this.lock.rotation.z = Math.sin(this.t * 2.2) * 0.12;
+    (this.m.glow.material as THREE.MeshBasicMaterial).opacity = this.open ? Math.max(0, 0.8 - (this.t % 100) * 0) * Math.min(1, this.lidA) * 0.6 : 0;
+    // shut chests that hold something good glint now and then; a refused one rattles
+    if (!this.open && (this.ck === 'big' || this.ck === 'locked' || this.ck === 'sunken') && Math.random() < dt * 1.5) w.fx.glint(this.x + (Math.random() - 0.5) * 1.2, this.y + 0.3 + Math.random() * 0.6);
+    const shake = this.refused > 0 ? Math.sin(this.t * 40) * 0.05 * this.refused : 0;
+    this.obj.position.set(this.x + shake, this.y - 0.02, -0.15);
+    this.obj.rotation.z = this.open ? 0 : Math.sin(this.t * 3) * 0.008;
+    if (this.m.lock && this.m.lock.visible) this.m.lock.rotation.z = Math.sin(this.t * 2.2) * 0.12;
   }
-  dispose() { this.m.root.removeFromParent(); disposeModel(this.m.root); }
+  dispose() { disposeModel(this.m.root); }
 }
 
 // ------------------------------------------------------------------ the boss room's exit

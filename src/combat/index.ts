@@ -8,7 +8,8 @@
 //   ENEMIES_FOR('reef', 0.4)                                      // weighted kind list (repeat = weight)
 //   const b = spawnBoss(world, 'reef', arena); b.onDefeated = () => openGate(); b.bar() -> { name, hp, max, phase }
 //
-// Events (world.emit): 'kill' {kind, x, y, elite, boss} when an enemy dies (drops are J's job),
+// Events (world.emit): 'kill' {kind, x, y, elite, size, family, boss?} when an enemy dies (drops are J's job:
+// family 'fish' -> materials (scales, pearls, shells), 'human' -> gear + scrap; size small..giant/boss = amount),
 // 'parry' {perfect}, 'riposte' {kind}, 'guardBreak' {}, 'bossIntro' {id, name, title}, 'bossPhase' {id, phase},
 // 'bossDefeated' {id}, 'flask' {left}, 'dodge' {perfect}.
 // Player side: (world.player as Blobfish).combat.hud() -> PlayerCombatHud (stamina, flasks, parry state).
@@ -18,8 +19,9 @@ import { setArena } from './arena';
 import { buildEnemy } from './roster';
 import { buildBoss } from '../bosses';
 
-export type { Arena, EnemyKind, FloorId, SpawnOpts, BossEntity, BossBar, AttackSpec, DefenseResult, PlayerCombatHud } from './types';
-export { ENEMY_KINDS } from './types';
+export type { Arena, EnemyKind, FloorId, SpawnOpts, BossEntity, BossBar, AttackSpec, DefenseResult, PlayerCombatHud, EnemySize, EnemyFamily } from './types';
+export { ENEMY_KINDS, ENEMY_INFO } from './types';
+import { ENEMY_INFO } from './types';
 export { setArena, arenaOf } from './arena';
 export { bindArena } from './roster';
 export { PlayerCombat } from './moveset';
@@ -34,22 +36,33 @@ export function spawnEnemy(world: World, kind: EnemyKind, x: number, y: number, 
   return e;
 }
 
-/** relative weights per floor: [kind, weight, min difficulty] */
+/**
+ * Relative weights per floor: [kind, weight, min difficulty]. FISH FIRST: the reef is sea life only; the giant
+ * humans appear from the second floor at about 80 m (difficulty ~0.23 on J's depth curve) as rare elites and
+ * mini-bosses, and grow more common deeper. Fish weights are doubled so a giant stays rare in a mixed list.
+ */
 const TABLE: Record<FloorId, [EnemyKind, number, number][]> = {
-  reef: [['crab', 3, 0], ['puffer', 2, 0], ['knife', 3, 0], ['harpoon', 2, 0], ['moray', 2, 0.15], ['barracuda', 1, 0.3], ['net', 1, 0.5]],
-  kelp: [['knife', 3, 0], ['harpoon', 3, 0], ['moray', 2, 0], ['barracuda', 2, 0], ['net', 2, 0.2], ['medic', 1, 0.3], ['jelly', 1, 0.3]],
-  graveyard: [['knife', 3, 0], ['harpoon', 3, 0], ['net', 2, 0], ['heavy', 1, 0.2], ['medic', 2, 0.2], ['moray', 2, 0], ['crab', 1, 0]],
-  arctic: [['harpoon', 3, 0], ['heavy', 2, 0], ['knife', 2, 0], ['jelly', 2, 0], ['net', 2, 0.2], ['medic', 1, 0.3], ['barracuda', 1, 0.3]],
-  abyss: [['angler', 3, 0], ['jelly', 3, 0], ['barracuda', 2, 0], ['heavy', 2, 0.2], ['moray', 2, 0], ['knife', 1, 0.4], ['harpoon', 1, 0.4]],
+  reef: [['crab', 6, 0], ['puffer', 6, 0], ['jelly', 4, 0], ['moray', 4, 0.05], ['lionfish', 4, 0.05], ['barracuda', 3, 0.1], ['stonefish', 2, 0.1], ['mantis', 2, 0.15]],
+  kelp: [['moray', 6, 0], ['barracuda', 6, 0], ['lionfish', 4, 0], ['mantis', 4, 0], ['stonefish', 4, 0], ['jelly', 4, 0], ['crab', 2, 0], ['puffer', 2, 0],
+    ['harpoon', 1, 0.23], ['knife', 1, 0.26]],
+  graveyard: [['moray', 4, 0], ['crab', 4, 0], ['mantis', 4, 0], ['stonefish', 4, 0], ['lionfish', 3, 0], ['barracuda', 3, 0], ['puffer', 2, 0],
+    ['harpoon', 2, 0], ['knife', 2, 0], ['net', 1, 0.3], ['medic', 1, 0.35], ['heavy', 1, 0.4]],
+  arctic: [['jelly', 5, 0], ['barracuda', 4, 0], ['mantis', 3, 0], ['angler', 2, 0], ['moray', 2, 0], ['crab', 2, 0],
+    ['harpoon', 2, 0], ['knife', 2, 0], ['net', 2, 0], ['heavy', 2, 0.2], ['medic', 1, 0.3]],
+  abyss: [['angler', 5, 0], ['jelly', 5, 0], ['barracuda', 3, 0], ['stonefish', 2, 0], ['moray', 2, 0],
+    ['heavy', 2, 0], ['harpoon', 2, 0], ['knife', 2, 0], ['net', 1, 0], ['medic', 1, 0.3]],
 };
 
-/** a weighted list of enemy kinds for a combat room on this floor (pick uniformly; repeats are the weights) */
+/** a weighted list of enemy kinds for an encounter on this floor (pick uniformly; repeats are the weights) */
 export function ENEMIES_FOR(floorId: FloorId | string, difficulty = 0): EnemyKind[] {
   const t = TABLE[(floorId as FloorId)] ?? TABLE.reef;
   const out: EnemyKind[] = [];
   for (const [k, wgt, min] of t) if (difficulty >= min) for (let i = 0; i < wgt; i++) out.push(k);
   return out;
 }
+
+/** is this kind one of the giant humans (rare elites / mini-bosses: count them as ENEMY_INFO[kind].cost) */
+export const isGiant = (k: EnemyKind) => ENEMY_INFO[k]?.family === 'human';
 
 /** how many enemies a combat room should hold at this difficulty (a hint for the room builder) */
 export function roomBudget(difficulty = 0): [number, number] {

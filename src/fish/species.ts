@@ -854,8 +854,76 @@ const spermWhale: FishSpec = {
   clearcoat: 0.4, clearcoatRough: 0.4,
 };
 
+// ------------------------------------------------------------------------------------------- lionfish
+// Red lionfish: a compact body in bold red / cream vertical bands, a crown of long venomous dorsal spines (each
+// banded), huge feathery pectoral fans, fleshy tentacles over the eyes. v4 combat: a spine-fan bruiser.
+const lionfish: FishSpec = {
+  name: 'lionfish', L: 0.4, body: 0.82,
+  top: [[0, 0.0], [0.02, 0.028], [0.1, 0.07], [0.22, 0.11], [0.36, 0.13], [0.5, 0.125], [0.66, 0.1], [0.82, 0.065], [1, 0.05]],
+  bot: [[0, 0.0], [0.02, 0.03], [0.1, 0.065], [0.22, 0.1], [0.38, 0.118], [0.54, 0.11], [0.7, 0.085], [0.86, 0.06], [1, 0.048]],
+  wid: [[0, 0.0], [0.03, 0.03], [0.15, 0.058], [0.35, 0.07], [0.6, 0.06], [0.82, 0.038], [1, 0.02]],
+  cy: [[0, -0.01], [0.3, 0], [1, 0.004]],
+  mouth: { t: 0.06, th: 0.45, open: 0.55, lip: 0.08, lipCol: '#d8b0a0', interior: '#6a2028', crease: '#4a1418' },
+  eye: { t: 0.16, y: 0.5, r: 0.032, fwd: 0.15, up: 0.2, lid: 'none', bulge: 0.8,
+    paint: { iris: ['#3a0a08', '#8a1810', '#d84020', '#ffb070'], pupil: 0.5, ring: '#ffe0c0', sclera: '#e8d8c8', irisR: 0.86 } },
+  gill: { t: 0.27, col: '#5a1410', curve: 0.03, k: 0.4 },
+  scales: { w: 6, h: 4, k: 0.5, rim: 0.08, hi: 0.03 },
+  rough: 0.5, sheen: 0.15,
+  paint: (c) => {
+    const RED = C('#b8281c'), DARK = C('#6a1008'), CREAM = C('#f4e4cc');
+    // bold vertical bands, leaning back, thinner bands between the wide ones
+    const b = ((c.t * 14 + c.yl * 3.2) % 1 + 1) % 1;
+    let col = b < 0.42 ? CREAM : b < 0.5 ? mix(RED, CREAM, 0.3) : RED;
+    if (b > 0.62 && b < 0.68) col = DARK;
+    if (c.yn < -0.55) col = mix(col, CREAM, 0.55);
+    if (c.t < 0.1) col = dmix(col, C('#d89080'), 0.4, c.px, c.py);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.2, t1: 0.62, h: [[0, 0.32], [0.3, 0.38], [0.6, 0.3], [1, 0.12]], sweep: 0.55, col: ['#f0e0d0', '#e8c8b8'], spines: 13, rays: 0, notch: 0.85, spineCol: '#c02818', alpha: [0.95, 0.15], px: [160, 96] },
+    { type: 'dorsal', t0: 0.64, t1: 0.86, h: [[0, 0.1], [0.5, 0.12], [1, 0.05]], sweep: 0.3, col: ['#f0d8c8', '#d8a898'], rays: 10, rayCol: '#a83020', spots: '#7a1810', spotK: 0.1, alpha: [0.7, 0.4], ripple: 0.4, px: [64, 40] },
+    { type: 'anal', t0: 0.64, t1: 0.84, h: [[0, 0.09], [0.5, 0.11], [1, 0.05]], sweep: 0.3, col: ['#f0d8c8', '#d8a898'], spines: 3, rays: 7, spineCol: '#b02818', spots: '#7a1810', spotK: 0.1, alpha: [0.7, 0.4], px: [48, 40] },
+    { type: 'caudal', shape: 'round', len: 0.18, span: 0.13, col: ['#f0e0d0', '#e0c8b8'], rays: 12, rayCol: '#a83020', spots: '#7a1810', spotK: 0.12, alpha: [0.75, 0.4], px: [64, 64] },
+    { type: 'pectoral', t: 0.28, y: -0.1, len: 0.34, angle: 35, shape: 'round', col: ['#e8d0c0', '#c87060', '#a83828'], rays: 16, rayCol: '#8a1a10', spots: '#6a1008', spotK: 0.1, alpha: [0.85, 0.35], flutter: 0.15, out: 0.9, px: [96, 72] },
+    { type: 'pelvic', t: 0.3, len: 0.12, angle: 50, col: ['#c84030', '#e8d8c8'], rays: 5, alpha: [0.9, 0.5], flutter: 0.05 },
+  ],
+  swim: { k: 0.5, a0: 0.02, pow: 3, amp: 0.03, freq: 0.6, freqK: 0.5, flutter: [3, 0.04], ripple: 0.02 },
+};
+
+// ------------------------------------------------------------------------------------------- stonefish
+// Reef stonefish: a squat, warty lump the colour of the rocks it sits on (ochre, rust and grey camo with pale
+// crusts), an upturned cavernous mouth, tiny sunken eyes. v4 combat: buried ambusher.
+const stonefish: FishSpec = {
+  name: 'stonefish', L: 0.45, body: 0.8,
+  top: [[0, 0.0], [0.02, 0.05], [0.1, 0.1], [0.22, 0.135], [0.36, 0.14], [0.52, 0.12], [0.7, 0.085], [0.86, 0.06], [1, 0.05]],
+  bot: [[0, 0.0], [0.02, 0.04], [0.1, 0.08], [0.24, 0.1], [0.4, 0.098], [0.58, 0.08], [0.76, 0.06], [1, 0.045]],
+  wid: [[0, 0.0], [0.03, 0.06], [0.15, 0.11], [0.35, 0.12], [0.6, 0.09], [0.82, 0.05], [1, 0.025]],
+  cy: [[0, 0.01], [0.3, 0], [1, -0.004]],
+  sq: [[0, 0.9], [0.4, 1.0], [1, 1.4]],
+  mouth: { t: 0.08, th: [[0, 0.62], [0.08, 0.66]], open: 0.9, lip: 0.06, lipCol: '#8a6a48', interior: '#7a3a3a', crease: '#2a1e14' },
+  eye: { t: 0.18, y: 0.78, r: 0.018, fwd: 0.1, up: 0.5, lid: 'sleepy', lidCol: '#6a5038', lidLine: '#2a1e14', lidLevel: 0.45, lidTilt: 0.1,
+    paint: { iris: ['#1a0e08', '#5a3a18', '#a87a38', '#e8c070'], pupil: 0.55, ring: '#e8d0a0', sclera: '#8a7a60', irisR: 0.86 } },
+  gill: { t: 0.3, col: '#3a2a1c', curve: 0.05, k: 0.6 },
+  scales: { w: 5, h: 5, k: 0.9, rim: 0.2, hi: 0.08, bump: 1.4 },
+  rough: 0.9, sheen: 0.04,
+  paint: (c) => {
+    let col = grad(['#3a2e22', '#5a4632', '#7a6040', '#8e7450', '#a08a62', '#b8a07a'])(0.45 + noise2(c.X * 6, c.yl * 18, 7) * 0.5 - c.yn * 0.2, c.px, c.py);
+    const n = noise2(c.X * 14, c.yl * 40, 11);
+    if (n > 0.7) col = dmix(col, C('#a8582a'), 0.6, c.px, c.py);       // rust blotches
+    if (n < 0.22) col = dmix(col, C('#c8c0a8'), 0.55, c.px, c.py);      // pale crust
+    if (c.sd < 0.3 && c.sid > 0.8) col = shade(col, 1.25);                // warts catch the light
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.22, t1: 0.8, h: [[0, 0.06], [0.4, 0.07], [1, 0.05]], sweep: 0.2, col: ['#6a5238', '#8a6e4a'], spines: 13, rays: 0, notch: 0.5, spineCol: '#4a3826', alpha: [0.95, 0.85], px: [128, 32] },
+    { type: 'caudal', shape: 'round', len: 0.15, span: 0.12, col: ['#5a4630', '#7a6040'], rays: 10, alpha: [0.95, 0.85], px: [48, 48] },
+    { type: 'pectoral', t: 0.3, y: -0.35, len: 0.16, angle: 30, shape: 'round', col: ['#6a5238', '#8a6e4a', '#a08a62'], rays: 12, alpha: [0.95, 0.8], flutter: 0.03, out: 0.95, px: [64, 48] },
+  ],
+  swim: { k: 0.4, a0: 0.015, pow: 3, amp: 0.02, freq: 0.5, freqK: 0.4, flutter: [2, 0.02], ripple: 0.01 },
+};
+
 export const SPECS: Record<string, FishSpec> = {
   piranha, cichlid, cichlid_blue: cichlidBlue, peacock_bass: peacockBass, napoleon, triggerfish, sardine, barracuda, cleaner_wrasse: cleaner,
   pufferfish, moray, anglerfish, ichthyosaur,
-  pumpkinseed, unicornfish, grouper, pike, snapper, orca, sperm_whale: spermWhale,
+  pumpkinseed, unicornfish, grouper, pike, snapper, orca, sperm_whale: spermWhale, lionfish, stonefish,
 };

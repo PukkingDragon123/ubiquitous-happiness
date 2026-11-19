@@ -9,7 +9,7 @@ import { audio } from '../audio/audio';
 
 const TXT = { cream: '#f4e6c4', dim: '#c8a878', ink: '#2a1808', good: '#8aff7a', bad: '#ff7a6a', gold: '#ffd860' };
 
-function panelRect(ui: PixelUI, w: number, h: number) {
+export function panelRect(ui: PixelUI, w: number, h: number) {
   const W = Math.min(w, ui.w - 16), H = Math.min(h, ui.h - 40);
   return { x: Math.round((ui.w - W) / 2), y: Math.round((ui.h - H) / 2) + 4, w: W, h: H };
 }

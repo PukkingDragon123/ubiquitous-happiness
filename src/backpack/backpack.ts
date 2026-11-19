@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import type { Run, ItemInst } from '../game/run';
 import {
-  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, recipesWith, GRID, ITEMS, RARITY_COLOR,
+  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, recipesWith, GRID_W, GRID_H, GRID_CELLS, packCells, ITEMS, RARITY_COLOR,
   setBonuses, statLines, stackCap, stackOnto, itemIcon, type ItemDef,
 } from '../game/items';
 import { PixelUI } from '../ui/pixel/ui';
@@ -74,11 +74,11 @@ const LE = { out: '#1c0c06', d2: '#3e1e10', d1: '#56301a', b: '#7a4528', l1: '#9
 const PK = { out: '#140a06', base: '#3c2c1e', sh: '#2a1c12', lit: '#56422e', st: '#9a7448', fl: '#4a3826' };
 const BR = { out: '#2e1404', d: '#8a5a14', b: '#d8a038', l: '#f8d878', w: '#fffbe0' };
 
-/** the whole backpack art for a grid of n x n cells of size c; the pocket area starts at PACK_IN */
+/** the whole backpack art for a grid of nw x nh cells of size c; the pocket area starts at PACK_IN */
 const PACK_IN = { x: 16, y: 38 };
-function packArt(n: number, c: number): HTMLCanvasElement {
-  return cached(`pack|${n}|${c}`, () => {
-    const gw = n * c, W = gw + PACK_IN.x * 2, H = gw + PACK_IN.y + 18;
+function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
+  return cached(`pack|${nw}x${nh}|${c}`, () => {
+    const gw = nw * c, gh = nh * c, W = gw + PACK_IN.x * 2, H = gh + PACK_IN.y + 18;
     const [cv, x] = canvas(W + 16, H + 4);
     const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
     const ox = 8; // room for the side straps
@@ -113,10 +113,10 @@ function packArt(n: number, c: number): HTMLCanvasElement {
     for (let py = 0; py < cv.height; py++) for (let px = 0; px < cv.width; px++) if (inBody(px, py, 4) && !inBody(px, py, 5) && ((px + py) >> 1) % 2 === 1 && ((px + py) % 4 === 3)) f(px, py, 1, 1, LE.out);
     // the pocket panel (canvas) with stitched cells
     const gx0 = ox + PACK_IN.x, gy0 = PACK_IN.y;
-    f(gx0 - 5, gy0 - 5, gw + 10, gw + 10, LE.out);
-    f(gx0 - 4, gy0 - 4, gw + 8, gw + 8, PK.fl);
+    f(gx0 - 5, gy0 - 5, gw + 10, gh + 10, LE.out);
+    f(gx0 - 4, gy0 - 4, gw + 8, gh + 8, PK.fl);
     f(gx0 - 4, gy0 - 4, gw + 8, 1, LE.d2);
-    for (let cy = 0; cy < n; cy++) for (let cx = 0; cx < n; cx++) {
+    for (let cy = 0; cy < nh; cy++) for (let cx = 0; cx < nw; cx++) {
       const X = gx0 + cx * c, Y = gy0 + cy * c;
       f(X + 1, Y + 1, c - 2, c - 2, PK.base);
       f(X + 1, Y + 1, c - 2, 2, PK.sh); f(X + 1, Y + 1, 2, c - 2, PK.sh);
@@ -128,7 +128,8 @@ function packArt(n: number, c: number): HTMLCanvasElement {
       // a worn patch in some pockets
       if ((cx * 7 + cy * 3) % 5 === 0) { f(X + c - 10, Y + c - 9, 5, 1, PK.lit); f(X + c - 9, Y + c - 8, 3, 1, PK.lit); }
     }
-    for (let i = 2; i < gw; i += 3) { f(gx0 + i, gy0 + gw - 1, 2, 1, PK.st); f(gx0 + gw - 1, gy0 + i, 1, 2, PK.st); }
+    for (let i = 2; i < gw; i += 3) f(gx0 + i, gy0 + gh - 1, 2, 1, PK.st);
+    for (let i = 2; i < gh; i += 3) f(gx0 + gw - 1, gy0 + i, 1, 2, PK.st);
     // the flap thrown open over the top, with a brass buckle
     const fy = 2, fh = 28, fx0 = ox + 4, fw = W - 8;
     for (let py = fy; py < fy + fh; py++) for (let px = fx0; px < fx0 + fw; px++) {
@@ -265,15 +266,20 @@ export class BackpackScreen implements Screen {
   private layout() {
     const ui = this.ui;
     // cell size follows the logical height: 720p / 1440p run at 1x / 2x of a 720-row canvas, 1080p / 4K of a 540-row one
-    C = ui.h >= 680 && ui.w >= 1200 ? 80 : ui.h >= 600 && ui.w >= 1000 ? 64 : ui.h >= 500 ? 56 : ui.h >= 420 ? 44 : 32;
-    const packW = GRID * C + PACK_IN.x * 2 + 16, packH = GRID * C + PACK_IN.y + 22;
-    const infoW = C >= 80 ? 216 : 176, gap = C >= 80 ? 20 : 12;
+    // the largest cell size whose pack (8 x 6) + seabed (4 wide) + info card fit the canvas
+    const infoW = ui.w >= 1200 ? 216 : 176, gap = ui.w >= 1200 ? 20 : 12;
+    C = 24;
+    for (const c of [72, 64, 56, 52, 48, 44, 40, 36, 32, 28]) {
+      const w = GRID_W * c + PACK_IN.x * 2 + 16 + gap + 4 * c + 16 + gap + infoW + 12, h = GRID_H * c + PACK_IN.y + 22 + 60;
+      if (w <= ui.w && h <= ui.h) { C = c; break; }
+    }
+    const packW = GRID_W * C + PACK_IN.x * 2 + 16, packH = GRID_H * C + PACK_IN.y + 22;
     let bCols = 4;
     let card = ui.w >= packW + gap + bCols * C + 16 + gap + infoW + 12;
     if (!card) bCols = Math.max(2, Math.min(4, Math.floor((ui.w - packW - gap - 28) / C)));
     else bCols = Math.max(4, Math.min(5, Math.floor((ui.w - packW - gap * 2 - infoW - 28) / C)));
     if (ui.w < packW + gap + bCols * C + 16) card = false;
-    const bRows = Math.max(3, Math.min(GRID, Math.floor((packH - 30) / C)));
+    const bRows = Math.max(3, Math.min(GRID_H, Math.floor((packH - 30) / C)));
     const boardW = bCols * C + 16, boardH = bRows * C + 16;
     const total = packW + gap + boardW + (card ? gap + infoW : 0);
     const x0 = Math.max(4, Math.round((ui.w - total) / 2));
@@ -381,20 +387,20 @@ export class BackpackScreen implements Screen {
   // ---------------------------------------------------------------- drawing
   private drawHeader(slide: number) {
     const ui = this.ui, L = this.L, run = this.run!;
-    const used = run.items.filter((i) => i.gx >= 0).reduce((a, i) => a + getItem(i.id).shape.length, 0);
-    const pw = ui.measure('BACKPACK', 'title') + 22, px = L.packX + 8 + Math.round((GRID * C + PACK_IN.x * 2 - pw) / 2), py = L.packY - 18 - slide;
+    const used = packCells(run.items).used;
+    const pw = ui.measure('BACKPACK', 'title') + 22, px = L.packX + 8 + Math.round((GRID_W * C + PACK_IN.x * 2 - pw) / 2), py = L.packY - 18 - slide;
     ui.frame('plaque', px, py, pw, 18);
     ui.text('BACKPACK', px + pw / 2, py + 4, { font: 'title', color: '#3a2408', shadow: '#f8e0a0', align: 'center' });
-    const full = used >= GRID * GRID;
-    ui.text(`${used}/${GRID * GRID}`, L.packX + 8 + GRID * C + PACK_IN.x * 2 - 4, py + 5, { font: 'body', color: full ? '#ff7a6a' : '#e8dcc4', outline: '#0a0604', align: 'right' });
+    const full = used >= GRID_CELLS;
+    ui.text(`${used}/${GRID_CELLS}`, L.packX + 8 + GRID_W * C + PACK_IN.x * 2 - 4, py + 5, { font: 'body', color: full ? '#ff7a6a' : '#e8dcc4', outline: '#0a0604', align: 'right' });
     // the close button
     if (ui.button('bp:close', '', L.closeX, L.closeY - slide, 14, 15, { style: 'red', icon: 'close', sfx: '' })) this.close();
   }
 
   private drawPack(slide: number) {
     const ui = this.ui, L = this.L;
-    const art = packArt(GRID, C);
-    ui.img(silhouette(art, '#00000080', `pack${GRID}`), L.packX + 3, L.packY + 4 + slide);
+    const art = packArt(GRID_W, GRID_H, C);
+    ui.img(silhouette(art, '#00000080', `pack${GRID_W}x${GRID_H}|${C}`), L.packX + 3, L.packY + 4 + slide);
     ui.img(art, L.packX, L.packY + slide);
   }
 
@@ -489,7 +495,7 @@ export class BackpackScreen implements Screen {
     if (!this.held) return;
     if (p.kind === 'grid') {
       for (const [x, y] of p.cells) {
-        if (x < 0 || y < 0 || x >= GRID || y >= GRID) continue;
+        if (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) continue;
         const X = L.gridX + x * C, Y = L.gridY + y * C;
         const col = p.ok ? '#5ae04a' : '#ff4a3a';
         ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.28);
@@ -681,7 +687,7 @@ export class BackpackScreen implements Screen {
 
   private drawHints() {
     const ui = this.ui, L = this.L;
-    let x = L.packX + 8, y = Math.min(ui.h - 16, L.packY + GRID * C + PACK_IN.y + 30);
+    let x = L.packX + 8, y = Math.min(ui.h - 16, L.packY + GRID_H * C + PACK_IN.y + 30);
     x += ui.hint('LMB', 'drag', x, y);
     x += ui.hint('R', 'turn', x, y);
     x += ui.hint('RMB', 'turn', x, y);
@@ -769,7 +775,7 @@ export class BackpackScreen implements Screen {
     const tlx = ui.mx - this.grab.x, tly = ui.my - this.grab.y;
     const cells = rotCells(getItem(it.id).shape, it.rot);
     const gx = Math.round((tlx - L.gridX) / C), gy = Math.round((tly - L.gridY) / C);
-    const inGrid = ui.mx >= L.gridX - C / 2 && ui.my >= L.gridY - C / 2 && ui.mx < L.gridX + GRID * C + C / 2 && ui.my < L.gridY + GRID * C + C / 2;
+    const inGrid = ui.mx >= L.gridX - C / 2 && ui.my >= L.gridY - C / 2 && ui.mx < L.gridX + GRID_W * C + C / 2 && ui.my < L.gridY + GRID_H * C + C / 2;
     if (inGrid) return { kind: 'grid', gx, gy, ok: fits(run.items, it, gx, gy, it.rot), cells: cells.map(([x, y]) => [gx + x, gy + y]) };
     const inBoard = ui.mx >= L.boardX && ui.my >= L.boardY && ui.mx < L.boardX + L.boardW && ui.my < L.boardY + L.boardH + C;
     if (inBoard) {

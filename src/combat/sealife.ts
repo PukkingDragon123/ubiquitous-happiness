@@ -10,7 +10,8 @@
 //   barracuda  stalks at range, quivers, and torpedo-dashes through you (every third dash red)
 import * as THREE from 'three';
 import type { World, Entity, DamageKind } from '../game/types';
-import type { Arena } from './types';
+import type { Arena, EnemyKind } from './types';
+import { ENEMY_INFO } from './types';
 import { Creature, sfx, SND } from '../creatures/base';
 import { EnemyCore, type MoveDef } from './core';
 import { attackPlayer } from './resolve';
@@ -158,7 +159,8 @@ export abstract class Foe extends Creature {
     this.dying = 0;
     this.team = 'neutral';
     w.run.kills++;
-    w.emit('kill', { kind: this.kind, x: this.x, y: this.y, elite: this.elite });
+    const info = ENEMY_INFO[this.kind as EnemyKind];
+    w.emit('kill', { kind: this.kind, x: this.x, y: this.y, elite: this.elite, size: this.elite && info?.size === 'small' ? 'medium' : info?.size ?? 'small', family: 'fish' });
     sfx(w, ['pop1', 'pop_b', 'squish2'], this.x, 0.9, 0.9);
     w.fx.gore(this.x, this.y, 0.8, { x: 0, y: 1 });
     this.onDeath(w);

@@ -17,6 +17,7 @@ import { psxMat } from '../player/psx';
 import { ctex, T, tone, bevel, rivet, rust, type Tones } from '../skills/texkit';
 import { chamferBox, lpCyl, lpCone, lpSphere, facet, boxUV } from '../gfx/lowpoly';
 import { hash2 } from '../core/math';
+import { drawText, measure } from '../ui/pixel/font';
 
 const TAU = Math.PI * 2;
 const matCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -297,21 +298,54 @@ export function pedestalModel(area: string): THREE.Group {
 
 // ------------------------------------------------------------------ chest
 export interface ChestModel { root: THREE.Group; lid: THREE.Group }
-export function chestModel(): ChestModel {
+export type ChestKind = 'small' | 'locked' | 'big' | 'sunken' | 'elite';
+/**
+ * A chest, by kind: 'small' (plain planks + iron bands), 'locked' (a padlock on a brass hasp), 'big' (wide, gold
+ * bands and corners, gems on the lid), 'sunken' (green-slimed planks, barnacles, a weed strand), 'elite' (red iron
+ * bands: what a champion drops). The lid is a half barrel on a hinge at the back (rotate `lid.rotation.x` negative).
+ */
+export function chestModel(kind: ChestKind = 'small'): ChestModel & { lock: THREE.Object3D | null; glow: THREE.Mesh } {
   const root = new THREE.Group();
-  const wood = M('wood', woodPage, { rough: 0.85 });
-  const iron = M('bar.iron', ironPage, { rough: 0.75, metal: 0.25 });
+  const big = kind === 'big';
+  const wood = kind === 'sunken' ? M('woodSunk', woodPage, { rough: 0.95, color: '#7e9a78' }) : M('wood', woodPage, { rough: 0.85 });
+  const band = big ? M('gold', goldPage, { rough: 0.4, metal: 0.35, emissive: '#3a2000', emissiveK: 0.3 })
+    : kind === 'elite' ? M('bar.redIron', ironPage, { rough: 0.6, metal: 0.3, color: '#c85a48' })
+      : M('bar.iron', ironPage, { rough: 0.75, metal: 0.25 });
   const gold = M('gold', goldPage, { rough: 0.4, metal: 0.35, emissive: '#3a2000', emissiveK: 0.3 });
-  const W = 1.1, H = 0.55, D = 0.7;
+  const W = big ? 1.5 : kind === 'small' ? 0.85 : 1.1, H = big ? 0.72 : kind === 'small' ? 0.45 : 0.55, D = big ? 0.9 : kind === 'small' ? 0.58 : 0.7;
   const body = mesh(chamferBox(W, H, D, 0.05), wood); body.position.y = H / 2; root.add(body);
-  for (const x of [-0.38, 0.38]) { const band = mesh(boxUV(new THREE.BoxGeometry(0.1, H + 0.02, D + 0.04), 2), iron); band.position.set(x, H / 2, 0); root.add(band); }
+  const bx = [-W * 0.35, W * 0.35];
+  for (const x of bx) { const b = mesh(boxUV(new THREE.BoxGeometry(0.1, H + 0.02, D + 0.04), 2), band); b.position.set(x, H / 2, 0); root.add(b); }
+  // inside: dark, and a warm glow that shows when the lid swings up
+  const inner = mesh(new THREE.BoxGeometry(W - 0.12, 0.04, D - 0.12), M('dark', () => null, { color: '#120808', rough: 1 })); inner.position.y = H - 0.03; root.add(inner);
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.16, D - 0.16), new THREE.MeshBasicMaterial({ color: new THREE.Color(big ? '#ffd870' : '#ffe8b0').multiplyScalar(1.8), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+  glow.rotation.x = -Math.PI / 2; glow.position.y = H + 0.005; root.add(glow);
+  // the lid: a half barrel hinged at the back edge
   const lid = new THREE.Group();
   lid.position.set(0, H, -D / 2);
-  const top = mesh(lpCyl(D / 2, W, 6, D / 2, 1), wood); top.rotation.z = Math.PI / 2; top.scale.set(1, 1, 1); top.position.set(0, 0, D / 2); lid.add(top);
-  for (const x of [-0.38, 0.38]) { const band = mesh(lpCyl(D / 2 + 0.03, 0.1, 6), iron); band.rotation.z = Math.PI / 2; band.position.set(x, 0, D / 2); lid.add(band); }
+  const barrel = new THREE.CylinderGeometry(D / 2, D / 2, W, 7, 1, false, 0, Math.PI);
+  barrel.rotateZ(Math.PI / 2);
+  const top = mesh(barrel, wood); top.position.set(0, 0, D / 2); lid.add(top);
+  for (const x of bx) { const lb = new THREE.CylinderGeometry(D / 2 + 0.03, D / 2 + 0.03, 0.1, 7, 1, false, 0, Math.PI); lb.rotateZ(Math.PI / 2); const m2 = mesh(lb, band); m2.position.set(x, 0, D / 2); lid.add(m2); }
+  if (big) {
+    // gold corners and three gems along the lid's crown
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const c = mesh(chamferBox(0.14, 0.16, 0.14, 0.03), gold); c.position.set(sx * (W / 2 - 0.04), 0.08, sz * (D / 2 - 0.04)); root.add(c); }
+    ['#e8304a', '#40c8ff', '#7ae05a'].forEach((col, i) => { const g = mesh(lpSphere(0.07, 0), M('gem.' + col, () => null, { color: col, rough: 0.3, emissive: col, emissiveK: 0.5 })); g.position.set((i - 1) * 0.36, D / 2 + 0.01, D / 2); lid.add(g); });
+  }
+  if (kind === 'sunken') {
+    const shell = M('barnacle', () => null, { color: '#d8ccb0', rough: 0.9 });
+    for (let k = 0; k < 9; k++) { const b = mesh(lpCone(0.05 + (k % 3) * 0.015, 0.06, 5), shell); b.position.set(-W / 2 + 0.1 + ((k * 0.37) % 1) * (W - 0.2), (k % 2 ? 0.08 : H * 0.6), D / 2 + 0.01); b.rotation.x = Math.PI / 2; root.add(b); }
+    const weed = mesh(new THREE.BoxGeometry(0.04, 0.6, 0.02), M('weed', () => null, { color: '#4a7a2a', rough: 0.9 })); weed.position.set(W / 2 - 0.1, H + 0.25, D / 2 - 0.1); weed.rotation.z = -0.3; lid.add(weed);
+  }
   root.add(lid);
-  const lock = mesh(chamferBox(0.2, 0.24, 0.08, 0.03), gold); lock.position.set(0, H - 0.05, D / 2 + 0.04); root.add(lock);
-  return { root, lid };
+  let lock: THREE.Object3D | null = null;
+  if (kind === 'locked') {
+    const hasp = mesh(chamferBox(0.16, 0.2, 0.06, 0.02), gold); hasp.position.set(0, H - 0.04, D / 2 + 0.03); root.add(hasp);
+    lock = padlock(); lock.position.set(0, H - 0.22, D / 2 + 0.1); lock.scale.setScalar(0.75); root.add(lock);
+  } else {
+    const plate = mesh(chamferBox(0.18, 0.2, 0.06, 0.02), big ? gold : band); plate.position.set(0, H - 0.05, D / 2 + 0.03); root.add(plate);
+  }
+  return { root, lid, lock, glow };
 }
 
 // ------------------------------------------------------------------ pickups
@@ -467,4 +501,56 @@ export function ropeModel(h: number): { root: THREE.Group; lamp: THREE.Mesh } {
   lamp.position.set(0.25, 1.5, 0.1); root.add(lamp);
   for (const dy of [0.2, -0.2]) { const cap = mesh(lpCyl(0.14, 0.07, 6), brass); cap.position.set(0.25, 1.5 + dy, 0.1); root.add(cap); }
   return { root, lamp };
+}
+
+// ------------------------------------------------------------------ signposts (the journey's distances)
+/**
+ * A weathered wooden signpost: a pole with barnacles at its foot, arrow boards with the words burnt in (painted
+ * with the pixel font onto plank pages), and a little lantern on top. dir: -1 points left (home), 1 right (onward),
+ * 0 a plain plaque.
+ */
+export function signpostModel(boards: { text: string; dir: -1 | 0 | 1 }[], lantern = true): THREE.Group {
+  const g = new THREE.Group();
+  const wood = M('wood', woodPage, { rough: 0.9 });
+  const H = 1.6 + boards.length * 0.55;
+  const pole = mesh(lpCyl(0.09, H, 6, 0.08), wood); pole.position.y = H / 2; g.add(pole);
+  const shell = M('barnacle', () => null, { color: '#d8ccb0', rough: 0.9 });
+  for (let k = 0; k < 5; k++) { const b = mesh(lpCone(0.05, 0.06, 5), shell); const a = k * 1.3; b.position.set(Math.cos(a) * 0.09, 0.1 + k * 0.06, Math.sin(a) * 0.09); b.rotation.set(Math.sin(a) * 1.4, 0, -Math.cos(a) * 1.4); g.add(b); }
+  boards.forEach((bd, i) => {
+    const y = H - 0.35 - i * 0.55;
+    const font = 'body' as const;
+    const tw = Math.max(24, measure(bd.text, font));
+    const cw = tw + 16, chh = 20;
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = chh;
+    const x = cv.getContext('2d')!;
+    // plank page: tones in grain bands, a darker border, nail heads, then the letters burnt in
+    for (let yy = 0; yy < chh; yy++) for (let xx = 0; xx < cw; xx++) {
+      const band = (yy + Math.floor(Math.sin(xx * 0.21 + i) * 1.5)) % 5;
+      const c = yy === 0 || yy === chh - 1 || xx === 0 || xx === cw - 1 ? '#3e2814' : band === 0 ? '#7a5634' : band === 3 ? '#a07848' : '#8e6a40';
+      x.fillStyle = c; x.fillRect(xx, yy, 1, 1);
+    }
+    for (const nx of [3, cw - 4]) { x.fillStyle = '#c8c0b0'; x.fillRect(nx, 9, 1, 1); x.fillStyle = '#2a1a0c'; x.fillRect(nx + 1, 10, 1, 1); }
+    drawText(x, bd.text, Math.round((cw - tw) / 2), 4, { font, color: '#24120a', shadow: null });
+    const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.colorSpace = THREE.SRGBColorSpace;
+    const bw = cw / 40, bh = 0.46;
+    const board = mesh(chamferBox(bw, bh, 0.07, 0.02), wood);
+    const off = bd.dir * (bw / 2 - 0.15);
+    board.position.set(off, y, 0.02); g.add(board);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.04, bh - 0.04), psxMat(tex, { rough: 0.9 }));
+    face.position.set(off, y, 0.057); g.add(face);
+    if (bd.dir) {
+      // the arrow's point: a wedge on the board's far end
+      const tip = new THREE.Shape(); tip.moveTo(0, -bh / 2); tip.lineTo(0.26, 0); tip.lineTo(0, bh / 2); tip.lineTo(0, -bh / 2);
+      const tg = new THREE.ExtrudeGeometry(tip, { depth: 0.07, bevelEnabled: false }); tg.translate(0, 0, -0.035);
+      const t = mesh(tg, wood); t.position.set(off + bd.dir * bw / 2, y, 0.02); if (bd.dir < 0) t.rotation.y = Math.PI; g.add(t);
+    }
+  });
+  if (lantern) {
+    const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
+    const arm = mesh(new THREE.BoxGeometry(0.4, 0.05, 0.05), wood); arm.position.set(0.2, H - 0.05, 0); g.add(arm);
+    const lamp = new THREE.Mesh(lpSphere(0.1, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd890').multiplyScalar(2.2) }));
+    lamp.position.set(0.36, H - 0.25, 0); lamp.name = 'lamp'; g.add(lamp);
+    for (const dy of [0.13, -0.13]) { const cap = mesh(lpCyl(0.09, 0.05, 6), brass); cap.position.set(0.36, H - 0.25 + dy, 0); g.add(cap); }
+  }
+  return g;
 }

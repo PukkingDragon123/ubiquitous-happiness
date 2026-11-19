@@ -112,7 +112,7 @@ export class MotherMoray extends BossBase {
       this.extT = 1; this.m.setJaw(k < 0.7 ? 1.15 : 0.2);
       if (c.justEntered('active')) w.sfx('swish_c', this.x, 1, 0.6);
       const r = this.hitCircle(w, this.x + this.aim.x * 0.4, this.y + this.aim.y * 0.4, 0.9, { knock: m.knock });
-      if (r === 'hit' && m.id === 'constrict') { this.hold = 1.1; p.hooked = true; callout(w, 'CONSTRICTED', p.x, p.y + 1, 'danger', 0.45); }
+      if (r === 'hit' && m.id === 'constrict') { this.hold = 1.1; p.hooked = true; (p as unknown as { grabbedBy: Entity | null }).grabbedBy = this; callout(w, 'CONSTRICTED', p.x, p.y + 1, 'danger', 0.45); }
     } else if (ph === 'recover') {
       // the head stays out a moment: the punish window
       this.extT = m.id.startsWith('snap') ? 0.55 : 0.85 - k * 0.3; this.m.setJaw(0.25);
@@ -193,7 +193,7 @@ export class MotherMoray extends BossBase {
     this.m.update(dt, this.core.phase === 'active' ? 3 : 0.6, 0);
     this.m.flash(this.flash * 0.8);
   }
-  dispose() { this.m.dispose(); }
+  dispose(w?: World) { super.dispose(w); this.m.dispose(); }
 }
 
 // =========================================================================================== LEVIATHAN
@@ -360,5 +360,5 @@ export class Leviathan extends BossBase {
     this.m.update(dt, sp + 0.3, 0);
     this.m.flash(this.flash * 0.8);
   }
-  dispose() { this.m.dispose(); if (this.dark) this.dark.alive = false; }
+  dispose(w?: World) { super.dispose(w); this.m.dispose(); if (this.dark) this.dark.alive = false; }
 }

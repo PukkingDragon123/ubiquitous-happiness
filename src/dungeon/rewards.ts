@@ -72,3 +72,64 @@ export function rollShop(rng: Rng, luck: number, floorN: number): ShopSlot[] {
   if (slots.length < 4 && rng.chance(0.5)) slots.push({ kind: rng.chance(0.5) ? 'bomb' : 'key', price: 5, sold: false });
   return slots;
 }
+
+// ------------------------------------------------------------------ chests and kill drops (v4: lots more loot)
+/** what a chest holds, by kind; luck and the depth's pearl multiplier (pk) tilt it */
+export function rollChest(rng: Rng, kind: 'small' | 'locked' | 'big' | 'sunken' | 'elite', area: string, luck: number, pk = 1): Reward[] {
+  const out: Reward[] = [];
+  const pearls = (n: number) => { for (let i = 0; i < n; i++) out.push({ kind: 'pearl', value: pk }); };
+  const mat = () => out.push({ kind: 'item', id: rollMaterial(rng, area) });
+  switch (kind) {
+    case 'small': {
+      const k = rng.weighted([['pearls', 4], ['mat', 4], ['heart', 1.5], ['bomb', 1.5], ['key', 1]] as [string, number][], (e) => e[1])[0];
+      if (k === 'pearls') pearls(rng.int(2, 4)); else if (k === 'mat') mat(); else out.push({ kind: k as 'heart', value: 1 } as Reward);
+      if (rng.chance(0.55)) rng.chance(0.5) ? mat() : pearls(2);
+      if (rng.chance(0.12 + luck * 0.02)) out.push({ kind: 'item', id: rollGear(rng, luck) });
+      break;
+    }
+    case 'locked': out.push({ kind: 'item', id: rollGear(rng, luck + 1, 'treasure') }); mat(); pearls(3); if (rng.chance(0.3)) out.push({ kind: 'bomb' }); break;
+    case 'big':
+      out.push({ kind: 'item', id: rollGear(rng, luck + 0.5, 'treasure') });
+      if (rng.chance(0.45 + luck * 0.03)) out.push({ kind: 'item', id: rollGear(rng, luck) });
+      mat(); mat(); pearls(rng.int(4, 6));
+      if (rng.chance(0.35)) out.push(rng.chance(0.5) ? { kind: 'key' } : { kind: 'bomb' });
+      if (rng.chance(0.3)) out.push({ kind: 'heart', value: 2 });
+      break;
+    case 'sunken': out.push({ kind: 'item', id: rollGear(rng, luck + 2, 'treasure') }); pearls(rng.int(6, 9)); if (rng.chance(0.5)) mat(); break;
+    case 'elite': mat(); if (rng.chance(0.6)) out.push({ kind: 'item', id: rollGear(rng, luck + 0.5) }); pearls(rng.int(2, 3)); break;
+  }
+  return out;
+}
+
+const FISH = /moray|crab|puffer|jelly|angler|barracuda|piranha|eel|shark|ray|squid|octo|fish|grouper|pike|bass|trigger|urchin|lion/i;
+const HUMAN_JUNK: [string, number][] = [['scrap', 3], ['rustyHook', 2], ['rustyNail', 2], ['lineScrap', 2], ['leadShot', 1.5], ['cork', 1]];
+/** a fish's own material, when it has an obvious one */
+function fishMaterial(kind: string): string | null {
+  if (/puffer|urchin|lion/i.test(kind)) return 'urchinSpine';
+  if (/crab/i.test(kind)) return 'seashell';
+  if (/moray|barracuda|shark|pike/i.test(kind)) return 'sharkTooth';
+  if (/jelly/i.test(kind)) return 'seaGlass';
+  if (/angler/i.test(kind)) return 'manaCrystal';
+  return null;
+}
+export const isFishKind = (kind: string) => !/^human:/.test(kind) && FISH.test(kind);
+
+/** what an enemy drops when it dies: fish drop materials, humans gear and scrap, bigger ones more; elites add a chest */
+export function rollKillDrops(rng: Rng, kind: string, size: number, area: string, luck: number, pk = 1, family?: string): Reward[] {
+  const out: Reward[] = [];
+  const rolls = 1 + (size >= 1.5 ? 1 : 0) + (size >= 2.5 ? 1 : 0);
+  // K's kill events carry a family ('fish' | 'human' ...) when they know it; else guess from the kind
+  const fish = family ? family === 'fish' : isFishKind(kind);
+  for (let i = 0; i < rolls; i++) {
+    if (fish) {
+      if (rng.chance(0.55)) { const own = fishMaterial(kind); out.push({ kind: 'item', id: own && ITEMS[own] && rng.chance(0.6) ? own : rollMaterial(rng, area) }); }
+      if (rng.chance(0.35)) out.push({ kind: 'pearl', value: pk });
+    } else {
+      if (rng.chance(0.6)) { const j = rng.weighted(HUMAN_JUNK, (e) => e[1])[0]; out.push({ kind: 'item', id: ITEMS[j] ? j : 'scrap' }); }
+      if (rng.chance(0.22 + luck * 0.02)) out.push({ kind: 'item', id: rollGear(rng, luck) });
+      if (rng.chance(0.5)) { out.push({ kind: 'pearl', value: pk }); if (rng.chance(0.4)) out.push({ kind: 'pearl', value: pk }); }
+    }
+  }
+  if (rng.chance(0.06)) out.push({ kind: 'heart', value: 1 });
+  return out;
+}

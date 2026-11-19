@@ -80,7 +80,8 @@ class FxBit implements Entity {
   x: number; y: number; vx = 0; vy = 0; r = 0; alive = true;
   obj: THREE.Mesh;
   t = 0;
-  constructor(x: number, y: number, public z: number, mat: THREE.Material, public life: number, public size: number, public mode: 'glint' | 'ring' | 'stun', public follow?: () => { x: number; y: number }, public spin = 0) {
+  aspect = 1;
+  constructor(x: number, y: number, public z: number, mat: THREE.Material, public life: number, public size: number, public mode: 'glint' | 'ring' | 'stun' | 'key' | 'burst', public follow?: () => { x: number; y: number }, public spin = 0) {
     this.x = x; this.y = y;
     this.obj = new THREE.Mesh(quad, mat);
     this.obj.renderOrder = 60;
@@ -100,8 +101,15 @@ class FxBit implements Entity {
     } else if (this.mode === 'ring') {
       s *= 0.85 + 0.15 * Math.sin(this.t * 18);
       ang = Math.round(this.t * this.spin * 8) / 8;
+    } else if (this.mode === 'key') {
+      // bounce in, bob, pop out
+      s *= k < 0.15 ? (k / 0.15) * 1.15 : k > 0.85 ? Math.max(0, (1 - k) / 0.15) : 1 + Math.sin(this.t * 14) * 0.04;
+    } else if (this.mode === 'burst') {
+      // the perfect-parry star: slams in huge, shrinks fast, turns an eighth
+      s *= k < 0.12 ? 1.4 * (k / 0.12) : 1.4 * Math.max(0, 1 - (k - 0.12) / 0.88) ** 1.5;
+      ang = k > 0.3 ? Math.PI / 4 : 0;
     }
-    this.obj.scale.setScalar(Math.max(0.001, s));
+    this.obj.scale.set(Math.max(0.001, s * this.aspect), Math.max(0.001, s), 1);
     this.obj.position.set(this.x, this.y, this.z);
     this.obj.quaternion.copy(w.camera.quaternion);
     if (ang) this.obj.rotateZ(ang);
@@ -112,14 +120,82 @@ class FxBit implements Entity {
 /** the attack tell: a pixel star flash (white = parryable, red = unblockable) */
 export function glint(w: World, x: number, y: number, o: { red?: boolean; size?: number; z?: number; follow?: () => { x: number; y: number }; sound?: boolean } = {}) {
   const red = !!o.red;
-  const sz = (o.size ?? 0.9) * (red ? 1.25 : 1);
-  w.add(new FxBit(x, y, o.z ?? 0.9, unlitMat(starTex(red), '#ffffff', red ? 1.8 : 2.2), 0.42, sz, 'glint', o.follow));
-  if (red) w.add(new FxBit(x, y, (o.z ?? 0.9) - 0.02, unlitMat(ringTex(true), '#ffffff', 1.6), 0.5, sz * 1.4, 'ring', o.follow, 3));
+  const sz = (o.size ?? 1.0) * (red ? 1.3 : 1.2);
+  w.add(new FxBit(x, y, o.z ?? 0.9, unlitMat(starTex(red), '#ffffff', red ? 1.8 : 2.4), 0.5, sz, 'glint', o.follow));
+  // a ring round every tell: white = parry it, red (spinning) = get out of the way
+  w.add(new FxBit(x, y, (o.z ?? 0.9) - 0.02, unlitMat(ringTex(red), '#ffffff', red ? 1.6 : 2), red ? 0.5 : 0.36, sz * (red ? 1.4 : 1.1), 'ring', o.follow, red ? 3 : 0));
   w.fx.emit('glow', x, y, { n: 1, size: sz * 0.7, life: 0.2, alpha: 0.6, color: red ? '#ff3020' : '#d8f0ff', z: (o.z ?? 0.9) - 0.05 });
   if (o.sound !== false) {
-    if (red) { w.sfx('k_glass', x, 0.65, 0.55); w.sfx('charge', x, 0.45, 0.8); }
-    else w.sfx('k_glass', x, 0.55, 1.5);
+    // two distinct cues: a bright bell "ting" for parryable, a low glassy whine for red
+    if (red) { w.sfx('k_glass', x, 0.7, 0.55); w.sfx('charge', x, 0.5, 0.8); }
+    else { w.sfx('bell', x, 0.6, 1.9); w.sfx('k_glass', x, 0.4, 1.6); }
   }
+}
+
+// ------------------------------------------------------------------ keycap hints (first few times)
+/** 5x7 glyphs for the few letters the hints need */
+const GLYPH: Record<string, string[]> = {
+  K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+  S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+  P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  C: ['01111', '10000', '10000', '10000', '10000', '10000', '01111'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  '/': ['00001', '00010', '00010', '00100', '01000', '01000', '10000'],
+};
+function keycapTex(kind: 'parry' | 'dodge') {
+  return pxTex('tgKey' + kind, 64, 20, (p) => {
+    const key = (x0: number, w: number, label: string) => {
+      // the keycap: a light top, a darker front lip, a hard outline
+      for (let y = 1; y < 18; y++) for (let x = x0; x < x0 + w; x++) p.set(x, y, y > 14 ? '#8a94a0' : '#eef2f6');
+      for (let x = x0; x < x0 + w; x++) { p.set(x, 0, '#1a2028'); p.set(x, 18, '#1a2028'); }
+      for (let y = 0; y < 19; y++) { p.set(x0 - 1, y, '#1a2028'); p.set(x0 + w, y, '#1a2028'); }
+      let cx = x0 + Math.round((w - (label.length * 6 - 1)) / 2);
+      for (const ch of label) { const g = GLYPH[ch]; if (g) for (let gy = 0; gy < 7; gy++) for (let gx = 0; gx < 5; gx++) if (g[gy][gx] === '1') p.set(cx + gx, 4 + gy, '#1a2028'); cx += 6; }
+    };
+    if (kind === 'parry') {
+      key(2, 15, 'K');
+      for (let gy = 0; gy < 7; gy++) for (let gx = 0; gx < 5; gx++) if (GLYPH['/'][gy][gx] === '1') p.set(21 + gx, 6 + gy, '#ffffff');
+      // a mouse with the right button lit
+      const mx = 30;
+      for (let y = 1; y < 18; y++) for (let x = mx; x < mx + 13; x++) { const dx = (x - mx - 6) / 6.5, dy = (y - 9) / 8.5; if (dx * dx + dy * dy <= 1) p.set(x, y, y < 8 && x > mx + 6 ? '#ffd23a' : y < 8 ? '#c8d0d8' : '#eef2f6'); }
+      for (let y = 1; y < 8; y++) p.set(mx + 6, y, '#1a2028');
+      for (let x = mx; x < mx + 13; x++) p.set(x, 8, '#1a2028');
+      p.outline('#1a2028');
+    } else key(3, 58, 'SPACE');
+  });
+}
+const hintCount: Record<string, number> = {};
+function hintSeen(kind: string): number {
+  if (hintCount[kind] === undefined) { let n = 0; try { n = +(localStorage.getItem('blobfish.hint.' + kind) || 0); } catch { /* storage off */ } hintCount[kind] = n; }
+  return hintCount[kind];
+}
+/**
+ * the first few parryable / unblockable tells also pop the key to press over the blobfish (K / right mouse:
+ * PARRY, SPACE: DODGE), so the defence is learnt by seeing it. `force` shows it regardless (tutorials).
+ */
+export function keyHint(w: World, kind: 'parry' | 'dodge', force = false) {
+  const n = hintSeen(kind), max = kind === 'parry' ? 6 : 4;
+  if (!force && n >= max) return;
+  const t = (hintLast[kind] ?? -99);
+  if (!force && w.time - t < 2.5) return;
+  hintLast[kind] = w.time;
+  hintCount[kind] = n + 1;
+  try { localStorage.setItem('blobfish.hint.' + kind, String(n + 1)); } catch { /* storage off */ }
+  const p = w.player;
+  const follow = () => ({ x: p.x, y: p.y + 1.25 });
+  const mat = unlitMat(keycapTex(kind), '#ffffff', 1.25);
+  const bit = new FxBit(p.x, p.y + 1.25, 1.2, mat, 1.3, 0.75, 'key', follow);
+  bit.aspect = 64 / 20;
+  w.add(bit);
+  w.text.pop(kind === 'parry' ? 'PARRY' : 'DODGE', 0, 1.82, kind === 'parry' ? 'hint' : 'danger', { size: 0.36, life: 1.3, vy: 0, follow: () => ({ x: p.x, y: p.y }) });
+}
+const hintLast: Record<string, number> = {};
+
+/** the perfect parry's big white star burst */
+export function parryStar(w: World, x: number, y: number) {
+  w.add(new FxBit(x, y, 1.0, unlitMat(starTex(false), '#ffffff', 3), 0.45, 3.2, 'burst'));
+  w.add(new FxBit(x, y, 0.98, unlitMat(ringTex(false), '#ffffff', 2.5), 0.4, 2.6, 'ring', undefined, 2));
 }
 
 /** a ring marking an area that is about to be hit (puffer blast, slams); lasts `dur` */

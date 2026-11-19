@@ -7,7 +7,9 @@
 //   PARRY   K / right mouse (tap)      0.15 s perfect window: deflect, stagger the attacker, riposte (x3 crit)
 //           pressed a touch late it's a block
 //   BLOCK   K / right mouse (hold)     drains stamina; at 0 the guard breaks
-//   DODGE   Space                      a quick dart, ~0.26 s of i-frames (no direction: a backstep)
+//   DODGE   Space (tap)                a quick dart, ~0.26 s of i-frames (no direction: a backstep)
+//   DASH    Space (hold)               after the dart, keep holding to charge (a glow builds, rising hum);
+//                                      release: a long piercing dash that cuts and staggers everything on its path
 //   FLASK   R / H                      "kelp tea": a slow gulp, heals half your hearts, interrupted by hits
 //   SKILLS  1-4                        unchanged (mana)
 // Stamina regenerates after a short delay. hud() exposes everything the HUD needs.
@@ -23,7 +25,7 @@ import { manaBoltShot } from '../skills/projectiles';
 import { withBlow, coreOf } from './core';
 import { parryFlash, clang, impact, callout } from './feel';
 
-type MoveId = 'light1' | 'light2' | 'light3' | 'heavy' | 'charge' | 'riposte' | 'dodge' | 'parry' | 'drink' | 'hitstun' | 'guardBroken' | 'whirl';
+type MoveId = 'light1' | 'light2' | 'light3' | 'heavy' | 'charge' | 'riposte' | 'dodge' | 'dashCharge' | 'dash' | 'parry' | 'drink' | 'hitstun' | 'guardBroken' | 'whirl';
 type Act = 'light' | 'heavy' | 'dodge' | 'parry' | 'drink';
 
 interface MoveSpec { startup: number; active: number; recovery: number; stamina: number; dmg: number; poise: number; reach: number; lunge: number; cancel: number }
@@ -39,6 +41,8 @@ export const PARRY_WINDOW = 0.15;
 const LATE_WINDOW = 0.12;
 const PARRY_RECOVER = 0.22;
 const DODGE = { dur: 0.34, iframes: 0.26, stamina: 20, cancel: 0.2 };
+/** charged dash: hold Space past the dart; full charge in `full` s; the dash covers `len0 + len1 * charge` m */
+const DASH = { hold: 0.2, full: 0.75, dur: 0.3, len0: 5.5, len1: 4.5, stamina: 16, recover: 0.22 };
 const DRINK = { dur: 1.2, gulp: 0.72 };
 const HOLD_TO_CHARGE = 0.22;
 const CHARGE_FULL = 0.75;
@@ -78,6 +82,19 @@ export class PlayerCombat implements Defender {
   /** dodge i-frames left */
   iframes = 0;
   private dodgeDir = new THREE.Vector2();
+  /** seconds Space has been held since the last press (-1: not held) */
+  private dashHold = -1;
+  /** charged dash: 0..1 charge, direction, path start, hit set */
+  dashCharge = 0;
+  private dashDir = new THREE.Vector2(1, 0);
+  private dashFrom = new THREE.Vector2();
+  private dashHits = new Set<Entity>();
+  private dashTick = 0;
+  /** 0..1 body glow the controller adds to the blobfish (dash charge, perfect parry) */
+  glow = 0;
+  /** slow-motion requests (riposte, perfect parry): real-time end, restored here so nothing stays slow */
+  private slowUntil = 0;
+  private slowK = 1;
   private gulped = false;
   // whirlwind (warrior skill)
   private whirlT = 0; private whirlMul = 1; private whirlTick = 0;
@@ -111,11 +128,15 @@ export class PlayerCombat implements Defender {
       case 'hitstun': return 0.15;
       case 'guardBroken': return 0;
       case 'dodge': return 0.2;
+      case 'dashCharge': return 0.2;
+      case 'dash': return 0;
       default: return this.blocking ? 0.45 : this.whirlT > 0 ? 0.7 : 1;
     }
   }
   /** facing locked to the aim during moves */
-  get faceAim() { return this.move !== null && this.move !== 'dodge' && this.move !== 'hitstun' || this.blocking; }
+  get faceAim() { return this.move !== null && this.move !== 'dodge' && this.move !== 'dash' && this.move !== 'hitstun' || this.blocking; }
+  /** a slow-motion beat (real seconds); the moveset restores the time scale when it's over */
+  slowmo(w: World, k: number, sec: number) { this.slowK = Math.min(this.slowK < 1 && performance.now() < this.slowUntil ? this.slowK : 1, k); this.slowUntil = Math.max(this.slowUntil, performance.now() + sec * 1000); w.game.timeScale = this.slowK; }
   phase(): 'startup' | 'active' | 'recovery' | null {
     const s = this.spec;
     if (!s) return null;
@@ -129,7 +150,7 @@ export class PlayerCombat implements Defender {
       flasks: this.flasks, flasksMax: this.flasksMax, drinking: this.move === 'drink' ? clamp(this.t / DRINK.dur, 0, 1) : 0,
       guard: this.move === 'guardBroken' ? 'guardBroken' : this.riposteT > 0 ? 'riposte' : this.parryT > 0 ? 'parry' : this.blocking || this.lateT > 0 ? 'block' : 'idle',
       parryWindow: Math.max(0, this.parryT), lastParry: this.lastParry, lastParryAge: this.p.alive ? performance.now() / 1000 - this.lastParryAt : 99,
-      charge: this.move === 'charge' ? this.charge : 0, move: this.move, iframes: this.iframes > 0,
+      charge: this.move === 'charge' ? this.charge : this.move === 'dashCharge' ? this.dashCharge : 0, move: this.move, iframes: this.iframes > 0,
     };
   }
   /** refill flasks (new floor) */
@@ -163,6 +184,10 @@ export class PlayerCombat implements Defender {
       if (inp.keyHit('KeyR') || inp.keyHit('KeyH')) this.buffer = { act: 'drink', t: w.time };
     }
     const attackHeld = inp.held('attack') || inp.key('Mouse1') || inp.key('KeyU');
+    if (inp.hit('dash')) this.dashHold = 0; else if (this.dashHold >= 0) { if (inp.held('dash')) this.dashHold += dt; else this.dashHold = -1; }
+    // slow-motion watchdog: whatever asked for it, time comes back
+    if (this.slowK < 1 && performance.now() > this.slowUntil) { this.slowK = 1; if (p.alive) w.game.timeScale = 1; }
+    this.glow = Math.max(0, this.glow - dt * 3);
     if (this.holdT >= 0) { if (attackHeld) this.holdT += dt; else this.holdT = -1; }
     if (!inp.held('ability')) this.parryDown = false;
     // ---- move timeline
@@ -180,6 +205,8 @@ export class PlayerCombat implements Defender {
     if (m === 'hitstun' || m === 'guardBroken') return false;
     if (m === 'drink') return false;
     if (m === 'dodge') return this.t >= (act === 'dodge' ? DODGE.dur - 0.06 : DODGE.cancel);
+    if (m === 'dashCharge') return false;
+    if (m === 'dash') return this.t >= DASH.dur + (act === 'dodge' ? DASH.recover : DASH.recover * 0.5);
     if (m === 'parry') return act === 'dodge' || this.t > PARRY_WINDOW + 0.05;
     if (m === 'charge') return act === 'dodge';
     const s = this.spec!;
@@ -251,7 +278,7 @@ export class PlayerCombat implements Defender {
       const tgt = this.riposteTarget && this.riposteTarget.alive ? this.riposteTarget : null;
       if (tgt && Math.hypot(tgt.x - p.x, tgt.y - p.y) < 4) { p.aim.set(tgt.x - p.x, tgt.y - p.y).normalize(); this.aimAng = Math.atan2(p.aim.y, p.aim.x); this.f = p.aim.x >= 0 ? 1 : -1; }
       p.invuln = Math.max(p.invuln, s.startup + s.active + 0.1);
-      w.game.timeScale = 0.6;
+      this.slowmo(w, 0.6, 0.5);
       w.sfx('magic_whoosh1', p.x, 0.6, 0.8);
       p.setExpr('angry', 0.8);
     } else p.setExpr('attack', s.startup + s.active + s.recovery);
@@ -287,6 +314,39 @@ export class PlayerCombat implements Defender {
     p.dodged(w);
   }
 
+  private startDash(w: World) {
+    const p = this.p, c = this.dashCharge;
+    this.begin('dash');
+    this.drain(DASH.stamina + c * 10, 0.7);
+    this.dashFrom.set(p.x, p.y);
+    this.dashHits.clear();
+    this.iframes = DASH.dur + 0.05;
+    w.sfx('magic_whoosh1', p.x, 0.8, 0.7 - c * 0.15); w.sfx('swish_c', p.x, 0.7, 0.8);
+    w.fx.emit('ring', p.x, p.y, { size: 0.3, size1: 1.4 + c, life: 0.25, color: '#bfefff', add: true, spread: 0 });
+    w.fx.emit('bubbleBig', p.x - this.dashDir.x * 0.5, p.y - this.dashDir.y * 0.5, { n: 6, spread: 0.3, speed: 1.2 });
+    w.game.addShake(0.1 + c * 0.1);
+    p.setExpr('angry', DASH.dur + 0.3);
+    w.emit('dash', { charged: true, charge: c });
+  }
+  /** the piercing dash cuts every enemy it passes through (once each) */
+  private dashSweep(w: World) {
+    const p = this.p, c = this.dashCharge, st = p.stats;
+    for (const e of w.entities) {
+      if (!e.alive || e.team !== 'enemy' || !e.hit || this.dashHits.has(e)) continue;
+      const d = segDist(e.x, e.y, this.dashFrom.x, this.dashFrom.y, p.x, p.y).d;
+      if (d > e.r + p.r + 0.2) continue;
+      this.dashHits.add(e);
+      const dmg = st.swordDmg * (1.4 + 1.6 * c);
+      const ok = withBlow({ heavy: true, riposte: false, poise: 40 + 50 * c, guardBreak: c > 0.6, weight: 'heavy' }, () => strike(w, p, e, dmg, this.dashDir.x, this.dashDir.y + 0.2, 'sword', { quiet: true }));
+      if (!ok) continue;
+      impact(w, e.x, e.y, Math.atan2(this.dashDir.y, this.dashDir.x), c > 0.6 ? 'heavy' : 'light', { armour: (e as unknown as { armoured?: boolean }).armoured });
+      w.game.freeze(0.035);
+      w.fx.slash(e.x, e.y, Math.atan2(this.dashDir.y, this.dashDir.x), 1.4, c >= 0.99 ? '#ffe070' : '#ffffff');
+      e.vx += this.dashDir.x * 3; e.vy += this.dashDir.y * 2;
+    }
+    this.dashFrom.set(p.x, p.y);
+  }
+
   private startParry(w: World) {
     const p = this.p;
     // mashing: a parry pressed right after another gets a shorter window
@@ -316,13 +376,13 @@ export class PlayerCombat implements Defender {
           w.sfx('sw_swish', p.x, m === 'heavy' || m === 'riposte' ? 0.8 : 0.55, (m === 'light3' ? 0.85 : m === 'heavy' ? 0.7 : 1.1 + this.combo * 0.08) * (wk === 'blunt' ? 0.75 : 1));
           if (m === 'heavy' || m === 'riposte') w.fx.emit('bubble', p.x - p.aim.x * 0.4, p.y - p.aim.y * 0.4, { n: 10, spread: 0.2, speed: 1.6 });
         }
-        if (m === 'riposte' && this.t >= s!.startup + s!.active) w.game.timeScale = damp(w.game.timeScale, 1, 10, dt);
+
         // hold through a light: roll into a heavy charge (Zelda-style)
         if (m.startsWith('light') && this.fromHold && attackHeld && this.holdT >= HOLD_TO_CHARGE && this.t >= s!.startup + s!.active && this.weaponKind() !== 'caster') {
           this.begin('charge'); this.charge = 0; this.chargeDing = false; this.combo = 0;
           break;
         }
-        if (this.t >= s!.startup + s!.active + s!.recovery) { if (m === 'riposte') w.game.timeScale = 1; this.end(); }
+        if (this.t >= s!.startup + s!.active + s!.recovery) this.end();
         break;
       }
       case 'charge': {
@@ -335,8 +395,46 @@ export class PlayerCombat implements Defender {
       }
       case 'dodge':
         if (Math.random() < dt * 30) w.fx.emit('bubbleS', p.x, p.y, { n: 1, spread: 0.2 });
+        // still holding Space after the dart: wind up a charged dash
+        if (this.dashHold >= DASH.hold && this.t >= 0.16) { this.begin('dashCharge'); this.dashCharge = 0; this.dashTick = 0; this.chargeDing = false; w.sfx('charge', p.x, 0.5, 0.8); break; }
         if (this.t >= DODGE.dur) this.end();
         break;
+      case 'dashCharge': {
+        this.dashCharge = clamp(this.t / DASH.full, 0, 1);
+        this.glow = Math.max(this.glow, 0.25 + this.dashCharge * 0.75);
+        // the line: toward the aim (mouse), or the held direction on keys
+        const ax = w.game.input.axis();
+        if (Math.hypot(ax.x, ax.y) > 0.1 && performance.now() - w.game.input.lastMouse > 1500) this.dashDir.set(ax.x, ax.y).normalize(); else this.dashDir.set(p.aim.x, p.aim.y).normalize();
+        // energy gathers in: sparkles pulled toward the body, a rising hum, a ding at full
+        this.dashTick -= dt;
+        if (this.dashTick <= 0) { this.dashTick = 0.18; w.sfx('k_tick', p.x, 0.3 + this.dashCharge * 0.3, 0.8 + this.dashCharge * 1.4); }
+        if (Math.random() < dt * (10 + this.dashCharge * 30)) {
+          const a = Math.random() * TAU, r = 1.2 + Math.random() * 0.6;
+          w.fx.emit('sparkle', p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, { n: 1, vx: -Math.cos(a) * r * 2.5, vy: -Math.sin(a) * r * 2.5, drag: 0, life: 0.38, color: this.dashCharge >= 1 ? '#ffe070' : '#bfefff', spread: 0 });
+        }
+        if (this.dashCharge >= 1 && !this.chargeDing) { this.chargeDing = true; w.sfx('k_glass', p.x, 0.7, 2); w.fx.emit('ring', p.x, p.y, { size: 0.4, size1: 1.8, life: 0.3, color: '#ffe070', add: true, spread: 0 }); }
+        this.drain(dt * 10, 0.5);
+        if (this.dashHold < 0 || this.t > 2.4) this.startDash(w);
+        break;
+      }
+      case 'dash': {
+        if (this.t < DASH.dur) {
+          const len = DASH.len0 + DASH.len1 * this.dashCharge, sp = len / DASH.dur;
+          // drive the soft body along the line (walls still stop it)
+          p.sb.accel(this.dashDir.x * sp - p.sb.vx, this.dashDir.y * sp - p.sb.vy, 1);
+          p.sb.stretch = 0.55; p.sb.stretchDir = Math.atan2(this.dashDir.y, this.dashDir.x);
+          this.iframes = Math.max(this.iframes, 0.06);
+          this.glow = Math.max(this.glow, 0.8);
+          // a ribbon behind, a wake of bubbles
+          p.trailPush(new THREE.Vector3(p.x, p.y - 0.32, 0.6), new THREE.Vector3(p.x, p.y + 0.32, 0.6), this.dashCharge >= 0.99);
+          if (Math.random() < dt * 40) w.fx.emit('bubble', p.x - this.dashDir.x * 0.5, p.y - this.dashDir.y * 0.5, { n: 1, spread: 0.2, speed: 0.5 });
+          this.dashSweep(w);
+        } else if (this.t < DASH.dur + 0.02) {
+          p.sb.accel(-p.sb.vx * 0.75, -p.sb.vy * 0.75, 1); // brake hard at the end of the line
+        }
+        if (this.t >= DASH.dur + DASH.recover) this.end();
+        break;
+      }
       case 'parry':
         // held: becomes a block once the windows close; released: a short recovery
         if (this.lateT <= 0 && this.parryDown) { this.end(); break; }
@@ -392,7 +490,9 @@ export class PlayerCombat implements Defender {
     const cx = p.x + Math.cos(ang) * 0.45, cy = p.y + Math.sin(ang) * 0.45;
     if (res === 'parried') {
       parryFlash(w, cx, cy, ang);
-      callout(w, 'PARRY!', p.x, p.y + 1, 'gold', 0.5);
+      this.slowmo(w, 0.35, 0.45);
+      this.glow = 1;
+      callout(w, 'PARRY!', p.x, p.y + 1.1, 'gold', 0.68);
       this.lastParry = 'perfect'; this.lastParryAt = performance.now() / 1000;
       this.parryT = 0; this.lateT = 0;
       this.riposteT = 1.6;
@@ -435,8 +535,10 @@ export class PlayerCombat implements Defender {
   /** a blow landed on the player (from Blobfish.damage): interrupt whatever was going on */
   onHurt(w: World) {
     if (this.move === 'drink' && !this.gulped) { callout(w, 'SPILLED!', this.p.x, this.p.y + 1, 'danger', 0.34); w.sfx('splash_s', this.p.x, 0.4); }
-    if (this.move === 'riposte') w.game.timeScale = 1;
+    if (this.move === 'riposte' && this.slowK < 1) { this.slowK = 1; w.game.timeScale = 1; }
+    if (this.move === 'dash') return; // the dash ploughs on (it has i-frames; only unblockables reach here)
     if (this.move !== 'guardBroken') this.begin('hitstun');
+    this.dashCharge = 0;
     this.charge = 0; this.holdT = -1; this.buffer = null; this.combo = 0;
   }
 
@@ -490,10 +592,19 @@ export class PlayerCombat implements Defender {
       ang = a + (Math.PI * 0.85) * f * ease(Math.min(1, this.t / 0.15)) + Math.sin(w.time * 50) * 0.03 * k;
       thrust = -0.2 * k; squash = 0.06 + 0.12 * k; lean = -0.3 * k;
     } else if (m === 'parry' || this.blocking) {
-      // blade up across the body toward the aim
+      // the guard: the toothpick held across in front of the face, nearly upright, leaning toward the aim
       const k = m === 'parry' ? ease(this.t / 0.06) : 1;
-      ang = a + 1.15 * f * k + (m === 'parry' && this.t < 0.1 ? Math.sin(this.t * 60) * 0.08 : 0);
-      lean = -0.18 * k; squash = 0.04;
+      const up = (f > 0 ? 1.28 : Math.PI - 1.28) + clamp(p.aim.y, -0.5, 0.5) * 0.35 * f;
+      ang = dampAngle(this.bladeAng, up, 40, dt) + (m === 'parry' && this.t < 0.1 ? Math.sin(this.t * 60) * 0.06 : 0);
+      thrust = 0.3 * k; lean = -0.18 * k; squash = 0.05;
+      // the perfect window glints on the blade
+      if (m === 'parry' && this.parryT > 0 && Math.random() < dt * 30) { const tp = p.tip(new THREE.Vector3()); w.fx.emit('glint', tp.x, tp.y, { n: 1, size: 0.3, life: 0.15, spread: 0.1 }); }
+    } else if (m === 'dashCharge') {
+      // coiled: the toothpick tucked back like a lance, the body squashing as the charge builds
+      const da = Math.atan2(this.dashDir.y, this.dashDir.x), k = this.dashCharge;
+      ang = da + Math.sin(w.time * 40) * 0.03 * k; thrust = -0.3 * k; squash = 0.08 + 0.16 * k; lean = -0.2 * k;
+    } else if (m === 'dash') {
+      ang = Math.atan2(this.dashDir.y, this.dashDir.x); thrust = this.t < DASH.dur ? 0.35 : 0.35 * (1 - (this.t - DASH.dur) / DASH.recover); squash = -0.08;
     } else if (m === 'dodge') {
       const k = this.t / DODGE.dur;
       ang = a + 1.4 * f; roll = -TAU * ease(k) * Math.sign(this.dodgeDir.x || f); squash = -0.1 * Math.sin(k * Math.PI);
@@ -562,7 +673,7 @@ export class PlayerCombat implements Defender {
       return;
     }
     impact(w, hx, hy, ang, rip ? 'riposte' : heavy ? 'heavy' : 'light', { armour: (e as unknown as { armoured?: boolean }).armoured });
-    if (rip) { callout(w, 'RIPOSTE!', e.x, e.y + e.r + 0.9, 'gold', 0.55); w.emit('riposte', { kind }); w.game.timeScale = 1; }
+    if (rip) { callout(w, 'RIPOSTE!', e.x, e.y + e.r + 0.9, 'gold', 0.55); w.emit('riposte', { kind }); this.slowmo(w, 0.4, 0.25); }
     if (heavy) { e.vx += Math.cos(ang) * 5; e.vy += Math.sin(ang) * 3; }
     // warrior 6-set: the spinning flourish releases a shockwave
     if (m === 'light3' && (st.sets?.warrior ?? 0) >= 6) { w.fx.shockwave(p.x, p.y, 1.2, '#ffe8a0'); for (const o of w.near(p.x, p.y, 2.4, 'enemy')) if (o !== e) strike(w, p, o, st.swordDmg, o.x - p.x, o.y - p.y, 'crush'); }

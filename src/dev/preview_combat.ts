@@ -1,7 +1,8 @@
 // Dev preview for the souls-like combat (?preview=combat).
 //
 // A flat walled arena (24 x 11 m), the real blobfish with the full moveset, and enemies / a boss from the URL:
-//   &enemy=knife,harpoon,moray   spawn these (spawnEnemy)        &boss=reef|kelp|graveyard|arctic|abyss
+//   &enemy=knife,harpoon,moray   spawn these (spawnEnemy; v4 kinds: lionfish, stonefish, mantis; the humans are
+//                                giants)   &boss=reef|kelp|graveyard|arctic|abyss
 //   &elite=1   elites   &roam=1 roamers (patrol / notice / leash) instead of arena-locked   &god=1  no damage               &dummy=1 (default with nothing else) a
 //   training dummy that swings white, white, RED on a rhythm and logs every defense + parry timing
 //   &dummy=still  a dummy that doesn't attack (combo / heavy practice)   &d=<camera distance>   &look=<area>

@@ -17,7 +17,8 @@ import { RunScreen } from './runScreen';
 import { HideoutScreen } from '../hideout/screen';
 import { BackpackScreen } from '../backpack/backpack';
 import { PixelUI } from '../ui/pixel/ui';
-import { META, saveMeta, type RunConfig, type RunResult } from '../meta/meta';
+import { META, saveMeta, resetMeta, type RunConfig, type RunResult } from '../meta/meta';
+import { resetHome, nextGoal, costLines } from '../hideout/rebuild';
 import { MASTERY } from '../hideout/mastery';
 import { ITEMS } from './items';
 import { audio } from '../audio/audio';
@@ -54,6 +55,15 @@ export function wantsIntro() {
   const q = new URLSearchParams(location.search).get('intro');
   if (q !== null) return q !== '0';
   return !META.introDone;
+}
+/** NEW GAME over a save: progress is wiped (the home is a ruin again); settings, cosmetics and achievements stay */
+export function startOver() {
+  const keep = { settings: META.settings, cosmetics: META.cosmetics, achievements: META.achievements };
+  resetMeta();
+  Object.assign(META, keep);
+  delete (META.achievements.counters as Record<string, number>).crabGift;
+  resetHome();
+  saveMeta();
 }
 /** there is something to RESUME: a run in progress, or a hideout to go back to */
 export function hasSave() { return !!META.activeRun || META.introDone || META.runs > 0; }
@@ -98,14 +108,14 @@ export function setupFlow(game: Game): Flow {
     // a dungeon save resumes in the dungeon screen; a v2 wave-defense save in the run screen
     const target = s.v === 2 ? 'run' : game.get('dungeon') ? 'dungeon' : null;
     if (!target) { META.activeRun = null; saveMeta(); return false; }
-    game.go(target, { resume: s });
+    // a save the run screen cannot rebuild must never strand the player: drop it and go home instead
+    try { game.go(target, { resume: s }); } catch (e) { console.warn('[flow] resume failed, going home', e); META.activeRun = null; saveMeta(); return false; }
     return true;
   };
   const intro = new IntroScreen(game);
   const hideout = new HideoutScreen(game, {
     onEnterRun: startRun,
     onResume: () => { resume(); },
-    onPrologue: () => game.go('intro', { replay: true }),
     onMenu: () => game.go('title', { quick: true }),
     hero: () => new CosmeticPuppet() as unknown as HideoutHero,
   });
@@ -118,12 +128,12 @@ export function setupFlow(game: Game): Flow {
   const flow: Flow = {
     hideout, run, intro, title: null as unknown as TitleScreen, startRun, resume,
     newGame: () => {
-      if (wantsIntro()) { game.go('intro', {}); return; }
-      if (META.activeRun) { META.activeRun = null; saveMeta(); }
-      home({ arrive: true });
+      // a new game always starts over: the prologue, then the ruined house (settings and cosmetics are kept)
+      if (hasSave()) startOver();
+      game.go('intro', {});
     },
     continueGame: () => { if (!resume()) home({ arrive: true }); },
-    runEnded: (r) => { game.go('hideout', { arrive: true }); game.openModal('result', r); },
+    runEnded: (r) => { home({ arrive: true }); game.openModal('result', r); },
     toTitle: () => game.go('title', { quick: true }),
     dungeonQuit: () => home({ arrive: true }),
     afterIntro: (skipped) => { welcome = !skipped; home({ arrive: true }); },
@@ -190,7 +200,7 @@ class ResultCard implements Screen {
   private draw(): boolean {
     const ui = this.ui, r = this.r as RunResult & { floor?: number; floors?: number };
     const win = r.outcome === 'victory';
-    const w = Math.min(ui.w - 16, 236), h = Math.min(ui.h - 16, 176);
+    const w = Math.min(ui.w - 16, 256), h = Math.min(ui.h - 16, 200);
     const x = Math.round((ui.w - w) / 2), y = Math.round((ui.h - h) / 2) + Math.round(Math.max(0, 1 - this.t * 3) * 20);
     ui.fill(0, 0, ui.w, ui.h, '#000000', Math.min(0.55, this.t * 1.5));
     ui.panel(win ? 'wood' : 'stone', x, y, w, h);
@@ -224,7 +234,7 @@ class ResultCard implements Screen {
     ui.text(win ? 'BROUGHT HOME' : ids.length ? 'LOST AT SEA' : 'NOTHING LOST', x + 12, yy, { font: 'small', color: win ? '#ffe07a' : '#ff9a8a', outline: '#140a06' });
     yy += ui.lh('small') + 1;
     // the items fill the space between here and the tally line (laid out from the bottom up)
-    const tallyY = y + h - 26 - ui.lh('small') - 3;
+    const nextY = y + h - 26 - ui.lh('small') - 4, tallyY = nextY - ui.lh('small') - 4;
     const cell = 16, cols = Math.floor((w - 24) / cell);
     const rows = Math.max(1, Math.min(3, Math.floor((tallyY - 2 - yy) / cell)));
     const fit = counts.length > cols * rows ? cols * rows - 1 : counts.length;
@@ -238,7 +248,21 @@ class ResultCard implements Screen {
     const tl = r.tally ?? { kills: 0, waves: 0, extracted: 0, time: 0 };
     const line = `${tl.kills ?? 0} KILLS · ${tl.extracted ?? 0} SENT HOME · ${Math.floor((tl.time ?? 0) / 60)}m${String(Math.floor((tl.time ?? 0) % 60)).padStart(2, '0')}`;
     ui.text(line, cx, tallyY, { font: 'small', color: '#c8bca8', outline: '#140a06', align: 'center' });
-    const ok = this.t > 0.8 && ui.button('res:ok', win ? 'HOME SWEET HOME' : 'BACK TO THE HIDEOUT', x + 20, y + h - 26, w - 40, 18, { style: win ? 'gold' : 'wood', key: 'Enter' });
-    return ok || (this.t > 0.8 && (this.game.input.keyHit('Escape') || this.game.input.keyHit('Space')));
+    // what home can build next with what is in the stash now (the loop: loot -> rebuild)
+    const g = nextGoal();
+    if (g) {
+      const parts = costLines(g.id);
+      const ready = parts.every(([, hv, n]) => hv >= n);
+      let tw = ui.measure('BUILD NEXT: ' + g.name, 'small') + 6;
+      for (const [, hv, n] of parts) tw += 16 + ui.measure(`${Math.min(hv, n)}/${n}`, 'small') + 6;
+      let xx = Math.round(cx - tw / 2);
+      xx += ui.text('BUILD NEXT: ' + g.name, xx, nextY, { font: 'small', color: ready ? '#aaf08a' : '#ffe07a', outline: '#140a06' }) + 6;
+      for (const [m, hv, n] of parts) { ui.item(m, xx, nextY - 3, 14, 14); xx += 16; xx += ui.text(`${Math.min(hv, n)}/${n}`, xx, nextY, { font: 'small', color: hv >= n ? '#aaf08a' : '#ffb0a0', outline: '#140a06' }) + 6; }
+    } else ui.text('THE HOUSE IS FULLY REBUILT', cx, nextY, { font: 'small', color: '#aaf08a', outline: '#140a06', align: 'center' });
+    const ok = this.t > 0.8 && ui.button('res:ok', win ? 'HOME SWEET HOME' : 'BACK HOME', x + 20, y + h - 26, w - 40, 18, { style: win ? 'gold' : 'wood', key: 'Enter' });
+    const x2 = this.t > 0.8 && ui.iconButton('res:x', 'close', x + w - 20, y + 4, { style: 'red', size: 13 });
+    // Esc, Space, the close button or a click outside the card all close it
+    const outside = this.t > 0.8 && ui.pressed && !ui.hover(x, y, w, h);
+    return ok || x2 || outside || (this.t > 0.8 && (this.game.input.keyHit('Escape') || this.game.input.keyHit('Space')));
   }
 }
