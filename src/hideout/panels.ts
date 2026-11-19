@@ -18,6 +18,12 @@ export function panelRect(ui: PixelUI, w: number, h: number) {
   return { x: Math.round((ui.w - W) / 2), y: Math.round((ui.h - H) / 2) + 5, w: W, h: H };
 }
 export const STASH_SIZE: [number, number] = [600, 310];
+/** the sea chest's rect: as tall as what it holds needs (at least room for the detail pane), at most STASH_SIZE */
+export function stashRect(ui: PixelUI) {
+  const gear = META.stash.filter((s) => ITEMS[s.id]).length, mats = Object.entries(META.materials).filter(([k, v]) => ITEMS[k] && v > 0).length;
+  const well = Math.max(196, Math.ceil(gear / 8) * 34 + 8, Math.ceil(mats / 2) * 26 + 6);
+  return panelRect(ui, STASH_SIZE[0], Math.min(STASH_SIZE[1], PANEL_IN.chest[1] + PANEL_IN.chest[3] + 28 + well));
+}
 export const WORK_SIZE: [number, number] = [600, 310];
 
 /** the frame, the name plate and the close X; returns the inner content rect and whether the X was clicked */
@@ -64,7 +70,7 @@ export class StashPanel {
   ];
   /** returns true when the panel wants to close */
   draw(ui: PixelUI): boolean {
-    const r = panelRect(ui, ...STASH_SIZE);
+    const r = stashRect(ui);
     const { close, inner } = frame(ui, 'chest', 'SEA CHEST', r, this.x, 'stashX');
     const nt = ui.tabs('stashTabs', this.tabs.map((t) => t.label), this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
     if (nt !== this.tab) { this.tab = nt; this.sel = null; ui.resetList('stashL'); }

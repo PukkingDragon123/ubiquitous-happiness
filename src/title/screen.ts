@@ -23,7 +23,7 @@ import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
 import { TravelSet, floorAt } from './travel';
 import type { BoardId } from './sign';
-import { SettingsPanel } from './pages';
+import { SettingsPanel, SETTINGS_W, SETTINGS_H } from './pages';
 import { Tag } from '../hideout/tag';
 
 export interface TitleOpts {
@@ -196,7 +196,7 @@ export class TitleScreen implements Screen {
     this.hot = null;
     if (this.phase === 'idle' && !this.leaving) {
       if (this.settingsOpen) {
-        const sw = 236, sh = 182;
+        const sw = SETTINGS_W, sh = SETTINGS_H;
         if (this.settings.draw(ui, Math.round((ui.w - sw) / 2), Math.round((ui.h - sh) / 2), dt) || (input.keyHit('Escape'))) { this.settingsOpen = false; audio.play('k_back2', { vol: 0.35, dry: true }); }
       } else this.interact(dt);
     }

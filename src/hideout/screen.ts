@@ -23,7 +23,7 @@ import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
 import { OceanOutside, Motes, FOG } from './ocean';
 import { CamRig } from './camera';
-import { StashPanel, WorkshopPanel, panelRect, STASH_SIZE, WORK_SIZE } from './panels';
+import { StashPanel, WorkshopPanel, panelRect, stashRect, WORK_SIZE } from './panels';
 import { WardrobePanel, wardRect } from './wardrobe';
 import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
 import { SettingsPanel } from '../title/pages';
@@ -292,7 +292,7 @@ export class HideoutScreen implements Screen {
   private panelRect(p: Panel): { x: number; y: number; w: number; h: number } {
     const ui = this.ui;
     switch (p) {
-      case 'stash': return panelRect(ui, ...STASH_SIZE);
+      case 'stash': return stashRect(ui);
       case 'workshop': return panelRect(ui, ...WORK_SIZE);
       case 'wardrobe': return wardRect(ui);
       case 'trophy': return { x: Math.round((ui.w - ACH_W) / 2), y: Math.max(4, Math.round((ui.h - ACH_H) / 2)), w: ACH_W, h: ACH_H };
