@@ -442,16 +442,17 @@ function goalCard(g: { name: string; costs: [string, number, number][]; built: n
     drawText(x, 'all rebuilt!', W / 2, 44, { font: 'title', color: '#1a5a1a', align: 'center' });
     return cv;
   }
-  drawText(x, 'NEXT', 8, 10, { font: 'small', color: '#a8342c' });
-  drawText(x, g.name.toUpperCase(), 8, 19, { font: 'title', color: '#2a1a0c' });
-  let yy = 40;
+  drawText(x, 'NEXT UP', 8, 5, { font: 'small', color: '#a8342c' });
+  drawText(x, g.name.toUpperCase(), 8, 17, { font: 'title', color: '#2a1a0c' });
+  f(8, 36, W - 16, 1, '#c8b488');
+  let yy = 41;
   for (const [id, have, need] of g.costs.slice(0, 3)) {
     const ok = have >= need;
-    f(8, yy - 1, 16, 16, '#d8c49a');
-    try { x.drawImage(itemIconBox(id, 16, 16), 8, yy - 1); } catch { /* unknown */ }
-    drawText(x, `${Math.min(have, need)}/${need}`, 30, yy + 4, { font: 'title', color: ok ? '#1a5a1a' : '#a8342c' });
+    f(7, yy - 2, 20, 20, '#8a7450'); f(8, yy - 1, 18, 18, '#e0cfa6');
+    try { x.drawImage(itemIconBox(id, 18, 18), 8, yy - 1); } catch { /* unknown */ }
+    drawText(x, `${Math.min(have, need)}/${need}`, 32, yy + 1, { font: 'title', color: ok ? '#1a5a1a' : '#a8342c' });
     if (ok) for (const [dx, dy] of [[0, 3], [1, 4], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1], [7, 0]]) f(W - 22 + dx * 2, yy + 3 + dy * 2, 2, 2, '#1a5a1a');
-    yy += 18;
+    yy += 20;
   }
   // the house: one pip per piece, filled when rebuilt
   const pw = Math.floor((W - 16) / g.total);
