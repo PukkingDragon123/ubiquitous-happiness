@@ -53,6 +53,8 @@ export class WelcomeHome implements Screen {
     this.t += dt;
     const inp = this.game.input;
     this.ui.begin(inp, dt);
+    // Esc skips the whole welcome (lines, HOME stamp) straight to the house
+    if (this.phase !== 'out' && this.t > 0.3 && inp.keyHit('Escape')) { this.dlg.finish(); this.phase = 'out'; }
     this.dlg.update(dt, inp);
     if (this.phase === 'in' && this.t > 1.4) {
       this.phase = 'talk';
@@ -61,6 +63,7 @@ export class WelcomeHome implements Screen {
         { who: 'crab', text: 'The board shows what we fix first. Bring the stuff, I\'ll swing the hammer.' },
         { who: 'kid', text: '...{p=0.3}Let\'s get to work.' },
       ]).then(() => {
+        if (this.phase === 'out') return;
         this.phase = 'home';
         const p = this.sofa();
         this.t3d.add('HOME', p.x, p.y, p.z, T3D.title, { size: 0.42, stagger: 0.1, enter: 'drop', face: 1, angle: 0.15, life: 3.4 });

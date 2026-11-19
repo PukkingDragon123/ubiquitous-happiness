@@ -124,7 +124,7 @@ export class Game {
   start() {
     const frame = (now: number) => {
       requestAnimationFrame(frame);
-      let dt = Math.min(0.05, (now - this.last) / 1000);
+      let dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000));
       this.last = now;
       this.fpsAcc += dt; this.fpsN++;
       if (this.fpsAcc > 0.5) { this.fps = this.fpsN / this.fpsAcc; this.fpsAcc = 0; this.fpsN = 0; }

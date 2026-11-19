@@ -241,7 +241,7 @@ export class Packing {
   }
 
   /** a low cinematic shot of the chest and the pack, the house behind */
-  shot(): Shot { return { target: new THREE.Vector3(PORCH.set.x, 0.2, PORCH.set.z + 0.05), yaw: 0, pitch: 0.92, dist: 5.5, fov: 38 }; }
+  shot(): Shot { return { target: new THREE.Vector3(PORCH.set.x, 0.2, PORCH.set.z + 0.05), yaw: 0, pitch: 0.92, dist: 6.0, fov: 38 }; }
 
   // ---------------------------------------------------------------- packing rules
   private packedMat(id: string) { return this.pack.reduce((s, p) => s + (p.uid < 0 && p.id === id ? p.n ?? 1 : 0), 0); }
