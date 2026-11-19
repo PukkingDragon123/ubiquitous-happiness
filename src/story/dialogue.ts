@@ -187,7 +187,7 @@ export class Dialogue {
     const lh = ui.lh(FONT);
     const nameW = sp.name ? ui.measure(sp.name, 'small') + 14 : 0;
     w = Math.ceil(Math.max(w + 24, nameW + 26, 60));
-    const h = lines.length * lh + (bark ? 16 : 22);
+    const h = lines.length * lh + (bark ? 16 : 26); // conversations keep a strip under the text for the E prompt
     return { line, sp, chs, lines, shown: 0, t: 0, doneT: 0, pause: 0, w, h, bark, life, pick: -1, blip: 0 };
   }
 

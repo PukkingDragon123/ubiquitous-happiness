@@ -575,7 +575,14 @@ export class HideoutScreen implements Screen {
       this.crabSay.place(this.camera, this.crab.group.position.clone().add(new THREE.Vector3(0, 1.0, 0)), this.game.post.h, [0, -6], dt);
     } else this.crabSay.hide();
     // ---- the objective line (top left): the next build and its materials, always
-    if (this.mode === 'free' || this.mode === 'sit' || this.mode === 'build') this.objective();
+    if (this.mode === 'free' || this.mode === 'sit' || this.mode === 'build') {
+      this.objective();
+      // the floating tags (hover, Mr. Crab's words) are drawn at ui.end() and keep clear of these
+      const r = ui.rects.get('objective');
+      if (r) ui.tagRects.push([r[0] - 3, r[1] - 3, r[2] + 6, r[3] + 6]);
+    }
+    if (this.markRect) ui.tagRects.push(this.markRect);
+    this.markRect = null;
     if (this.fadeIn > 0.5) ui.cursor = 'arrow';
     ui.drawCursor = this.mode !== 'swim' && this.mode !== 'sleep' && live;
     ui.end();
@@ -723,6 +730,8 @@ export class HideoutScreen implements Screen {
    * (its full tag shows instead). Drawn on the UI canvas but never takes the mouse: clicks go through to the room.
    */
   private goalTop = new Map<string, THREE.Vector3>();
+  /** the goal marker's rect this frame (tags keep clear of it) */
+  private markRect: [number, number, number, number] | null = null;
   private goalMarker() {
     const ui = this.ui, g = nextGoal();
     if (!g || this.hoverThing?.id === g.id || this.fadeIn > 0.3) return;
@@ -743,6 +752,7 @@ export class HideoutScreen implements Screen {
     for (let i = 0; i < 6; i++) { ui.fill(tx - 5 + i, ty + i, 11 - i * 2, 1, i === 0 ? '#2a1606' : '#c8913a'); ui.fill(tx - 6 + i, ty + i, 1, 1, '#2a1606'); ui.fill(tx + 5 - i, ty + i, 1, 1, '#2a1606'); }
     ui.fill(tx, ty + 6, 1, 1, '#2a1606');
     ui.frame('dark', x, y, w, h);
+    this.markRect = [x - 2, y - 2, w + 4, h + 10];
     if (ready) { const a = 0.5 + 0.5 * Math.sin(this.t * 5); ui.rect(x - 1, y - 1, w + 2, h + 2, '#8ee06a'); ui.fill(x, y, w, h, '#5fae3f', 0.12 * a); }
     ui.text(name, x + w / 2, y + 4, { font: 'body', color: '#f2c66d', shadow: '#0b1622', align: 'center' });
     ui.text(sub, x + w / 2, y + 5 + ui.lh('body'), { font: 'small', color: ready ? '#8ee06a' : '#9fb8b4', shadow: '#0b1622', align: 'center' });
@@ -760,6 +770,7 @@ export class HideoutScreen implements Screen {
     const parts = costLines(g.id);
     const have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
     const ready = canAfford(g.id);
-    ui.objective(ready ? `Ready! Build the ${g.name.toLowerCase()}` : `Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y: 8, id: 'objective', cost: costOf(g.id), have: META.materials, ready });
+    // (the strip stamps READY! itself when the materials are in, so the words stay short)
+    ui.objective(`Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y: 8, id: 'objective', cost: costOf(g.id), have: META.materials, ready });
   }
 }

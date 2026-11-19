@@ -446,10 +446,21 @@ export class Packing {
     else if (dialSide) { const p = this.scr(this.local(DIAL.x + dialSide * 0.1, DIAL.y, DIAL.z), cam, ui); if (p) this.flashCard(ui, p, dialSide > 0 ? 'harder' : 'easier'); }
   }
   /** a small dark card above a screen point (the hovered thing), kept on screen */
+  /** where the YOUR BUILD sign hangs this frame (hover cards never cover it) */
+  private noteRect: [number, number, number, number] = [0, 0, 0, 0];
+  /** a small dark card above a screen point (the hovered thing): on screen, and never over the YOUR BUILD sign */
   private cardAt(ui: PixelUI, p: [number, number], w: number, h: number): [number, number] {
-    const x = Math.max(6, Math.min(ui.w - w - 6, p[0] - Math.round(w / 2)));
+    let x = Math.max(6, Math.min(ui.w - w - 6, p[0] - Math.round(w / 2)));
     let y = p[1] - h - 14;
     if (y < 6) y = p[1] + 18;
+    const [nx, ny, nw, nh] = this.noteRect;
+    const hits = (xx: number, yy: number) => xx < nx + nw + 4 && xx + w + 4 > nx && yy < ny + nh + 4 && yy + h + 4 > ny;
+    if (hits(x, y)) {
+      // beside the sign if that keeps it near the thing, else below the sign
+      if (nx + nw + 8 + w <= ui.w - 6) x = nx + nw + 8;
+      else y = ny + nh + 8;
+    }
+    y = Math.max(6, Math.min(ui.h - h - 6, y));
     ui.fill(x + 3, y + 4, w, h, '#000000', 0.35);
     ui.frame('dark', x, y, w, h);
     return [x, y];
@@ -528,7 +539,7 @@ export class Packing {
       c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
     });
     // the note: a little driftwood sign hung on two ropes, carved with your build
-    const w = 170, x = 10, y = 14, dimInk = K.cream2;
+    const w = 170, x = 12, y = 18, dimInk = K.cream2;
     const sets = setBonuses(packed).slice(0, 4);
     const b = buildLines(this.pack);
     const rows: { text: string; color: string; font: 'body' | 'small'; gap?: number }[] = [];
@@ -545,6 +556,7 @@ export class Packing {
     ui.fill(x + 3 + sway, y + 4, w, h, '#000000', 0.35);
     ui.img(wellArt(w, h, 'plank'), x + sway, y);
     ui.block(x, y, w, h);
+    this.noteRect = [x - 2, 0, w + 6, y + h + 2];
     let yy = y + 8;
     ui.text('YOUR BUILD', x + 10 + sway, yy, { font: 'title', color: K.brass2, outline: K.ink2 }); yy += ui.lh('title') + 1;
     ui.fill(x + 10 + sway, yy, w - 20, 1, '#2e261e'); ui.fill(x + 10 + sway, yy + 1, w - 20, 1, '#9a8a6c'); yy += 4;
