@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { PixelUI } from '../ui/pixel/ui';
+import { ICON_NAMES, cursorTex, type CursorName } from '../ui/pixel/art';
 import { KIT, skin, btnSkin, closeArt, keycapBody, type BtnStyle, type BtnState, type SkinKind } from '../ui/pixel/skins';
 import { Dialogue } from '../story/dialogue';
 import { Toasts } from '../achievements/toast';
@@ -85,8 +86,8 @@ export default function make(game: Game): Screen {
 
   function panels(X: number, Y: number, W: number, H: number) {
     ui.panel('wood', X, Y + 8, 196, 130, 'STASH');
-    ui.text('wood: lacquer frame, brass', X + 12, Y + 26, { font: 'body', color: KIT.text });
-    ui.text('corners, oilcloth inset.', X + 12, Y + 40, { font: 'body', color: KIT.text });
+    ui.text('wood: ship planks, rope,', X + 12, Y + 26, { font: 'body', color: KIT.text });
+    ui.text('water behind glass.', X + 12, Y + 40, { font: 'body', color: KIT.text });
     ui.text('Light text goes here.', X + 12, Y + 58, { font: 'small', color: KIT.textDim });
     for (let i = 0; i < 6; i++) { ui.frame('slot', X + 12 + i * 29, Y + 76, 26, 26); }
     ui.item('pearl', X + 17, Y + 81, 16); ui.item('copperOre', X + 46, Y + 81, 16); ui.item('kelp', X + 75, Y + 81, 16);
@@ -94,24 +95,25 @@ export default function make(game: Game): Screen {
     ui.closeButton('pnl:x', X + 196 - 16, Y + 8 - 5, { key: null });
 
     ui.panel('cream', X + 206, Y + 8, 196, 130, 'A NOTE');
-    ui.text('cream: the same frame', X + 218, Y + 26, { font: 'body', color: KIT.textInk, shadow: null });
-    ui.text('around a flat card.', X + 218, Y + 40, { font: 'body', color: KIT.textInk, shadow: null });
-    ui.text('Dark ink text, no noise.', X + 218, Y + 58, { font: 'small', color: KIT.textInkDim, shadow: null });
+    ui.text('cream: the same planks', X + 218, Y + 26, { font: 'body', color: KIT.textInk, shadow: null });
+    ui.text('round a sailcloth.', X + 218, Y + 40, { font: 'body', color: KIT.textInk, shadow: null });
+    ui.text('Dark ink text on canvas.', X + 218, Y + 58, { font: 'small', color: KIT.textInkDim, shadow: null });
     ui.frame('insetCream', X + 218, Y + 74, 172, 34);
-    ui.text('insetCream: a well', X + 224, Y + 80, { font: 'small', color: KIT.textInk, shadow: null });
+    ui.text('insetCream: wet sand', X + 224, Y + 80, { font: 'small', color: KIT.textInk, shadow: null });
 
     ui.panel('dark', X + 412, Y, 200, 74, 'SETTINGS');
-    ui.text('dark: slim brass trim', X + 420, Y + 28, { font: 'body', color: KIT.text });
+    ui.text('dark: rope-trimmed', X + 420, Y + 28, { font: 'body', color: KIT.text });
     ui.text('sub-panels, settings', X + 420, Y + 44, { font: 'small', color: KIT.textDim });
     ui.frame('inset', X + 420, Y + 56, 184, 12);
     ui.panel('paper', X + 412, Y + 82, 200, 56);
-    ui.text('paper: tooltip / tag card', X + 420, Y + 89, { font: 'body', color: KIT.textInk, shadow: null });
-    ui.text('cream with a card edge', X + 420, Y + 105, { font: 'small', color: KIT.textInkDim, shadow: null });
+    ui.text('paper: sailcloth card', X + 420, Y + 89, { font: 'body', color: KIT.textInk, shadow: null });
+    ui.text('tooltips, tags, objectives', X + 420, Y + 105, { font: 'small', color: KIT.textInkDim, shadow: null });
 
     const y2 = Y + 150;
-    label('PLAQUE / BRASS', X, y2);
-    ui.frame('plaque', X, y2 + 12, 120, 24);
-    ui.text('PLATE', X + 60, y2 + 17, { font: 'title', color: KIT.ink, shadow: KIT.brass[3], align: 'center' });
+    label('PLAQUE (SIGN) / BRASS', X, y2);
+    ui.frame('plaque', X, y2 + 12, 76, 24);
+    ui.text('SIGN', X + 38, y2 + 17, { font: 'title', color: KIT.ink, shadow: '#e6dec8', align: 'center' });
+    ui.frame('brass', X + 80, y2 + 12, 46, 24);
     label('BLUEPRINT / CARD / TV', X + 132, y2);
     ui.frame('blueprint', X + 132, y2 + 12, 90, 50); ui.frame('card', X + 228, y2 + 12, 40, 50); ui.frame('cardSel', X + 274, y2 + 12, 40, 50); ui.frame('tv', X + 320, y2 + 12, 70, 50);
     label('SMALL SIZES', X + 400, y2);
@@ -137,25 +139,27 @@ export default function make(game: Game): Screen {
   function detail(X: number, Y: number) {
     const d = ui.hd;
     const Z = 4;
-    // the real-size pieces on the left, their close-ups on the right
+    // the real-size pieces on the left (live: kelp, rope, bubbles, caustics), their close-ups on the right
     const pw = 200, ph = 120;
-    ui.panel('wood', X, Y + 8, pw, ph, 'GRAIN', { id: 'det1', pop: false });
+    ui.panel('wood', X, Y + 8, pw, ph, 'PLANKS', { id: 'det1', pop: false });
     ui.panel('cream', X, Y + 140, pw, 76, undefined, { id: 'det2', pop: false });
     ui.frame('plaque', X, Y + 226, 110, 24);
-    ui.text('ENGRAVED', X + 55, Y + 231, { font: 'title', color: KIT.ink, shadow: KIT.brass[3], align: 'center' });
-    ui.button('det:b1', 'BRASS', X + 118, Y + 226, 82, 24, { style: 'wood', sfx: '' });
+    ui.text('DRIFTWOOD', X + 55, Y + 231, { font: 'title', color: KIT.ink, shadow: '#e6dec8', align: 'center' });
+    ui.button('det:b1', 'PLANK', X + 118, Y + 226, 82, 24, { style: 'wood', sfx: '' });
     const wood = skin('wood', pw, ph, d), cream = skin('cream', 200, 76, d), plq = skin('plaque', 110, 24, d);
     const zx = X + 212;
-    zoom(wood, 0, 0, 26 * d, 22 * d, zx, Y, Z, 'BRASS CORNER');
-    zoom(wood, 52 * d, 0, 40 * d, 22 * d, zx + 26 * Z + 10, Y, Z, 'GRAIN, KNOT, RIVET');
+    zoom(wood, 0, 0, 26 * d, 22 * d, zx, Y, Z, 'ROPE LASHING, BARNACLES');
+    zoom(wood, 66 * d, 0, 40 * d, 22 * d, zx + 26 * Z + 10, Y, Z, 'GRAIN, WORM HOLES, NAILS');
     const y2 = Y + 22 * Z + 16;
-    zoom(wood, 4 * d, 50 * d, 30 * d, 20 * d, zx, y2, 3, 'STITCHES, CREASE');
-    zoom(cream, 136 * d, 6 * d, 40 * d, 20 * d, zx + 30 * 3 + 10, y2, 3, 'FIBRES, COFFEE RING');
-    const y3 = y2 + 20 * 3 + 16;
-    zoom(plq, 0, 0, 26 * d, 24 * d, zx, y3, 3, 'BRASS PLATE');
-    zoom(btnSkin('wood', 'normal', 82, 24, d), 0, 0, 26 * d, 24 * d, zx + 26 * 3 + 10, y3, 3, 'RAMP + PLATE');
-    zoom(btnSkin('green', 'normal', 60, 24, d), 0, 0, 26 * d, 24 * d, zx + 52 * 3 + 20, y3, 3, 'GLOSS');
-    zoom(closeArt(20, 'normal', d), 0, 0, 20 * d, 23 * d, zx + 78 * 3 + 30, y3, 3, 'CLOSE');
+    zoom(wood, 30 * d, 92 * d, 34 * d, 28 * d, zx, y2, 3, 'SAND, SCALLOP');
+    zoom(wood, (pw - 34) * d, 0, 34 * d, 28 * d, zx + 34 * 3 + 10, y2, 3, 'SEA GLASS');
+    zoom(cream, 0, 0, 34 * d, 28 * d, zx + 68 * 3 + 20, y2, 3, 'SAILCLOTH');
+    const y3 = y2 + 28 * 3 + 16;
+    zoom(plq, 0, 0, 26 * d, 24 * d, zx, y3, 2, 'SIGN');
+    zoom(btnSkin('wood', 'normal', 82, 24, d), 0, 0, 30 * d, 24 * d, zx + 26 * 2 + 10, y3, 2, 'PLANK');
+    zoom(btnSkin('green', 'normal', 60, 24, d), 0, 0, 30 * d, 24 * d, zx + 56 * 2 + 20, y3, 2, 'PAINT');
+    zoom(btnSkin('red', 'normal', 60, 24, d), 30 * d, 0, 30 * d, 24 * d, zx + 86 * 2 + 30, y3, 2, 'CHIPS');
+    zoom(closeArt(20, 'normal', d), 0, 0, 20 * d, 23 * d, zx + 116 * 2 + 40, y3, 2, 'CLOSE');
     void keycapBody;
   }
 
@@ -192,6 +196,14 @@ export default function make(game: Game): Screen {
     hx += ui.hint('LMB', 'attack', hx, y3 + 12);
     hx += ui.hint('RMB', 'skill', hx, y3 + 12);
     ui.hint('E', 'use', hx, y3 + 12);
+    // every kit icon (on a plank and on water) and every cursor
+    const y4 = y3 + 34;
+    label('ICONS', X, y4);
+    let ix = X;
+    for (const n of ICON_NAMES) { const w = ui.icon(n, ix, y4 + 12); ix += w + 4; }
+    label('CURSORS', X, y4 + 34);
+    let cx = X;
+    for (const n of ['arrow', 'point', 'grab', 'hammer', 'rotate', 'remove', 'busy'] as CursorName[]) { const c = cursorTex(n, ui.hd); ui.img(c.cv, cx, y4 + 46, { w: c.w, h: c.h }); cx += c.w + 8; }
   }
 
   function controls(X: number, Y: number, dt: number) {

@@ -72,7 +72,7 @@ export function bigText(ui: PixelUI, str: string, x: number, y: number, o: BigOp
 // Every plate is painted per pixel at its exact size in a few flat tones. The DETAIL is structured and placed on
 // purpose, never noise: engraved grooves (a dark line over a light one), milgrain beads, slotted screws, worn edges
 // where hands would rub, verdigris only in recesses, a fixed set of scratches, glass streaks, stitched hems.
-export type PlateKind = 'lacquer' | 'brass' | 'well' | 'cream' | 'ribbon' | 'glass' | 'disc' | 'nameplate' | 'logbook' | 'iron';
+export type PlateKind = 'lacquer' | 'brass' | 'well' | 'cream' | 'ribbon' | 'glass' | 'disc' | 'nameplate' | 'logbook' | 'iron' | 'board' | 'sign';
 type RGB = [number, number, number];
 const hx = (s: string): RGB => { const v = parseInt(s.replace('#', '').slice(0, 6), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
 class Px {
@@ -123,19 +123,27 @@ export interface PlateOpts {
   rimW?: number;
   /** face alpha 0..255 (glass) */
   alpha?: number;
+  /** board: x positions (px) of rope lashings round the planks */
+  rope?: number[];
+  /** board: barnacle clusters on the corners (default on when big enough) */
+  barnacles?: boolean;
+  /** board: plank height in px (default 13) */
+  plank?: number;
 }
 const plateCache = new Map<string, HTMLCanvasElement>();
 /** a painted plate canvas of exactly w x h UI px (cached) */
 export function plate(w: number, h: number, kind: PlateKind = 'lacquer', o: PlateOpts = {}): HTMLCanvasElement {
   w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
-  const key = `${kind}|${w}|${h}|${o.rim ?? ''}|${o.face ?? ''}|${o.corners ?? ''}|${o.rimW ?? ''}|${o.alpha ?? ''}`;
+  const key = `${kind}|${w}|${h}|${o.rim ?? ''}|${o.face ?? ''}|${o.corners ?? ''}|${o.rimW ?? ''}|${o.alpha ?? ''}|${o.rope?.join(',') ?? ''}|${o.barnacles ?? ''}`;
   const hit = plateCache.get(key);
   if (hit) return hit;
   const p = new Px(w, h);
   const PAINT: Record<PlateKind, () => void> = {
-    lacquer: () => paintLacquer(p, o, false), glass: () => paintLacquer(p, o, true), brass: () => paintBrass(p, o),
+    // v5 ocean + woody: the instrument plates are DRIFTWOOD boards now ('lacquer' kept as the name callers use)
+    lacquer: () => paintBoard(p, o), board: () => paintBoard(p, o), glass: () => paintLacquer(p, o, true), brass: () => paintBrass(p, o),
     well: () => paintWell(p, o), cream: () => paintCream(p), disc: () => paintDisc(p, o), ribbon: () => paintRibbon(p, o),
-    nameplate: () => paintNameplate(p, o), logbook: () => paintLogbook(p), iron: () => paintIron(p, o),
+    nameplate: () => paintNameplate(p, o), logbook: () => paintSign(p, o), sign: () => paintSign(p, o),
+    iron: () => paintBoard(p, { ...o, face: o.face ?? '#9a3a30', wood: '#6a4a32' } as PlateOpts),
   };
   PAINT[kind]();
   const cv = p.done();
@@ -150,6 +158,152 @@ function edgeD(x: number, y: number, w: number, h: number, r = 2) {
   if (dx + dy < r - 0) return -1;
   if (dx + dy === r) return 0;
   return Math.min(dx, dy);
+}
+
+// ------------------------------------------------------------------ driftwood, rope, nails, barnacles, shells
+const WOOD = '#9a7a58';
+/** a barnacle seen from above (5 px): a cream cone ring, a dark mouth */
+function barnacle(p: Px, cx: number, cy: number, big = true) {
+  const rows = big ? ['.kkk.', 'kwlwk', 'kldlk', 'kwlsk', '.kkk.'] : ['.kk.', 'kwlk', 'klsk', '.kk.'];
+  const pal: Record<string, string> = { k: '#3a3328', w: '#f2ead6', l: '#cfc4a8', s: '#a89c80', d: '#2a221a' };
+  const o = big ? 2 : 1;
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - o + x, cy - o + y, c); } });
+}
+/** a little scallop shell: a fan with ribs, pink-cream, an ink edge (7x6) */
+function shell(p: Px, cx: number, cy: number) {
+  const rows = ['..kkk..', '.kwpwk.', 'kpwpwpk', 'kwpwpwk', '.kpwpk.', '..kkk..'];
+  const pal: Record<string, string> = { k: '#5a2a24', w: '#ffe8d8', p: '#e8a89a' };
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - 3 + x, cy - 3 + y, c); } });
+}
+/** an iron nail head with a rust streak running down from it */
+function nail(p: Px, cx: number, cy: number, streak = 3) {
+  p.set(cx, cy, '#5a5a62'); p.set(cx + 1, cy, '#3a3a42'); p.set(cx, cy + 1, '#3a3a42'); p.set(cx + 1, cy + 1, '#1a1a20'); p.set(cx, cy, '#9a9aa6');
+  for (let k = 0; k < streak; k++) p.over(cx + (k > 1 ? 1 : 0), cy + 2 + k, k === streak - 1 ? '#8a5a3a' : '#7a3a1a');
+}
+/** a vertical rope lashing at column x: twisted strands (diagonal two-tone stripes) inside an ink outline */
+function ropeV(p: Px, x: number, y0: number, y1: number, wd = 5) {
+  for (let y = y0; y <= y1; y++) for (let k = 0; k < wd; k++) {
+    if (k === 0 || k === wd - 1) { p.set(x + k, y, '#2a1a0c'); continue; }
+    const ph = (y + k) % 4;
+    p.set(x + k, y, ph === 0 ? '#6a4a24' : ph === 1 ? '#f0d49a' : ph === 2 ? '#d8b878' : '#b08a52');
+  }
+}
+/** a horizontal rope along row y */
+function ropeH(p: Px, x0: number, x1: number, y: number, ht = 4) {
+  for (let x = x0; x <= x1; x++) for (let k = 0; k < ht; k++) {
+    if (k === 0 || k === ht - 1) { p.set(x, y + k, '#2a1a0c'); continue; }
+    const ph = (x + k) % 4;
+    p.set(x, y + k, ph === 0 ? '#6a4a24' : ph === 1 ? '#f0d49a' : ph === 2 ? '#d8b878' : '#b08a52');
+  }
+}
+
+/**
+ * a DRIFTWOOD board: weathered planks (salt-bleached top edges, long wavy grain, a knot each, dark seams), a rim of
+ * sea-worn teal paint chipped back to the wood in places, nails with rust streaks at the plank ends, optional rope
+ * lashings, barnacles on two corners. Detail is placed by rule (sines of the position, a fixed hash), never noise.
+ */
+function paintBoard(p: Px, o: PlateOpts & { wood?: string }) {
+  const { w, h } = p;
+  const W = ramp((o as { wood?: string }).wood ?? WOOD), T = ramp(o.face ?? PAL.teal1);
+  const n = Math.max(1, Math.round((h - 4) / (o.plank ?? 13)));
+  const ph = (h - 4) / n;
+  const plankOf = (y: number) => Math.min(n - 1, Math.floor((y - 2) / ph));
+  const seam = (y: number) => { const i = plankOf(y); return y - 2 - Math.round(i * ph); };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const d = edgeD(x, y, w, h, 2);
+    if (d < 0) continue;
+    if (d === 0) { p.set(x, y, '#1a0e06'); continue; }
+    const tl = (y === d && x < w - 1 - d) || (x === d && y < h - 1 - d);
+    // the sea-worn paint rim, chipped (chips at fixed places along the edge)
+    if (d <= 2) {
+      const along = y === d || y === h - 1 - d ? x : y;
+      const chip = hash(Math.floor(along / 5), w + h + (y > h / 2 ? 1 : 0) + (x > w / 2 ? 2 : 0)) < 0.3;
+      if (chip) p.set(x, y, d === 1 ? (tl ? W[4] : W[1]) : W[2]);
+      else p.set(x, y, d === 1 ? (tl ? T[4] : T[1]) : (tl ? T[3] : T[2]));
+      continue;
+    }
+    if (d === 3) { p.set(x, y, '#2a1608'); continue; }
+    // the planks
+    const i = plankOf(y), sy = seam(y), plH = Math.round((i + 1) * ph) - Math.round(i * ph);
+    if (i > 0 && sy === 0) { p.set(x, y, '#2a1608'); continue; }
+    let c = W[3];
+    if (sy === 1 || (i === 0 && y === 4)) c = W[5];                       // salt-bleached lit edge
+    else if (sy === 2) c = W[4];
+    else if (sy >= plH - 1) c = W[1];
+    // two long wavy grain lines per plank, broken into runs
+    const g1 = Math.round(plH * 0.38 + Math.sin(x * 0.09 + i * 2.1) * 1.4), g2 = Math.round(plH * 0.7 + Math.sin(x * 0.06 + i * 1.3 + 1) * 1.2);
+    if (sy === g1 && (x + i * 11) % 31 < 23) c = W[2];
+    if (sy === g2 && (x + i * 7) % 27 < 15) c = W[2];
+    if (sy === g1 + 1 && (x + i * 11) % 31 < 9) c = W[4];
+    p.set(x, y, c);
+  }
+  // a knot per plank (where the grain would bend), placed by rule
+  for (let i = 0; i < n; i++) {
+    if (w < 40) break;
+    const kx = Math.round(12 + hash(i + 3, w) * (w - 24)), ky = Math.round(2 + i * ph + ph * 0.55);
+    p.set(kx - 2, ky, W[1]); p.set(kx - 1, ky - 1, W[1]); p.set(kx, ky - 1, W[1]); p.set(kx + 1, ky - 1, W[1]); p.set(kx + 2, ky, W[1]);
+    p.set(kx - 1, ky + 1, W[1]); p.set(kx, ky + 1, W[1]); p.set(kx + 1, ky + 1, W[1]);
+    p.set(kx - 1, ky, W[0]); p.set(kx, ky, '#3a2410'); p.set(kx + 1, ky, W[0]); p.set(kx, ky - 2, W[4]);
+  }
+  // nails at the plank ends, rust running down
+  if (w >= 40) for (let i = 0; i < n; i++) { const ny = Math.round(2 + i * ph + ph / 2) - 1; nail(p, 6, ny, Math.min(3, Math.floor(ph / 3))); nail(p, w - 8, ny, Math.min(3, Math.floor(ph / 3))); }
+  // rope lashings
+  for (const rx of o.rope ?? []) ropeV(p, Math.round(rx), 1, h - 2);
+  // barnacles on two corners
+  if ((o.barnacles ?? true) && w >= 48 && h >= 22) {
+    barnacle(p, w - 6, h - 6); barnacle(p, w - 11, h - 4, false); barnacle(p, w - 5, h - 11, false);
+    barnacle(p, 5, 5, false);
+  }
+}
+
+/**
+ * the run summary's SHIP'S SIGN: a big board of thick driftwood planks with a carved border groove, heavy rope
+ * lashings at both ends, barnacle clusters and scallop shells on the corners, a band of net trim along the bottom
+ */
+function paintSign(p: Px, o: PlateOpts) {
+  const { w, h } = p;
+  paintBoard(p, { ...o, barnacles: false, face: o.face ?? '#2a6b6f', plank: 26 });
+  const W = ramp(WOOD);
+  // the carved border: a groove (dark cut, lit lower lip) inset from the rim
+  const e = 9;
+  p.grooveH(e, w - e - 2, e, W[0], W[5]); p.grooveH(e, w - e - 2, h - e - 2, W[0], W[5]);
+  p.grooveV(e, e, h - e - 2, W[0], W[5]); p.grooveV(w - e - 2, e, h - e - 2, W[0], W[5]);
+  // heavy rope lashings wrapped round both ends
+  for (const rx of [18, w - 25]) { ropeV(p, rx, 0, h - 1, 7); for (let y = 6; y < h - 6; y += 11) { p.hline(rx - 1, rx + 7, y, '#2a1a0c'); } }
+  // net trim along the bottom edge: a diamond mesh of tarred twine
+  const ny0 = h - 13;
+  for (let x = 30; x < w - 32; x++) for (let k = 0; k < 8; k++) {
+    if ((x + k) % 8 === 0 || (x - k + 64) % 8 === 0) p.set(x, ny0 + k, '#3a2a18');
+  }
+  ropeH(p, 30, w - 33, ny0 - 3, 4);
+  // barnacle clusters and shells on the corners
+  for (const [cx, cy] of [[w - 12, h - 10], [10, 11]] as [number, number][]) { barnacle(p, cx, cy); barnacle(p, cx + 5, cy - 3, false); barnacle(p, cx - 5, cy + 2, false); barnacle(p, cx - 1, cy + 5, false); }
+  shell(p, w - 12, 10); shell(p, 12, h - 11);
+  barnacle(p, w - 18, 7, false); barnacle(p, 17, h - 7, false);
+}
+
+// ------------------------------------------------------------------ caustics (a tiled light web, animated by UV offset)
+let causticCv: HTMLCanvasElement | null = null;
+/**
+ * a 64 px tileable caustic web: thin bright lines where two warped sine fields cross zero (integer frequencies so it
+ * tiles; maths, not noise). Draw it with PlanePool.drawTiled at low alpha and slide its offset over time.
+ */
+export function caustics(): HTMLCanvasElement {
+  if (causticCv) return causticCv;
+  const S = 64, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d')!, img = x.createImageData(S, S), D = img.data;
+  const TAU = Math.PI * 2;
+  for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+    const u = px / S, v = py / S;
+    const a = Math.sin(TAU * 2 * u + 1.4 * Math.sin(TAU * v)) + Math.sin(TAU * 2 * v + 1.2 * Math.sin(TAU * u + 0.7));
+    const b = Math.sin(TAU * 3 * (u + v) * 0.5 * 2 / 2 + 1.1 * Math.sin(TAU * 2 * u)) ;
+    const m = Math.min(Math.abs(a), Math.abs(b) * 1.6);
+    const al = m < 0.12 ? 150 : m < 0.24 ? 70 : 0;
+    const i = (py * S + px) * 4; D[i] = 220; D[i + 1] = 250; D[i + 2] = 255; D[i + 3] = al;
+  }
+  x.putImageData(img, 0, 0);
+  causticCv = c;
+  return c;
 }
 
 /** the instrument plate: an ink outline, a brass rim with a milgrain bead, a lacquered face with an engraved inner
@@ -251,6 +405,8 @@ function paintBrass(p: Px, o: PlateOpts) {
     p.set(10, cy + 2, VERDI[1]); p.set(w - 11, cy + 2, VERDI[1]); p.set(10, cy + 1, VERDI[0]);
     // the corners rubbed bright
     for (const [cx, cy2] of [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]]) p.set(cx, cy2, R[5]);
+    // barnacles settled on the brass at two corners
+    if (w >= 60) { barnacle(p, w - 5, h - 5, false); barnacle(p, w - 9, h - 4, false); barnacle(p, 4, 4, false); }
   }
 }
 
@@ -375,6 +531,7 @@ function paintNameplate(p: Px, o: PlateOpts) {
     p.set(gx - 1, cy - 1, '#ffffff');
     p.rivet(ex, 5, R); p.rivet(ex, h - 7, R);
   }
+  if (w >= 80) { barnacle(p, w - cap + 2, h - 6, false); barnacle(p, w - cap - 2, h - 5, false); }
 }
 
 /** a riveted iron band (the boss's bar housing): dark plates with rivets every 18 px and a lit top lip */
@@ -586,6 +743,21 @@ export function tube(ui: PixelUI, x: number, y: number, w: number, h: number, v:
   }
 }
 
+/** a strand of kelp hanging from (x, y), `len` px, swaying from its root (drawn per frame: a few dozen pixels) */
+export function kelp(ui: PixelUI, x: number, y: number, len: number, t: number, ph: number, alpha: number) {
+  const K = ['#1f4a16', '#3a7a28', '#5fae3f', '#a6e07a'];
+  let px = x;
+  for (let k = 0; k < len; k++) {
+    const sway = Math.sin(t * 1.3 + k * 0.12 + ph) * (k / len) * 4;
+    px = x + Math.round(sway);
+    const wd = k < len - 6 ? 3 : 2;
+    ui.fill(px - 1, y + k, wd + 2, 1, K[0], alpha);
+    ui.fill(px, y + k, wd, 1, K[2], alpha);
+    ui.fill(px, y + k, 1, 1, K[3], alpha);
+    // a blade every 7 px, alternating sides
+    if (k % 7 === 3) { const sd = (Math.floor(k / 7) % 2) ? 1 : -1; for (let j = 1; j <= 4; j++) { ui.fill(px + (sd > 0 ? wd + j - 1 : -j), y + k + Math.floor(j / 2), 1, 2, j === 4 ? K[0] : K[1], alpha); } }
+  }
+}
 /** a tiny painted glyph from rows ('k' ink, 'w' white, 'b' brass, ...), cached, for labels like the house mark */
 const glyphCache = new Map<string, HTMLCanvasElement>();
 export function pixGlyph(name: string, rows: string[], pal: Record<string, string>): HTMLCanvasElement {
@@ -604,6 +776,8 @@ export const GLYPH = {
   fish: () => pixGlyph('fish', ['...kkk...k', '.kkwwwk.kk', 'kwkwwwwkwk', 'kwwwwwwwwk', '.kkwwwk.kk', '...kkk...k'], { k: PAL.ink2, w: PAL.sea2 }),
   star: () => pixGlyph('star', ['...k...', '..kwk..', 'kkwwwkk', '.kwwwk.', '.kwkwk.', 'kk...kk'], { k: PAL.ink2, w: PAL.brass2 }),
   check: () => pixGlyph('check', ['......kk', '.....kgk', 'kk..kgk.', 'kgkkgk..', '.kggk...', '..kk....'], { k: PAL.ink2, g: PAL.kelp2 }),
+  bubble: () => pixGlyph('bubble', ['.kkk.', 'kw..k', 'k...k', 'k...k', '.kkk.'], { k: '#cfeef0', w: '#ffffff' }),
+  bubbleS: () => pixGlyph('bubbleS', ['.k.', 'kwk', '.k.'], { k: '#cfeef0', w: '#ffffff' }),
   book: () => pixGlyph('book', ['.kkkk.kkkk.', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kkkkkkkkkkk', '.rr.....rr.'], { k: '#3a2410', w: PAL.cream, b: '#a08a64', r: PAL.coral }),
   parcel: () => pixGlyph('parcel', ['kkkkkkkkk', 'kbbbrbbbk', 'kbbbrbbbk', 'krrrrrrrk', 'kbbbrbbbk', 'kbbbrbbbk', 'kkkkkkkkk'], { k: PAL.ink2, b: '#c8a070', r: PAL.coral }),
   parcelOff: () => pixGlyph('parcelOff', ['k.k.k.k.k', '.........', 'k.......k', '.........', 'k.......k', '.........', 'k.k.k.k.k'], { k: '#6fb8b0' }),

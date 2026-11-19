@@ -33,6 +33,7 @@ import { Tag, type TagLine } from './tag';
 import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT } from './house';
 import { CodexBook, codexCount } from '../ui/codex';
 import { brassPlate } from './itemCard';
+import { bubbles } from './seaFx';
 import { IN, outlineOf, setGhostHot, setGhostState, pulseGhosts } from './pieces';
 import { PIECE, PIECES, isBuilt, canAfford, costLines, costOf, buildPiece, nextGoal, ensureHome } from './rebuild';
 import { BuildScene } from './buildscene';
@@ -306,7 +307,7 @@ export class HideoutScreen implements Screen {
     const r = this.panelRect(p);
     let close = false;
     switch (p) {
-      case 'stash': close = this.stash.draw(ui); break;
+      case 'stash': close = this.stash.draw(ui, dt); break;
       case 'workshop': close = this.work.draw(ui, dt); break;
       case 'wardrobe': {
         close = this.ward.draw(ui, r.x, r.y, dt);
@@ -745,6 +746,7 @@ export class HideoutScreen implements Screen {
     if (ready) { const a = 0.5 + 0.5 * Math.sin(this.t * 5); ui.rect(x - 1, y - 1, w + 2, h + 2, '#8ee06a'); ui.fill(x, y, w, h, '#5fae3f', 0.12 * a); }
     ui.text(name, x + w / 2, y + 4, { font: 'body', color: '#f2c66d', shadow: '#0b1622', align: 'center' });
     ui.text(sub, x + w / 2, y + 5 + ui.lh('body'), { font: 'small', color: ready ? '#8ee06a' : '#9fb8b4', shadow: '#0b1622', align: 'center' });
+    bubbles(ui, x + 4, y - 1, w - 8, this.t, 12, 3, 16);
   }
 
   /** the goal board's painted note follows the next build and the materials at home */

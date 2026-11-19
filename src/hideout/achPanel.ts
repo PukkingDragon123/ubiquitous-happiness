@@ -9,6 +9,8 @@ import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC, SLOT_NAME } from '../cosmetics';
 import { K, brassPlate } from './itemCard';
 import { panelArt, PANEL_IN } from './panelArt';
+import { wobble, SeaFx } from './seaFx';
+import { panelLife } from './panels';
 
 const COLS = 8, CW = 38, CH = 56, DW = 160;
 const ROWS = Math.ceil(ACHIEVEMENTS.length / COLS);
@@ -18,12 +20,12 @@ export const ACH_H = PANEL_IN.trophy[1] + PANEL_IN.trophy[3] + ROWS * CH + 28;
 export class AchievementsPanel {
   private sel = 0;
   private t = 0;
+  private fx = new SeaFx();
   open() { this.t = 0; }
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
     this.t += dt;
     const inp = ui.input;
-    const k = Math.min(1, this.t * 6), oy = Math.round((1 - (1 - (1 - k) ** 3)) * 24);
-    y += oy;
+    y += wobble(this.t);
     ui.block(x, y - 10, ACH_W, ACH_H + 10);
     ui.fill(x + 4, y + 5, ACH_W, ACH_H, '#000000', 0.4);
     ui.img(panelArt('trophy', ACH_W, ACH_H), x, y);
@@ -86,6 +88,7 @@ export class AchievementsPanel {
     let hx = gx;
     hx += ui.icon('left', hx, by + 7) + 2; hx += ui.icon('right', hx, by + 7) + 5;
     ui.text('browse', hx, by + 6, { font: 'small', color: '#c8d8ff', shadow: '#000' });
+    panelLife(ui, this.fx, { x, y, w: ACH_W, h: ACH_H }, { x: gx, y: gy, w: COLS * CW, h: ROWS * CH }, 11, dt);
     if (ui.button('ach:back', 'BACK', x + ACH_W - PANEL_IN.trophy[2] - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }

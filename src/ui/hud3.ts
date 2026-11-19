@@ -37,7 +37,7 @@ import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
 import { skin } from './pixel/skins';
-import { PAL, plate, bigText, bigMeasure, bar, tube, solid, GLYPH, type BigOpts } from './obj/plates';
+import { PAL, plate, bigText, bigMeasure, bar, tube, solid, caustics, GLYPH, type BigOpts } from './obj/plates';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -409,9 +409,15 @@ function paintStrip(cv: HTMLCanvasElement, m: StripMap, t: number) {
   const L = Math.max(1e-6, m.length);
   const X = (v: number) => 1 + Math.round(clamp01(v / L) * (W - 3));
   // parchment in two flat tones, the water a pale wash
-  f(0, 0, W, H, '#ead9b0');
-  f(0, 0, W, Math.round(H * 0.3), '#efe2c0');
-  for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 1, X(ln.x1) - X(ln.x0), Math.max(2, Math.round(H * 0.22)), '#bcd8cc');
+  // a sea chart: pale water in two tones, light glinting across it in moving dashes (repainted each frame anyway:
+  // the strip is a few hundred px)
+  f(0, 0, W, H, '#d4e6dc');
+  f(0, 0, W, Math.round(H * 0.3), '#e2f0e6');
+  for (let row = 0; row < 2; row++) {
+    const yy = 1 + row * Math.max(2, Math.round(H * 0.2));
+    for (let cx = 0; cx < W; cx++) if (((cx + Math.floor(t * (row ? 7 : 11)) + row * 9) % 19) < 3) f(cx, yy + Math.round(Math.sin(cx * 0.4 + t * 2 + row) * 0.6), 1, 1, '#ffffff', 0.8);
+  }
+  for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 1, X(ln.x1) - X(ln.x0), Math.max(2, Math.round(H * 0.22)), '#b4d8d8');
   const sb = m.seabed ?? [0.72];
   const bedAt = (cx: number) => { const tt = clamp01(cx / Math.max(1, W - 1)) * (sb.length - 1); const i = Math.floor(tt), fr = tt - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], fr); };
   let prev = -1;
@@ -428,8 +434,8 @@ function paintStrip(cv: HTMLCanvasElement, m: StripMap, t: number) {
   let cur = 0;
   const fog = (a: number, b: number) => {
     if (b <= a) return; const xa = X(a), xb = X(b);
-    f(xa, 0, xb - xa + 1, H, '#d6bf8e');
-    for (let cx = xa; cx <= xb; cx++) for (let cy = 0; cy < H; cy++) if ((cx + cy) % 5 === 0) f(cx, cy, 1, 1, '#c4a876');
+    f(xa, 0, xb - xa + 1, H, '#9fb8b0');
+    for (let cx = xa; cx <= xb; cx++) for (let cy = 0; cy < H; cy++) if ((cx + cy) % 5 === 0) f(cx, cy, 1, 1, '#8aa49c');
   };
   for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
   if (cur < L) fog(cur, L);
@@ -642,6 +648,12 @@ export class Hud {
     } else { this.bossName = ''; this.bossIn = 0; }
   }
 
+  /** light caustics sliding slowly over a plate (a tiled overlay moved by UV offset: no repaint) */
+  private shimmer(ui: DUi, x: number, y: number, w: number, h: number, seed: number, alpha = 1) {
+    const i = 3;
+    this.planes.drawTiled(caustics(), ui.p(x) + i, ui.p(y) + i, ui.p(w) - 2 * i, ui.p(h) - 2 * i, { tile: 56, ox: this.t * 0.021 + seed, oy: this.t * 0.013 + seed * 0.7, alpha: 0.22 * alpha });
+  }
+
   // ---------------------------------------------------------------- top left: porthole + hearts + bars + flasks
   private vitals(ui: DUi, dt: number, s: HudData): { right: number; bottom: number } {
     const S = this.stage, c = s.combat;
@@ -670,7 +682,8 @@ export class Hud {
     const bottom = Math.max(by + (hasStam ? 10 : 0) + (hasMana ? 8 : 0) + 3, y0 + 40);
     // the lacquered plate (behind everything; the porthole covers its left end)
     const px0 = pc.x, pw = right - px0, ph = bottom - y0;
-    this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer'), ui.p(px0), ui.p(y0), { shadow: 2 });
+    this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer', { rope: [ui.p(pw) - 15] }), ui.p(px0), ui.p(y0), { shadow: 2 });
+    this.shimmer(ui, px0, y0, pw, ph, 0);
     while (this.hearts.length < total) { const h = new Heart3D(); S.ui.add(h.root); this.hearts.push(h); }
     this.hearts.forEach((h, i) => {
       h.root.visible = i < total;
@@ -685,7 +698,7 @@ export class Hud {
       const sc = 11.5;
       h.root.scale.set(sc * (1 + beat + bump * 0.3), sc * (1 + beat - bump * 0.15 + wob * 0.02), sc);
       h.root.rotation.set(0, Math.sin(this.t * 1.3 + i) * 0.25, wob * 0.06);
-      S.put(h.root, x0 + 6 + (i % perRow) * 13, hy + Math.floor(i / perRow) * 13 - Math.sin(bump * Math.PI) * 4, 10);
+      S.put(h.root, x0 + 6 + (i % perRow) * 13, hy + Math.floor(i / perRow) * 13 - Math.sin(bump * Math.PI) * 4 + Math.sin(this.t * 2.2 + i * 0.8) * 0.8, 10);
     });
     // stamina: teal, amber while regen waits, red guard-broken, white on a parry; a pale chip of what you just spent
     let yy = by;
@@ -709,6 +722,13 @@ export class Hud {
       f.root.scale.setScalar(13);
       S.put(f.root, flaskX + 6 + i * 11, by + (hasMana ? 8 : 4), 8);
     });
+    // bubbles drift up out of the porthole's top, wobbling, popping at the screen's edge
+    for (let i = 0; i < 4; i++) {
+      const ph2 = (this.t * 0.22 + i * 0.29) % 1;
+      const bx = pc.x - 6 + i * 4 + Math.sin(this.t * 2.3 + i * 1.7) * 1.5, by = pc.y - PR - 2 - ph2 * (pc.y - PR + 6);
+      const g = ph2 < 0.5 || i % 2 ? GLYPH.bubble() : GLYPH.bubbleS(), gs = Math.max(1, Math.round(ui.k));
+      ui.ui.img(g, ui.p(bx), ui.p(by), { w: g.width * gs, h: g.height * gs, alpha: Math.min(1, (1 - ph2) * 1.6) * 0.9 });
+    }
     return { right, bottom: Math.max(bottom, pc.y + PR + 4) };
   }
 
@@ -731,6 +751,7 @@ export class Hud {
     const ws = cells.map((c) => 20 + Math.max(2, c.num.length) * digitW + (c.sub ? ui.bigW(c.sub, 5.5) + 1 : 0) + 9);
     const W = ws.reduce((a, b) => a + b, 0) + 4;
     this.planes.draw(plate(ui.p(W), ui.p(h), 'brass'), ui.p(x0), ui.p(y), { shadow: 2 });
+    this.shimmer(ui, x0, y, W, h, 1.7);
     let cx = x0 + 2;
     cells.forEach((c, i) => {
       const w = ws[i], r = this.rolls[c.k], pop = this.pop[c.k];
@@ -778,7 +799,8 @@ export class Hud {
     const x1 = d ? gc.x : ui.w - M;
     const NW = Math.max(150, Math.min(Math.round(ui.w * 0.34), 250, x1 - leftLimit - 24));
     const x0 = x1 - NW, y0 = gc.y - 21, h = 46;
-    this.planes.draw(plate(ui.p(NW), ui.p(h), 'lacquer'), ui.p(x0), ui.p(y0), { shadow: 2 });
+    this.planes.draw(plate(ui.p(NW), ui.p(h), 'lacquer', { rope: [4] }), ui.p(x0), ui.p(y0), { shadow: 2 });
+    this.shimmer(ui, x0, y0, NW, h, 3.1);
     const cr = (d ? gc.x - PR - 9 : x1 - 8);
     const cl = x0 + 8;
     // the area name and the stage pips
@@ -834,7 +856,8 @@ export class Hud {
     const shake = Math.sin(this.t * 70) * this.bossShake * 2;
     const bx = cx - BW / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
     // the dark plate with the bar
-    this.planes.draw(plate(ui.p(BW + 24), ui.p(25), 'iron', { rim: '#b04a3a' }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
+    this.planes.draw(plate(ui.p(BW + 24), ui.p(25), 'iron', { rim: '#b04a3a', rope: [3, ui.p(BW + 24) - 8] }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
+    this.shimmer(ui, bx - 12, py, BW + 24, 25, 4.4, fade);
     const v = this.bossShown;
     tube(ui.ui, ui.p(bx - 4), ui.p(py + 6), ui.p(BW + 8), Math.max(9, ui.p(10)), v, { col: '#d8303a', chip: this.bossChip, flash: this.bossFlash, ticks: 0.1, t: this.t });
     const po = clamp01(b.poise ?? 1);
@@ -996,7 +1019,8 @@ export class Hud {
       }
       if (c.banner) {
         // the slam: the title starts big and lands on its plate, a shake as it hits, then it lifts away
-        const cy = ui.h * 0.36, cap = 20;
+        // (lower when the floor's area card is still up, so they never stack)
+        const cy = ui.h * (this.toasts.some((q) => q.area) ? 0.5 : 0.36), cap = 20;
         const st = clamp01(c.t / 0.16), capNow = cap * (1 + (1 - st) * 0.8);
         if (st >= 1 && !c.landed) { c.landed = true; audio.play('thud_heavy1', { vol: c.banner === 'danger' ? 0.45 : 0.25, dry: true }); }
         const a = clamp01(c.t * 7) * (1 - outK);
@@ -1007,10 +1031,12 @@ export class Hud {
           const rw = tw + 70, rh = 38;
           this.planes.draw(plate(ui.p(rw), ui.p(rh), 'nameplate'), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(y - rh / 2), { alpha: a * st, shadow: 3 });
         } else {
-          const rw = tw + 76, rh = 36;
-          this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#c8913a' }), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(y - rh / 2), { alpha: a * st, shadow: 3 });
+          // a driftwood plank lashed with rope at both ends
+          const rw = tw + 70, rh = 36;
+          this.planes.draw(plate(ui.p(rw), ui.p(rh), 'board', { rope: [9, ui.p(rw) - 15], plank: 17 }), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(y - rh / 2), { alpha: a * st, shadow: 3 });
+          this.shimmer(ui, ui.w / 2 - rw / 2 + shake, y - rh / 2, rw, rh, 2.2, a * st);
         }
-        ui.big(c.title, ui.w / 2 + shake, y - capNow / 2 - 1, capNow, { color: c.color, color2: c.banner === 'danger' ? '#ff9a84' : PAL.brass2, align: 'center', alpha: a });
+        ui.big(c.title, ui.w / 2 + shake, y - capNow / 2 - 1, capNow, { color: c.banner === 'danger' ? c.color : PAL.brass2, color2: c.banner === 'danger' ? '#ff9a84' : '#f8e0a0', align: 'center', alpha: a });
         const sa = clamp01((c.t - 0.35) * 4) * (1 - outK);
         if (c.sub && sa > 0) {
           const sw = ui.bigW(c.sub, 6) + 18, sy = y + 22;

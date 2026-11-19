@@ -95,7 +95,7 @@ export class SkillCard3D {
     this.shade = new THREE.Mesh(new THREE.PlaneGeometry(win.w, win.h), new THREE.MeshBasicMaterial({ color: '#06101a', transparent: true, opacity: 0.78, toneMapped: false, depthWrite: false }));
     this.shade.position.set(0, win.y, W * 0.005);
     this.tilt.add(this.shade);
-    const frameMat = new THREE.MeshStandardMaterial({ color: met.base, roughness: 0.32, metalness: 0.65, flatShading: true, emissive: met.hi, emissiveIntensity: 0.05 });
+    const frameMat = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.85, metalness: 0, flatShading: true });
     const frame = new THREE.Mesh(frameGeo(W, H, win, W * 0.06), frameMat);
     this.tilt.add(frame);
     // v5: the frame's FACE is hand-painted (engraved rarity metal, filigree corners, worn edges, a set rarity gem,
@@ -221,80 +221,90 @@ export class SkillCard3D {
 // ------------------------------------------------------------------ the painted card face
 const faceCache = new Map<string, HTMLCanvasElement>();
 /**
- * the card's frame face at 1 texel per unit (UI px on the HUD): an ink outline, an engraved band of the rarity's
- * metal (lit top / left, shaded bottom / right, a groove down its middle), filigree curls in the corners, edges
- * rubbed bright where hands hold it, the window's inset bevel, an engraved lower panel with a set rarity gem and a
- * scratch or two. The window is cut out (the art shows through). Placed detail only.
+ * the card's frame face at 1 texel per unit (UI px on the HUD), ocean + woody: a mitred DRIFTWOOD frame (grain
+ * running along each side, salt-bleached outer edge, dark mitre seams), a trim of sea-worn paint in the rarity's
+ * colour round the window (chipped back to wood in places), brass corner caps with a nail, a piece of rarity SEA
+ * GLASS set in the bottom rail, a barnacle or two on a corner, the window's inset bevel. The window is cut out (the
+ * art shows through under its glass). Placed detail only.
  */
 function paintCardFace(Wf: number, Hf: number, win: { w: number; h: number; y: number }, rarity: Rarity, big: boolean): HTMLCanvasElement {
   const w = Math.round(Wf), h = Math.round(Hf);
-  const key = `${w}|${h}|${rarity}|${big}`;
+  const key = `${w}|${h}|${rarity}|${big}|wood`;
   const hit = faceCache.get(key);
   if (hit) return hit;
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const x = cv.getContext('2d')!;
   const img = x.createImageData(w, h), D = img.data;
-  const M = ramp(METAL[rarity].base), G = ramp(RARITY_COLOR[rarity]);
+  const Wd = ramp('#9a7a58'), P = ramp(RARITY_COLOR[rarity]), B = ramp('#c8913a');
   const put = (px: number, py: number, col: string, a = 255) => {
     px = Math.round(px); py = Math.round(py);
     if (px < 0 || py < 0 || px >= w || py >= h) return;
     const n = parseInt(col.slice(1, 7), 16), i = (py * w + px) * 4; D[i] = n >> 16; D[i + 1] = (n >> 8) & 255; D[i + 2] = n & 255; D[i + 3] = a;
   };
   const alpha = (px: number, py: number) => (px < 0 || py < 0 || px >= w || py >= h ? 0 : D[(py * w + px) * 4 + 3]);
-  const r = Math.max(2, Math.round(w * 0.1));
+  const r = Math.max(2, Math.round(w * 0.08));
   const wx0 = Math.round((w - win.w) / 2), ww = Math.round(win.w), wy0 = Math.round(h / 2 - (win.y + win.h / 2)), wh = Math.round(win.h);
   const inWin = (px: number, py: number) => px >= wx0 && px < wx0 + ww && py >= wy0 && py < wy0 + wh;
   const inCard = (px: number, py: number) => {
     const dx = Math.max(0, r - px, px - (w - 1 - r)), dy = Math.max(0, r - py, py - (h - 1 - r));
     return dx * dx + dy * dy <= r * r + 0.5;
   };
-  const band = Math.max(3, wx0);
   for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
     if (!inCard(px, py) || inWin(px, py)) continue;
     const edge = !inCard(px - 1, py) || !inCard(px + 1, py) || !inCard(px, py - 1) || !inCard(px, py + 1);
-    if (edge) { put(px, py, '#0b1622'); continue; }
-    const d = Math.min(px, py, w - 1 - px, h - 1 - py);
-    const tl = py < h - 1 - py ? py <= px && py <= w - 1 - px : false;
-    const left = px <= py && px <= h - 1 - py && px < w / 2;
-    const lit = tl || left;
-    // the window's inset bevel: shadow on its top / left lip, a reflected light on its bottom / right
+    if (edge) { put(px, py, '#1a0e06'); continue; }
+    // which rail: left / right (grain runs down) or top / bottom (grain runs across), split at the mitres
+    const dl = px, dr = w - 1 - px, dt = py, db = h - 1 - py;
+    const side = Math.min(dl, dr) < Math.min(dt, db) * (w / h) * 1.0 ? 'v' : 'h';
+    const d = Math.min(dl, dr, dt, db);
     const wdx = px < wx0 ? wx0 - px : px >= wx0 + ww ? px - (wx0 + ww - 1) : 0, wdy = py < wy0 ? wy0 - py : py >= wy0 + wh ? py - (wy0 + wh - 1) : 0;
-    if (Math.max(wdx, wdy) === 1 && wdx <= 1 && wdy <= 1) { put(px, py, '#0b1622'); continue; }
-    if (Math.max(wdx, wdy) === 2 && wdx <= 2 && wdy <= 2) { put(px, py, px >= wx0 + ww || py >= wy0 + wh ? M[5] : M[1]); continue; }
+    const wd = Math.max(wdx, wdy);
+    // the window's inset: an ink line, then the chipped rarity paint trim
+    if (wd === 1 && wdx <= 1 && wdy <= 1) { put(px, py, '#1a0e06'); continue; }
+    if (wd === 2 && wdx <= 2 && wdy <= 2) {
+      const along = wdy === 2 ? px : py;
+      const chip = (along * 7 + (py > wy0 ? 3 : 0)) % 11 === 0;
+      put(px, py, chip ? Wd[2] : px >= wx0 + ww || py >= wy0 + wh ? P[2] : P[4]);
+      continue;
+    }
     let c: string;
-    if (d === 1) c = lit ? M[5] : M[1];
-    else if (d === 2) c = lit ? M[4] : M[2];
-    else c = py < h * 0.3 ? M[4] : M[3];
-    // a groove down the middle of the side bands
-    if (band >= 5 && d === Math.floor(band / 2) && py > r && py < h - r) c = M[1];
-    if (band >= 5 && d === Math.floor(band / 2) + 1 && py > r && py < h - r) c = M[5];
+    if (d === 1) c = py <= px * (h / w) + 1 && dt <= dl ? Wd[5] : dl <= 1 ? Wd[4] : Wd[1];   // the salt-bleached outer edge
+    else {
+      // grain along the rail: wavy lines broken into runs
+      const u = side === 'v' ? py : px, vv = side === 'v' ? Math.min(dl, dr) : Math.min(dt, db);
+      const g = Math.round(2 + Math.sin(u * 0.35 + (side === 'v' ? px : py) * 0.2) * 0.7);
+      const m5 = vv % 5;
+      c = m5 === g % 5 && (u + vv * 3) % 11 < 7 ? Wd[2] : m5 === (g + 2) % 5 && (u + vv) % 9 < 3 ? Wd[4] : vv < 2 ? Wd[4] : Wd[3];
+    }
+    // the dark mitre seams on the diagonals at the corners
+    if ((Math.abs(dl - dt) <= 0 && dl < wx0) || (Math.abs(dr - dt) <= 0 && dr < wx0) || (Math.abs(dl - db) <= 0 && dl < wx0) || (Math.abs(dr - db) <= 0 && dr < wx0)) c = Wd[0];
     put(px, py, c);
   }
-  // the lower panel (under the window): two engraved rules and, on HUD cards, the set rarity gem in its middle
-  const py0 = wy0 + wh + 3, py1 = h - 3;
-  if (py1 - py0 >= 4) {
-    for (let px = wx0 + 1; px < wx0 + ww - 1; px++) { put(px, py0, M[1]); put(px, py0 + 1, M[5]); if (py1 - py0 >= 8) { put(px, py1 - 2, M[1]); put(px, py1 - 1, M[5]); } }
-    // a scratch across the panel (fixed)
-    for (let k = 0; k < 4; k++) put(wx0 + Math.round(ww * 0.72) + k, py0 + 3 + (k >> 1), M[5]);
-  }
-  const gem = (cx: number, cy: number, R: number) => {
-    for (let dy = -R - 1; dy <= R + 1; dy++) for (let dx = -R - 1; dx <= R + 1; dx++) {
-      const m = Math.abs(dx) + Math.abs(dy);
-      if (m > R + 1) continue;
-      put(cx + dx, cy + dy, m === R + 1 ? M[0] : m === R ? '#0b1622' : dy < 0 && dx <= 0 ? G[4] : dx + dy > 0 ? G[2] : G[3]);
+  // brass corner caps (an L in the corner) with a nail head
+  const L = Math.max(3, Math.round(w / 9));
+  for (const [cx, cy, sx, sy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]]) {
+    for (let i = 0; i < L; i++) for (let j = 0; j < 2; j++) {
+      if (alpha(cx + sx * i, cy + sy * j)) put(cx + sx * i, cy + sy * j, j === 0 ? B[4] : B[2]);
+      if (alpha(cx + sx * j, cy + sy * i)) put(cx + sx * j, cy + sy * i, j === 0 ? B[4] : B[2]);
     }
-    put(cx - Math.max(1, R - 2), cy - Math.max(1, R - 2) + 1, '#ffffff');
-  };
-  const gr = Math.max(2, Math.round(w / 14));
-  if (!big && py1 - py0 >= 2 * gr + 2) gem(Math.round(w / 2), Math.round((py0 + py1) / 2), gr);
-  else gem(Math.round(w / 2), Math.max(gr + 2, Math.round(wy0 / 2)), gr);
-  // filigree curls in the four corners of the band
-  if (band >= 4) for (const [cx, cy, sx, sy] of [[band - 1, band - 1, 1, 1], [w - band, band - 1, -1, 1], [band - 1, h - band, 1, -1], [w - band, h - band, -1, -1]]) {
-    put(cx, cy, M[5]); put(cx - sx, cy, M[5]); put(cx, cy - sy, M[5]); put(cx - sx, cy - sy, M[1]);
-    if (band >= 6) { put(cx - 2 * sx, cy, M[1]); put(cx, cy - 2 * sy, M[1]); }
+    put(cx + sx * 2, cy + sy * 2, '#3a3a42'); put(cx + sx * 2 + (sx > 0 ? 0 : 0), cy + sy * 2, '#9a9aa6');
   }
-  // the rim rubbed bright where fingers hold it (bottom corners and the sides' middles)
-  for (const [px, py] of [[2, h - 4], [3, h - 3], [w - 3, h - 4], [w - 4, h - 3], [1, Math.round(h * 0.55)], [1, Math.round(h * 0.55) + 1], [w - 2, Math.round(h * 0.45)]]) if (alpha(px, py)) put(px, py, M[5]);
+  // a piece of sea glass in the bottom rail (HUD cards) or the top rail (big cards with a name plate)
+  const gw = Math.max(5, Math.round(w / 7)), gh = Math.max(4, Math.round(gw * 0.75));
+  const py0 = wy0 + wh + 3, py1 = h - 3;
+  const gcx = Math.round(w / 2 - gw / 2), gcy = !big && py1 - py0 >= gh ? Math.round((py0 + py1) / 2 - gh / 2) : Math.max(1, Math.round(wy0 / 2 - gh / 2));
+  for (let yy = 0; yy < gh; yy++) for (let xx = 0; xx < gw; xx++) {
+    const cornerCut = (xx === 0 || xx === gw - 1) && (yy === 0 || yy === gh - 1);
+    if (cornerCut) continue;
+    const e = xx === 0 || yy === 0 || xx === gw - 1 || yy === gh - 1;
+    put(gcx + xx, gcy + yy, e ? P[1] : yy <= 1 && xx <= gw / 2 ? P[5] : yy >= gh - 2 ? P[2] : P[3]);
+  }
+  put(gcx + 1, gcy + 1, '#ffffff');
+  // barnacles on the bottom-right corner (5 / 4 px, cream cones with a dark mouth)
+  if (w >= 30) {
+    const bar = (bx: number, by: number) => { for (const [dx, dy, c] of [[0, -1, '#3a3328'], [-1, 0, '#3a3328'], [1, 0, '#3a3328'], [0, 1, '#3a3328'], [0, 0, '#2a221a'], [-1, -1, '#f2ead6'], [1, -1, '#cfc4a8'], [-1, 1, '#cfc4a8'], [1, 1, '#a89c80']] as [number, number, string][]) if (alpha(bx + dx, by + dy)) put(bx + dx, by + dy, c); };
+    bar(w - 5 - L, h - 3); bar(w - 3, h - 6 - L);
+  }
   x.putImageData(img, 0, 0);
   faceCache.set(key, cv);
   return cv;

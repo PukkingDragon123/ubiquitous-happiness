@@ -9,6 +9,8 @@ import { achFor, progress } from '../achievements';
 import { audio } from '../audio/audio';
 import { K, brassPlate } from './itemCard';
 import { panelArt, PANEL_IN } from './panelArt';
+import { wobble, SeaFx } from './seaFx';
+import { panelLife } from './panels';
 
 const CELL = 28, ROW = 46;
 export const WARD_W = PANEL_IN.wardrobe[0] + PANEL_IN.wardrobe[2] + 12 * CELL + 14;
@@ -23,6 +25,8 @@ export class WardrobePanel {
   /** an item was equipped this frame */
   equipped: string | null = null;
   private t = 0;
+  private fx = new SeaFx();
+  private lastHover: string | null = null;
   open() { this.t = 0; this.hover = null; }
   /** returns true to close */
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
@@ -30,9 +34,8 @@ export class WardrobePanel {
     this.hover = null; this.equipped = null;
     const look = equippedLook();
     const r = wardRect(ui), W = r.w, H = r.h;
-    // slide in from the left, like a door swinging open
-    const k = Math.min(1, this.t * 6), ox = Math.round((1 - (1 - (1 - k) ** 3)) * -40);
-    x += ox;
+    // bobbing up into place like something surfacing
+    y += wobble(this.t);
     ui.block(x, y - 10, W, H + 10);
     ui.fill(x + 4, y + 5, W, H, '#000000', 0.4);
     ui.img(panelArt('wardrobe', W, H), x, y);
@@ -89,6 +92,9 @@ export class WardrobePanel {
     let hx = ix + 2;
     hx += ui.hint('LMB', 'wear', hx, by + 4, { color: K.cream2 });
     ui.hint('RMB', 'spin him', hx, by + 4, { color: K.cream2 });
+    if (this.hover && this.hover !== this.lastHover) this.fx.burst(ui.mx, ui.my - 4, 4);
+    this.lastHover = this.hover;
+    panelLife(ui, this.fx, { x, y, w: W, h: H }, { x: ix, y: y + it, w: iw, h: H - it - PANEL_IN.wardrobe[3] }, 5, dt);
     if (ui.button('ward:back', 'BACK', x + W - il - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }

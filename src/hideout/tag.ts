@@ -1,5 +1,5 @@
-// TAGS: the hub's words live on cards pinned to things. A Tag is a clean kit card (src/ui/pixel: a cream card with
-// an ink outline and a brass pin, or a dark oilcloth card) whose lines are set in the UI's screen font, floating at a
+// TAGS: the hub's words live on cards hung on things. A Tag is a kit card (src/ui/pixel: a sailcloth card with a
+// stitched hem hung on a little rope loop, or a rope-trimmed dark-water card) whose lines are set in the UI's screen font, floating at a
 // world anchor (a station, an item, a poster). v5: tags are drawn by the PixelUI that is drawing when place() is
 // called (the screen's own UI), so they share the kit's pixel size and fonts exactly, crisp at any resolution; the
 // `mesh` stays for API compatibility (add it to the scene as before: it is never visible). A TableCard is the same
@@ -115,7 +115,7 @@ export class Tag {
   /**
    * float the card at an anchor's screen position: `off` is in rendered (internal) pixels as before, the card's
    * bottom-centre by default (or its left / right edge, vertically centred), clamped on screen, dropping in on
-   * its pin. Call inside the screen UI's begin()/end(); otherwise it draws on the next screen UI end().
+   * its rope. Call inside the screen UI's begin()/end(); otherwise it draws on the next screen UI end().
    */
   place(cam: THREE.PerspectiveCamera, anchor: THREE.Vector3, internalH: number, off: [number, number] = [0, -10], dt = 1 / 60, align: 'bottom' | 'left' | 'right' = 'bottom') {
     if (!this.shown) return;

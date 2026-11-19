@@ -30,6 +30,7 @@ import { audio } from '../audio/audio';
 import { paintTag } from './tag';
 import { K, itemHead, itemBody, buildLines } from './itemCard';
 import { wellArt } from './panelArt';
+import { rope, bubbles, SeaFx } from './seaFx';
 import { PORCH, type House } from './house';
 import type { Shot } from './camera';
 
@@ -428,13 +429,16 @@ export class Packing {
     const k = 0.5 + 0.5 * Math.sin(this.t * 3.2);
     const bw = Math.max(150, ui.measure('SWIM OUT', 'title') + 66), bh = 28, bx = ui.w - bw - 12, by = ui.h - bh - 12;
     if (!this.drag) { ui.fill(bx - 3, by - 3, bw + 6, bh + 6, '#8ee06a', 0.12 + 0.12 * k); ui.rect(bx - 2, by - 2, bw + 4, bh + 4, '#5fae3f'); }
+    bubbles(ui, bx + 10, by - 2, bw - 20, this.t, 4, 3, 18);
     let dive = live && !this.drag && ui.button('pack:swim', 'SWIM OUT', bx, by, bw, bh, { style: 'green', font: 'title', key: 'Enter', keyLabel: 'ENTER' });
     const home = live && !this.drag && ui.button('pack:home', 'HOME', 12, ui.h - 24 - 12, 92, 24, { style: 'dark', font: 'body', key: 'Escape', keyLabel: 'ESC' });
     if (live && sign === 'swim' && ui.pressed) dive = true;
     if (live && !this.drag && input.keyHit('Enter')) dive = true;
     if (dive && !this.diving) { this.dive(); return; }
     if (live && !this.drag && (home || (sign === 'home' && ui.pressed))) { this.onClose?.(); return; }
-    // the card by whatever is under the mouse
+    // a splash of bubbles wherever you press; the card by whatever is under the mouse
+    if (live && ui.pressed) this.fx.burst(ui.mx, ui.my, 5);
+    this.fx.draw(ui, dt);
     if (this.flash.t > 0) { const p = this.scr(this.local(BAG.x, 0.4, BAG.z), cam, ui); if (p) this.flashCard(ui, p, this.flash.text); }
     else if (hoverSlot && hoverAt && !this.drag?.moved) { const p = this.scr(hoverAt, cam, ui); if (p) this.itemCard(ui, p, hoverSlot); }
     else if (sign && !this.drag) { const p = this.scr(this.local(sign === 'swim' ? 2.45 : -2.55, 1.6, -0.75), cam, ui); if (p) this.signCard(ui, p, sign); }
@@ -496,6 +500,7 @@ export class Packing {
     if (live && ui.button('pack:mMore', '', x + w + 2, y + 3, 16, 18, { style: 'brass', icon: 'right', disabled: this.mastery >= Math.min(MAX_MASTERY, META.masteryUnlocked), sfx: '' })) setM(this.mastery + 1);
     if (this.mastery > 0 && ui.hover(x, y, w, h)) ui.tooltip([{ text: m.name, font: 'title' }, ...masteryMods(this.mastery).map((t) => ({ text: '· ' + t, font: 'small' as const }))], { maxW: 200 });
   }
+  private fx = new SeaFx();
   private dialKey = -1;
   private dialImage() {
     const key = this.mastery * 100 + META.masteryUnlocked;
@@ -522,25 +527,29 @@ export class Packing {
       this.stage.put(c.c.root, x, y, 10);
       c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
     });
-    // the note: a cream card pinned with a brass tack
-    const w = 168, x = 10, y = 10, ink = '#2a1a0c', dimInk = '#6a5638';
+    // the note: a little driftwood sign hung on two ropes, carved with your build
+    const w = 170, x = 10, y = 14, dimInk = K.cream2;
     const sets = setBonuses(packed).slice(0, 4);
     const b = buildLines(this.pack);
     const rows: { text: string; color: string; font: 'body' | 'small'; gap?: number }[] = [];
-    for (const st of sets) rows.push({ text: `${st.name} ${st.count}${st.next ? '/' + st.next : ''}${st.tier ? '  · ON' : ''}`, color: st.tier ? '#1a5a1a' : dimInk, font: 'body' });
-    for (const q of b.stats.slice(0, 6)) rows.push({ text: q.text, color: q.good ? '#1a4a7a' : '#8a1a14', font: 'body', gap: rows.length && !rows.some((r) => r.color === '#1a4a7a' || r.color === '#8a1a14') ? 3 : 0 });
+    for (const st of sets) rows.push({ text: `${st.name} ${st.count}${st.next ? '/' + st.next : ''}${st.tier ? '  · ON' : ''}`, color: st.tier ? st.color : dimInk, font: 'body' });
+    let firstStat = true;
+    for (const q of b.stats.slice(0, 6)) { rows.push({ text: q.text, color: q.good ? K.kelpL : K.coralL, font: 'body', gap: firstStat && rows.length ? 3 : 0 }); firstStat = false; }
     if (!sets.length && !b.stats.length) rows.push({ text: 'Nothing packed yet.', color: dimInk, font: 'body' }, { text: 'Gear changes your stats; skills deal cards.', color: dimInk, font: 'small' });
-    rows.push({ text: `MASTERY ${this.mastery} · ${MASTERY[this.mastery].name}`, color: '#8a2a10', font: 'small', gap: 4 });
+    rows.push({ text: `MASTERY ${this.mastery} · ${MASTERY[this.mastery].name}`, color: K.brass2, font: 'small', gap: 4 });
     let h = 10 + ui.lh('title') + 4;
     for (const r of rows) h += (r.gap ?? 0) + ui.textBox(r.text, -9999, -9999, w - 20, { font: r.font });
-    h += 8;
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35);
-    ui.img(wellArt(w, h, 'paper'), x, y);
+    h += 10;
+    const sway = Math.round(Math.sin(this.t * 1.2) * 1.5);
+    for (const rx of [x + 14, x + w - 18]) rope(ui, rx + sway, 0, y + 2, true);
+    ui.fill(x + 3 + sway, y + 4, w, h, '#000000', 0.35);
+    ui.img(wellArt(w, h, 'plank'), x + sway, y);
     ui.block(x, y, w, h);
     let yy = y + 8;
-    ui.text('YOUR BUILD', x + 10, yy, { font: 'title', color: ink, shadow: null }); yy += ui.lh('title') + 1;
-    ui.fill(x + 10, yy, w - 20, 1, '#c8b488'); yy += 3;
-    for (const r of rows) { yy += r.gap ?? 0; yy += ui.textBox(r.text, x + 10, yy, w - 20, { font: r.font, color: r.color, shadow: null }); }
+    ui.text('YOUR BUILD', x + 10 + sway, yy, { font: 'title', color: K.brass2, outline: K.ink2 }); yy += ui.lh('title') + 1;
+    ui.fill(x + 10 + sway, yy, w - 20, 1, '#2e261e'); ui.fill(x + 10 + sway, yy + 1, w - 20, 1, '#9a8a6c'); yy += 4;
+    for (const r of rows) { yy += r.gap ?? 0; yy += ui.textBox(r.text, x + 10 + sway, yy, w - 20, { font: r.font, color: r.color, outline: K.ink2 }); }
+    bubbles(ui, x + 10, y + h, w - 20, this.t, 9, 3, 18);
   }
 
   private dive() {

@@ -154,6 +154,19 @@ export class PlanePool {
     this.used++;
     return m;
   }
+  /**
+   * a canvas TILED over a rect (UI px) every `tile` px, scrolled by (ox, oy) tiles: animated overlays like caustics
+   * move by UV offset only (each mesh keeps its own clone of the texture, which shares the uploaded image)
+   */
+  drawTiled(cv: HTMLCanvasElement, x: number, y: number, w: number, h: number, o: { tile: number; ox?: number; oy?: number; alpha?: number; tint?: string }) {
+    const m = this.draw(cv, x, y, { w, h, alpha: o.alpha, tint: o.tint });
+    const base = this.tex(cv);
+    let t = m.userData.tiled as THREE.CanvasTexture | undefined;
+    if (!t || t.source !== base.source) { t = base.clone(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; m.userData.tiled = t; }
+    t.repeat.set(w / o.tile, h / o.tile); t.offset.set(o.ox ?? 0, o.oy ?? 0);
+    (m.material as THREE.MeshBasicMaterial).map = t;
+    return m;
+  }
   end() { for (let i = this.used; i < this.meshes.length; i++) this.meshes[i].visible = false; }
   /** hide everything (a screen that stops drawing) */
   clear() { this.begin(); this.end(); }

@@ -425,38 +425,50 @@ export class GoalBoard {
   }
 }
 
-/** the goal card: cream paper with fibre lines and a fold, a red tack, NEXT + the name, icon / count rows, house pips */
+/** the goal sign: three nailed driftwood planks, NEXT UP + the name carved in, the materials in carved recesses
+ *  with their counts, barnacles and a scallop shell grown on, and a row of house pips along the bottom */
 function goalCard(g: { name: string; costs: [string, number, number][]; built: number; total: number } | null): HTMLCanvasElement {
   const W = 136, H = 100;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   setTextDensity(x, 1);
   const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
-  f(0, 0, W, H, '#5a4426'); f(1, 1, W - 2, H - 2, '#efe2c0'); f(1, 1, W - 2, 1, '#fffaf0'); f(1, H - 2, W - 2, 1, '#cdb88c');
-  for (let yy = 7; yy < H - 4; yy += 5) for (let xx = 4; xx < W - 4; xx++) if ((xx * 7 + yy * 3) % 23 < 6) f(xx, yy, 1, 1, '#e4d3ac');
-  for (let i = 0; i < 12; i++) { f(W - 13 + i, 1 + i, 1, 1, '#d8c69c'); } // the folded corner's crease
-  f(W - 12, 1, 11, 1, '#5a4426'); for (let i = 0; i < 11; i++) f(W - 12 + i, 1, 1, i + 1, i % 2 ? '#e8d8b2' : '#dccb9f');
-  f(W / 2 - 3, 2, 6, 6, '#6a1410'); f(W / 2 - 2, 3, 4, 4, '#d8342c'); f(W / 2 - 2, 3, 2, 2, '#ff9a84');
+  const R = ['#16110c', '#5a5040', '#7e725e', '#ae9f84', '#c8ba9c', '#e6dabe'];
+  f(0, 0, W, H, R[0]);
+  const ph = Math.floor((H - 2) / 3);
+  for (let i = 0; i < 3; i++) {
+    const y0 = 1 + i * ph;
+    f(1, y0, W - 2, ph - 1, i === 1 ? R[4] : R[3]);
+    for (const [v, c] of [[Math.round(ph * 0.3), R[2]], [Math.round(ph * 0.7), R[5]]] as [number, string][]) for (let xx = 3; xx < W - 3; xx++) if ((xx * 3 + i * 7 + v) % 17 < 12) f(xx, y0 + v + ((xx >> 4) & 1), 1, 1, c);
+    f(1, y0 + ph - 1, W - 2, 1, R[0]);
+    for (const nx of [4, W - 6]) { f(nx, y0 + Math.round(ph / 2) - 1, 2, 2, '#2a2420'); f(nx, y0 + Math.round(ph / 2) - 1, 1, 1, '#9a948c'); }
+  }
+  f(1, 1, W - 2, 1, R[5]);
+  // carved text: dark letters with a lit lip under them
+  const carve = (t: string, px: number, py: number, font: 'title' | 'small', col = '#20160c', align: 'left' | 'center' = 'left') => {
+    drawText(x, t, px, py + 1, { font, color: R[5], align });
+    drawText(x, t, px, py, { font, color: col, align });
+  };
+  // barnacles bottom-left, a scallop top-right
+  const barn = (bx: number, by: number) => { for (const [cx, cy, r] of [[bx + 3, by + 2, 3], [bx + 8, by + 3, 2], [bx + 4, by + 6, 2]]) { f(cx - r, cy, r * 2 + 1, r, '#2e2a24'); f(cx - r + 1, cy, r * 2 - 1, r - 1, '#b8aea0'); f(cx - r + 1, cy, r, 1, '#ece4d6'); f(cx - 1, cy, 3, 1, '#2e2a24'); } };
+  barn(3, H - 12);
+  f(W - 12, 3, 9, 6, '#6e3e3a'); f(W - 11, 2, 7, 1, '#6e3e3a'); f(W - 11, 3, 7, 4, '#f0b8a0'); for (const k of [2, 4]) f(W - 11 + k, 3, 1, 4, '#c08070'); f(W - 9, 9, 3, 2, '#6e3e3a');
   if (!g) {
-    drawText(x, 'HOME', W / 2, 22, { font: 'title', color: '#2a1a0c', align: 'center' });
-    drawText(x, 'all rebuilt!', W / 2, 44, { font: 'title', color: '#1a5a1a', align: 'center' });
+    carve('HOME', W / 2, 18, 'title', '#20160c', 'center');
+    carve('all rebuilt!', W / 2, 52, 'title', '#1a4a14', 'center');
     return cv;
   }
-  drawText(x, 'NEXT UP', 8, 5, { font: 'small', color: '#a8342c' });
-  drawText(x, g.name.toUpperCase(), 8, 17, { font: 'title', color: '#2a1a0c' });
-  f(8, 36, W - 16, 1, '#c8b488');
-  let yy = 41;
-  for (const [id, have, need] of g.costs.slice(0, 3)) {
-    const ok = have >= need;
-    f(7, yy - 2, 20, 20, '#8a7450'); f(8, yy - 1, 18, 18, '#e0cfa6');
-    try { x.drawImage(itemIconBox(id, 18, 18), 8, yy - 1); } catch { /* unknown */ }
-    drawText(x, `${Math.min(have, need)}/${need}`, 32, yy + 1, { font: 'title', color: ok ? '#1a5a1a' : '#a8342c' });
-    if (ok) for (const [dx, dy] of [[0, 3], [1, 4], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1], [7, 0]]) f(W - 22 + dx * 2, yy + 3 + dy * 2, 2, 2, '#1a5a1a');
-    yy += 20;
-  }
+  carve('NEXT UP', 8, 5, 'small', '#6a1c10');
+  carve(g.name.toUpperCase(), 8, 16, 'title');
+  g.costs.slice(0, 4).forEach(([id, have, need], i) => {
+    const ok = have >= need, cx = 8 + (i % 2) * 62, yy = ph + 6 + Math.floor(i / 2) * 22;
+    f(cx - 1, yy - 2, 20, 20, R[0]); f(cx, yy - 1, 18, 18, '#d8cdb2'); f(cx, yy + 16, 18, 1, R[5]);
+    try { x.drawImage(itemIconBox(id, 18, 18), cx, yy - 1); } catch { /* unknown */ }
+    carve(`${Math.min(have, need)}/${need}`, cx + 22, yy + 1, 'title', ok ? '#163e10' : '#6a1c10');
+  });
   // the house: one pip per piece, filled when rebuilt
-  const pw = Math.floor((W - 16) / g.total);
-  for (let i = 0; i < g.total; i++) { f(8 + i * pw, H - 9, pw - 2, 5, '#6a5638'); f(9 + i * pw, H - 8, pw - 4, 3, i < g.built ? '#5fae3f' : '#e4d3ac'); }
+  const pw = Math.floor((W - 34) / g.total);
+  for (let i = 0; i < g.total; i++) { f(16 + i * pw, H - 9, pw - 2, 5, R[0]); f(17 + i * pw, H - 8, pw - 4, 3, i < g.built ? '#5fae3f' : R[2]); }
   return cv;
 }
 

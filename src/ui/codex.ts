@@ -14,6 +14,7 @@ import type { PixelUI } from './pixel/ui';
 import { photo } from './obj/studio';
 import { SPECS } from '../fish/species';
 import { buildFish } from '../fish';
+import { kelp, bubbles } from '../hideout/seaFx';
 
 export type CodexKind = 'fish' | 'giant';
 export interface CodexEntry {
@@ -160,6 +161,9 @@ export class CodexBook {
       if (ui.button('codex:tab:' + k, `${label} ${c.known}/${c.total}`, tx, y + 26, 92, 16, { style: this.tab === k ? 'gold' : 'wood', font: 'small', on: this.tab === k })) { this.tab = k; this.scroll = 0; this.sel = ''; }
       tx += 96;
     }
+    // the sea's life on the old book: kelp caught on its cover, bubbles drifting up off it
+    kelp(ui, x + 22, y - 6, 24, this.t, 3, 1); kelp(ui, x + W - 40, y - 6, 16, this.t, 8, -1);
+    bubbles(ui, x + 30, y - 8, W - 60, this.t, 13, 4, 26);
     if (ui.closeButton('codex:close', x + W - 12, y - 14, { size: 20, key: null })) { this.close(); return false; }
     // the entry grid (left page)
     const list = codexEntries(this.tab);
@@ -195,8 +199,6 @@ export class CodexBook {
       const ph = Math.round(pw * 0.62);
       ui.fill(px, y + 12, pw, ph, '#d8c49a'); ui.rect(px, y + 12, pw, ph, '#8a6a44');
       if (pic) ui.img(pic, px + 2, y + 14, { w: pw - 4, h: ph - 4 });
-      // tape on the photo corners
-      for (const [qx, qy] of [[px - 3, y + 9], [px + pw - 11, y + 9]]) ui.fill(qx, qy, 14, 6, '#e8e0c0', 0.85);
       let yy = y + 20 + ph;
       ui.text(known ? e.name : '???', px, yy, { font: 'title', color: '#2a1408', shadow: null }); yy += 16;
       if (e.habitat || known) { ui.text(known ? (e.habitat ?? (e.kind === 'fish' ? 'open water' : '')) : 'not yet met', px, yy, { font: 'small', color: '#7a5a3a', shadow: null }); yy += 12; }

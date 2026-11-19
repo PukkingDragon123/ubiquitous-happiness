@@ -21,7 +21,7 @@ import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
 import { skin, PAD } from '../ui/pixel/skins';
 import { closeArt } from '../ui/pixel/art';
-import { PAL, plate, bigText, bar, GLYPH, solid } from '../ui/obj/plates';
+import { PAL, plate, bigText, bar, GLYPH, solid, caustics, kelp } from '../ui/obj/plates';
 import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
@@ -208,6 +208,7 @@ export class DungeonHud {
     planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
     ui.block(0, 0, ui.w, ui.h);
     planes.draw(skin('wood', W, H), x, y, { alpha: a, shadow: 3 });
+    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 64, ox: this.t * 0.02, oy: this.t * 0.012, alpha: 0.16 * a });
     // the header: the title on a brass plaque over the top edge, one line of what this is, the close X
     const title = 'POST OFFICE';
     const tw = ui.measure(title, 'title');
@@ -308,6 +309,8 @@ export class DungeonHud {
     const hasMats = m.items.some((i) => ITEMS[i.id]?.kind === 'material');
     if (ui.button('mail:mats', 'ALL MATERIALS', gx + bw + 6, by, 140, 24, { style: 'brass', key: 'KeyA', disabled: !hasMats })) out = 'mail:mats';
     if (ui.button('mail:close', 'DONE', x + W - pad - 96, by, 96, 24, { style: 'wood', key: 'Escape' })) out = 'mail:close';
+    // kelp hanging over the panel's corners, swaying
+    kelp(ui, x + W - 8, y - 2, 34, this.t, 0.5, a); kelp(ui, x + 4, y + 8, 22, this.t, 2.2, a);
     // clicking outside the panel closes it (no way to get stuck in it)
     if (ui.pressed && !ui.hover(x - 4, y - 14, W + 8, H + 18)) out = out ?? 'mail:close';
     return out;
@@ -333,10 +336,12 @@ export class DungeonHud {
     const H = 16 + 22 + 8 + ui.lh('body') + ui.lh('small') + 6 + 3 * 30 + 2 + wrap(note, 'small', W - 36, ui.hd).length * ui.lh('small') + 16;
     const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - e) * 20);
     const a = Math.min(1, this.pauseT * 8);
-    ui.fill(0, 0, ui.w, ui.h, PAL.ink2, 0.6 * a);
+    const planes = this.l.planes;
+    planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
     ui.block(0, 0, ui.w, ui.h);
-    ui.img(skin('wood', W, H), x + 3, y + 3, { alpha: 0.35 * a });
-    ui.img(skin('wood', W, H), x, y, { alpha: a });
+    planes.draw(skin('wood', W, H), x, y, { alpha: a, shadow: 3 });
+    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 64, ox: this.t * 0.02, oy: this.t * 0.012, alpha: 0.16 * a });
+    kelp(ui, x + W - 9, y - 1, 30, this.t, 1.1, a);
     const cap = 22;
     bigText(ui, 'PAUSED', x + W / 2, y + 16, { cap, color: PAL.cream, color2: PAL.brass2, align: 'center', alpha: a });
     // where you are: the area, metres from home, the depth

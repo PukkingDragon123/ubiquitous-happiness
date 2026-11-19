@@ -21,8 +21,8 @@ import type { Input } from '../../core/input';
 import { audio } from '../../audio/audio';
 import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
 import { drawText, measure, wrap, lineH, capH, setTextDensity, type FontName, type TextOpts } from './font';
-import { skin, btnSkin, btnFace, PAD, BTN, LIP, KIT, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, type SkinKind, type BtnStyle, type BtnState } from './skins';
-import { icon, cursorArt, type CursorName } from './art';
+import { skin, btnSkin, btnFace, PAD, BTN, LIP, KIT, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, bubbleArt, causticTile, type SkinKind, type BtnStyle, type BtnState } from './skins';
+import { icon, iconTex, mouseTex, cursorTex, type CursorName } from './art';
 import { easeOutBack } from '../../core/math';
 import { iconAt } from '../../backpack/icons';
 
@@ -286,6 +286,7 @@ export class PixelUI {
     // whose press and release landed in different frames (every real click at 60 fps) never fired
     if (!this.down && !this.pressed && !this.released) this.active = null;
     this.cursor = 'arrow';
+    this.stepFx(dt);
     if (this.frameNo % 300 === 0) this.prune();
   }
 
@@ -296,10 +297,11 @@ export class PixelUI {
     const later = this.laterQ; this.laterQ = [];
     if (!this.fixed) { later.push(...PixelUI.overlay); PixelUI.overlay = []; }
     for (const d of later) d(this);
+    this.drawFx();
     for (const t of this.tips) t();
     if (this.drawCursor && this.inside && this.cursorVisible) {
-      const c = cursorArt(this.cursor);
-      this.ctx.drawImage(c.cv, this.mx - c.hx, this.my - c.hy);
+      const c = cursorTex(this.cursor, this.hd);
+      this.ctx.drawImage(c.cv, this.mx - c.hx, this.my - c.hy, c.w, c.h);
     }
     if (this.hot && this.hot !== this.lastHot && this.sfx) audio.play('k_tick1', { vol: 0.12, dry: true, rate: 1.3 });
     this.lastHot = this.hot;
@@ -392,6 +394,121 @@ export class PixelUI {
     for (const m of [this.animSeen, this.eased, this.bars] as Map<string, { last: number }>[]) for (const [k, v] of m) if (v.last < old) m.delete(k);
   }
 
+  // ---------------------------------------------------------------- ocean motion (v5): all small overlays over cached skins
+  /** set false (or &uideco=0) to switch off the living decorations (bubbles, kelp, rope, caustics, hover splashes) */
+  deco = new URLSearchParams(location.search).get('uideco') !== '0';
+  private fx: { x: number; y: number; vx: number; vy: number; t: number; life: number; r: number; kind: 'bubble' | 'drop'; ph: number; delay: number }[] = [];
+  private emit = new Map<string, number>();
+  private pats = new Map<string, CanvasPattern | null>();
+  /** release a bubble at (x, y) UI px: it wobbles up and fades (o.r 1..3 UI px, o.vy UI px/s, o.delay s) */
+  bubble(x: number, y: number, o: { r?: number; vy?: number; life?: number; delay?: number } = {}) {
+    if (!this.deco || this.fx.length > 90) return;
+    this.fx.push({ x, y, vx: 0, vy: o.vy ?? -16, t: 0, life: o.life ?? 1.1 + ((x * 7 + y * 3) % 10) / 20, r: o.r ?? 1, kind: 'bubble', ph: (x * 0.37 + y * 0.11) % 6.28, delay: o.delay ?? 0 });
+  }
+  /** a little splash: droplets thrown up from (x, y) that fall back, plus a couple of bubbles */
+  splash(x: number, y: number, n = 4) {
+    if (!this.deco) return;
+    for (let i = 0; i < n; i++) this.fx.push({ x: x + (i - n / 2) * 2, y, vx: (i - (n - 1) / 2) * 12, vy: -34 - (i % 2) * 10, t: 0, life: 0.45, r: 1, kind: 'drop', ph: 0, delay: 0 });
+    this.bubble(x - 3, y, { r: 1, vy: -20 }); this.bubble(x + 4, y, { r: 1, vy: -14, delay: 0.08 });
+  }
+  private stepFx(dt: number) {
+    for (const p of this.fx) {
+      if (p.delay > 0) { p.delay -= dt; continue; }
+      p.t += dt;
+      if (p.kind === 'drop') { p.vy += 140 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+      else { p.y += p.vy * dt; p.x += Math.sin(p.t * 7 + p.ph) * 6 * dt; }
+    }
+    this.fx = this.fx.filter((p) => p.t < p.life);
+  }
+  private drawFx() {
+    for (const p of this.fx) {
+      if (p.delay > 0) continue;
+      const a = Math.min(1, (p.life - p.t) / 0.25) * Math.min(1, p.t / 0.08);
+      if (p.kind === 'drop') { this.ctx.globalAlpha = a; this.ctx.fillStyle = '#bff0ff'; this.ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1); this.ctx.globalAlpha = 1; continue; }
+      const b = bubbleArt(p.r, this.hd), S = 2 * p.r + 1;
+      this.ctx.globalAlpha = a; this.ctx.drawImage(b, Math.round(p.x - p.r), Math.round(p.y - p.r), S, S); this.ctx.globalAlpha = 1;
+    }
+  }
+  /**
+   * a slow caustic-light shimmer over a rect (two layers of the caustic web sliding past each other). Cheap: two
+   * pattern fills. Draw it over a skin's inset, under the content.
+   */
+  caustic(x: number, y: number, w: number, h: number, alpha = 0.1) {
+    if (!this.deco || w < 4 || h < 4) return;
+    const hd = this.hd, key = String(hd);
+    let pat = this.pats.get(key);
+    if (pat === undefined) { pat = this.ctx.createPattern(causticTile(hd), 'repeat'); this.pats.set(key, pat); }
+    if (!pat) return;
+    const c = this.ctx;
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.beginPath(); c.rect(Math.round(x) * hd, Math.round(y + this.liftY) * hd, Math.round(w) * hd, Math.round(h) * hd); c.clip();
+    c.fillStyle = pat;
+    for (const [sx, sy, k] of [[6, 3.5, 1], [-4.5, 5, 0.7]] as const) {
+      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.round((this.t * sx + (k < 1 ? 41 : 0)) * hd), Math.round((this.t * sy + (k < 1 ? 17 : 0)) * hd)]));
+      c.globalAlpha = alpha * k * this.fadeK;
+      c.fillRect(Math.round(x) * hd, Math.round(y + this.liftY) * hd, Math.round(w) * hd, Math.round(h) * hd);
+    }
+    c.restore();
+  }
+  /** a kelp strand draped over an edge at (x, y), hanging down and swaying; side -1 hangs out to the left, +1 right */
+  kelp(x: number, y: number, side: -1 | 1, len = 12, phase = 0) {
+    const pts: [number, number, number][] = [];
+    let px = x, py = y, ang = side > 0 ? 0 : Math.PI;
+    for (let i = 0; i < len; i++) {
+      const k = Math.min(1, i / 4);
+      const target = Math.PI / 2 + side * 0.12;                                    // hanging down
+      const base = side > 0 ? 0 : Math.PI;
+      ang = base + (target - base) * (k * k * (3 - 2 * k)) + Math.sin(this.t * 1.7 + phase - i * 0.45) * 0.09 * (i / len) * side;
+      px += Math.cos(ang) * 2.4; py += Math.sin(ang) * 2.4;
+      pts.push([px, py, i < 2 ? 3 : i < len - 4 ? 4 : i < len - 1 ? 3 : 2]);
+    }
+    for (const [qx, qy, w] of pts) this.fill(Math.round(qx - w / 2) - 1, Math.round(qy) - 1, w + 2, 4, KIT.ink);
+    for (const [qx, qy, w] of pts) { this.fill(Math.round(qx - w / 2), Math.round(qy), w, 2, KIT.kelp[2]); this.fill(Math.round(qx - w / 2), Math.round(qy), 1, 2, KIT.kelp[3]); if (w > 2) this.fill(Math.round(qx - w / 2) + w - 1, Math.round(qy), 1, 2, KIT.kelp[1]); }
+    // a float bladder two thirds down
+    const [bx, by] = pts[Math.floor(len * 0.62)];
+    this.fill(Math.round(bx) - 2, Math.round(by) - 2, 5, 5, KIT.ink); this.fill(Math.round(bx) - 1, Math.round(by) - 1, 3, 3, '#7a9a2a'); this.fill(Math.round(bx) - 1, Math.round(by) - 1, 1, 1, '#c8e070');
+  }
+  /** a loose rope end hanging from (x, y), swaying, frayed at the tip */
+  ropeEnd(x: number, y: number, len = 6, phase = 0) {
+    let px = x, py = y;
+    const seg: [number, number][] = [];
+    for (let i = 0; i < len; i++) { const a = Math.PI / 2 + Math.sin(this.t * 1.3 + phase - i * 0.35) * 0.18 * (i / len); px += Math.cos(a) * 2; py += Math.sin(a) * 2; seg.push([px, py]); }
+    for (const [qx, qy] of seg) this.fill(Math.round(qx) - 1, Math.round(qy) - 1, 4, 3, KIT.ink);
+    seg.forEach(([qx, qy], i) => { this.fill(Math.round(qx), Math.round(qy), 2, 2, i % 2 ? '#82683a' : '#d6bc80'); this.fill(Math.round(qx), Math.round(qy), 1, 1, i % 2 ? '#b09254' : '#f0dca6'); });
+    const [ex, ey] = seg[seg.length - 1];
+    for (const dx of [-1, 1, 2]) this.fill(Math.round(ex) + dx, Math.round(ey) + 2, 1, 2 + (dx === 1 ? 1 : 0), '#b09254');
+  }
+  /**
+   * the living decorations of a panel (called by panel(); call it yourself after ui.frame() for a hand-drawn panel):
+   * the caustic shimmer over the inset, and on big plank frames a swaying kelp strand draped over a side, a rope end
+   * dangling from a bottom lashing, and a bubble now and then rising off the top edge. `key` keeps them steady.
+   */
+  panelFx(kind: SkinKind, x: number, y: number, w: number, h: number, key = `${kind}|${w}x${h}`, alpha = 1) {
+    if (!this.deco) return;
+    const plank = kind === 'wood' || kind === 'stone' || kind === 'cream';
+    if (plank || kind === 'dark' || kind === 'inset') {
+      const p = PAD[kind];
+      const ins = plank ? 7 : kind === 'dark' ? 4 : 1;
+      this.caustic(x + ins, y + ins, w - 2 * ins, h - 2 * ins, (kind === 'cream' ? 0.2 : 0.11) * alpha);
+      void p;
+    }
+    const h0 = hashStr(key);
+    if (plank && w >= 110 && h >= 70) {
+      // the kelp hangs off whichever side has more room; it starts below the corner (clear of a close key)
+      const side: -1 | 1 = x > this.w - (x + w) ? -1 : 1;
+      this.kelp(side > 0 ? x + w - 4 : x + 4, y + 18 + (h0 % 9), side, 15 + (h0 % 6), h0 % 7);
+      this.ropeEnd(side > 0 ? x + 4 : x + w - 6, y + h - 3, 5 + (h0 % 3), h0 % 5);
+    }
+    if ((plank || kind === 'dark') && w >= 90 && h >= 50) {
+      const next = this.emit.get(key) ?? this.t + 0.6 + (h0 % 10) / 10;
+      if (this.t >= next) {
+        const n = Math.floor(this.t * 3.1 + h0);
+        this.bubble(x + 10 + (n * 53 % Math.max(1, w - 20)), y + 3, { r: 1 + (n % 3 === 0 ? 1 : 0), vy: -12 - (n % 4) * 3 });
+        this.emit.set(key, this.t + 1.3 + ((n * 7) % 10) / 6);
+      } else this.emit.set(key, next);
+    }
+  }
+
   // ---------------------------------------------------------------- primitives
   fill(x: number, y: number, w: number, h: number, col: string, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK; c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y + this.liftY), Math.round(w), Math.round(h)); c.globalAlpha = 1;
@@ -440,7 +557,8 @@ export class PixelUI {
     else c.drawImage(cv, Math.round(x), Math.round(y), w, h);
     c.globalAlpha = 1;
   }
-  icon(name: string, x: number, y: number, alpha = 1) { const i = icon(name); this.img(i, x, y, { alpha }); return i.width; }
+  /** a kit icon at this canvas's density; returns its width (UI px) */
+  icon(name: string, x: number, y: number, alpha = 1) { const i = iconTex(name, this.hd), w = i.width / this.hd; this.img(i, x, y, { alpha, w, h: i.height / this.hd }); return w; }
   /** item icon fitted to a size box (nearest-safe downsample) */
   item(id: string, x: number, y: number, w: number, h = w, level = 1, alpha = 1) {
     // rendered at the canvas density: a 24 UI px slot gets a 72 px model icon on a 3x canvas
@@ -471,12 +589,14 @@ export class PixelUI {
   block(x: number, y: number, w: number, h: number) { if (this.hover(x, y, w, h)) this.overNext = true; }
 
   /**
-   * a panel: the skin, an optional title (a brass plaque on the frame for 'wood' / 'stone' / 'cream', a heading
-   * inside for the others), and a POP-IN the first frames it is drawn (the frame springs from 86% with an overshoot,
-   * the content fades + rises in after it). The pop is keyed by o.id, else kind + title (+ its order among
-   * same-keyed panels this frame); pass a stable o.id for panels whose title changes, o.pop: false to skip it.
+   * a panel: the skin, an optional title (a driftwood plank sign on the frame for 'wood' / 'stone' / 'cream', a
+   * heading inside for the others), a POP-IN the first frames it is drawn (the frame springs from 86% with an
+   * overshoot and a damped water wobble, bubbles burst off its bottom edge, the content fades + rises in), and the
+   * live ocean decorations of panelFx() (caustic light, a swaying kelp strand, a dangling rope end, bubbles). The pop
+   * is keyed by o.id, else kind + title (+ its order among same-keyed panels this frame); pass a stable o.id for
+   * panels whose title changes, o.pop: false to skip the pop, o.deco: false to skip the decorations.
    */
-  panel(kind: SkinKind, x: number, y: number, w: number, h: number, title?: string, o: { titleStyle?: TextOpts; alpha?: number; id?: string; pop?: boolean } = {}) {
+  panel(kind: SkinKind, x: number, y: number, w: number, h: number, title?: string, o: { titleStyle?: TextOpts; alpha?: number; id?: string; pop?: boolean; deco?: boolean } = {}) {
     this.block(x, y, w, h);
     this.fadeK = 1; this.liftY = 0;
     let key = o.id ?? `${kind}|${title ?? ''}`;
@@ -485,22 +605,27 @@ export class PixelUI {
     const D = 0.2;
     const pt = this.pop && o.pop !== false ? this.anim('panel:' + key) : 9;
     let fx = x, fy = y, fw = w, fh = h, fa = o.alpha ?? 1;
-    if (pt < D) {
-      const k = pt / D;
+    if (pt < 0.45) {
+      // spring in from 86% with an overshoot, then a damped WATER WOBBLE (width and height breathing out of phase)
+      const k = Math.min(1, pt / D);
       const s = 0.86 + 0.14 * easeOutBack(k, 2.2);
-      fw = Math.max(8, Math.round(w * s)); fh = Math.max(8, Math.round(h * s));
+      const wob = 0.045 * Math.sin(pt * 34) * Math.exp(-pt * 8);
+      fw = Math.max(8, Math.round(w * s * (1 + wob))); fh = Math.max(8, Math.round(h * s * (1 - wob)));
       fx = x + Math.round((w - fw) / 2); fy = y + Math.round((h - fh) / 2);
       fa *= Math.min(1, pt / 0.07);
+      // a burst of bubbles off the bottom edge as it lands
+      if (pt === 0 && this.deco && o.deco !== false && w >= 60 && (kind === 'wood' || kind === 'stone' || kind === 'cream' || kind === 'dark')) for (let i = 0; i < 6; i++) this.bubble(x + 10 + ((i * 37 + w) % Math.max(1, w - 20)), y + 2, { vy: -18 - (i % 3) * 6, r: 1 + (i % 2), delay: i * 0.05, life: 0.9 });
     }
     if (fw === w && fh === h) this.frame(kind, fx, fy, fw, fh, fa);
     else { const c = this.ctx; c.globalAlpha = fa; c.drawImage(skin(kind, Math.round(w), Math.round(h), this.hd), fx, fy, fw, fh); c.globalAlpha = 1; }
+    if (this.deco && o.deco !== false) this.panelFx(kind, fx, fy, fw, fh, key, fa);
     if (title) {
       const lacq = kind === 'wood' || kind === 'stone' || kind === 'cream';
-      const st: TextOpts = o.titleStyle ?? (lacq ? { font: 'title', color: KIT.ink, shadow: '#f2c66d' } : kind === 'paper' || kind === 'insetCream' ? { font: 'title', color: KIT.textInk, shadow: null } : kind === 'blueprint' || kind === 'card' ? { font: 'title', color: '#ffffff', shadow: '#0a2046' } : { font: 'title', color: KIT.cream[3], outline: KIT.ink, shadow: '#000000' });
+      const st: TextOpts = o.titleStyle ?? (lacq ? { font: 'title', color: KIT.ink, shadow: '#e6dec8' } : kind === 'paper' || kind === 'insetCream' ? { font: 'title', color: KIT.textInk, shadow: null } : kind === 'blueprint' || kind === 'card' ? { font: 'title', color: '#ffffff', shadow: '#0a2046' } : { font: 'title', color: KIT.cream[3], outline: KIT.ink, shadow: '#000000' });
       const f = st.font ?? 'title';
       const tw = this.measure(title, f);
       if (lacq) {
-        // a brass plaque riveted over the top frame
+        // a driftwood plank sign nailed over the top frame
         const pw = Math.ceil(tw) + 22, ph = Math.round(this.cap(f)) + 9;
         const px = fx + Math.round((fw - pw) / 2), py = fy - Math.round(ph / 2) + 3;
         this.frame('plaque', px, py, pw, ph, fa);
@@ -545,9 +670,22 @@ export class PixelUI {
     const P = BTN[st];
     const [ft, fh] = btnFace(state, h);
     const fy = y + ft;
-    // the hover glint: a bright diagonal sweeping across the face once
+    // a slow caustic shimmer: every few seconds a soft band of light drifts across the face
+    if (this.deco && state !== 'disabled' && w >= 24) {
+      const hh = hashStr(id), per = 5 + (hh % 30) / 10, ph = (this.t + (hh % 100) / 17) % per;
+      if (ph < 1.1) {
+        const bx0 = x - 10 + (w + 20) * (ph / 1.1);
+        for (let r = 1; r < fh - 1; r++) {
+          const sx = Math.round(bx0 + (fh - r) * 0.5 + Math.sin(r * 0.9 + this.t * 3) * 0.6);
+          const a0 = Math.max(x + 2, sx), b0 = Math.min(x + w - 2, sx + 5);
+          if (b0 > a0) this.fill(a0, fy + r, b0 - a0, 1, '#dffcff', 0.13);
+        }
+      }
+    }
+    // the hover glint: a bright diagonal sweeping across the face once, and a little splash of bubbles
     if (state === 'hover') {
       const g = this.anim(id + ':glint');
+      if (g === 0 && this.deco) this.splash(x + w / 2 + ((hashStr(id) % 11) - 5), fy, w >= 40 ? 4 : 2);
       if (g < 0.4) {
         const gx = x - 8 + (w + 16) * (g / 0.4);
         for (let r = 1; r < fh - 1; r++) {
@@ -559,14 +697,16 @@ export class PixelUI {
     }
     const font = o.font ?? 'body';
     const ty = fy + Math.round((fh - this.cap(font)) / 2);
-    const ic = typeof o.icon === 'string' ? icon(o.icon) : o.icon;
+    // string icons come painted at this canvas's density; a caller's canvas is taken as UI px
+    const icCv = typeof o.icon === 'string' ? iconTex(o.icon, this.hd) : o.icon;
+    const ic = icCv ? { cv: icCv, width: typeof o.icon === 'string' ? icCv.width / this.hd : icCv.width, height: typeof o.icon === 'string' ? icCv.height / this.hd : icCv.height } : undefined;
     const kc = o.key ? (o.keyLabel ?? labelForKey(o.key)) : '';
     const kcW = kc ? this.keycapW(kc) : 0;
     const tw = label ? this.measure(label, font) : 0;
     const total = (ic ? ic.width + (label ? 3 : 0) : 0) + tw;
     let cx = x + 6;
     if (o.align !== 'left') cx = x + Math.round((w - total - (kc ? kcW + 4 : 0)) / 2);
-    if (ic) { this.img(ic, cx, fy + Math.round((fh - ic.height) / 2), { alpha: state === 'disabled' ? 0.5 : 1 }); cx += ic.width + 3; }
+    if (ic) { this.img(ic.cv, cx, fy + Math.round((fh - ic.height) / 2), { alpha: state === 'disabled' ? 0.5 : 1, w: ic.width, h: ic.height }); cx += ic.width + 3; }
     const brass = st === 'wood' || st === 'brass' || st === 'gold';
     if (label) this.text(label, cx, ty, state === 'disabled' ? { font, color: '#b4b0a6', shadow: '#2a2a2a' } : brass ? { font, color: P.text, shadow: P.textSh } : { font, color: P.text, outline: P.textSh });
     if (kc) this.keycap(kc, x + w - kcW - 4, fy + Math.round((fh - KEYCAP_H) / 2), st === 'dark' || st === 'tv', state === 'down');
@@ -731,30 +871,16 @@ export class PixelUI {
   hint(key: string, label: string, x: number, y: number, o: { color?: string; dark?: boolean; font?: FontName } = {}) {
     let w = 0;
     if (key === 'LMB' || key === 'RMB' || key === 'MMB') {
-      const g = this.mouseGlyph(key);
-      this.img(g, x, y); w = g.width + 4;
+      const g = this.mouseGlyph(key), gw = g.width / this.hd;
+      this.img(g, x, y + Math.round((KEYCAP_H - g.height / this.hd) / 2), { w: gw, h: g.height / this.hd }); w = gw + 3;
     } else w = this.keycap(key, x, y, o.dark) + 4;
     const f = o.font ?? 'small';
     w += this.text(label, x + w, y + Math.round((KEYCAP_H - 2 - this.cap(f)) / 2), { font: f, color: o.color ?? KIT.text, shadow: '#06141a' });
     return Math.ceil(w) + 10;
   }
   /** the width hint() takes */
-  hintW(key: string, label: string, font: FontName = 'small') { return (key === 'LMB' || key === 'RMB' || key === 'MMB' ? 13 : this.keycapW(key) + 4) + Math.ceil(this.measure(label, font)) + 10; }
-  private glyphCache = new Map<string, HTMLCanvasElement>();
-  private mouseGlyph(k: string) {
-    let g = this.glyphCache.get(k);
-    if (!g) {
-      const rows = ['..kkkkk..', '.kAAkBBk.', 'kAAAkBBBk', 'kAAAkBBBk', 'kAAAkBBBk', 'kkkkkkkkk', 'kllllllgk', 'kllllllgk', 'kllllllgk', '.kllllgk.', '..kgggk..', '...kkk...'];
-      const A = k === 'LMB' ? '#f2c66d' : '#f3e7c9', B = k === 'RMB' ? '#f2c66d' : '#f3e7c9';
-      const cv = document.createElement('canvas'); cv.width = 9; cv.height = 12;
-      const x = cv.getContext('2d')!;
-      const pal: Record<string, string> = { k: KIT.ink, l: '#f3e7c9', g: '#b9a476', A, B };
-      rows.forEach((r, yy) => { for (let i = 0; i < r.length; i++) { const c = pal[r[i]]; if (c) { x.fillStyle = c; x.fillRect(i, yy, 1, 1); } } });
-      if (k === 'MMB') { x.fillStyle = '#f2c66d'; x.fillRect(4, 1, 1, 4); }
-      g = cv; this.glyphCache.set(k, g);
-    }
-    return g;
-  }
+  hintW(key: string, label: string, font: FontName = 'small') { return (key === 'LMB' || key === 'RMB' || key === 'MMB' ? 12 : this.keycapW(key) + 4) + Math.ceil(this.measure(label, font)) + 10; }
+  private mouseGlyph(k: string) { return mouseTex(k === 'LMB' ? 'L' : k === 'RMB' ? 'R' : 'M', this.hd); }
 
   /**
    * a scrollable list of n rows; row(i, x, y, w, hovered) draws one. Returns the clicked row or -1.
@@ -967,9 +1093,15 @@ export function drawCard(ui: PixelUI, lines: { text: string; color?: string; fon
   ui.fill(x + 2, y + 2, w, h, '#000000', 0.25 * a);
   ui.frame(kind, x, y, w, h, a);
   if (o.pin) {
-    // a brass pin at the top centre
-    const px = x + Math.floor(w / 2) - 2;
-    ui.fill(px, y - 2, 5, 5, KIT.ink, a); ui.fill(px + 1, y - 1, 3, 3, KIT.brass[2], a); ui.fill(px + 1, y - 1, 1, 1, KIT.brass[4], a); ui.fill(px + 3, y + 1, 1, 1, KIT.brass[1], a);
+    // hung on a short rope loop: two strands rising from the card's top edge to a knot
+    const cx = x + Math.floor(w / 2);
+    for (let i = 0; i <= 5; i++) {
+      for (const sx of [-1, 1]) { const px = cx + sx * (6 - i), py = y - Math.round(i * 0.9); ui.fill(px - 1, py - 1, 3, 3, KIT.ink, a); }
+    }
+    for (let i = 0; i <= 5; i++) {
+      for (const sx of [-1, 1]) { const px = cx + sx * (6 - i), py = y - Math.round(i * 0.9); ui.fill(px, py, 1, 1, i % 2 ? '#b09254' : '#d6bc80', a); }
+    }
+    ui.fill(cx - 2, y - 8, 5, 4, KIT.ink, a); ui.fill(cx - 1, y - 7, 3, 2, '#b09254', a); ui.fill(cx - 1, y - 7, 1, 1, '#f0dca6', a);
   }
   let cy = y + pad[1] + 1;
   rows.forEach((r, i) => {
@@ -998,3 +1130,6 @@ function shadeFor(c: string) {
   const r = ((v >> 16) & 255) * 0.55, g = ((v >> 8) & 255) * 0.55, b = (v & 255) * 0.55;
   return '#' + [r, g, b].map((k) => Math.round(k).toString(16).padStart(2, '0')).join('');
 }
+
+/** a small stable string hash (decoration placement / phases) */
+function hashStr(s: string): number { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) % 100000; }

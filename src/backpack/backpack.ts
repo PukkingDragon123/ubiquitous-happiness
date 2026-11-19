@@ -29,6 +29,7 @@ import { itemModel } from './models';
 import { audio } from '../audio/audio';
 import { easeOutBack } from '../core/math';
 import { K, modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
+import { bubbles, kelp, caustics, SeaFx } from '../hideout/seaFx';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
@@ -146,15 +147,18 @@ function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
     }
     // rivets where the flap is fixed to the body
     rivet(f, fx0 + 2, fy1 - 2); rivet(f, fx1 - 4, fy1 - 2);
-    // ---- two straps hang from the flap over the top border, punched and stitched, each ending in a brass buckle
+    // ---- two rope ties hang from the flap over the top border, knotted, their ends frayed (a sea-bag's lashing)
+    const RP = ['#2a1e0e', '#8a6a3a', '#c8a464', '#ecd29a'];
     for (const sx of [EXT + Math.round(bw * 0.16), EXT + Math.round(bw * 0.84)]) {
-      const s0 = sx - 4;
-      f(s0 - 1, 6, 10, TOP - 9, LE.out); f(s0, 6, 8, TOP - 10, LE.d1); f(s0, 6, 1, TOP - 10, LE.l2); f(s0 + 7, 6, 1, TOP - 10, LE.d2);
-      for (let yy = 7; yy < TOP - 12; yy += 2) { f(s0 + 1, yy, 1, 1, LE.st); f(s0 + 6, yy, 1, 1, LE.st); }
-      f(s0 + 3, 8, 2, 2, LE.out); f(s0 + 3, 8, 1, 1, LE.d3); // a punched hole
-      const by = TOP - 11;
-      f(s0 - 2, by, 12, 8, BR.out); f(s0 - 1, by + 1, 10, 6, BR.b); f(s0 - 1, by + 1, 10, 1, BR.l); f(s0 - 1, by + 1, 1, 6, BR.l); f(s0 + 8, by + 2, 1, 5, BR.d); f(s0 - 1, by + 6, 10, 1, BR.d);
-      f(s0 + 1, by + 3, 6, 2, LE.d2); f(s0 + 3, by + 2, 2, 4, BR.dd); f(s0 + 3, by + 2, 1, 2, BR.l); f(s0 - 1, by + 1, 1, 1, BR.w);
+      for (let yy = 4; yy < TOP - 6; yy++) {
+        const k = yy % 4;
+        f(sx - 2, yy, 1, 1, RP[0]); f(sx - 1, yy, 1, 1, k === 0 ? RP[3] : k === 1 ? RP[2] : k === 2 ? RP[1] : RP[0]);
+        f(sx, yy, 1, 1, k === 1 ? RP[3] : k === 2 ? RP[2] : k === 3 ? RP[1] : RP[0]); f(sx + 1, yy, 1, 1, RP[0]);
+      }
+      // the knot, and two frayed ends
+      const ky = TOP - 9;
+      f(sx - 4, ky, 8, 6, RP[0]); f(sx - 3, ky + 1, 6, 4, RP[2]); f(sx - 3, ky + 1, 3, 1, RP[3]); f(sx + 1, ky + 3, 2, 2, RP[1]);
+      for (const [dx, len] of [[-3, 5], [1, 4]] as [number, number][]) for (let i = 0; i < len; i++) { f(sx + dx + (i > 2 ? -1 : 0), ky + 6 + i, 1, 1, RP[2]); f(sx + dx + 1, ky + 6 + i, 1, 1, i % 2 ? RP[1] : RP[3]); }
     }
     // ---- brass D-rings on leather tabs at the sides, brass corner caps (riveted) at the bottom
     for (const [rx, dir] of [[EXT - 4, -1], [EXT + bw, 1]] as [number, number][]) {
@@ -162,16 +166,10 @@ function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
       f(rx + (dir < 0 ? 3 : -3), ry + 2, 4, 6, LE.d2);
       f(rx, ry, 4, 10, BR.out); f(rx + (dir < 0 ? 1 : 0), ry + 1, 3, 8, BR.b); f(rx + (dir < 0 ? 2 : 0), ry + 3, 1, 4, BR.out); f(rx + 1, ry + 1, 1, 2, BR.l);
     }
-    for (const [cx0, flip] of [[bx0, 1], [bx1, -1]] as [number, number][]) {
-      for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
-        if (i > 2 && j < 5) continue;
-        const px = cx0 + (flip > 0 ? i : -i), py = by1 - j;
-        if (!inBody(px, py)) continue;
-        const edge = i === 0 || j === 0 || (i === 2 && j < 5) || (j === 4 && i > 2) || i === 7 || j === 7;
-        f(px, py, 1, 1, edge ? BR.out : i + j < 5 ? BR.l : i + j > 9 ? BR.d : BR.b);
-      }
-      rivet(f, cx0 + (flip > 0 ? 3 : -5), by1 - 5);
-    }
+    // a salt tide-line dried along the bottom, barnacles grown on both bottom corners
+    for (let px = bx0 + 8; px < bx1 - 8; px++) { const yy = by1 - 5 + Math.round(Math.sin(px * 0.21) * 1.2); if ((px * 5) % 11 < 8) f(px, yy, 1, 1, '#c8b49a'); }
+    const barn = (bx: number, by: number) => { for (const [cx, cy, r] of [[bx + 3, by + 2, 3], [bx + 8, by + 3, 2], [bx + 4, by + 6, 2]]) { f(cx - r, cy, r * 2 + 1, r, '#2e2a24'); f(cx - r + 1, cy, r * 2 - 1, r - 1, '#b8aea0'); f(cx - r + 1, cy, r, 1, '#ece4d6'); f(cx - 1, cy, 3, 1, '#2e2a24'); } };
+    barn(bx0 + 1, by1 - 9); barn(bx1 - 12, by1 - 9);
     return cv;
   });
 }
@@ -181,7 +179,7 @@ function trayArt(w: number, h: number): HTMLCanvasElement {
   return cached(`tray|${w}|${h}`, () => {
     const [cv, x] = canvas(w, h);
     const f: Fill = (px, py, ww, hh, col) => { x.fillStyle = col; x.fillRect(px, py, ww, hh); };
-    const WD = { out: '#1a0e06', d2: '#3a2412', d1: '#5a3a1e', b: '#7a5430', l1: '#9a7044', l2: '#c09060' };
+    const WD = { out: '#16110c', d2: '#3a3026', d1: '#5a4c3c', b: '#7c6c58', l1: '#a09078', l2: '#c8b89a' };
     const SA = { b: '#c4a06a', d: '#a9844f', l: '#dcbf8a', dd: '#8a6a3e', sh: '#9a7a48' };
     const F = 7;
     // the frame: plank faces lit from the top-left, grain lines running along each plank
@@ -201,17 +199,12 @@ function trayArt(w: number, h: number): HTMLCanvasElement {
     for (const [cx, cy, dx, dy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]]) for (let i = 0; i < F; i++) f(cx + dx * i, cy + dy * i, 1, 1, WD.d2);
     // a knot on the top and the bottom plank (a dark ring with a lit lip)
     for (const [kx, ky] of [[Math.round(w * 0.33), 2], [Math.round(w * 0.71), h - 5]]) { f(kx - 2, ky, 5, 2, WD.d2); f(kx - 1, ky, 3, 2, WD.d1); f(kx, ky, 1, 1, WD.out); f(kx - 3, ky + 1, 1, 1, WD.d1); f(kx + 3, ky, 1, 1, WD.l1); }
-    // brass corner plates with a rivet each
+    // rope lashed round each corner (three wraps), and a nail at every plank end
+    const RP = ['#2a1e0e', '#8a6a3a', '#c8a464', '#ecd29a'];
     for (const [cx, cy, dx, dy] of [[0, 0, 1, 1], [w - 1, 0, -1, 1], [0, h - 1, 1, -1], [w - 1, h - 1, -1, -1]]) {
-      for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) {
-        if (i > 2 && j > 2) continue;
-        const px = cx + dx * i, py = cy + dy * j;
-        if (!inRound(px, py, 0, 0, w - 1, h - 1, 4)) continue;
-        const edge = i === 6 || j === 6 || (i === 2 && j > 2) || (j === 2 && i > 2) || !inRound(px, py, 1, 1, w - 2, h - 2, 3);
-        f(px, py, 1, 1, edge ? BR.out : i + j < 3 ? BR.l : BR.b);
-      }
-      f(cx + dx * 1, cy + dy * 1, 1, 1, BR.w);
+      for (let wr = 0; wr < 3; wr++) for (let i = 0; i < 7; i++) f(cx + dx * (1 + wr * 2 + i), cy + dy * (7 - i), 1, 1, i === 0 || i === 6 ? RP[0] : i % 3 === 0 ? RP[3] : i % 3 === 1 ? RP[2] : RP[1]);
     }
+    for (let px = 24; px < w - 24; px += 36) { f(px, 2, 2, 2, '#2a2420'); f(px, 2, 1, 1, '#9a948c'); f(px, h - 4, 2, 2, '#2a2420'); f(px, h - 4, 1, 1, '#9a948c'); }
     // the sand: a shadowed rim under the frame, ripple bands, shore finds
     const ix = F, iy = F, iw = w - F * 2, ih = h - F * 2;
     f(ix - 1, iy - 1, iw + 2, ih + 2, WD.out);
@@ -294,6 +287,8 @@ export class BackpackScreen implements Screen {
   private overClose = false;
   private cardItem: { uid: number; key: string; o: THREE.Object3D; sh: THREE.Mesh } | null = null;
   private cardPop = 0;
+  /** bubble splashes (pick up, drop, fuse, presses) */
+  private fx = new SeaFx();
   /** rows the seabed tray keeps room for (the tallest thing that might be dropped on it) */
   private reserve = 2;
 
@@ -471,6 +466,7 @@ export class BackpackScreen implements Screen {
     this.drawSets(cslide);
     this.drawHints(cslide);
     this.drawPlanLabel();
+    this.drawLife(dt, slide, cslide);
     this.drawFx(dt);
     this.syncModels();
     if (fg.closeButton('bp:close', this.L.closeX + cslide, this.L.closeY, { size: this.L.close, key: null })) this.close();
@@ -534,7 +530,7 @@ export class BackpackScreen implements Screen {
     if (!loose && !(this.held && this.plan.kind === 'board')) {
       const cy = y + L.trayH / 2;
       fg.text('Nothing down here', L.trayX + L.trayW / 2, cy - fg.lh('body') + 1, { font: 'body', color: '#6a4a26', shadow: null, align: 'center' });
-      fg.text('drag things out of the bag to leave them', L.trayX + L.trayW / 2, cy + 3, { font: 'small', color: '#8a6a3e', shadow: null, align: 'center' });
+      fg.text('drag things out of the bag to leave them', L.trayX + L.trayW / 2, cy + 3, { font: 'small', color: '#5e4222', shadow: null, align: 'center' });
     }
   }
 
@@ -703,6 +699,20 @@ export class BackpackScreen implements Screen {
       ui.text(t.text, t.x, t.y + dy, { font: 'title', color: t.col, outline: '#140a04', align: 'center', alpha: a });
       if (t.sub) ui.text(t.sub, t.x, t.y + dy + ui.lh('title') + 1, { font: 'body', color: '#fff2c8', outline: '#140a04', align: 'center', alpha: a });
     }
+  }
+
+  /** the sea's constant little life: caustics on the lining and the sand, bubbles off the bag, kelp on the frames */
+  private drawLife(dt: number, slide: number, cs: number) {
+    const ui = this.ui, fg = this.fg, L = this.L, t = this.t;
+    caustics(ui, L.gridX, L.gridY + slide, GRID_W * C, GRID_H * C, t, 0.05);
+    caustics(ui, L.trayX + 7, L.trayY + 7 + slide, L.trayW - 14, L.trayH - 14, t + 3, 0.1, '#fff6d8');
+    bubbles(fg, L.packX + 30, L.packY + slide + 2, GRID_W * C - 40, t, 2, 5, 26);
+    bubbles(fg, L.colX + cs + 30, L.colY - 2, L.colW - 70, t, 6, 3, 18);
+    kelp(fg, L.colX + cs + 3, L.colY + 2, 34, t, 4, 1); kelp(fg, L.colX + cs + 6, L.colY + 3, 20, t, 7, -1);
+    kelp(fg, L.colX + cs + L.colW - 5, L.setsY + 2, 20, t, 9, -1);
+    kelp(fg, L.trayX + L.trayW - 10, L.trayY + slide + 1, 18, t, 2, -1);
+    if (this.game.input && fg.pressed && !this.held) this.fx.burst(fg.mx, fg.my, 5);
+    this.fx.draw(fg, dt);
   }
 
   // ---- the card column
@@ -923,6 +933,7 @@ export class BackpackScreen implements Screen {
     // the grab point in pocket px (a seabed find grows to pocket size around the cursor)
     this.grab = { x: Math.max(2, Math.min(f.w * k - 2, (this.ui.mx - v.x) * k)), y: Math.max(2, Math.min(f.h * k - 2, (this.ui.my - v.y) * k)) };
     v.pop = 1;
+    this.fx.burst(this.ui.mx, this.ui.my, 6);
     sfx(['k_pick1', 'cloth1', 'k_tick1'], { vol: 0.45 });
   }
 
@@ -972,6 +983,7 @@ export class BackpackScreen implements Screen {
       it.gx = p.gx; it.gy = p.gy; this.slot.delete(it.uid);
       v.vy = 70; v.bump = 1;
       this.dust(it, '#cfe8e0');
+      { const [tx, ty] = this.targetOf(it), f = this.footOf(it, C); this.fx.burst(tx + f.w / 2, ty + f.h / 2, 8); }
       sfx(['k_drop2', 'k_drop3', 'cloth1'], { vol: 0.55 });
       return;
     }
@@ -1033,6 +1045,7 @@ export class BackpackScreen implements Screen {
     if (out.gx < 0) this.slot.set(out.uid, place.slot && this.boardFits(out, place.slot.bx, place.slot.by, out.rot) ? place.slot : this.freeBoardSlot(out) ?? { bx: 0, by: this.L.bRows });
     const v = this.visOf(out); v.x = cx; v.y = cy; v.pop = 0;
     this.burst(out, '#ffe8a0', 22); this.burst(out, '#c8a0ff', 12);
+    { const f = this.footOf(out); this.fx.burst(cx + f.w / 2, cy + f.h / 2, 14); }
     const d = getItem(res.id);
     const isLevel = res.id === it.id && res.id === target.id;
     const [tx, ty] = this.targetOf(out);

@@ -17,6 +17,8 @@ import { PIECE, nextGoal } from './rebuild';
 import type { PixelUI } from '../ui/pixel/ui';
 import { photo } from '../ui/obj/studio';
 import { K } from './itemCard';
+import { wellArt } from './panelArt';
+import { rope, bubbles, wobble, SeaFx } from './seaFx';
 import { audio } from '../audio/audio';
 import { clamp01, easeOutBack } from '../core/math';
 
@@ -35,6 +37,7 @@ export class BuildScene {
   private nextHit = 0;
   /** the BUILT card: what was built, what it unlocks, what's next, a studio photo of the piece */
   private card: { name: string; unlock: string; next: string; pic: HTMLCanvasElement | null; t: number; stamped?: boolean } | null = null;
+  private fx = new SeaFx();
   private crabFrom = new THREE.Vector3();
   private crabTo = new THREE.Vector3();
   onDone?: () => void;
@@ -164,45 +167,53 @@ export class BuildScene {
     if (!c || !this.active) return;
     c.t += dt;
     const k = Math.min(1, c.t / 0.28), e = 1 - (1 - k) ** 3;
-    const w = Math.min(ui.w - 24, 352), pw = 84, ph = 63;
-    const tx0 = 12 + pw + 12, tw = w - tx0 - 12;
+    const P = 64, w = Math.min(ui.w - 24, 340);
+    const tx0 = 14 + P + 12, tw = w - tx0 - 14;
     const unlockH = ui.textBox(c.unlock, -9999, -9999, tw, { font: 'body' });
-    const h = Math.max(ph + 24, 12 + ui.lh('small') + ui.lh('title') + 4 + ui.lh('small') + unlockH + (c.next ? ui.lh('small') + 4 : 0) + 10);
+    const h = Math.max(P + 22, 12 + ui.lh('small') + ui.lh('title') + 2 + ui.lh('small') + unlockH + (c.next ? ui.lh('small') + 3 : 0) + 12);
     const bar = Math.round(ui.h * 0.6 * Math.max(0, 1 - (ui.w / ui.h) / 2.39) * 0.5);
-    const x = Math.round((ui.w - w) / 2), y = Math.round(ui.h - bar - h - 10 + (1 - e) * 30);
-    const a = e;
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35 * a);
-    ui.frame('cream', x, y, w, h, a);
-    // the brass pin at the top
-    ui.fill(x + w / 2 - 3, y - 3, 7, 7, K.brassD, a); ui.fill(x + w / 2 - 2, y - 2, 5, 5, K.brass1, a); ui.fill(x + w / 2 - 2, y - 2, 2, 2, K.brassW, a);
-    // the photo, framed, a strip of tape over its corner
-    const fx = x + 12, fy = y + Math.round((h - ph) / 2);
-    if (!c.pic || c.pic.width !== pw * ui.hd) c.pic = this.photo(pw * ui.hd, ph * ui.hd);
-    ui.fill(fx - 2, fy - 2, pw + 4, ph + 4, '#3a2a18', a); ui.fill(fx - 1, fy - 1, pw + 2, ph + 2, '#f8f0dc', a);
-    ui.fill(fx, fy, pw, ph, '#bfd2cc', a); ui.fill(fx, fy + Math.round(ph * 0.68), pw, ph - Math.round(ph * 0.68), '#9fb4aa', a);
-    if (c.pic) ui.img(c.pic, fx, fy, { w: pw, h: ph, alpha: a });
-    ui.fill(fx + pw - 14, fy - 4, 18, 6, '#efe6c8', 0.85 * a); ui.fill(fx + pw - 14, fy + 1, 18, 1, '#d6caa4', 0.85 * a);
-    // the words
+    // it surfaces from below with a little water bob
+    const x = Math.round((ui.w - w) / 2), y = Math.round(ui.h - bar - h - 12 + (1 - e) * 34 + wobble(c.t) * 0.5);
+    if (!c.stamped) { c.stamped = true; this.fx.burst(x + w / 2, y + 6, 14); this.fx.burst(x + 14 + P / 2, y + h / 2, 8); }
+    // two ropes it hangs from, a carved driftwood plaque
+    const sway = Math.round(Math.sin(c.t * 1.4) * 1.5);
+    for (const rx of [x + 22, x + w - 26]) rope(ui, rx + sway, y - 14, 16, true);
+    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35 * e);
+    ui.img(wellArt(w, h, 'plank'), x, y);
+    // a starfish clinging to the top-left corner
+    const sx = x + 4, sy = y + 3;
+    for (const [dx, dy] of [[0, -3], [3, -1], [2, 2], [-2, 2], [-3, -1]]) { ui.fill(sx + 4 + Math.round(dx * 0.6), sy + 4 + Math.round(dy * 0.6), 2, 2, '#c8582c'); ui.fill(sx + 4 + dx, sy + 4 + dy, 1, 1, '#e8783c'); }
+    ui.fill(sx + 4, sy + 4, 2, 2, '#f09a5a');
+    // the piece's photo behind a brass porthole
+    if (!c.pic || c.pic.width !== P * ui.hd) c.pic = this.porthole(P * ui.hd);
+    const fx = x + 14, fy = y + Math.round((h - P) / 2);
+    if (c.pic) ui.img(c.pic, fx, fy, { w: P, h: P });
+    ui.img(portholeRing(P), fx - 4, fy - 4);
+    // the words, carved into the wood
     const tx = x + tx0;
     let yy = y + 10;
-    ui.text('NEW!', tx, yy, { font: 'small', color: '#a8342c', shadow: null, alpha: a }); yy += ui.lh('small');
-    ui.text(c.name, tx, yy, { font: 'title', color: K.ink, shadow: null, alpha: a }); yy += ui.lh('title') + 2;
-    ui.text('UNLOCKS', tx, yy, { font: 'small', color: '#8a5a24', shadow: null, alpha: a }); yy += ui.lh('small');
-    yy += ui.textBox(c.unlock, tx, yy, tw, { font: 'body', color: '#1a4a7a', shadow: null }) + 3;
-    if (c.next) ui.text(`next up: ${c.next}`, tx, yy, { font: 'small', color: '#6a5638', shadow: null, alpha: a });
-    // the BUILT stamp slams on a beat later (rings shrinking onto the card)
-    const sk = Math.max(0, Math.min(1, (c.t - 0.3) / 0.16));
-    if (sk > 0) {
-      if (!c.stamped) { c.stamped = true; audio.play('thud_heavy1', { vol: 0.3, rate: 1.3 }); audio.play('k_confirm2', { vol: 0.3, dry: true }); }
-      const r = Math.round(22 * (1 + (1 - sk) * 0.8)), sx = x + w - 34, sy = y + 30;
-      const col = '#b8342c';
-      for (let yy2 = -r; yy2 <= r; yy2++) for (let xx2 = -r; xx2 <= r; xx2++) {
-        const d = Math.hypot(xx2, yy2);
-        if ((d <= r && d > r - 2) || (d <= r - 4 && d > r - 5)) ui.fill(sx + xx2, sy + yy2, 1, 1, col, 0.85 * sk);
-      }
-      ui.fill(sx - r + 5, sy - 1, 4, 2, col, 0.85 * sk); ui.fill(sx + r - 8, sy - 1, 4, 2, col, 0.85 * sk);
-      ui.text('BUILT', sx, sy - Math.round(ui.cap('small') / 2), { font: 'small', color: col, shadow: null, align: 'center', alpha: sk });
+    ui.text('BUILT!', tx, yy, { font: 'small', color: K.kelpL, outline: K.ink2 }); yy += ui.lh('small');
+    ui.text(c.name, tx, yy, { font: 'title', color: K.brass2, outline: K.ink2 }); yy += ui.lh('title') + 2;
+    ui.text('UNLOCKS', tx, yy, { font: 'small', color: K.cream2, outline: K.ink2 }); yy += ui.lh('small');
+    yy += ui.textBox(c.unlock, tx, yy, tw, { font: 'body', color: K.cream, outline: K.ink2 }) + 3;
+    if (c.next) ui.text(`next up: ${c.next}`, tx, yy, { font: 'small', color: K.dim, outline: K.ink2 });
+    bubbles(ui, x + 30, y - 1, w - 60, c.t, 21, 4, 24);
+    if (c.t > 0.3 && c.t - dt <= 0.3) { audio.play('bubbles_a', { vol: 0.3 }); audio.play('k_confirm2', { vol: 0.3, dry: true }); }
+    this.fx.draw(ui, dt);
+  }
+  /** the photo cut to a circle (for the porthole) */
+  private porthole(px: number): HTMLCanvasElement | null {
+    const src = this.photo(px, px);
+    if (!src) return null;
+    const ctx = src.getContext('2d')!;
+    const d = ctx.getImageData(0, 0, px, px), r = px / 2;
+    for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) {
+      const i = (y * px + x) * 4, dd = Math.hypot(x - r + 0.5, y - r + 0.5);
+      if (dd > r) d.data[i + 3] = 0;
+      else if (d.data[i + 3] < 255) { const a = d.data[i + 3] / 255, bg = y < px * 0.66 ? [184, 214, 210] : [150, 182, 172]; for (let k = 0; k < 3; k++) d.data[i + k] = Math.round(d.data[i + k] * a + bg[k] * (1 - a)); d.data[i + 3] = 255; }
     }
+    ctx.putImageData(d, 0, 0);
+    return src;
   }
   /** a studio photo of the finished piece (a clone, so the house keeps its model) */
   private photo(w: number, h: number): HTMLCanvasElement | null {
@@ -210,4 +221,25 @@ export class BuildScene {
     try { if (s?.built) { const c = s.built.clone(true); c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); c.scale.set(1, 1, 1); return photo(c, w, h, { yaw: -0.5, pitch: 0.35, fill: 1, ss: 2 }); } } catch { /* no GL */ }
     return null;
   }
+}
+
+/** a brass porthole ring (bolted) around an s x s circle, cached */
+let ringCache: { s: number; cv: HTMLCanvasElement } | null = null;
+function portholeRing(s: number): HTMLCanvasElement {
+  if (ringCache?.s === s) return ringCache.cv;
+  const W = s + 8, cv = document.createElement('canvas'); cv.width = W; cv.height = W;
+  const x = cv.getContext('2d')!;
+  const f = (px: number, py: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, 1, 1); };
+  const r0 = s / 2, c = W / 2;
+  for (let py = 0; py < W; py++) for (let px = 0; px < W; px++) {
+    const d = Math.hypot(px - c + 0.5, py - c + 0.5);
+    if (d > r0 + 4 || d < r0 - 1) continue;
+    const lit = (px - c) + (py - c) < 0;
+    f(px, py, d > r0 + 3 ? '#2e1404' : d < r0 ? '#2e1404' : d > r0 + 2 ? (lit ? '#f2c66d' : '#8a5a24') : lit ? '#c8913a' : '#6a4014');
+  }
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2, bx = Math.round(c + Math.cos(a) * (r0 + 2) - 1), by = Math.round(c + Math.sin(a) * (r0 + 2) - 1); x.fillStyle = '#4a2c0c'; x.fillRect(bx, by, 2, 2); x.fillStyle = '#fff1c2'; x.fillRect(bx, by, 1, 1); }
+  // a glint across the glass
+  for (let i = 0; i < 10; i++) f(Math.round(c - r0 * 0.5 + i), Math.round(c - r0 * 0.55 + i * 0.4), 'rgba(255,255,255,0.35)');
+  ringCache = { s, cv };
+  return cv;
 }

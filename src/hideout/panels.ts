@@ -11,6 +11,7 @@ import { CRAFTS, craft, craftAvailable, stationName, upgradable, upgradeCost, up
 import { audio } from '../audio/audio';
 import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate } from './itemCard';
 import { panelArt, wellArt, PANEL_IN, type PanelKind } from './panelArt';
+import { bubbles, kelp, caustics, wobble, SeaFx } from './seaFx';
 
 /** a centred panel rect at most w x h (leaves room for the name plate above it) */
 export function panelRect(ui: PixelUI, w: number, h: number) {
@@ -26,10 +27,22 @@ export function stashRect(ui: PixelUI) {
 }
 export const WORK_SIZE: [number, number] = [600, 310];
 
-/** the panel rect rising into place for its first moments on screen (a 0.2 s overshoot) */
-function pop(ui: PixelUI, id: string, r: { x: number; y: number; w: number; h: number }) {
-  const k = Math.min(1, ui.anim('pop:' + id) / 0.2), e = k >= 1 ? 1 : 1 + 2.4 * (k - 1) ** 3 + 1.4 * (k - 1) ** 2;
-  return { ...r, y: r.y + Math.round((1 - e) * 18) };
+/** the panel rect bobbing into place like something surfacing (a damped water wobble) */
+export function pop(ui: PixelUI, id: string, r: { x: number; y: number; w: number; h: number }) {
+  return { ...r, y: r.y + wobble(ui.anim('pop:' + id)) };
+}
+/**
+ * the sea's life on a panel, drawn over it each frame with a few fills: a kelp blade draped over a top corner,
+ * bubbles rising off the top edge, a faint caustic shimmer over the inside, and a splash of bubbles wherever you
+ * press inside it. Call after drawing the panel's content.
+ */
+export function panelLife(ui: PixelUI, fx: SeaFx, r: { x: number; y: number; w: number; h: number }, inner: { x: number; y: number; w: number; h: number }, seed: number, dt: number) {
+  caustics(ui, inner.x, inner.y, inner.w, inner.h, ui.t + seed, 0.045);
+  bubbles(ui, r.x + 20, r.y - 1, r.w - 40, ui.t, seed, 4, 30);
+  kelp(ui, r.x + 14 + (seed % 3) * 6, r.y + 3, 22 + (seed % 4) * 3, ui.t, seed, 1);
+  kelp(ui, r.x + r.w - 22, r.y + 3, 16, ui.t, seed + 5, -1);
+  if (ui.pressed && ui.hover(r.x, r.y, r.w, r.h)) fx.burst(ui.mx, ui.my, 6);
+  fx.draw(ui, dt);
 }
 
 /** the frame, the name plate and the close X; returns the inner content rect and whether the X was clicked */
@@ -70,11 +83,13 @@ function detail(ui: PixelUI, id: string, level: number, x: number, y: number, w:
 export class StashPanel {
   tab = 0;
   sel: number | null = null;
+  private fx = new SeaFx();
+  private lastHov = -1;
   private tabs: { label: string; kinds: ItemKind[] | null }[] = [
     { label: 'ALL', kinds: ['tool', 'trinket', 'ability', 'weapon', 'armor'] }, { label: 'TOOLS', kinds: ['tool', 'weapon', 'armor'] }, { label: 'TRINKETS', kinds: ['trinket'] }, { label: 'CORES', kinds: ['ability'] }, { label: 'MATERIALS', kinds: null },
   ];
   /** returns true when the panel wants to close */
-  draw(ui: PixelUI): boolean {
+  draw(ui: PixelUI, dt = 1 / 60): boolean {
     const r = pop(ui, 'stash', stashRect(ui));
     const { close, inner } = frame(ui, 'chest', 'SEA CHEST', r, 'stashX');
     const nt = ui.tabs('stashTabs', this.tabs.map((t) => t.label), this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
@@ -98,6 +113,7 @@ export class StashPanel {
         ui.text(`x${n}`, x + w - 10, y + 4, { font: 'title', color: K.brass2, shadow: K.ink2, align: 'right' });
         if (hov) ui.tooltip(ui.itemTip(id));
       }, { cols: 2, style: 'dark' });
+      panelLife(ui, this.fx, r, inner, 3, dt);
       return close;
     }
     const items = META.stash.filter((s) => ITEMS[s.id] && kinds.includes(getItem(s.id).kind));
@@ -126,6 +142,11 @@ export class StashPanel {
     ui.img(wellArt(dw, ch), dx, cy);
     const it: ItemInst | undefined = hov0.it ?? items.find((s) => s.uid === this.sel) ?? items[0];
     if (it) detail(ui, it.id, it.level ?? 1, dx + 8, cy + 8, dw - 16, ch - 16);
+    // a little burst of bubbles off each piece you point at
+    const hu = (hov0.it as ItemInst | null)?.uid ?? -1;
+    if (hu !== this.lastHov && hu >= 0) this.fx.burst(ui.mx, ui.my - 4, 4);
+    this.lastHov = hu;
+    panelLife(ui, this.fx, r, inner, 3, dt);
     return close;
   }
 }
@@ -134,6 +155,7 @@ export class WorkshopPanel {
   tab = 0;
   sel = 0;
   private bang = 0;
+  private fx = new SeaFx();
   draw(ui: PixelUI, dt: number): boolean {
     this.bang = Math.max(0, this.bang - dt);
     const r = pop(ui, 'work', panelRect(ui, ...WORK_SIZE));
@@ -178,7 +200,7 @@ export class WorkshopPanel {
         const av = craftAvailable(c);
         if (!av) ui.text(`build a ${stationName(c.station!)} first`, dx + 8, by + 6, { font: 'body', color: K.coralL, shadow: K.ink2 });
         if (ui.button('craft', 'CRAFT', dx + dw - 98, by, 90, btnH, { style: 'green', disabled: !canMake(c), icon: 'hammer', sfx: '' })) {
-          if (craft(c)) { audio.play('clank1', { vol: 0.5 }); audio.play('jin_good', { vol: 0.35, dry: true }); this.bang = 0.5; }
+          if (craft(c)) { audio.play('clank1', { vol: 0.5 }); audio.play('jin_good', { vol: 0.35, dry: true }); this.bang = 0.5; this.fx.burst(dx + dw - 53, by, 14); }
         }
       }
     } else {
@@ -201,11 +223,12 @@ export class WorkshopPanel {
         ui.costRow(cost, dx + 8, yy, { have: META.materials, showHave: true, size: 18, font: 'body' });
         const can = Object.entries(cost).every(([k, v]) => (META.materials[k] ?? 0) >= v);
         if (ui.button('upg', 'UPGRADE', dx + dw - 108, by, 100, btnH, { style: 'gold', disabled: !can, icon: 'star', sfx: '' })) {
-          if (upgrade(it)) { audio.play('powerup1', { vol: 0.4, dry: true }); this.bang = 0.5; }
+          if (upgrade(it)) { audio.play('powerup1', { vol: 0.4, dry: true }); this.bang = 0.5; this.fx.burst(dx + dw - 58, by, 14); }
         }
       }
     }
     if (this.bang > 0) ui.fill(r.x, r.y, r.w, r.h, '#fff4d0', this.bang * 0.25);
+    panelLife(ui, this.fx, r, inner, 7, dt);
     return close;
   }
 }
