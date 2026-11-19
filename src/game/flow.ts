@@ -133,7 +133,11 @@ export function setupFlow(game: Game): Flow {
       game.go('intro', {});
     },
     continueGame: () => { if (!resume()) home({ arrive: true }); },
-    runEnded: (r) => { home({ arrive: true }); game.openModal('result', r); },
+    runEnded: (r) => {
+      // the dungeon already showed its run summary card: no second card, just the home's reaction (Mr. Crab + the goal)
+      if ((r as RunResult & { summaryShown?: boolean }).summaryShown) { home({ arrive: true, back: true }); return; }
+      home({ arrive: true }); game.openModal('result', r);
+    },
     toTitle: () => game.go('title', { quick: true }),
     dungeonQuit: () => home({ arrive: true }),
     afterIntro: (skipped) => { welcome = !skipped; home({ arrive: true }); },

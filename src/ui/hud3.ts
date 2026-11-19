@@ -84,6 +84,8 @@ export interface HudData {
   /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
   skills?: SkillHudState | null;
   /** the diving depth gauge: metres now, the deepest ever (red marker); floorMax = the dial's full scale */
+  /** metres travelled from home (the journey) */
+  far?: number;
   depth?: { m: number; record: number; floorMax?: number; floorTop?: number; floorBottom?: number; zone?: string; descending?: boolean } | null;
   /** hide everything but title cards (cutscenes) */
   hidden?: boolean;
@@ -531,6 +533,7 @@ export class Hud {
   private boss = new BossPlaque();
   private gauge = new DepthGauge();
   private gaugePlaque = plaque(40, 14);
+  private farPlaque = plaque(46, 14);
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
   private ribbon = new THREE.Group();
@@ -547,7 +550,7 @@ export class Hud {
     this.avatar.root.scale.setScalar(28);
     this.avatar.root.userData.noPixel = true; // the blobfish keeps its own soft skin shading
     this.avatarShadow.rotation.x = -1.2;
-    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque);
+    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque, this.farPlaque);
     this.pouch.scale.multiplyScalar(13);
     const mk = (name: string, s: number) => { const m = hudModel(name); m.scale.setScalar(s); S.ui.add(m); const p = plaque(22, 11); S.ui.add(p); return { m, p }; };
     this.counters = { pearls: mk('pearlCoin', 11), keys: mk('key', 13), bombs: mk('bomb', 13) };
@@ -608,7 +611,7 @@ export class Hud {
       const y = this.bars(ui, dt, s);
       this.counterCol(ui, dt, s, y);
       this.strip(ui, s.strip ?? null);
-      this.depthGauge(ui, dt, s.depth ?? null, !!s.strip);
+      this.depthGauge(ui, dt, s.depth ?? null, !!s.strip, s.far ?? (s.strip as { far?: number } | null | undefined)?.far);
       this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null);
       this.hand(ui, dt, s.skills ?? null);
     }
@@ -744,8 +747,9 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- the depth gauge (under the strip map)
-  private depthGauge(ui: DUi, dt: number, d: HudData['depth'], hasStrip: boolean) {
+  private depthGauge(ui: DUi, dt: number, d: HudData['depth'], hasStrip: boolean, far?: number) {
     this.gauge.root.visible = this.gaugePlaque.visible = !!d;
+    this.farPlaque.visible = !!d && far !== undefined;
     if (!d) return;
     const x = ui.w - 40, y = hasStrip ? 102 : 40;
     this.gauge.update(dt, this.t, d, ui.k);
@@ -754,6 +758,15 @@ export class Hud {
     this.stage.put(this.gaugePlaque, x, y + 37, 6);
     // the depth, once: on the plaque under the gauge
     ui.text(Math.round(d.m) > 0 ? `-${Math.round(d.m)} M` : '0 M', x, y + 32, { font: 'body', color: d.descending ? '#bff4ff' : '#fff0d0', outline: '#2a1606', align: 'center' });
+    // the journey: how far from home, on a second plaque left of the gauge (a little house glyph + metres)
+    if (far !== undefined) {
+      const fx = x - 64, fy = y + 37;
+      this.stage.put(this.farPlaque, fx, fy, 6);
+      const k = ui.k, F = (px: number, py: number, w: number, h: number, c: string) => ui.ui.fill(Math.round((fx + px) * k), Math.round((fy + py) * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), c);
+      F(-19, -6, 7, 1, '#2a1606'); F(-18, -7, 5, 1, '#2a1606'); F(-17, -8, 3, 1, '#2a1606');
+      F(-18, -5, 5, 4, '#2a1606'); F(-17, -4, 3, 3, '#e8c890'); F(-16, -3, 1, 2, '#2a1606');
+      ui.text(`${Math.round(far)} M`, fx + 4, fy - 5, { font: 'body', color: '#fff0d0', outline: '#2a1606', align: 'center' });
+    }
   }
 
   // ---------------------------------------------------------------- bottom centre: the boss plaque

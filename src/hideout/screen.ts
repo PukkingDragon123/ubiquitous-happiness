@@ -232,6 +232,19 @@ export class HideoutScreen implements Screen {
     setTimeout(() => { if (this.mode === 'free' && !this.build.active) this.rig.shot = null; }, 1700);
     this.sayGoal();
   }
+  /** back from a run (its summary card already shown): Mr. Crab reacts to what the haul lets you build next */
+  private homecoming() {
+    const g = nextGoal();
+    if (!g) { this.say(this.crabSay, ['Welcome home, kid!']); return; }
+    if (canAfford(g.id)) {
+      this.flashSpot = { id: g.id, t: 4 };
+      audio.play('jin_good', { vol: 0.4, dry: true, delay: 1.2 });
+      this.say(this.crabSay, [`${g.name} ready to build!`, 'Click its blueprint.']);
+    } else {
+      const left = costLines(g.id).filter(([, h, n]) => h < n).map(([m, h, n]) => `${n - h} ${MAT_NAME(m).toLowerCase()}`);
+      this.say(this.crabSay, ['Welcome back, kid.', `${g.name}: ${left.slice(0, 2).join(', ')} to go.`]);
+    }
+  }
   private sayGoal() {
     const g = nextGoal();
     if (!g) { this.say(this.crabSay, ['Home sweet home!']); return; }
@@ -395,7 +408,7 @@ export class HideoutScreen implements Screen {
   }
 
   enter(data?: unknown) {
-    const d = (data ?? {}) as { view?: string; arrive?: boolean };
+    const d = (data ?? {}) as { view?: string; arrive?: boolean; back?: boolean };
     ensureHome();
     this.house.sync(); this.makeThings();
     this.mode = 'free'; this.panel = null; this.modeT = 0;
@@ -414,7 +427,7 @@ export class HideoutScreen implements Screen {
     const view = d.view ?? new URLSearchParams(location.search).get('view') ?? '';
     if (view === 'packing') this.enterPacking();
     else if (view === 'stash' || view === 'workshop' || view === 'wardrobe' || view === 'trophy') this.openPanel(view);
-    this.sayGoal();
+    if (d.back) this.homecoming(); else this.sayGoal();
   }
   exit() {
     POST.uLetterbox.value = 0; POST.uFade.value = 0;
