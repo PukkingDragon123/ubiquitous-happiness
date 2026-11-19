@@ -96,6 +96,8 @@ export class HideoutScreen implements Screen {
   private fadeIn = 0;
   private sleepT = 0;
   private arriveT = -1;
+  /** seconds since entering the house screen (a double Enter on the run card must not walk you straight back out) */
+  private inT = 0;
   private swimT = 0;
   private swimCfg: TableConfig | null = null;
   private shakeK = 0;
@@ -410,6 +412,7 @@ export class HideoutScreen implements Screen {
   }
 
   enter(data?: unknown) {
+    this.inT = 0;
     const d = (data ?? {}) as { view?: string; arrive?: boolean; back?: boolean };
     ensureHome();
     this.house.sync(); this.makeThings();
@@ -534,6 +537,7 @@ export class HideoutScreen implements Screen {
       this.player.update(dt, control ? input : null, this.rig.cur.yaw, this.mode === 'free' || this.mode === 'build' || this.mode === 'packing');
     }
     // arriving: walking in through the door (no packing scene on the way in); done once inside
+    this.inT += dt;
     if (this.arriveT >= 0) { this.arriveT += dt; if (this.hero.root.position.z < IN.z1 - 0.4 || this.arriveT > 4) { this.arriveT = -1; if (this.hero.root.position.z > IN.z1 - 0.4) this.hero.root.position.set(0.2, 0, IN.z1 - 1.6); } }
     this.hero.lookAt?.(this.hoverThing ? this.hoverThing.face() : null);
     this.hero.update(dt, { t: this.t, move: this.mode === 'sit' || this.mode === 'sleep' ? 0 : this.player.move });
@@ -611,7 +615,8 @@ export class HideoutScreen implements Screen {
     } else this.tag.hide();
     if (!live) return;
     if (input.keyHit('Escape')) { this.openPanel('pause'); return; }
-    if (near && (input.keyHit('KeyE') || input.keyHit('Space') || input.keyHit('Enter'))) { this.useThing(near); return; }
+    const keyUse = input.keyHit('KeyE') || input.keyHit('Space') || input.keyHit('Enter');
+    if (near && keyUse && !(near.id === 'doorway' && (this.arriveT >= 0 || this.inT < 2))) { this.useThing(near); return; }
     if (ui.pressed && !ui.mouseOnUI) {
       if (hov) this.walkUse(hov);
       else {
