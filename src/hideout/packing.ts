@@ -538,29 +538,34 @@ export class Packing {
       this.stage.put(c.c.root, x, y, 10);
       c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
     });
-    // the note: a little driftwood sign hung on two ropes, carved with your build
-    const w = 170, x = 12, y = 18, dimInk = K.cream2;
-    const sets = setBonuses(packed).slice(0, 4);
+    // the note: a little driftwood sign hung on two ropes, carved with your build. Wide and short (two columns:
+    // the sets, then what the gear adds) so it stays above the chest and never hides a slot
+    const w = 300, x = 12, y = 16, dimInk = K.cream2;
+    const sets = setBonuses(packed);
     const b = buildLines(this.pack);
-    const rows: { text: string; color: string; font: 'body' | 'small'; gap?: number }[] = [];
-    for (const st of sets) rows.push({ text: `${st.name} ${st.count}${st.next ? '/' + st.next : ''}${st.tier ? '  · ON' : ''}`, color: st.tier ? st.color : dimInk, font: 'body' });
-    let firstStat = true;
-    for (const q of b.stats.slice(0, 6)) { rows.push({ text: q.text, color: q.good ? K.kelpL : K.coralL, font: 'body', gap: firstStat && rows.length ? 3 : 0 }); firstStat = false; }
-    if (!sets.length && !b.stats.length) rows.push({ text: 'Nothing packed yet.', color: dimInk, font: 'body' }, { text: 'Gear changes your stats; skills deal cards.', color: dimInk, font: 'small' });
-    rows.push({ text: `MASTERY ${this.mastery} · ${MASTERY[this.mastery].name}`, color: K.brass2, font: 'small', gap: 4 });
-    let h = 10 + ui.lh('title') + 4;
-    for (const r of rows) h += (r.gap ?? 0) + ui.textBox(r.text, -9999, -9999, w - 20, { font: r.font });
-    h += 10;
+    const col = (list: { text: string; color: string }[], max: number) => list.length > max ? [...list.slice(0, max - 1), { text: `+${list.length - max + 1} more`, color: K.dim }] : list;
+    const left = col(sets.map((st) => ({ text: `${st.name} ${st.count}${st.next ? '/' + st.next : ''}${st.tier ? ' · ON' : ''}`, color: st.tier ? st.color : dimInk })), 3);
+    const right = col(b.stats.map((q) => ({ text: q.text, color: q.good ? K.kelpL : K.coralL })), 3);
+    const empty = !left.length && !right.length;
+    const rows = empty ? 1 : Math.max(left.length, right.length);
+    const lh = ui.lh('body');
+    const h = 8 + ui.lh('title') + 4 + rows * lh + 8;
     const sway = Math.round(Math.sin(this.t * 1.2) * 1.5);
-    for (const rx of [x + 14, x + w - 18]) rope(ui, rx + sway, 0, y + 2, true);
+    for (const rx of [x + 16, x + w - 20]) rope(ui, rx + sway, 0, y + 2, true);
     ui.fill(x + 3 + sway, y + 4, w, h, '#000000', 0.35);
     ui.img(wellArt(w, h, 'plank'), x + sway, y);
     ui.block(x, y, w, h);
     this.noteRect = [x - 2, 0, w + 6, y + h + 2];
+    const tx = x + 10 + sway;
     let yy = y + 8;
-    ui.text('YOUR BUILD', x + 10 + sway, yy, { font: 'title', color: K.brass2, outline: K.ink2 }); yy += ui.lh('title') + 1;
-    ui.fill(x + 10 + sway, yy, w - 20, 1, '#2e261e'); ui.fill(x + 10 + sway, yy + 1, w - 20, 1, '#9a8a6c'); yy += 4;
-    for (const r of rows) { yy += r.gap ?? 0; yy += ui.textBox(r.text, x + 10 + sway, yy, w - 20, { font: r.font, color: r.color, outline: K.ink2 }); }
+    ui.text('YOUR BUILD', tx, yy, { font: 'title', color: K.brass2, outline: K.ink2 });
+    if (b.skills.length) ui.text(`${b.skills.length} skill${b.skills.length > 1 ? 's' : ''}`, x + w - 10 + sway, yy + ui.cap('title') - ui.cap('small'), { font: 'small', color: K.seaL, outline: K.ink2, align: 'right' });
+    yy += ui.lh('title') + 1;
+    ui.fill(tx, yy, w - 20, 1, '#2e261e'); ui.fill(tx, yy + 1, w - 20, 1, '#9a8a6c'); yy += 4;
+    if (empty) ui.text('Nothing packed yet: gear changes your stats.', tx, yy, { font: 'body', color: dimInk, outline: K.ink2 });
+    const half = Math.round((w - 20) / 2);
+    left.forEach((r, i) => ui.text(r.text, tx, yy + i * lh, { font: 'body', color: r.color, outline: K.ink2 }));
+    right.forEach((r, i) => ui.text(r.text, tx + (left.length ? half : 0), yy + i * lh, { font: 'body', color: r.color, outline: K.ink2 }));
     bubbles(ui, x + 10, y + h, w - 20, this.t, 9, 3, 18);
   }
 

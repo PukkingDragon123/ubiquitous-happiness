@@ -596,18 +596,44 @@ export class BackpackScreen implements Screen {
     }
     m.o.userData.seen = this.t;
     const f = this.footOf(it, cell);
+    const { fit, ox, oy } = this.fitOf(m.o, it);
     const cx = x + f.w / 2, cy = y + f.h / 2;
-    // grows in on arrival; a squash-and-settle bump when dropped
-    const sc = cell * (0.92 + hot * 0.06) * (held ? 1.1 : 1) * Math.max(0.01, alpha) * (1 + squash);
+    // grows in on arrival; a squash-and-settle bump when dropped; never drawn bigger than its pockets
+    const sc = cell * fit * (0.92 + hot * 0.06) * (held ? 1.1 : 1) * Math.max(0.01, alpha) * (1 + squash);
     m.o.scale.setScalar(sc);
     // lying in the pocket, tilted a touch toward the light; a slow sway when hovered / held
     const turn = hot > 0 || held ? Math.sin(this.t * 2.6) * 0.35 : 0;
     m.o.rotation.set(0.32 - lift * 0.03, -0.28 + turn, -it.rot * (Math.PI / 2));
-    this.stage.put(m.o, cx, cy - lift, 20 + lift * 6 + (held ? 600 : 0));
+    this.stage.put(m.o, cx - ox * sc, cy - lift + oy * sc, 20 + lift * 6 + (held ? 600 : 0));
     m.sh.rotation.z = -it.rot * (Math.PI / 2);
     m.sh.scale.setScalar(cell * (held ? 1.05 : 1));
     (m.sh.material as THREE.MeshBasicMaterial).opacity = (held ? 0.32 : it.gx >= 0 ? 0.5 : 0.36) * alpha;
     this.stage.put(m.sh, cx + 2 + lift * 1.2, cy + 3 + lift * 1.0, held ? 300 : -10);
+  }
+
+  /**
+   * how much a miniature must shrink to stay inside its footprint as it lies in the pocket (tilted toward the light,
+   * turned `rot` quarter turns), and the offset that centres what you see: some models (the giant clam's open
+   * shells) stand up off the cloth and their tilted silhouette spills over the neighbouring pockets otherwise.
+   * Measured once per model and turn.
+   */
+  private fitOf(o: THREE.Object3D, it: ItemInst): { fit: number; ox: number; oy: number } {
+    const cache = (o.userData.fits ??= {}) as Record<number, { fit: number; ox: number; oy: number }>;
+    const hit = cache[it.rot];
+    if (hit) return hit;
+    const parent = o.parent, pos = o.position.clone(), rot = o.rotation.clone(), scl = o.scale.clone();
+    o.removeFromParent();
+    o.position.set(0, 0, 0); o.scale.setScalar(1); o.rotation.set(0.32, -0.28, -it.rot * (Math.PI / 2));
+    o.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(o);
+    o.position.copy(pos); o.rotation.copy(rot); o.scale.copy(scl);
+    if (parent) parent.add(o);
+    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+    const ex = Math.max(0.01, b.max.x - b.min.x), ey = Math.max(0.01, b.max.y - b.min.y);
+    const fit = Math.min(1, (w * 1.02) / (ex * 0.92), (h * 1.02) / (ey * 0.92));
+    const out = { fit, ox: (b.min.x + b.max.x) / 2, oy: (b.min.y + b.max.y) / 2 };
+    cache[it.rot] = out;
+    return out;
   }
 
   /** drop the miniatures of items that are gone */

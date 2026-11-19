@@ -307,6 +307,7 @@ export class PixelUI {
     this.lastHot = this.hot;
     (this.quad.material as THREE.MeshBasicMaterial).opacity = this.opacity;
     this.tex.needsUpdate = true;
+    if (!this.fixed) PixelUI.lastDrawn.set(this, performance.now());
     const i = PixelUI.stack.lastIndexOf(this);
     if (i >= 0) PixelUI.stack.splice(i, 1);
   }
@@ -316,6 +317,29 @@ export class PixelUI {
   tagRects: [number, number, number, number][] = [];
   /** queue a draw for end() (above everything drawn this frame, below tooltips and the cursor) */
   later(fn: (ui: PixelUI) => void) { this.laterQ.push(fn); }
+
+  /** every screen PixelUI and when it last finished a frame (performance.now()): overlays such as the achievement
+   *  toast read what is on screen from these to find a free lane */
+  static lastDrawn = new Map<PixelUI, number>();
+  /** screen-space rects (UI px) of the visible 3D objects on this UI's layer (UiStage models: HUD instruments, the
+   *  avatar, item models), one per mesh */
+  objectRects(): [number, number, number, number][] {
+    const out: [number, number, number, number][] = [];
+    const devH = this.devH, s = this.scale;
+    const box = new THREE.Box3();
+    const visit = (o: THREE.Object3D) => {
+      if (!o.visible || o === this.quad) return;
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.geometry) {
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        box.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld);
+        if (Number.isFinite(box.min.x)) out.push([box.min.x / s, (devH - box.max.y) / s, (box.max.x - box.min.x) / s, (box.max.y - box.min.y) / s]);
+      }
+      for (const c of o.children) visit(c);
+    };
+    for (const c of this.layer.scene.children) visit(c);
+    return out;
+  }
 
   /** PixelUIs between begin() and end() (innermost last): world tags draw onto the screen UI that is drawing */
   static stack: PixelUI[] = [];
