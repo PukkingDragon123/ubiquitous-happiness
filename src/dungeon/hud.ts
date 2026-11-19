@@ -21,7 +21,7 @@ import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
 import { skin, PAD } from '../ui/pixel/skins';
 import { closeArt } from '../ui/pixel/art';
-import { PAL, plate, bigText, bigMeasure, bar, GLYPH, solid } from '../ui/obj/plates';
+import { PAL, plate, bigText, bar, GLYPH, solid } from '../ui/obj/plates';
 import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
@@ -76,7 +76,7 @@ export class DungeonHud {
   private t = 0;
   private promptKey = ''; private promptT = 0; private promptA = 0;
   private mailModels = new Map<number, THREE.Object3D>();
-  private mailT = 0; private pauseT = 0;
+  private mailT = 0; private pauseT = 0; private pauseF = 0;
   private mailHover = -1;
   resize(w: number, h: number, pr: number) { this.ui.resize(w, h, pr); this.l.resize(w, h, pr); }
 
@@ -92,6 +92,7 @@ export class DungeonHud {
     let out: string | null = null;
     this.mailT = s.mail ? this.mailT + dt : 0;
     this.pauseT = s.paused ? this.pauseT + dt : 0;
+    this.pauseF = s.paused ? this.pauseF + 1 : 0;
     if (s.prompt && !s.paused && !s.mail && !s.menu) this.prompt(s.prompt, dt); else { this.promptA = 0; this.promptKey = ''; }
     extra?.(ui);
     if (s.mail) out = this.mailPanel(s.mail);
@@ -129,7 +130,7 @@ export class DungeonHud {
     ui.text(short, cx, y + Math.round((h - ui.cap('body')) / 2), { font: 'body', color: p.bad ? PAL.coral2 : PAL.cream, alpha: a });
     // the longer explanation, when there is one: a cream note pinned under the tag for a moment
     const rest = full.replace(/^[A-Z ]+:\s*/, (m0) => (m0.includes(':') ? '' : m0));
-    if (full.toUpperCase() !== short && full.length > short.length + 3 && this.promptT < 3) {
+    if (/[:·(]/.test(full) && full.toUpperCase() !== short && full.length > short.length + 3 && this.promptT < 3) {
       const lines = wrap(rest, 'small', 170, ui.hd);
       const nw = Math.round(Math.max(...lines.map((l) => ui.measure(l, 'small'))) + 14), nh = lines.length * ui.lh('small') + 9;
       const nx = Math.round(Math.max(6, Math.min(ui.w - nw - 6, x + w / 2 - nw / 2))), ny = y + h + 6;
@@ -253,7 +254,7 @@ export class DungeonHud {
       mo.rotation.set(0.3, -0.3 + (h || on ? Math.sin(this.t * 2.5) * 0.4 : 0), 0);
       st.put(mo, (ix + cell / 2) / kk, (iy + cell / 2 - (on ? 2 : 0)) / kk, 100 + (on ? 10 : 0));
       if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + cell - 3, iy + cell - ui.lh('small') + 1, { font: 'small', color: PAL.cream, align: 'right', alpha: a });
-      if (needs.has(it.id)) ui.img(GLYPH.house(), ix + 3, iy + 3, { alpha: a });
+      if (needs.has(it.id)) ui.img(GLYPH.house(), ix + 3, iy + cell - 12, { alpha: a });
       if (on) {
         // the POST stamp on the corner
         const sw = ui.measure('POST', 'small') + 6;
@@ -328,7 +329,8 @@ export class DungeonHud {
   private pauseCard(s: DungeonHudState): string | null {
     const ui = this.ui;
     const pop = Math.min(1, this.pauseT * 6), e = 1 + 2.4 * (pop - 1) ** 3 + 1.4 * (pop - 1) ** 2;
-    const W = 250, H = 214;
+    const W = 250, note = 'Your run is saved: RESUME it from home any time.';
+    const H = 16 + 22 + 8 + ui.lh('body') + ui.lh('small') + 6 + 3 * 30 + 2 + wrap(note, 'small', W - 36, ui.hd).length * ui.lh('small') + 16;
     const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - e) * 20);
     const a = Math.min(1, this.pauseT * 8);
     ui.fill(0, 0, ui.w, ui.h, PAL.ink2, 0.6 * a);
@@ -357,13 +359,13 @@ export class DungeonHud {
     }
     let out: string | null = null;
     const bw = W - 48, bx = x + 24, bh = 24;
-    if (ui.button('p:resume', 'RESUME', bx, ty, bw, bh, { style: 'green', key: 'Escape', keyLabel: 'ESC' }) && this.pauseT > 0.15) out = 'resume';
+    if (ui.button('p:resume', 'RESUME', bx, ty, bw, bh, { style: 'green', key: 'Escape', keyLabel: 'ESC' }) && this.pauseF > 1) out = 'resume';
     ty += bh + 6;
     if (ui.button('p:bag', 'BACKPACK', bx, ty, bw, bh, { style: 'brass', key: 'Tab' })) out = 'bag';
     ty += bh + 6;
     if (ui.button('p:quit', 'QUIT TO HOME', bx, ty, bw, bh, { style: 'red' })) out = 'quit';
     ty += bh + 8;
-    ui.textBox('Your run is saved: RESUME it from home any time.', x + 18, ty, W - 36, { font: 'small', color: PAL.dim, align: 'center' });
+    ui.textBox(note, x + 18, ty, W - 36, { font: 'small', color: PAL.dim, align: 'center' });
     return out;
   }
 }
@@ -380,4 +382,3 @@ function shortLabel(label: string): string {
   const head = L.split(/[:·(]/)[0].trim().split(/\s+/).slice(0, 2).join(' ');
   return head || L;
 }
-void bigMeasure;

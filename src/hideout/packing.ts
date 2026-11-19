@@ -3,10 +3,10 @@
 //   - drag loot and gear (agent L's 3D item models) from the chest into the pack's grid (click packs / unpacks,
 //     R or right click turns while dragging, materials stack); the chest pages with two brass knobs
 //   - your BUILD laid out: a 3D skill card for every skill the packed gear grants (L's SkillCard3D), and a
-//     paper note with the set bonuses and the stat changes
-//   - a small brass MASTERY dial (click a half / scroll / A D)
-//   - a painted SWIM OUT sign (click it, or Enter) -> onDive(cfg); the HOME sign (or Esc) -> onClose()
-// Every word is painted on an object (signs, the dial, the note, the floating paper tag).
+//     pinned paper note (v5, top left) with the set bonuses, the stat changes and the mastery
+//   - a small brass MASTERY dial (click a half / scroll / A D) with a brass label plate and ◄ ► under it
+//   - SWIM OUT: the painted sign, or the big green button (Enter) -> onDive(cfg); HOME: the sign, the button (Esc)
+// v5: the hovered item gets a card by it (photo-less: its name in rarity colour, kind, stats, what a click does).
 //
 //   const p = new Packing(house); p.open(); each frame in packing mode: p.update(dt, ui, input, camera, ray, internalH)
 //   p.shot() -> the camera shot;  p.config() -> TableConfig (RunConfig + pack + mats, start area 'reef')
@@ -18,7 +18,7 @@ import { Px } from '../gfx/px';
 import { damp } from '../core/math';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
 import { MASTERY, MAX_MASTERY, masteryMods } from './mastery';
-import { ITEMS, getItem, GRID_W, GRID_H, fits, instCells, findSpot, stackCap, shapeSize, setBonuses, applyItems, SKILL_NAMES, type Rarity } from '../game/items';
+import { ITEMS, getItem, GRID_W, GRID_H, fits, instCells, findSpot, stackCap, shapeSize, setBonuses, setCounts, applyItems, SKILL_NAMES } from '../game/items';
 import { BASE_STATS, type ItemInst } from '../game/run';
 import { itemModel } from '../backpack/models';
 import type { PixelUI } from '../ui/pixel/ui';
@@ -27,7 +27,9 @@ import { drawText } from '../ui/pixel/font';
 import { UiStage } from '../ui/obj/stage';
 import { SkillCard3D } from '../ui/obj/cards';
 import { audio } from '../audio/audio';
-import { Tag, paintTag, type TagLine } from './tag';
+import { paintTag } from './tag';
+import { K, itemHead, itemBody, buildLines } from './itemCard';
+import { wellArt } from './panelArt';
 import { PORCH, type House } from './house';
 import type { Shot } from './camera';
 
@@ -37,11 +39,10 @@ export interface TableConfig extends RunConfig {
   mats: Record<string, number>;
 }
 
-const RARITY_INK: Partial<Record<Rarity, string>> = { common: '#2a1808', uncommon: '#1a5a1a', rare: '#1a3a8a', epic: '#6a1a8a', legendary: '#8a4a04' };
 // set-local layout (x right, z toward the camera), the set is at PORCH.set
 const CHEST = { x: -1.2, z: 0.0, w: 1.7, d: 0.95, floor: 0.11 };
-const CELL = 0.125;
-const BAG = { x: 1.25, z: 0.0, gw: GRID_W * CELL, gd: GRID_H * CELL, floor: 0.21 };
+const CELL = 0.15;
+const BAG = { x: 1.22, z: 0.0, gw: GRID_W * CELL, gd: GRID_H * CELL, floor: 0.21 };
 const DIAL = { x: 0.0, z: 0.62, r: 0.15, y: 0.16 };
 
 function canvasTex(cv: HTMLCanvasElement) { const t = new THREE.CanvasTexture(cv); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace; return t; }
@@ -113,8 +114,6 @@ export class Packing {
   private home: ReturnType<typeof arrowSign>;
   private lid = new THREE.Group();
   private bagFlap = new THREE.Group();
-  private tag = new Tag('paper', 170);
-  private note = new Tag('paper', 150);
   private stage = new UiStage();
   private cards: { id: string; c: SkillCard3D }[] = [];
   private cardKey = '';
@@ -202,10 +201,10 @@ export class Packing {
     S.add(this.needle);
     // ---- the signs: SWIM OUT (on, away from home) and HOME (back inside)
     this.swim = arrowSign('SWIM OUT', 1, 1.0);
-    this.swim.group.position.set(2.7, 0, -0.35); this.swim.group.rotation.y = -0.25;
+    this.swim.group.position.set(2.45, 0, -0.75); this.swim.group.rotation.y = -0.25;
     this.swim.group.traverse((o) => { o.userData.sign = 'swim'; });
     this.home = arrowSign('HOME', -1, 0.85);
-    this.home.group.position.set(-2.75, 0, -0.45); this.home.group.rotation.y = 0.3;
+    this.home.group.position.set(-2.55, 0, -0.8); this.home.group.rotation.y = 0.3;
     this.home.group.traverse((o) => { o.userData.sign = 'home'; });
     S.add(this.swim.group, this.home.group);
     // the porch lantern on its post
@@ -216,7 +215,6 @@ export class Packing {
     pk.sphere(MAT.glow('#ffd28a'), 0.07, 2.6, 1.78, -0.65, { w: 6, h: 4 });
     S.add(pk.build());
     S.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !(m.material as THREE.Material).transparent) { m.castShadow = true; m.receiveShadow = true; } });
-    house.group.add(this.tag.mesh, this.note.mesh);
   }
 
   /** open the scene: the last pack restored from the stash */
@@ -232,7 +230,7 @@ export class Packing {
     this.drag = null; this.page = 0; this.diving = false; this.openK = 0;
     this.cardKey = '';
   }
-  close() { if (!this.diving && this.pack.length) { const c = this.config(); META.lastConfig = c; saveMeta(); } this.tag.hide(); this.note.hide(); this.drag = null; this.stage.detach(); for (const c of this.cards) c.c.root.removeFromParent(); this.cards = []; this.cardKey = ''; }
+  close() { if (!this.diving && this.pack.length) { const c = this.config(); META.lastConfig = c; saveMeta(); } this.drag = null; this.stage.detach(); for (const c of this.cards) c.c.root.removeFromParent(); this.cards = []; this.cardKey = ''; }
 
   config(): TableConfig {
     const mats: Record<string, number> = {};
@@ -241,7 +239,7 @@ export class Packing {
   }
 
   /** a low cinematic shot of the chest and the pack, the house behind */
-  shot(): Shot { return { target: new THREE.Vector3(PORCH.set.x, 0.2, PORCH.set.z + 0.05), yaw: 0, pitch: 0.92, dist: 6.0, fov: 38 }; }
+  shot(): Shot { return { target: new THREE.Vector3(PORCH.set.x - 0.05, 0.2, PORCH.set.z + 0.12), yaw: 0, pitch: 0.98, dist: 4.7, fov: 36 }; }
 
   // ---------------------------------------------------------------- packing rules
   private packedMat(id: string) { return this.pack.reduce((s, p) => s + (p.uid < 0 && p.id === id ? p.n ?? 1 : 0), 0); }
@@ -367,14 +365,20 @@ export class Packing {
   }
 
   // ---------------------------------------------------------------- the frame
+  /** a world point (set-local) in UI px */
+  private scr(v: THREE.Vector3, cam: THREE.PerspectiveCamera, ui: PixelUI): [number, number] | null {
+    const p = v.clone().project(cam);
+    if (p.z > 1) return null;
+    return [Math.round((p.x * 0.5 + 0.5) * ui.w), Math.round((-p.y * 0.5 + 0.5) * ui.h)];
+  }
   update(dt: number, ui: PixelUI, input: Input, cam: THREE.PerspectiveCamera, ray: THREE.Raycaster, internalH: number, live: boolean) {
+    void internalH;
     this.t += dt; this.flash.t -= dt;
     this.openK = Math.min(1, this.openK + dt * 1.6);
     this.lid.rotation.x = -this.openK * 1.85;
     this.bagFlap.rotation.x = -this.openK * 0.9;
     for (const [k, v] of this.dropT) { if (v > 0.6) this.dropT.delete(k); else this.dropT.set(k, v + dt); }
     this.set.updateWorldMatrix(true, true);
-    let tip: { lines: TagLine[]; at: THREE.Vector3 } | null = null;
     // ---- picks
     let item: THREE.Object3D | null = null, dialSide = 0, sign: string | null = null, knob = 0;
     if (live && !this.diving && ui.inside && !ui.mouseOnUI && !this.drag?.moved) {
@@ -384,7 +388,7 @@ export class Packing {
         if (o?.userData.slot) { item = o; break; }
         if (h.object.userData.sign) { sign = h.object.userData.sign as string; break; }
         if (h.object.userData.knob) { knob = h.object.userData.knob as number; break; }
-        if (h.object === this.dialMesh) { dialSide = this.set.worldToLocal(h.point.clone()).x < DIAL.x ? -1 : 1; tip = { at: h.point.clone(), lines: [{ text: dialSide > 0 ? 'harder' : 'easier', color: '#3a2810' }] }; break; }
+        if (h.object === this.dialMesh) { dialSide = this.set.worldToLocal(h.point.clone()).x < DIAL.x ? -1 : 1; break; }
         break;
       }
     }
@@ -406,29 +410,91 @@ export class Packing {
     this.swim.mat.emissiveIntensity = damp(this.swim.mat.emissiveIntensity, sign === 'swim' ? 0.6 : 0.08 + Math.max(0, Math.sin(this.t * 3)) * 0.1, 10, dt);
     this.home.mat.emissiveIntensity = damp(this.home.mat.emissiveIntensity, sign === 'home' ? 0.6 : 0, 10, dt);
     this.swim.board.rotation.z = sign === 'swim' ? Math.sin(this.t * 14) * 0.03 : 0;
-    if (sign) { ui.cursor = 'point'; tip = { at: this.local(sign === 'swim' ? 2.7 : -2.75, 1.5, -0.3), lines: sign === 'swim' ? [{ text: 'SWIM OUT', font: 'title' }, { text: `the journey starts at the reef · M${this.mastery}`, color: '#3a2810' }, { text: `${this.pack.length} things packed`, color: '#5a4a3a' }] : [{ text: 'back inside', color: '#3a2810' }] }; }
-    if (live && !this.diving && ((sign === 'swim' && ui.pressed) || input.keyHit('Enter'))) this.dive();
-    // a plain, always-visible way out too (the painted sign alone was easy to miss): bottom right, green
-    if (live && !this.diving && !this.drag && ui.button('pack:swim', 'SWIM OUT', ui.w - 104, ui.h - 30, 96, 22, { style: 'green', font: 'title' })) this.dive();
-    else if (live && !this.diving && !this.drag && ((sign === 'home' && ui.pressed) || input.keyHit('Escape'))) { this.onClose?.(); return; }
+    if (sign) ui.cursor = 'point';
     // ---- items
     const n = this.layout(item);
+    let hoverSlot: Slot | null = null, hoverAt: THREE.Vector3 | null = null;
     if (item && !this.drag) {
-      const s = item.userData.slot as Slot, d = getItem(s.id);
+      hoverSlot = item.userData.slot as Slot;
+      hoverAt = item.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.12, 0));
       ui.cursor = 'grab';
-      const lines: TagLine[] = [{ text: d.name + ((s.level ?? 1) > 1 ? ` +${(s.level ?? 1) - 1}` : ''), font: 'title', color: RARITY_INK[d.rarity] ?? '#2a1808' }, { text: `${d.rarity} ${d.kind}`.toUpperCase(), color: '#5a4a3a' }];
-      if (d.desc) lines.push({ text: d.desc, color: '#3a2810', gap: 2 });
-      if ((s.n ?? 1) > 1) lines.push({ text: `${s.n} ${s.from === 'bag' ? 'in this stack' : 'in the chest'}`, color: '#1a4a7a' });
-      lines.push({ text: s.from === 'bag' ? 'drag: move · click: unpack' : 'drag into the pack · click: pack', color: '#7a5a3a', gap: 2 });
-      tip = { at: item.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.1, 0)), lines };
-      if (ui.pressed) this.drag = { it: s.inst, from: s.from, sx: ui.mx, sy: ui.my, moved: false, rot: s.inst.rot, key: item.userData.key as string };
+      if (ui.pressed) this.drag = { it: hoverSlot.inst, from: hoverSlot.from, sx: ui.mx, sy: ui.my, moved: false, rot: hoverSlot.inst.rot, key: item.userData.key as string };
     }
     this.dragDrop(ui, input, ray);
-    if (!n && !tip) tip = { at: this.local(CHEST.x, 0.5, CHEST.z), lines: [{ text: 'The stash is empty.', color: '#2a1808' }, { text: 'Bring loot home from runs.', color: '#5a4a3a' }] };
-    if (this.flash.t > 0) tip = { at: this.local(BAG.x, 0.4, BAG.z), lines: [{ text: this.flash.text, font: 'title', color: '#a01a1a' }] };
-    if (tip && !this.drag?.moved && !this.diving) { this.tag.show(tip.lines); this.tag.place(cam, tip.at, internalH, [0, -14], dt); } else this.tag.hide();
-    // ---- the build: skill cards across the top, the set bonuses and stat changes on a pinned note
-    this.buildSummary(ui, cam, internalH, dt);
+    if (this.diving) { this.stage.detach(); return; }
+    // ---- the 2D layer: the build note, the mastery plate, the buttons, the hovered item's card
+    this.buildSummary(ui, dt);
+    this.masteryPlate(ui, cam, live, setM);
+    const k = 0.5 + 0.5 * Math.sin(this.t * 3.2);
+    const bw = Math.max(150, ui.measure('SWIM OUT', 'title') + 66), bh = 28, bx = ui.w - bw - 12, by = ui.h - bh - 12;
+    if (!this.drag) { ui.fill(bx - 3, by - 3, bw + 6, bh + 6, '#8ee06a', 0.12 + 0.12 * k); ui.rect(bx - 2, by - 2, bw + 4, bh + 4, '#5fae3f'); }
+    let dive = live && !this.drag && ui.button('pack:swim', 'SWIM OUT', bx, by, bw, bh, { style: 'green', font: 'title', key: 'Enter', keyLabel: 'ENTER' });
+    const home = live && !this.drag && ui.button('pack:home', 'HOME', 12, ui.h - 24 - 12, 92, 24, { style: 'dark', font: 'body', key: 'Escape', keyLabel: 'ESC' });
+    if (live && sign === 'swim' && ui.pressed) dive = true;
+    if (live && !this.drag && input.keyHit('Enter')) dive = true;
+    if (dive && !this.diving) { this.dive(); return; }
+    if (live && !this.drag && (home || (sign === 'home' && ui.pressed))) { this.onClose?.(); return; }
+    // the card by whatever is under the mouse
+    if (this.flash.t > 0) { const p = this.scr(this.local(BAG.x, 0.4, BAG.z), cam, ui); if (p) this.flashCard(ui, p, this.flash.text); }
+    else if (hoverSlot && hoverAt && !this.drag?.moved) { const p = this.scr(hoverAt, cam, ui); if (p) this.itemCard(ui, p, hoverSlot); }
+    else if (sign && !this.drag) { const p = this.scr(this.local(sign === 'swim' ? 2.45 : -2.55, 1.6, -0.75), cam, ui); if (p) this.signCard(ui, p, sign); }
+    else if (!n && !this.drag) { const p = this.scr(this.local(CHEST.x, 0.4, CHEST.z), cam, ui); if (p) this.flashCard(ui, p, 'The stash is empty', 'Bring loot home from runs.'); }
+    else if (dialSide) { const p = this.scr(this.local(DIAL.x + dialSide * 0.1, DIAL.y, DIAL.z), cam, ui); if (p) this.flashCard(ui, p, dialSide > 0 ? 'harder' : 'easier'); }
+  }
+  /** a small dark card above a screen point (the hovered thing), kept on screen */
+  private cardAt(ui: PixelUI, p: [number, number], w: number, h: number): [number, number] {
+    const x = Math.max(6, Math.min(ui.w - w - 6, p[0] - Math.round(w / 2)));
+    let y = p[1] - h - 14;
+    if (y < 6) y = p[1] + 18;
+    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35);
+    ui.frame('dark', x, y, w, h);
+    return [x, y];
+  }
+  private itemCard(ui: PixelUI, p: [number, number], s: Slot) {
+    const w = 196, lv = s.level ?? 1;
+    const opts = { level: lv, n: s.n, maxStats: 3, maxFuse: 0, noDesc: true, counts: setCounts(this.pack), loose: s.from === 'chest' };
+    const hh = itemHead(ui, s.id, 0, 0, w - 16, { ...opts, draw: false });
+    const bh = itemBody(ui, s.id, 0, 0, w - 16, { ...opts, draw: false });
+    const verb = s.from === 'bag' ? 'drag: move  ·  click: unpack' : 'drag into the pack  ·  click: pack it';
+    const h = 10 + hh + bh + ui.lh('small') + 10;
+    const [x, y] = this.cardAt(ui, p, w, h);
+    let yy = y + 7;
+    yy += itemHead(ui, s.id, x + 8, yy, w - 16, opts);
+    yy += itemBody(ui, s.id, x + 8, yy, w - 16, opts);
+    if ((s.n ?? 1) > 1 && s.from === 'chest') ui.text(`x${s.n}`, x + w - 8, y + 7, { font: 'title', color: K.brass2, shadow: K.ink2, align: 'right' });
+    ui.text(verb, x + w / 2, y + h - ui.lh('small') - 4, { font: 'small', color: K.dim, shadow: null, align: 'center' });
+  }
+  private signCard(ui: PixelUI, p: [number, number], sign: string) {
+    const lines = sign === 'swim' ? ['SWIM OUT', `to the reef  ·  mastery ${this.mastery}`, `${this.pack.length} things packed`] : ['HOME', 'back inside', ''];
+    const w = Math.max(ui.measure(lines[0], 'title'), ui.measure(lines[1], 'body'), ui.measure(lines[2], 'small')) + 20;
+    const h = ui.lh('title') + ui.lh('body') + (lines[2] ? ui.lh('small') : 0) + 12;
+    const [x, y] = this.cardAt(ui, p, w, h);
+    ui.text(lines[0], x + 10, y + 6, { font: 'title', color: sign === 'swim' ? K.kelpL : K.brass2, shadow: K.ink2 });
+    ui.text(lines[1], x + 10, y + 6 + ui.lh('title'), { font: 'body', color: K.cream, shadow: K.ink2 });
+    if (lines[2]) ui.text(lines[2], x + 10, y + 6 + ui.lh('title') + ui.lh('body'), { font: 'small', color: K.dim, shadow: K.ink2 });
+  }
+  private flashCard(ui: PixelUI, p: [number, number], title: string, sub = '') {
+    const w = Math.max(ui.measure(title, 'title'), ui.measure(sub, 'body')) + 20, h = ui.lh('title') + (sub ? ui.lh('body') : 0) + 12;
+    const [x, y] = this.cardAt(ui, p, w, h);
+    ui.text(title, x + w / 2, y + 6, { font: 'title', color: title === 'PACK FULL' ? K.coralL : K.cream, shadow: K.ink2, align: 'center' });
+    if (sub) ui.text(sub, x + w / 2, y + 6 + ui.lh('title'), { font: 'body', color: K.dim, shadow: K.ink2, align: 'center' });
+  }
+  /** the dial's brass label plate: MASTERY n, its name, ◄ ►, and the newest rule it adds */
+  private masteryPlate(ui: PixelUI, cam: THREE.PerspectiveCamera, live: boolean, setM: (m: number) => void) {
+    const p = this.scr(this.local(DIAL.x, DIAL.y, DIAL.z + DIAL.r + 0.12), cam, ui);
+    if (!p) return;
+    const m = MASTERY[this.mastery];
+    const title = `MASTERY ${this.mastery}`, name = m.name;
+    const w = Math.max(ui.measure(title, 'body') + 52, ui.measure(name, 'small') + 20), h = ui.lh('body') + ui.lh('small') + 9;
+    const x = Math.round(p[0] - w / 2), y = p[1] + 2;
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.4);
+    ui.fill(x, y, w, h, K.brassD); ui.fill(x + 1, y + 1, w - 2, h - 2, K.brass1); ui.fill(x + 1, y + 1, w - 2, 1, K.brass2); ui.fill(x + 1, y + h - 2, w - 2, 1, K.brass0);
+    ui.fill(x + 3, y + 3, w - 6, h - 6, '#d9a44a');
+    ui.text(title, x + w / 2, y + 4, { font: 'body', color: '#3a2008', shadow: '#f8dc90', align: 'center' });
+    ui.text(name, x + w / 2, y + 5 + ui.lh('body'), { font: 'small', color: '#5a3410', shadow: null, align: 'center' });
+    if (live && ui.button('pack:mLess', '', x - 18, y + 3, 16, 18, { style: 'brass', icon: 'left', disabled: this.mastery <= 0, sfx: '' })) setM(this.mastery - 1);
+    if (live && ui.button('pack:mMore', '', x + w + 2, y + 3, 16, 18, { style: 'brass', icon: 'right', disabled: this.mastery >= Math.min(MAX_MASTERY, META.masteryUnlocked), sfx: '' })) setM(this.mastery + 1);
+    if (this.mastery > 0 && ui.hover(x, y, w, h)) ui.tooltip([{ text: m.name, font: 'title' }, ...masteryMods(this.mastery).map((t) => ({ text: '· ' + t, font: 'small' as const }))], { maxW: 200 });
   }
   private dialKey = -1;
   private dialImage() {
@@ -437,8 +503,10 @@ export class Packing {
     return this.dialTex.image as HTMLCanvasElement;
   }
 
-  private buildSummary(ui: PixelUI, cam: THREE.PerspectiveCamera, internalH: number, dt: number) {
-    const stats = applyItems({ ...BASE_STATS, abilities: [], skills: [], sets: {}, gear: {} }, this.pack.filter((p) => p.gx >= 0));
+  /** the skill cards across the top, and the pinned YOUR BUILD note top left (sets, stat changes, mastery) */
+  private buildSummary(ui: PixelUI, dt: number) {
+    const packed = this.pack.filter((p) => p.gx >= 0);
+    const stats = applyItems({ ...BASE_STATS, abilities: [], skills: [], sets: {}, gear: {} }, packed);
     const skills = [...new Set(stats.skills ?? [])].filter((s) => SKILL_NAMES[s]);
     const key = skills.join(',');
     if (key !== this.cardKey) {
@@ -446,39 +514,38 @@ export class Packing {
       for (const c of this.cards) c.c.root.removeFromParent();
       this.cards = skills.slice(0, 5).map((id) => ({ id, c: new SkillCard3D(id, { w: 44 }) }));
     }
-    if (!this.diving) {
-      this.stage.attach(ui);
-      const w = 52, x0 = Math.round(ui.w / 2 - ((this.cards.length - 1) * w) / 2);
-      this.cards.forEach((c, i) => {
-        const x = x0 + i * w, y = 40;
-        const hov = ui.hover(x - 22, y - 32, 44, 64) ? 1 : 0;
-        this.stage.put(c.c.root, x, y, 10);
-        c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
-      });
-    } else this.stage.detach();
-    // the note: sets + stats + the mastery level, pinned at the bottom left
-    const lines: TagLine[] = [{ text: 'YOUR BUILD', font: 'title' }];
-    for (const s of setBonuses(this.pack.filter((p) => p.gx >= 0)).slice(0, 4)) lines.push({ text: `${s.name} ${s.count}${s.next ? '/' + s.next : ''}${s.tier ? ' · active' : ''}`, color: s.tier ? '#1a5a1a' : '#5a4a3a' });
-    const B = BASE_STATS, st = stats;
-    const add = (label: string, v: number, unit = '') => { if (Math.abs(v) > 1e-3) lines.push({ text: `${v > 0 ? '+' : ''}${Math.round(v * 100) / 100}${unit} ${label}`, color: v > 0 ? '#1a4a7a' : '#8a1a14' }); };
-    add('hearts', (st.maxHp - B.maxHp) / 2); add('sword damage', st.swordDmg - B.swordDmg); add('swim speed', st.speed - B.speed); add('armour', (st.armor - B.armor) * 100, '%');
-    add('crit', (st.crit - B.crit) * 100, '%'); add('spell power', (st.spellPower - B.spellPower) * 100, '%'); add('luck', st.luck - B.luck);
-    if (lines.length === 1) lines.push({ text: 'Nothing packed yet.', color: '#5a4a3a' }, { text: 'Gear changes your stats; skills deal cards.', color: '#7a5a3a' });
-    const m = MASTERY[this.mastery];
-    lines.push({ text: `MASTERY ${this.mastery} · ${m.name}`, color: '#8a2a10', gap: 3 });
-    for (const mod of masteryMods(this.mastery).slice(-2)) lines.push({ text: '· ' + mod, color: '#5a4a3a' });
-    if (this.diving) { this.note.hide(); return; }
-    this.note.show(lines);
-    // pinned bottom left of the shot, on the open sand (clear of the HOME sign and the skill cards)
-    const W = internalH * cam.aspect;
-    const ndc = new THREE.Vector3(-1 + 8 / (W / 2), (-internalH / 2 + 8 + this.note.h / 2) / (internalH / 2), 0.5).unproject(cam);
-    this.note.place(cam, ndc, internalH, [0, 0], dt, 'left');
+    this.stage.attach(ui);
+    const cw = 52, x0 = Math.round(ui.w / 2 - ((this.cards.length - 1) * cw) / 2);
+    this.cards.forEach((c, i) => {
+      const x = x0 + i * cw, y = 40;
+      const hov = ui.hover(x - 22, y - 32, 44, 64) ? 1 : 0;
+      this.stage.put(c.c.root, x, y, 10);
+      c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
+    });
+    // the note: a cream card pinned with a brass tack
+    const w = 168, x = 10, y = 10, ink = '#2a1a0c', dimInk = '#6a5638';
+    const sets = setBonuses(packed).slice(0, 4);
+    const b = buildLines(this.pack);
+    const rows: { text: string; color: string; font: 'body' | 'small'; gap?: number }[] = [];
+    for (const st of sets) rows.push({ text: `${st.name} ${st.count}${st.next ? '/' + st.next : ''}${st.tier ? '  · ON' : ''}`, color: st.tier ? '#1a5a1a' : dimInk, font: 'body' });
+    for (const q of b.stats.slice(0, 6)) rows.push({ text: q.text, color: q.good ? '#1a4a7a' : '#8a1a14', font: 'body', gap: rows.length && !rows.some((r) => r.color === '#1a4a7a' || r.color === '#8a1a14') ? 3 : 0 });
+    if (!sets.length && !b.stats.length) rows.push({ text: 'Nothing packed yet.', color: dimInk, font: 'body' }, { text: 'Gear changes your stats; skills deal cards.', color: dimInk, font: 'small' });
+    rows.push({ text: `MASTERY ${this.mastery} · ${MASTERY[this.mastery].name}`, color: '#8a2a10', font: 'small', gap: 4 });
+    let h = 10 + ui.lh('title') + 4;
+    for (const r of rows) h += (r.gap ?? 0) + ui.textBox(r.text, -9999, -9999, w - 20, { font: r.font });
+    h += 8;
+    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35);
+    ui.img(wellArt(w, h, 'paper'), x, y);
+    ui.block(x, y, w, h);
+    let yy = y + 8;
+    ui.text('YOUR BUILD', x + 10, yy, { font: 'title', color: ink, shadow: null }); yy += ui.lh('title') + 1;
+    ui.fill(x + 10, yy, w - 20, 1, '#c8b488'); yy += 3;
+    for (const r of rows) { yy += r.gap ?? 0; yy += ui.textBox(r.text, x + 10, yy, w - 20, { font: r.font, color: r.color, shadow: null }); }
   }
 
   private dive() {
     if (this.diving) return;
     this.diving = true;
-    this.tag.hide(); this.note.hide();
     audio.play('k_confirm2', { vol: 0.4, dry: true }); audio.play('bubbles_a', { vol: 0.35, delay: 0.2 });
     const cfg = this.config();
     META.lastConfig = cfg; META.mastery = cfg.mastery; saveMeta();
@@ -536,8 +603,8 @@ export class Packing {
   /** CSS-px centre of a widget for tests: 'swim' | 'home' | 'dial+' | 'dial-' | 'chest:<id>' | 'item:<id>' | 'bag:<gx>,<gy>' */
   point(id: string, cam: THREE.Camera, w: number, h: number): [number, number] | null {
     let p: THREE.Vector3 | null = null;
-    if (id === 'swim') p = this.local(2.9, 1.2, -0.3);
-    else if (id === 'home') p = this.local(-2.95, 1.2, -0.4);
+    if (id === 'swim') p = this.local(2.65, 1.2, -0.7);
+    else if (id === 'home') p = this.local(-2.75, 1.2, -0.75);
     else if (id === 'dial+') p = this.local(DIAL.x + DIAL.r * 0.6, DIAL.y, DIAL.z);
     else if (id === 'dial-') p = this.local(DIAL.x - DIAL.r * 0.6, DIAL.y, DIAL.z);
     else if (id.startsWith('chest:') || id.startsWith('item:')) {

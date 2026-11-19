@@ -21,8 +21,8 @@ import type { Input } from '../../core/input';
 import { audio } from '../../audio/audio';
 import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
 import { drawText, measure, wrap, lineH, capH, setTextDensity, type FontName, type TextOpts } from './font';
-import { skin, btnSkin, btnFace, PAD, BTN, LIP, KIT, type SkinKind, type BtnStyle, type BtnState } from './skins';
-import { icon, keycapBody, closeArt, KEYCAP_H, cursorArt, type CursorName } from './art';
+import { skin, btnSkin, btnFace, PAD, BTN, LIP, KIT, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, type SkinKind, type BtnStyle, type BtnState } from './skins';
+import { icon, cursorArt, type CursorName } from './art';
 import { easeOutBack } from '../../core/math';
 import { iconAt } from '../../backpack/icons';
 
@@ -263,6 +263,7 @@ export class PixelUI {
     this.rects = this.rectsNext; this.rectsNext = new Map();
     this.tips = [];
     this.laterQ = [];
+    this.tagRects = [];
     this.fadeK = 1; this.liftY = 0;
     this.panelN.clear();
     if (input) {
@@ -309,6 +310,8 @@ export class PixelUI {
   }
 
   private laterQ: ((ui: PixelUI) => void)[] = [];
+  /** world-tag cards drawn this frame (tags nudge themselves off each other) */
+  tagRects: [number, number, number, number][] = [];
   /** queue a draw for end() (above everything drawn this frame, below tooltips and the cursor) */
   later(fn: (ui: PixelUI) => void) { this.laterQ.push(fn); }
 
@@ -405,9 +408,11 @@ export class PixelUI {
     for (let i = 0; i <= n; i++) if (((i + phase) >> 1) & 1) this.ctx.fillRect(Math.round(x0 + ((x1 - x0) * i) / (n || 1)), Math.round(y0 + ((y1 - y0) * i) / (n || 1) + this.liftY), 1, 1);
     this.ctx.globalAlpha = 1;
   }
+  /** a skin at w x h UI px (painted at this canvas's density: fine texture detail is one device pixel) */
   frame(kind: SkinKind, x: number, y: number, w: number, h: number, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK;
-    c.drawImage(skin(kind, w, h), Math.round(x), Math.round(y + this.liftY));
+    w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
+    c.drawImage(skin(kind, w, h, this.hd), Math.round(x), Math.round(y + this.liftY), w, h);
     c.globalAlpha = 1;
   }
   text(str: string, x: number, y: number, o: TextOpts = {}) {
@@ -449,7 +454,7 @@ export class PixelUI {
   keycap(label: string, x: number, y: number, dark = false, down = false) {
     const tw = label ? this.measure(label, 'small') : 0;
     const w = Math.max(KEYCAP_H, Math.ceil(tw) + 7);
-    this.img(keycapBody(w, KEYCAP_H, dark, down), x, y);
+    this.img(keycapBody(w, KEYCAP_H, dark, down, this.hd), x, y, { w, h: KEYCAP_H });
     if (label) this.text(label, x + w / 2, y + (down ? 3 : 1) + Math.round((8 - this.cap('small')) / 2), { font: 'small', color: dark ? KIT.text : KIT.ink, shadow: null, align: 'center' });
     return w;
   }
@@ -487,7 +492,8 @@ export class PixelUI {
       fx = x + Math.round((w - fw) / 2); fy = y + Math.round((h - fh) / 2);
       fa *= Math.min(1, pt / 0.07);
     }
-    this.frame(kind, fx, fy, fw, fh, fa);
+    if (fw === w && fh === h) this.frame(kind, fx, fy, fw, fh, fa);
+    else { const c = this.ctx; c.globalAlpha = fa; c.drawImage(skin(kind, Math.round(w), Math.round(h), this.hd), fx, fy, fw, fh); c.globalAlpha = 1; }
     if (title) {
       const lacq = kind === 'wood' || kind === 'stone' || kind === 'cream';
       const st: TextOpts = o.titleStyle ?? (lacq ? { font: 'title', color: KIT.ink, shadow: '#f2c66d' } : kind === 'paper' || kind === 'insetCream' ? { font: 'title', color: KIT.textInk, shadow: null } : kind === 'blueprint' || kind === 'card' ? { font: 'title', color: '#ffffff', shadow: '#0a2046' } : { font: 'title', color: KIT.cream[3], outline: KIT.ink, shadow: '#000000' });
@@ -535,7 +541,7 @@ export class PixelUI {
     let clicked = c0;
     if (o.key && !o.disabled && this.input?.keyHit(o.key)) clicked = true;
     const state: BtnState = o.state ?? (o.disabled ? 'disabled' : held ? 'down' : o.on ? 'on' : over ? 'hover' : 'normal');
-    this.img(btnSkin(st, state, w, h), x, y);
+    this.img(btnSkin(st, state, w, h, this.hd), x, y, { w: Math.max(6, Math.round(w)), h: Math.max(8, Math.round(h)) });
     const P = BTN[st];
     const [ft, fh] = btnFace(state, h);
     const fy = y + ft;
@@ -587,7 +593,7 @@ export class PixelUI {
     let clicked = c0;
     const key = o.key === undefined ? 'Escape' : o.key;
     if (key && !o.disabled && this.input?.keyHit(key)) clicked = true;
-    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal')), x, y);
+    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal'), this.hd), x, y, { w: s, h: s + 3 });
     if (over && o.tip) this.tooltip(o.tip);
     if (clicked && this.sfx && o.sfx !== '') audio.play(o.sfx ?? 'k_close1', { vol: 0.4, dry: true });
     return clicked;
@@ -607,7 +613,7 @@ export class PixelUI {
       const on = i === sel;
       const { over, clicked } = this.interact(id + ':' + i, cx, y, w, h);
       const dy = on ? 0 : over ? 2 : 3;
-      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', w, h - dy), cx, y + dy);
+      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy, this.hd), cx, y + dy, { w: Math.round(w), h: h - dy });
       this.text(l, cx + w / 2, y + dy + Math.round((h - dy - this.cap(font)) / 2) + (on ? 0 : -1), { font, color: on ? KIT.cream[3] : over ? KIT.cream[2] : KIT.textDim, outline: on ? KIT.ink : null, shadow: on ? null : '#06141a', align: 'center' });
       if (clicked && !on) { out = i; if (this.sfx) audio.play('tab1', { vol: 0.4, dry: true }); }
       cx += w + (o.gap ?? 2);
@@ -631,7 +637,7 @@ export class PixelUI {
     // notches
     for (let i = 1; i < 4; i++) this.fill(x + Math.round((w - 1) * i / 4), ty + 7, 1, 2, KIT.teal[3]);
     const kx = x + Math.round((w - 1) * k) - 4;
-    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal'), kx, y - 1);
+    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal', this.hd), kx, y - 1, { w: 9, h: 14 });
     if (held) {
       let nv = min + ((this.mx - x) / (w - 1)) * (max - min);
       if (o.step) nv = Math.round(nv / o.step) * o.step;
@@ -648,7 +654,7 @@ export class PixelUI {
     const font = o.font ?? 'body';
     const w = 13 + 5 + Math.ceil(this.measure(label, font));
     const { over, held, clicked } = this.interact(id, x, y, w, 13);
-    this.img(checkArt(on, over, held), x, y);
+    this.img(checkArt(on, over, held, 13, this.hd), x, y, { w: 13, h: 13 });
     this.text(label, x + 18, y + Math.round((13 - this.cap(font)) / 2), { font, color: o.color ?? (over ? '#ffffff' : KIT.text), shadow: '#06141a' });
     if (clicked) { if (this.sfx) audio.play('k_toggle2', { vol: 0.35, dry: true }); return !on; }
     return on;
@@ -848,7 +854,7 @@ export class PixelUI {
     }
     // checkbox
     const bx = X + 6, by = y + 3 + Math.round((rowH - 11) / 2);
-    this.img(checkArt(done, false, false, 11), bx, by, { alpha: a });
+    this.img(checkArt(done, false, false, 11, this.hd), bx, by, { alpha: a, w: 11, h: 11 });
     let cx = X + 22;
     if (o.icon) { this.item(o.icon, cx, y + 3 + Math.round((rowH - 14) / 2), 14, 14, 1, a); cx += iconW; }
     const ty = y + 3 + Math.round((rowH - cap) / 2);
@@ -872,7 +878,9 @@ export class PixelUI {
     }
     if (o.cost) {
       const fk = this.fadeK; this.fadeK = fk * a;
-      this.costRow(o.cost, X + 22, y + 3 + rowH + 1, { have: o.have, showHave: !!o.have, size: 14, light: true });
+      // have counts clipped to the need (3/3, never 9/3)
+      const have = o.have ? Object.fromEntries(Object.entries(o.cost).map(([k, n]) => [k, Math.min(n, o.have![k] ?? 0)])) : undefined;
+      this.costRow(o.cost, X + 22, y + 3 + rowH + 1, { have, showHave: !!have, size: 14, light: true });
       this.fadeK = fk;
     }
     if (this.hover(x, y, w, h)) this.overNext = true;
@@ -989,72 +997,4 @@ function shadeFor(c: string) {
   const v = parseInt(c.slice(1), 16);
   const r = ((v >> 16) & 255) * 0.55, g = ((v >> 8) & 255) * 0.55, b = (v & 255) * 0.55;
   return '#' + [r, g, b].map((k) => Math.round(k).toString(16).padStart(2, '0')).join('');
-}
-
-// ------------------------------------------------------------------ small widget art (cached)
-const artCache = new Map<string, HTMLCanvasElement>();
-function artOf(key: string, w: number, h: number, paint: (px: (x: number, y: number, c: string) => void) => void) {
-  let c = artCache.get(key);
-  if (c) return c;
-  c = document.createElement('canvas'); c.width = w; c.height = h;
-  const x = c.getContext('2d')!;
-  paint((xx, yy, col) => { x.fillStyle = col; x.fillRect(xx, yy, 1, 1); });
-  artCache.set(key, c);
-  if (artCache.size > 400) artCache.clear();
-  return c;
-}
-/** a checkbox: a recessed cream box with a bold kelp tick */
-function checkArt(on: boolean, hover: boolean, down: boolean, S = 13): HTMLCanvasElement {
-  return artOf(`chk|${on}|${hover}|${down}|${S}`, S, S, (px) => {
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const e = Math.min(x, y, S - 1 - x, S - 1 - y);
-      const corner = (x === 0 || x === S - 1) && (y === 0 || y === S - 1);
-      if (corner) continue;
-      if (e === 0) { px(x, y, KIT.ink); continue; }
-      if (e === 1 && (x === 1 || y === 1)) { px(x, y, down ? '#b9a476' : '#c9b48a'); continue; }
-      px(x, y, hover ? '#fffaf0' : '#f3e7c9');
-    }
-    if (on) {
-      const m = S / 13;
-      const pts: [number, number][] = [[3, 6], [4, 7], [5, 8], [6, 7], [7, 6], [8, 5], [9, 4], [10, 3]].map(([a, b]) => [Math.round(a * m), Math.round(b * m)]);
-      for (const [a, b] of pts) { px(a, b + 1, KIT.kelp[0]); px(a, b + 2, KIT.kelp[0]); }
-      for (const [a, b] of pts) { px(a, b, KIT.kelp[2]); px(a, b - 1, KIT.kelp[3]); }
-    }
-  });
-}
-/** the slider knob: a brass lozenge with a groove */
-function knobArt(state: 'normal' | 'hover' | 'down'): HTMLCanvasElement {
-  return artOf(`knob|${state}`, 9, 14, (px) => {
-    const top = state === 'down' ? 1 : 0;
-    for (let y = top; y < 13 + top; y++) for (let x = 0; x < 9; x++) {
-      const ly = y - top;
-      const e = Math.min(x, ly, 8 - x, 12 - ly);
-      if ((x === 0 || x === 8) && (ly === 0 || ly === 12)) continue;
-      if (e === 0) { px(x, y, KIT.ink); continue; }
-      let c: string = state === 'hover' ? '#dba552' : KIT.brass[2];
-      if (ly === 1 || x === 1) c = KIT.brass[3];
-      else if (ly >= 10 || x === 7) c = KIT.brass[1];
-      if (x === 4 && ly > 3 && ly < 9) c = KIT.brass[1];
-      if (x === 5 && ly > 3 && ly < 9) c = KIT.brass[3];
-      px(x, y, c);
-    }
-    if (state !== 'down') for (let x = 1; x < 8; x++) px(x, 13, '#000000');
-  });
-}
-/** a folder tab (open at the bottom): on = lacquer with a brass top trim, hover / off = darker */
-function tabSkin(state: 'on' | 'hover' | 'off', w: number, h: number): HTMLCanvasElement {
-  return artOf(`tab|${state}|${w}|${h}`, w, h, (px) => {
-    const body = state === 'on' ? KIT.teal[2] : state === 'hover' ? '#184349' : KIT.teal[1];
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const dx = Math.min(x, w - 1 - x);
-      if (y === 0 && dx < 2) continue;
-      if (y === 1 && dx === 0) continue;
-      if (y === 0 || dx === 0 || (y === 1 && dx === 1)) { px(x, y, KIT.ink); continue; }
-      if (state === 'on' && y === 1) { px(x, y, KIT.brass[3]); continue; }
-      if (state === 'on' && y === 2) { px(x, y, KIT.brass[1]); continue; }
-      if (dx === 1) { px(x, y, x === 1 ? (state === 'on' ? KIT.teal[4] : KIT.teal[3]) : KIT.teal[0]); continue; }
-      if (y === 1) { px(x, y, KIT.teal[3]); continue; }
-      px(x, y, body);
-    }
-  });
 }

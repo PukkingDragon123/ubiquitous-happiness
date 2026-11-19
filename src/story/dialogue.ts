@@ -398,10 +398,10 @@ export class Dialogue {
     if (!a.bark && typed && !a.line.choices?.length && a.line.auto === undefined) {
       const b = Math.round(Math.max(0, Math.sin(this.t * 6)) * 2);
       const kw = ui.keycapW('E');
-      const px = bx + W - kw - 18, py = by + H - 8 - b;
+      const px = bx + W - kw - 8, py = by + H - 9 - b;
       ui.keycap('E', px, py);
-      // a bobbing ink arrow beside the key
-      const ax = px + kw + 3, ay = py + 4;
+      // a bobbing brass arrow beside the key, inside the bubble
+      const ax = px - 10, ay = py + 3;
       f(ax, ay, 7, 1, line); f(ax + 1, ay + 1, 5, 1, KIT.brass[2]); f(ax, ay + 1, 1, 1, line); f(ax + 6, ay + 1, 1, 1, line);
       f(ax + 1, ay + 2, 5, 1, line); f(ax + 2, ay + 2, 3, 1, KIT.brass[2]); f(ax + 1, ay + 2, 1, 1, line); f(ax + 5, ay + 2, 1, 1, line);
       f(ax + 2, ay + 3, 3, 1, line); f(ax + 3, ay + 3, 1, 1, KIT.brass[3]); f(ax + 3, ay + 4, 1, 1, line);

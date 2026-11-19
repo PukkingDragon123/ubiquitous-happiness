@@ -132,6 +132,14 @@ export class Tag {
       if (align === 'bottom') { x = ax - w / 2; y = ay - h; } else if (align === 'left') { x = ax; y = ay - h / 2; } else { x = ax - w; y = ay - h / 2; }
       x = Math.round(Math.max(4, Math.min(ui.w - 4 - w, x)));
       y = Math.round(Math.max(4, Math.min(ui.h - 4 - h, y)));
+      // don't cover a tag already drawn this frame: slide above or below it, whichever moves less and stays on screen
+      for (const [ox, oy, ow, oh] of ui.tagRects) {
+        if (x >= ox + ow + 2 || x + w + 2 <= ox || y >= oy + oh + 2 || y + h + 2 <= oy) continue;
+        const up = oy - h - 4, dn = oy + oh + 4;
+        const okUp = up >= 4, okDn = dn + h <= ui.h - 4;
+        y = okUp && (!okDn || Math.abs(up - y) <= Math.abs(dn - y)) ? up : okDn ? dn : y;
+      }
+      ui.tagRects.push([x, y, w, h]);
       const p = this.pop;
       const drop = Math.round((1 - easeOutBack(p, 2)) * -5);
       drawTag(ui, this.lines, this.style, Math.min(this.maxW + 20, ui.w - 16), x, y + drop, Math.min(1, p * 2));

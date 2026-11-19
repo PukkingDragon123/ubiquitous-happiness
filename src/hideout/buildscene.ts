@@ -1,7 +1,7 @@
 // The BUILD SCENE: a short animated rebuild of one piece. The camera pushes in on the spot; Mr. Crab scuttles over
 // and the blobfish waddles up; planks and stones fly in on arcs and thunk into place (dust, a knock, a little
 // shake) while the crab hammers with his big claw; the piece grows out of its blueprint ghost, pops, sparkles and a
-// paper card says what it unlocks. Click / Esc / Space skips to the end; it always finishes (nothing to get stuck in).
+// pinned BUILT card (drawUi, a stamped cream card with a photo of the piece) says what it unlocks and what is next. Click / Esc / Space skips to the end; it always finishes (nothing to get stuck in).
 //
 //   const b = new BuildScene(...); b.start('stash');  each frame: if (b.active) b.update(dt)
 //   b.onDone = () => ...   (the piece is already built in the save when the scene starts)
@@ -13,11 +13,15 @@ import type { HubPlayer } from './player';
 import type { MrCrab } from '../story/crab';
 import type { CamRig } from './camera';
 import type { Motes } from './ocean';
-import { PIECE } from './rebuild';
-import { Tag } from './tag';
+import { PIECE, nextGoal } from './rebuild';
+import type { PixelUI } from '../ui/pixel/ui';
+import { photo } from '../ui/obj/studio';
+import { K } from './itemCard';
 import { audio } from '../audio/audio';
 import { clamp01, easeOutBack } from '../core/math';
 
+/** seconds the BUILT card stays up */
+const DONE_T = 3.2;
 interface Flyer { m: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; t0: number; dur: number; spin: THREE.Vector3; landed: boolean }
 
 export class BuildScene {
@@ -29,14 +33,14 @@ export class BuildScene {
   private flyers: Flyer[] = [];
   private nextFly = 0;
   private nextHit = 0;
-  private card = new Tag('paper', 170);
+  /** the BUILT card: what was built, what it unlocks, what's next, a studio photo of the piece */
+  private card: { name: string; unlock: string; next: string; pic: HTMLCanvasElement | null; t: number; stamped?: boolean } | null = null;
   private crabFrom = new THREE.Vector3();
   private crabTo = new THREE.Vector3();
   onDone?: () => void;
   onShake?: (k: number) => void;
 
   constructor(private house: House, private player: HubPlayer, private crab: MrCrab, private rig: CamRig, private dust: Motes, private sparks: Motes, private cam: THREE.PerspectiveCamera, private internalH: () => number) {
-    house.group.add(this.card.mesh);
   }
 
   start(id: string) {
@@ -70,9 +74,10 @@ export class BuildScene {
     const ok = (v: THREE.Vector3) => this.house.walkable(v.x, v.z, 0.2);
     this.crabTo.copy(ok(first) ? first : ok(second) ? second : this.house.nearestWalkable(first.x, first.z) ?? s.stand);
     audio.play('k_confirm1', { vol: 0.4, dry: true }); audio.play('crab_click1', { vol: 0.4 });
-    this.card.hide();
+    this.card = null;
   }
-  skip() { if (this.active && this.phase !== 'done') this.finish(); }
+  /** click / Esc: jump to the end of the hammering, or (once the card has been up a moment) wrap up */
+  skip() { if (!this.active) return; if (this.phase !== 'done') this.finish(); else if (this.pt > 0.8) this.pt = Math.max(this.pt, DONE_T - 0.05); }
 
   private finish() {
     this.phase = 'done'; this.pt = 0;
@@ -85,7 +90,8 @@ export class BuildScene {
     audio.play('jin_good', { vol: 0.45, dry: true }); audio.play('pickup_sparkle1', { vol: 0.35, dry: true });
     this.player.hero.play?.('hop'); this.player.hero.expression?.('happy');
     const p = PIECE[this.id];
-    this.card.show([{ text: `${p.name.toUpperCase()} BUILT`, font: 'title', color: '#2a1808' }, { text: p.unlock, color: '#1a4a7a' }]);
+    const nx = nextGoal();
+    this.card = { name: p.name.toUpperCase(), unlock: p.unlock, next: nx ? nx.name : '', pic: null, t: 0 };
   }
 
   update(dt: number) {
@@ -142,12 +148,66 @@ export class BuildScene {
       this.house.setGrow(this.id, easeOutBack(k, 1.2) * 0.98);
       if (this.pt > dur) this.finish();
     } else {
-      // done: the card floats over the new piece, the camera eases back out
-      const at = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 1.6, s.piece.z);
-      this.card.place(this.cam, at, this.internalH(), [0, -6], dt);
+      // done: the card is up (drawUi), the camera eases back out
       if (this.pt > 0.9) { this.rig.shot = null; this.rig.k = 2.2; }
       if (this.pt > 1.6) this.house.shell.roof.visible = true;
-      if (this.pt > 2.4) { this.active = false; this.card.hide(); this.crab.move = 0; this.house.shell.roof.visible = true; this.onDone?.(); }
+      if (this.pt > DONE_T) { this.active = false; this.card = null; this.crab.move = 0; this.house.shell.roof.visible = true; this.onDone?.(); }
     }
+  }
+
+  /**
+   * the BUILT card, pinned near the bottom of the letterboxed shot: a cream card with a brass pin, the piece's photo
+   * in a frame, its name, a red BUILT stamp that slams on, what it unlocks and what's next. Call inside ui.begin/end.
+   */
+  drawUi(ui: PixelUI, dt: number) {
+    const c = this.card;
+    if (!c || !this.active) return;
+    c.t += dt;
+    const k = Math.min(1, c.t / 0.28), e = 1 - (1 - k) ** 3;
+    const w = Math.min(ui.w - 24, 352), pw = 84, ph = 63;
+    const tx0 = 12 + pw + 12, tw = w - tx0 - 12;
+    const unlockH = ui.textBox(c.unlock, -9999, -9999, tw, { font: 'body' });
+    const h = Math.max(ph + 24, 12 + ui.lh('small') + ui.lh('title') + 4 + ui.lh('small') + unlockH + (c.next ? ui.lh('small') + 4 : 0) + 10);
+    const bar = Math.round(ui.h * 0.6 * Math.max(0, 1 - (ui.w / ui.h) / 2.39) * 0.5);
+    const x = Math.round((ui.w - w) / 2), y = Math.round(ui.h - bar - h - 10 + (1 - e) * 30);
+    const a = e;
+    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35 * a);
+    ui.frame('cream', x, y, w, h, a);
+    // the brass pin at the top
+    ui.fill(x + w / 2 - 3, y - 3, 7, 7, K.brassD, a); ui.fill(x + w / 2 - 2, y - 2, 5, 5, K.brass1, a); ui.fill(x + w / 2 - 2, y - 2, 2, 2, K.brassW, a);
+    // the photo, framed, a strip of tape over its corner
+    const fx = x + 12, fy = y + Math.round((h - ph) / 2);
+    if (!c.pic || c.pic.width !== pw * ui.hd) c.pic = this.photo(pw * ui.hd, ph * ui.hd);
+    ui.fill(fx - 2, fy - 2, pw + 4, ph + 4, '#3a2a18', a); ui.fill(fx - 1, fy - 1, pw + 2, ph + 2, '#f8f0dc', a);
+    ui.fill(fx, fy, pw, ph, '#bfd2cc', a); ui.fill(fx, fy + Math.round(ph * 0.68), pw, ph - Math.round(ph * 0.68), '#9fb4aa', a);
+    if (c.pic) ui.img(c.pic, fx, fy, { w: pw, h: ph, alpha: a });
+    ui.fill(fx + pw - 14, fy - 4, 18, 6, '#efe6c8', 0.85 * a); ui.fill(fx + pw - 14, fy + 1, 18, 1, '#d6caa4', 0.85 * a);
+    // the words
+    const tx = x + tx0;
+    let yy = y + 10;
+    ui.text('NEW!', tx, yy, { font: 'small', color: '#a8342c', shadow: null, alpha: a }); yy += ui.lh('small');
+    ui.text(c.name, tx, yy, { font: 'title', color: K.ink, shadow: null, alpha: a }); yy += ui.lh('title') + 2;
+    ui.text('UNLOCKS', tx, yy, { font: 'small', color: '#8a5a24', shadow: null, alpha: a }); yy += ui.lh('small');
+    yy += ui.textBox(c.unlock, tx, yy, tw, { font: 'body', color: '#1a4a7a', shadow: null }) + 3;
+    if (c.next) ui.text(`next up: ${c.next}`, tx, yy, { font: 'small', color: '#6a5638', shadow: null, alpha: a });
+    // the BUILT stamp slams on a beat later (rings shrinking onto the card)
+    const sk = Math.max(0, Math.min(1, (c.t - 0.3) / 0.16));
+    if (sk > 0) {
+      if (!c.stamped) { c.stamped = true; audio.play('thud_heavy1', { vol: 0.3, rate: 1.3 }); audio.play('k_confirm2', { vol: 0.3, dry: true }); }
+      const r = Math.round(22 * (1 + (1 - sk) * 0.8)), sx = x + w - 34, sy = y + 30;
+      const col = '#b8342c';
+      for (let yy2 = -r; yy2 <= r; yy2++) for (let xx2 = -r; xx2 <= r; xx2++) {
+        const d = Math.hypot(xx2, yy2);
+        if ((d <= r && d > r - 2) || (d <= r - 4 && d > r - 5)) ui.fill(sx + xx2, sy + yy2, 1, 1, col, 0.85 * sk);
+      }
+      ui.fill(sx - r + 5, sy - 1, 4, 2, col, 0.85 * sk); ui.fill(sx + r - 8, sy - 1, 4, 2, col, 0.85 * sk);
+      ui.text('BUILT', sx, sy - Math.round(ui.cap('small') / 2), { font: 'small', color: col, shadow: null, align: 'center', alpha: sk });
+    }
+  }
+  /** a studio photo of the finished piece (a clone, so the house keeps its model) */
+  private photo(w: number, h: number): HTMLCanvasElement | null {
+    const s = this.house.spots.get(this.id);
+    try { if (s?.built) { const c = s.built.clone(true); c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); c.scale.set(1, 1, 1); return photo(c, w, h, { yaw: -0.5, pitch: 0.35, fill: 1, ss: 2 }); } } catch { /* no GL */ }
+    return null;
   }
 }

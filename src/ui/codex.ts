@@ -14,6 +14,7 @@ import type { PixelUI } from './pixel/ui';
 import { photo } from './obj/studio';
 import { SPECS } from '../fish/species';
 import { buildFish } from '../fish';
+import { CloseX } from '../hideout/itemCard';
 
 export type CodexKind = 'fish' | 'giant';
 export interface CodexEntry {
@@ -123,6 +124,7 @@ export class CodexBook {
   private tab: CodexKind = 'fish';
   private sel = '';
   private scroll = 0;
+  private x = new CloseX();
   get isOpen() { return this.on; }
   open(tab: CodexKind = this.tab) { this.on = true; this.t = 0; this.tab = tab; }
   close() { this.on = false; }
@@ -135,10 +137,17 @@ export class CodexBook {
     const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - Math.min(1, this.t * 6)) ** 2 * 30);
     ui.fill(0, 0, ui.w, ui.h, '#02060c', 0.55 * Math.min(1, this.t * 6));
     // close: Esc, the button, a click outside the book
-    if (ui.input?.keyHit('Escape') || (ui.pressed && !ui.hover(x - 6, y - 16, W + 12, H + 22))) { this.close(); return false; }
+    if (ui.input?.keyHit('Escape') || (ui.pressed && !ui.hover(x - 8, y - 16, W + 20, H + 24))) { this.close(); return false; }
     ui.block(0, 0, ui.w, ui.h);
-    // leather cover, two parchment pages, the spine
-    ui.fill(x - 6, y - 6, W + 12, H + 12, '#2a1408'); ui.fill(x - 5, y - 5, W + 10, H + 10, '#5a3018'); ui.fill(x - 5, y - 5, W + 10, 1, '#8a5a30');
+    // leather cover (burnished rim, stitched edge, brass corner caps), two parchment pages, the spine
+    ui.fill(x - 8, y - 8, W + 16, H + 16, '#1a0a06'); ui.fill(x - 7, y - 7, W + 14, H + 14, '#5a3018');
+    ui.fill(x - 7, y - 7, W + 14, 1, '#a8703c'); ui.fill(x - 7, y - 7, 1, H + 14, '#8a5a30'); ui.fill(x - 7, y + H + 6, W + 14, 1, '#3a1c0c'); ui.fill(x + W + 6, y - 7, 1, H + 14, '#3a1c0c');
+    for (let i = 0; i < W + 6; i += 4) { ui.fill(x - 3 + i, y - 5, 2, 1, '#e6c28a'); ui.fill(x - 3 + i, y + H + 4, 2, 1, '#e6c28a'); }
+    for (let i = 0; i < H + 6; i += 4) { ui.fill(x - 5, y - 3 + i, 1, 2, '#e6c28a'); ui.fill(x + W + 4, y - 3 + i, 1, 2, '#e6c28a'); }
+    for (const [cx, cy, dx, dy] of [[x - 7, y - 7, 1, 1], [x + W + 6, y - 7, -1, 1], [x - 7, y + H + 6, 1, -1], [x + W + 6, y + H + 6, -1, -1]]) {
+      for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) if (i < 3 || j < 3) ui.fill(cx + dx * i, cy + dy * j, 1, 1, i === 0 || j === 0 ? '#2e1404' : i + j < 5 ? '#f2c66d' : '#c8913a');
+      ui.fill(cx + dx * 1, cy + dy * 1, 1, 1, '#fff1c2');
+    }
     const half = Math.floor(W / 2);
     ui.frame('paper', x, y, half - 2, H); ui.frame('paper', x + half + 2, y, W - half - 2, H);
     ui.fill(x + half - 2, y, 4, H, '#3a1c0a'); ui.fill(x + half - 1, y, 1, H, '#7a4a20');
@@ -153,7 +162,7 @@ export class CodexBook {
       if (ui.button('codex:tab:' + k, `${label} ${c.known}/${c.total}`, tx, y + 26, 92, 16, { style: this.tab === k ? 'gold' : 'wood', font: 'small', on: this.tab === k })) { this.tab = k; this.scroll = 0; this.sel = ''; }
       tx += 96;
     }
-    if (ui.button('codex:close', '', x + W - 16, y - 12, 14, 15, { style: 'red', icon: 'close', sfx: '' })) { this.close(); return false; }
+    if (this.x.draw(ui, 'codex:close', x + W - 12, y - 14, 20)) { this.close(); return false; }
     // the entry grid (left page)
     const list = codexEntries(this.tab);
     const cell = 46, cols = Math.max(1, Math.floor((half - 24) / cell));
@@ -166,7 +175,11 @@ export class CodexBook {
       const known = !!seen[e.id];
       const hov = ui.hover(cx, cy, cell - 4, cell - 4) && ui.hover(gx, gy, cols * cell, viewH);
       const selNow = this.sel === e.id;
-      ui.frame(selNow ? 'cardSel' : 'slot', cx, cy, cell - 4, cell - 4);
+      // a photo print on the page: a white border, a little shadow, red ink round the one you're reading
+      ui.fill(cx + 1, cy + 2, cell - 4, cell - 4, '#b8a47a');
+      ui.fill(cx, cy, cell - 4, cell - 4, selNow ? '#a8342c' : hov ? '#8a6a44' : '#c8b488');
+      ui.fill(cx + 1, cy + 1, cell - 6, cell - 6, '#fbf4e2');
+      ui.fill(cx + 3, cy + 3, cell - 10, cell - 10, known ? '#cfdcd2' : '#e4d6b4');
       const pic = known ? photoOf(e, 84) : silhouetteOf(e, 84);
       if (pic) ui.img(pic, cx + 2, cy + 6, { w: cell - 8, h: Math.round((cell - 8) * 0.66), alpha: known ? 1 : 0.8 });
       else ui.text('?', cx + (cell - 4) / 2, cy + 12, { font: 'title', color: '#6a5a4a', shadow: null, align: 'center' });

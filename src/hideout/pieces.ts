@@ -15,6 +15,8 @@ import { retro } from '../gfx/retro';
 import { Px, hex, mix, type RGB } from '../gfx/px';
 import { hash2, fbm, TAU } from '../core/math';
 import { paintTag, type TagLine } from './tag';
+import { drawText, setTextDensity } from '../ui/pixel/font';
+import { itemIconBox } from '../ui/pixel/ui';
 
 export const IN = { x0: -6, x1: 6, z0: -4.5, z1: 4.5 };
 export const WALL_T = 0.5;
@@ -406,12 +408,55 @@ export class GoalBoard {
     const key = JSON.stringify(lines);
     if (key === this.key) return;
     this.key = key;
-    const cv = paintTag(lines, 'paper', 170, 7);
+    this.show(paintTag(lines, 'paper', 170, 7));
+  }
+  /** v5: the pinned goal card (big enough to read across the room): what's next, its materials, the progress */
+  paintGoal(g: { name: string; costs: [string, number, number][]; built: number; total: number } | null) {
+    const key = JSON.stringify(g);
+    if (key === this.key) return;
+    this.key = key;
+    this.show(goalCard(g));
+  }
+  private show(cv: HTMLCanvasElement) {
     const t = new THREE.CanvasTexture(cv); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace;
     this.mat.map?.dispose(); this.mat.map = t; this.mat.needsUpdate = true;
     const s = Math.min(1.12 / cv.width, 0.82 / cv.height);
     this.face.scale.set(cv.width * s, cv.height * s, 1);
   }
+}
+
+/** the goal card: cream paper with fibre lines and a fold, a red tack, NEXT + the name, icon / count rows, house pips */
+function goalCard(g: { name: string; costs: [string, number, number][]; built: number; total: number } | null): HTMLCanvasElement {
+  const W = 136, H = 100;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
+  setTextDensity(x, 1);
+  const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+  f(0, 0, W, H, '#5a4426'); f(1, 1, W - 2, H - 2, '#efe2c0'); f(1, 1, W - 2, 1, '#fffaf0'); f(1, H - 2, W - 2, 1, '#cdb88c');
+  for (let yy = 7; yy < H - 4; yy += 5) for (let xx = 4; xx < W - 4; xx++) if ((xx * 7 + yy * 3) % 23 < 6) f(xx, yy, 1, 1, '#e4d3ac');
+  for (let i = 0; i < 12; i++) { f(W - 13 + i, 1 + i, 1, 1, '#d8c69c'); } // the folded corner's crease
+  f(W - 12, 1, 11, 1, '#5a4426'); for (let i = 0; i < 11; i++) f(W - 12 + i, 1, 1, i + 1, i % 2 ? '#e8d8b2' : '#dccb9f');
+  f(W / 2 - 3, 2, 6, 6, '#6a1410'); f(W / 2 - 2, 3, 4, 4, '#d8342c'); f(W / 2 - 2, 3, 2, 2, '#ff9a84');
+  if (!g) {
+    drawText(x, 'HOME', W / 2, 22, { font: 'title', color: '#2a1a0c', align: 'center' });
+    drawText(x, 'all rebuilt!', W / 2, 44, { font: 'title', color: '#1a5a1a', align: 'center' });
+    return cv;
+  }
+  drawText(x, 'NEXT', 8, 10, { font: 'small', color: '#a8342c' });
+  drawText(x, g.name.toUpperCase(), 8, 19, { font: 'title', color: '#2a1a0c' });
+  let yy = 40;
+  for (const [id, have, need] of g.costs.slice(0, 3)) {
+    const ok = have >= need;
+    f(8, yy - 1, 16, 16, '#d8c49a');
+    try { x.drawImage(itemIconBox(id, 16, 16), 8, yy - 1); } catch { /* unknown */ }
+    drawText(x, `${Math.min(have, need)}/${need}`, 30, yy + 4, { font: 'title', color: ok ? '#1a5a1a' : '#a8342c' });
+    if (ok) for (const [dx, dy] of [[0, 3], [1, 4], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1], [7, 0]]) f(W - 22 + dx * 2, yy + 3 + dy * 2, 2, 2, '#1a5a1a');
+    yy += 18;
+  }
+  // the house: one pip per piece, filled when rebuilt
+  const pw = Math.floor((W - 16) / g.total);
+  for (let i = 0; i < g.total; i++) { f(8 + i * pw, H - 9, pw - 2, 5, '#6a5638'); f(9 + i * pw, H - 8, pw - 4, 3, i < g.built ? '#5fae3f' : '#e4d3ac'); }
+  return cv;
 }
 
 // ------------------------------------------------------------------ the codex lectern
@@ -433,11 +478,23 @@ export function lectern(): THREE.Group {
 }
 
 // ------------------------------------------------------------------ ghosts (unbuilt spots)
-const GHOST = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.08, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
+// v5: three looks so the room isn't a wall of blue wireframes. 'next' (the goal board's piece) glows and breathes,
+// every other unbuilt spot is a 'faint' whisper of a blueprint, and 'hot' (hovered / flashed) warms to gold.
+export type GhostState = 'faint' | 'next' | 'hot';
+const GHOST = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.1, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
+const GHOST_FAINT = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.025, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 const GHOST_HOT = new THREE.MeshBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 0.22, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
-const EDGE = new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.7, toneMapped: false });
+const EDGE = new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.8, toneMapped: false });
+const EDGE_FAINT = new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.1, toneMapped: false });
 const EDGE_HOT = new THREE.LineBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 1, toneMapped: false });
-/** a translucent blueprint copy of a model (shares geometry); setGhostHot(g, true) warms it */
+const FLOOR = { faint: 0.14, next: 0.9, hot: 1 };
+/** breathe the next piece's blueprint (call once a frame) */
+export function pulseGhosts(t: number) {
+  const k = 0.5 + 0.5 * Math.sin(t * 2.6);
+  GHOST.opacity = 0.07 + 0.07 * k;
+  EDGE.opacity = 0.55 + 0.4 * k;
+}
+/** a translucent blueprint copy of a model (shares geometry); setGhostState(g, ...) / setGhostHot(g, true) */
 export function ghostOf(obj: THREE.Object3D): THREE.Group {
   const g = new THREE.Group();
   obj.updateMatrixWorld(true);
@@ -445,7 +502,7 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
   obj.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    const c = new THREE.Mesh(m.geometry, GHOST);
+    const c = new THREE.Mesh(m.geometry, GHOST_FAINT);
     c.matrixAutoUpdate = false;
     c.matrix.copy(inv).multiply(m.matrixWorld);
     c.renderOrder = 5;
@@ -456,20 +513,33 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
   g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox!.clone().applyMatrix4(m.matrix); if (b.max.y - b.min.y > 0.06) box.union(b); } });
   if (!box.isEmpty()) {
     const sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz.x, sz.y, sz.z)), EDGE);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz.x, sz.y, sz.z)), EDGE_FAINT);
     // (lines never take clicks: a raycaster's default line threshold is a whole metre, which steals clicks from
     // whatever stands in front of the blueprint)
     e.position.copy(c); e.userData.edge = true; e.raycast = () => {};
     g.add(e);
   }
+  g.userData.ghostBase = 'faint';
   return g;
 }
-export function setGhostHot(g: THREE.Object3D, hot: boolean) {
+function applyGhost(g: THREE.Object3D, st: GhostState) {
   g.traverse((o) => {
     const m = o as THREE.Mesh;
-    if ((o as THREE.LineSegments).isLineSegments && o.userData.edge) (o as THREE.LineSegments).material = hot ? EDGE_HOT : EDGE;
-    else if (m.isMesh && !m.userData.hit) m.material = hot ? GHOST_HOT : GHOST;
+    if ((o as THREE.LineSegments).isLineSegments && o.userData.edge) (o as THREE.LineSegments).material = st === 'hot' ? EDGE_HOT : st === 'next' ? EDGE : EDGE_FAINT;
+    else if ((o as THREE.LineSegments).isLineSegments && o.userData.floor) ((o as THREE.LineSegments).material as THREE.LineBasicMaterial).opacity = FLOOR[st];
+    else if (m.isMesh && !m.userData.hit) m.material = st === 'hot' ? GHOST_HOT : st === 'next' ? GHOST : GHOST_FAINT;
   });
+}
+/** a spot ghost's resting look ('next' for the goal, else 'faint'); a hot ghost keeps glowing until un-hot */
+export function setGhostState(g: THREE.Object3D, st: 'faint' | 'next') {
+  if (g.userData.ghostBase === st) return;
+  g.userData.ghostBase = st;
+  if (!g.userData.ghostHot) applyGhost(g, st);
+}
+export function setGhostHot(g: THREE.Object3D, hot: boolean) {
+  if (!!g.userData.ghostHot === hot && g.userData.ghostApplied) return;
+  g.userData.ghostHot = hot; g.userData.ghostApplied = true;
+  applyGhost(g, hot ? 'hot' : (g.userData.ghostBase as GhostState) ?? 'faint');
 }
 /** a dashed blueprint outline on the floor (w x d, centred) */
 export function floorOutline(w: number, d: number): THREE.LineSegments {
@@ -481,8 +551,8 @@ export function floorOutline(w: number, d: number): THREE.LineSegments {
   };
   edge(-w / 2, -d / 2, w / 2, -d / 2); edge(w / 2, -d / 2, w / 2, d / 2); edge(w / 2, d / 2, -w / 2, d / 2); edge(-w / 2, d / 2, -w / 2, -d / 2);
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.85, toneMapped: false }));
-  l.raycast = () => {};
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: FLOOR.faint, toneMapped: false }));
+  l.raycast = () => {}; l.userData.floor = true;
   return l;
 }
 

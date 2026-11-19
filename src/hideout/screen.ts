@@ -23,8 +23,8 @@ import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
 import { OceanOutside, Motes, FOG } from './ocean';
 import { CamRig } from './camera';
-import { StashPanel, WorkshopPanel, panelRect } from './panels';
-import { WardrobePanel, WARD_W } from './wardrobe';
+import { StashPanel, WorkshopPanel, panelRect, STASH_SIZE, WORK_SIZE } from './panels';
+import { WardrobePanel, wardRect } from './wardrobe';
 import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
 import { SettingsPanel } from '../title/pages';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
@@ -32,13 +32,14 @@ import { HubPlayer } from './player';
 import { Tag, type TagLine } from './tag';
 import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT } from './house';
 import { CodexBook, codexCount } from '../ui/codex';
-import { IN, outlineOf, setGhostHot } from './pieces';
+import { brassPlate, CloseX } from './itemCard';
+import { IN, outlineOf, setGhostHot, setGhostState, pulseGhosts } from './pieces';
 import { PIECE, PIECES, isBuilt, canAfford, costLines, buildPiece, nextGoal, ensureHome } from './rebuild';
 import { BuildScene } from './buildscene';
 import { Packing, type TableConfig } from './packing';
 import { MrCrab } from '../story/crab';
 import { getItem, ITEMS } from '../game/items';
-import { COSMETIC, SLOTS } from '../cosmetics';
+import { COSMETIC } from '../cosmetics';
 import type { CosmeticRig } from '../cosmetics/rig';
 
 export type { TableConfig };
@@ -291,12 +292,12 @@ export class HideoutScreen implements Screen {
   private panelRect(p: Panel): { x: number; y: number; w: number; h: number } {
     const ui = this.ui;
     switch (p) {
-      case 'stash': return panelRect(ui, 340, 210);
-      case 'workshop': return panelRect(ui, 360, 214);
-      case 'wardrobe': { const h = 24 + SLOTS.length * 38 + 28; return { x: 8, y: Math.round((ui.h - h) / 2), w: WARD_W, h }; }
+      case 'stash': return panelRect(ui, ...STASH_SIZE);
+      case 'workshop': return panelRect(ui, ...WORK_SIZE);
+      case 'wardrobe': return wardRect(ui);
       case 'trophy': return { x: Math.round((ui.w - ACH_W) / 2), y: Math.max(4, Math.round((ui.h - ACH_H) / 2)), w: ACH_W, h: ACH_H };
       case 'settings': return { x: Math.round((ui.w - 236) / 2), y: Math.round((ui.h - 182) / 2), w: 236, h: 182 };
-      case 'pause': return { x: Math.round((ui.w - 140) / 2), y: Math.round((ui.h - 104) / 2), w: 140, h: 104 };
+      case 'pause': return { x: Math.round((ui.w - 176) / 2), y: Math.round((ui.h - 126) / 2) + 6, w: 176, h: 126 };
       case 'codex': return { x: 0, y: 0, w: ui.w, h: ui.h };
     }
   }
@@ -320,21 +321,25 @@ export class HideoutScreen implements Screen {
       case 'codex': if (!this.codexBook.draw(ui, dt)) { this.panel = null; this.mode = 'free'; this.modeT = 0; } return;
     }
     // a click outside the panel closes it (not on the frame it opened)
-    if (live && this.modeT > 0.2 && ui.pressed && !ui.hover(r.x - 2, r.y - 2, r.w + 4, r.h + 4)) close = true;
+    // (the rect reaches up over the name plate and the close X that sit on the panel's top edge)
+    if (live && this.modeT > 0.2 && ui.pressed && !ui.hover(r.x - 2, r.y - 16, r.w + 8, r.h + 18)) close = true;
     if (live && this.modeT > 0.1 && input.keyHit('Escape')) close = true;
     if (close && this.panel === p) this.closePanel();
   }
+  private pauseX = new CloseX();
   private pauseCard(r: { x: number; y: number; w: number; h: number }): boolean {
     const ui = this.ui;
-    ui.fill(0, 0, ui.w, ui.h, '#000000', 0.3);
+    ui.fill(0, 0, ui.w, ui.h, '#000000', 0.35);
     ui.panel('wood', r.x, r.y, r.w, r.h);
-    let close = ui.iconButton('pz:x', 'close', r.x + r.w - 20, r.y + 4, { style: 'red', size: 13 });
-    let yy = r.y + 22;
-    if (ui.button('pz:back', 'CONTINUE', r.x + 12, yy, r.w - 24, 18, { style: 'wood' })) close = true;
-    yy += 24;
-    if (ui.button('pz:set', 'SETTINGS', r.x + 12, yy, r.w - 24, 18, { style: 'wood' })) { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
-    yy += 24;
-    if (ui.button('pz:title', 'SIGNPOST', r.x + 12, yy, r.w - 24, 18, { style: 'dark' })) { this.panel = null; this.mode = 'free'; this.opts.onMenu?.(); return false; }
+    brassPlate(ui, 'HOME', r.x + r.w / 2, r.y - 9, { font: 'title' });
+    let close = this.pauseX.draw(ui, 'pz:x', r.x + r.w - 15, r.y - 7, 20);
+    let yy = r.y + 20;
+    const bw = r.w - 28, bh = 24;
+    if (ui.button('pz:back', 'CONTINUE', r.x + 14, yy, bw, bh, { style: 'green', font: 'body' })) close = true;
+    yy += bh + 6;
+    if (ui.button('pz:set', 'SETTINGS', r.x + 14, yy, bw, bh, { style: 'wood', font: 'body' })) { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
+    yy += bh + 6;
+    if (ui.button('pz:title', 'SIGNPOST', r.x + 14, yy, bw, bh, { style: 'dark', font: 'body' })) { this.panel = null; this.mode = 'free'; this.opts.onMenu?.(); return false; }
     return close;
   }
   private wardPreview(id: string | null) {
@@ -501,7 +506,7 @@ export class HideoutScreen implements Screen {
     ui.begin(live ? input : null, dt);
 
     switch (this.mode) {
-      case 'free': this.freeMode(dt, live); break;
+      case 'free': this.freeMode(dt, live); this.goalMarker(); break;
       case 'sit':
         if (live && (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'KeyE'].some((k) => input.keyHit(k)) || (ui.pressed && this.modeT > 0.3))) this.standUp();
         break;
@@ -512,6 +517,7 @@ export class HideoutScreen implements Screen {
       case 'panel': this.drawPanel(dt, live); break;
       case 'build':
         this.build.update(dt);
+        this.build.drawUi(ui, dt);
         if (live && this.modeT > 0.3 && (input.keyHit('Escape') || input.keyHit('Space') || ui.pressed)) this.build.skip();
         if (!this.build.active && this.mode === 'build') {
           this.mode = 'free'; this.house.sync(); this.makeThings();
@@ -546,6 +552,10 @@ export class HideoutScreen implements Screen {
     this.house.update(dt, this.t);
     for (const id of ['lampA', 'lampB']) { const s = this.house.spots.get(id); if (s && this.lampsOff.has(id)) for (const l of s.lights) l.intensity = 0; }
     this.paintGoal();
+    // the blueprints: the goal's glows and breathes, the rest are faint until hovered
+    pulseGhosts(this.t);
+    const goalId = nextGoal()?.id;
+    for (const s of this.house.spots.values()) if (!isBuilt(s.piece.id)) setGhostState(s.ghost, s.piece.id === goalId ? 'next' : 'faint');
     if (this.flashSpot) {
       this.flashSpot.t -= dt;
       const s = this.house.spots.get(this.flashSpot.id);
@@ -565,7 +575,7 @@ export class HideoutScreen implements Screen {
       this.crabSay.place(this.camera, this.crab.group.position.clone().add(new THREE.Vector3(0, 1.0, 0)), this.game.post.h, [0, -6], dt);
     } else this.crabSay.hide();
     // ---- the objective line (top left): the next build and its materials, always
-    if (this.mode !== 'swim' && this.mode !== 'packing') this.objective();
+    if (this.mode === 'free' || this.mode === 'sit' || this.mode === 'build') this.objective();
     if (this.fadeIn > 0.5) ui.cursor = 'arrow';
     ui.drawCursor = this.mode !== 'swim' && this.mode !== 'sleep' && live;
     ui.end();
@@ -707,16 +717,41 @@ export class HideoutScreen implements Screen {
     this.crab.update(dt);
   }
 
+  /**
+   * a little brass-trimmed marker floating over the NEXT piece's glowing blueprint: its name, a bobbing arrow, and
+   * either READY TO BUILD (green, pulsing) or how many materials are still missing. Hidden while that piece is hovered
+   * (its full tag shows instead). Drawn on the UI canvas but never takes the mouse: clicks go through to the room.
+   */
+  private goalTop = new Map<string, THREE.Vector3>();
+  private goalMarker() {
+    const ui = this.ui, g = nextGoal();
+    if (!g || this.hoverThing?.id === g.id || this.fadeIn > 0.3) return;
+    const s = this.house.spots.get(g.id); if (!s || !s.ghost.visible) return;
+    let top = this.goalTop.get(g.id);
+    if (!top) { const b = new THREE.Box3().setFromObject(s.ghost); top = new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y + 0.15, (b.min.z + b.max.z) / 2); this.goalTop.set(g.id, top); }
+    const v = top.clone().project(this.camera);
+    if (v.z > 1) return;
+    const ax = Math.round((v.x * 0.5 + 0.5) * ui.w), ay = Math.round((-v.y * 0.5 + 0.5) * ui.h);
+    const ready = canAfford(g.id);
+    const parts = costLines(g.id), have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
+    const name = g.name.toUpperCase(), sub = ready ? 'READY TO BUILD' : `${have}/${need} materials`;
+    const w = Math.max(ui.measure(name, 'body'), ui.measure(sub, 'small')) + 16, h = ui.lh('body') + ui.lh('small') + 7;
+    const bob = Math.round(Math.sin(this.t * 3) * 2);
+    const x = Math.max(4, Math.min(ui.w - w - 4, ax - Math.round(w / 2))), y = Math.max(4, ay - h - 12 + bob);
+    // the arrow (brass, pointing down at the blueprint)
+    const tx = Math.max(x + 6, Math.min(x + w - 6, ax)), ty = y + h;
+    for (let i = 0; i < 6; i++) { ui.fill(tx - 5 + i, ty + i, 11 - i * 2, 1, i === 0 ? '#2a1606' : '#c8913a'); ui.fill(tx - 6 + i, ty + i, 1, 1, '#2a1606'); ui.fill(tx + 5 - i, ty + i, 1, 1, '#2a1606'); }
+    ui.fill(tx, ty + 6, 1, 1, '#2a1606');
+    ui.frame('dark', x, y, w, h);
+    if (ready) { const a = 0.5 + 0.5 * Math.sin(this.t * 5); ui.rect(x - 1, y - 1, w + 2, h + 2, '#8ee06a'); ui.fill(x, y, w, h, '#5fae3f', 0.12 * a); }
+    ui.text(name, x + w / 2, y + 4, { font: 'body', color: '#f2c66d', shadow: '#0b1622', align: 'center' });
+    ui.text(sub, x + w / 2, y + 5 + ui.lh('body'), { font: 'small', color: ready ? '#8ee06a' : '#9fb8b4', shadow: '#0b1622', align: 'center' });
+  }
+
   /** the goal board's painted note follows the next build and the materials at home */
   private paintGoal() {
     const g = nextGoal();
-    if (!g) { this.house.board.paint([{ text: 'HOME SWEET HOME', font: 'title' }, { text: 'all rebuilt!', color: '#1a4a7a' }, { text: 'go diving', color: '#3a2810', gap: 4 }]); return; }
-    const done = PIECES.filter((p) => isBuilt(p.id)).length;
-    this.house.board.paint([
-      { text: 'TO BUILD NEXT', color: '#8a2a10' }, { text: g.name.toUpperCase(), font: 'title' },
-      ...costLines(g.id).map(([m, h, n]) => ({ text: `${MAT_NAME(m)}  ${Math.min(h, n)}/${n}`, color: h >= n ? '#1a5a1a' : '#8a1a14' })),
-      { text: `rebuilt ${done}/${PIECES.length}`, color: '#5a4a3a', gap: 3 },
-    ]);
+    this.house.board.paintGoal(g ? { name: g.name, costs: costLines(g.id), built: PIECES.filter((p) => isBuilt(p.id)).length, total: PIECES.length } : null);
   }
   private objective() {
     const ui = this.ui, g = nextGoal();

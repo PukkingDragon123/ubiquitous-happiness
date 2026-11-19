@@ -1,10 +1,10 @@
 // The UI kit style guide (?preview=uikit): every PixelUI widget in every state, on the v5 "diver's kit" look, so
-// screen owners can check the kit at a glance. Pages (tabs, keys 1-5, &page=N): PANELS, BUTTONS, CONTROLS, CARDS,
-// TYPE. &bg=light puts everything over a bright sand backdrop (readability check). &uipop=0 switches the pop-ins off.
+// screen owners can check the kit at a glance. Pages (tabs, keys 1-6, &page=N): PANELS, DETAIL (close-up crops of
+// the hand-placed texture: grain, brass, stitching, fibres), BUTTONS, CONTROLS, CARDS, TYPE. &bg=light puts everything over a bright sand backdrop (readability check). &uipop=0 switches the pop-ins off.
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { PixelUI } from '../ui/pixel/ui';
-import { KIT, type BtnStyle, type BtnState, type SkinKind } from '../ui/pixel/skins';
+import { KIT, skin, btnSkin, closeArt, keycapBody, type BtnStyle, type BtnState, type SkinKind } from '../ui/pixel/skins';
 import { Dialogue } from '../story/dialogue';
 import { Toasts } from '../achievements/toast';
 import { ACH } from '../achievements';
@@ -27,7 +27,7 @@ function backdrop(light: boolean): THREE.Texture {
   return t;
 }
 
-const PAGES = ['PANELS', 'BUTTONS', 'CONTROLS', 'CARDS', 'TYPE'];
+const PAGES = ['PANELS', 'DETAIL', 'BUTTONS', 'CONTROLS', 'CARDS', 'TYPE'];
 
 export default function make(game: Game): Screen {
   const q = new URLSearchParams(location.search);
@@ -42,11 +42,14 @@ export default function make(game: Game): Screen {
   let vol = 0.7, mus = 0.35, blur = 0.5, lq = false, sub = true, tab = 0, step = 2, hp = 0.8, pearls = 37, t = 0, picked = -1, bump = 0;
   const STEP = ['TINY', 'SMALL', 'MEDIUM', 'LARGE', 'HUGE'];
   const dlg = new Dialogue(ui, () => camera);
-  dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e0564a', voice: 'k_tick1', pitch: 0.9, vol: 0 });
-  dlg.speaker({ id: 'kid', name: 'BLOBBY', color: '#3d8fd6', voice: 'k_tick1', pitch: 1.2, vol: 0 });
+  // anchored to fixed points low on the right (the tail points at them)
+  dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e0564a', voice: 'k_tick1', pitch: 0.9, vol: 0, anchor: () => new THREE.Vector3(2.9, -1.95, 0) });
+  dlg.speaker({ id: 'kid', name: 'BLOBBY', color: '#3d8fd6', voice: 'k_tick1', pitch: 1.2, vol: 0, anchor: () => new THREE.Vector3(2.4, -1.95, 0) });
   const toasts = new Toasts(game);
   const settings = new SettingsPanel();
   let toastLayer: { scene: THREE.Scene; camera: THREE.Camera } | null = null;
+  // dev: time a big panel paint at each density (window.uikitBench())
+  (window as unknown as { uikitBench: () => string }).uikitBench = () => [1, 2, 3, 4].map((d) => { const t0 = performance.now(); skin('wood', 300 + d, 200, d); btnSkin('green', 'hover', 120 + d, 24, d); return `d${d}: ${(performance.now() - t0).toFixed(1)}ms`; }).join('  ');
   const screen: Screen = {
     name: 'uikit', scene, camera, underwater: false, overlays: [ui.layer],
     enter() {},
@@ -67,10 +70,11 @@ export default function make(game: Game): Screen {
       ui.fill(0, 26, W, 1, KIT.brass[1]);
       const X = 10, Y = 34;
       if (page === 0) panels(X, Y, W, H);
-      if (page === 1) buttons(X, Y);
-      if (page === 2) controls(X, Y, dt);
-      if (page === 3) cards(X, Y, dt);
-      if (page === 4) type(X, Y);
+      if (page === 1) detail(X, Y);
+      if (page === 2) buttons(X, Y);
+      if (page === 3) controls(X, Y, dt);
+      if (page === 4) cards(X, Y, dt);
+      if (page === 5) type(X, Y);
       ui.end();
       toastLayer = toasts.frame(dt);
       screen.overlays = toastLayer ? [ui.layer, toastLayer] : [ui.layer];
@@ -106,8 +110,8 @@ export default function make(game: Game): Screen {
 
     const y2 = Y + 150;
     label('PLAQUE / BRASS', X, y2);
-    ui.frame('plaque', X, y2 + 12, 120, 22);
-    ui.text('BRASS PLATE', X + 60, y2 + 16, { font: 'title', color: KIT.ink, shadow: KIT.brass[3], align: 'center' });
+    ui.frame('plaque', X, y2 + 12, 120, 24);
+    ui.text('PLATE', X + 60, y2 + 17, { font: 'title', color: KIT.ink, shadow: KIT.brass[3], align: 'center' });
     label('BLUEPRINT / CARD / TV', X + 132, y2);
     ui.frame('blueprint', X + 132, y2 + 12, 90, 50); ui.frame('card', X + 228, y2 + 12, 40, 50); ui.frame('cardSel', X + 274, y2 + 12, 40, 50); ui.frame('tv', X + 320, y2 + 12, 70, 50);
     label('SMALL SIZES', X + 400, y2);
@@ -116,9 +120,43 @@ export default function make(game: Game): Screen {
     k.forEach((kind, i) => ui.frame(kind, X + 400 + i * 34, y2 + 46, 30, 16));
     // pop-in replay: a panel that blinks out every 2.5 s
     const cyc = (t % 2.5);
-    label('POP-IN (replays)', X, y2 + 74);
-    if (cyc > 0.35) ui.panel('wood', X, y2 + 90, 150, Math.min(H - (y2 + 96), 60), 'HELLO', { id: 'popdemo' });
+    label('POP-IN (replays)', X + 170, y2 + 92);
+    if (cyc > 0.35) ui.panel('wood', X, y2 + 86, 150, Math.min(H - (y2 + 90), 60), 'HELLO', { id: 'popdemo' });
     void W;
+  }
+
+  /** a magnified crop of a painted canvas (texels at the UI's density) into a framed box */
+  function zoom(cv: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, x: number, y: number, z: number, cap: string) {
+    const d = ui.hd;
+    const dw = Math.round((sw / d) * z), dh = Math.round((sh / d) * z);
+    ui.fill(x - 1, y - 1, dw + 2, dh + 2, KIT.ink);
+    ui.ctx.drawImage(cv, sx, sy, sw, sh, x, y, dw, dh);
+    label(cap, x, y + dh + 3);
+  }
+
+  function detail(X: number, Y: number) {
+    const d = ui.hd;
+    const Z = 4;
+    // the real-size pieces on the left, their close-ups on the right
+    const pw = 200, ph = 120;
+    ui.panel('wood', X, Y + 8, pw, ph, 'GRAIN', { id: 'det1', pop: false });
+    ui.panel('cream', X, Y + 140, pw, 76, undefined, { id: 'det2', pop: false });
+    ui.frame('plaque', X, Y + 226, 110, 24);
+    ui.text('ENGRAVED', X + 55, Y + 231, { font: 'title', color: KIT.ink, shadow: KIT.brass[3], align: 'center' });
+    ui.button('det:b1', 'BRASS', X + 118, Y + 226, 82, 24, { style: 'wood', sfx: '' });
+    const wood = skin('wood', pw, ph, d), cream = skin('cream', 200, 76, d), plq = skin('plaque', 110, 24, d);
+    const zx = X + 212;
+    zoom(wood, 0, 0, 26 * d, 22 * d, zx, Y, Z, 'BRASS CORNER');
+    zoom(wood, 52 * d, 0, 40 * d, 22 * d, zx + 26 * Z + 10, Y, Z, 'GRAIN, KNOT, RIVET');
+    const y2 = Y + 22 * Z + 16;
+    zoom(wood, 4 * d, 50 * d, 30 * d, 20 * d, zx, y2, 3, 'STITCHES, CREASE');
+    zoom(cream, 136 * d, 6 * d, 40 * d, 20 * d, zx + 30 * 3 + 10, y2, 3, 'FIBRES, COFFEE RING');
+    const y3 = y2 + 20 * 3 + 16;
+    zoom(plq, 0, 0, 26 * d, 24 * d, zx, y3, 3, 'BRASS PLATE');
+    zoom(btnSkin('wood', 'normal', 82, 24, d), 0, 0, 26 * d, 24 * d, zx + 26 * 3 + 10, y3, 3, 'RAMP + PLATE');
+    zoom(btnSkin('green', 'normal', 60, 24, d), 0, 0, 26 * d, 24 * d, zx + 52 * 3 + 20, y3, 3, 'GLOSS');
+    zoom(closeArt(20, 'normal', d), 0, 0, 20 * d, 23 * d, zx + 78 * 3 + 30, y3, 3, 'CLOSE');
+    void keycapBody;
   }
 
   function buttons(X: number, Y: number) {
@@ -215,11 +253,12 @@ export default function make(game: Game): Screen {
     let y = oy + 12;
     y += ui.objective('Rebuild the workbench', [3, 5], { x: X, y, w: 230, id: 'o1' }) + 3;
     y += ui.objective('Find the Harpoon King', undefined, { x: X, y, w: 230, id: 'o2' }) + 3;
-    y += ui.objective('Mend the bed', undefined, { x: X, y, w: 230, id: 'o3', cost: { kelp: 5, cork: 3, driftwood: 2 }, have: { kelp: 2, cork: 3, driftwood: 9 } }) + 3;
+    y += ui.objective('Mend the bed', undefined, { x: X, y, w: 230, id: 'o3', cost: { kelp: 5, cork: 3, driftwood: 2 }, have: { kelp: 2, cork: 3, driftwood: 2 } }) + 3;
     let y2 = oy + 12;
-    y2 += ui.objective('Build the stash chest', undefined, { x: X + 240, y: y2, w: 230, id: 'o4', cost: { driftwood: 3 }, have: { driftwood: 3 }, ready: true }) + 3;
-    y2 += ui.objective('Dive below -200 m', 0.62, { x: X + 240, y: y2, w: 230, id: 'o5' }) + 3;
-    ui.objective('Meet Mr. Crab', undefined, { x: X + 240, y: y2, w: 230, id: 'o6', done: true });
+    const X2 = X + 236;
+    y2 += ui.objective('Stash chest', undefined, { x: X2, y: y2, w: 150, id: 'o4', cost: { driftwood: 3 }, have: { driftwood: 3 }, ready: true }) + 3;
+    y2 += ui.objective('Dive -200 m', 0.62, { x: X2, y: y2, w: 150, id: 'o5' }) + 3;
+    ui.objective('Meet Mr. Crab', undefined, { x: X2, y: y2, w: 150, id: 'o6', done: true });
     void y;
     // the dialogue bubble (a narrator caption: no anchor) and choices
     if (!dlg.busy) void dlg.play([{ who: 'crab', text: 'It ain\'t much, kid. Neither are you. {shake}Yet.{/shake}' }, { who: 'kid', text: 'Can we build the {gold}stash chest{/gold} now?', choices: [{ text: 'Yes, let\'s go!' }, { text: 'Show me the plans' }] }]);

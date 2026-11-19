@@ -1,36 +1,46 @@
-// ACHIEVEMENTS: a pixel grid of medals with progress bars, and a detail card for the one under the mouse (or the
-// keyboard selection): the medal big, what to do, how far along you are, and the cosmetic it unlocks.
+// ACHIEVEMENTS (v5): the TROPHY CASE: a polished brass frame round a navy velvet back, the medals pinned in rows (a
+// progress bar under each), and a brass-edged card for the one under the mouse (or the keyboard selection): the
+// medal big, what to do, how far along you are, and the cosmetic it unlocks.
 import { PixelUI } from '../ui/pixel/ui';
 import { META } from '../meta/meta';
 import { ACHIEVEMENTS, progress, isDone } from '../achievements';
 import { medal } from '../achievements/medals';
 import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC, SLOT_NAME } from '../cosmetics';
+import { K, brassPlate, CloseX } from './itemCard';
+import { panelArt, PANEL_IN } from './panelArt';
 
-const COLS = 8, CW = 34, CH = 50;
-export const ACH_W = COLS * CW + 14 + 126, ACH_H = 3 * CH + 52;
+const COLS = 8, CW = 38, CH = 56, DW = 160;
+const ROWS = Math.ceil(ACHIEVEMENTS.length / COLS);
+export const ACH_W = PANEL_IN.trophy[0] + PANEL_IN.trophy[2] + COLS * CW + 8 + DW;
+export const ACH_H = PANEL_IN.trophy[1] + PANEL_IN.trophy[3] + ROWS * CH + 28;
 
 export class AchievementsPanel {
   private sel = 0;
   private t = 0;
+  private x = new CloseX();
   open() { this.t = 0; }
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
     this.t += dt;
     const inp = ui.input;
-    ui.panel('dark', x, y, ACH_W, ACH_H, undefined, { alpha: 0.93 });
-    ui.fill(x + 4, y + 4, ACH_W - 8, 15, '#1a0c08', 0.9); ui.fill(x + 4, y + 18, ACH_W - 8, 1, '#f0c040');
-    ui.text('ACHIEVEMENTS', x + 9, y + 8, { font: 'title', color: '#fff4dc', color2: '#ffd27a', shadow: '#000' });
+    const k = Math.min(1, this.t * 6), oy = Math.round((1 - (1 - (1 - k) ** 3)) * 24);
+    y += oy;
+    ui.block(x, y - 10, ACH_W, ACH_H + 10);
+    ui.fill(x + 4, y + 5, ACH_W, ACH_H, '#000000', 0.4);
+    ui.img(panelArt('trophy', ACH_W, ACH_H), x, y);
+    brassPlate(ui, 'TROPHY CASE', x + ACH_W / 2, y - 9, { font: 'title' });
+    let close = this.x.draw(ui, 'ach:x', x + ACH_W - 15, y - 7, 20);
+    const [il, it] = PANEL_IN.trophy;
     const done = META.achievements.unlocked.length;
-    const hx = x + 16 + ui.measure('ACHIEVEMENTS', 'title');
-    ui.text(`${done}/${ACHIEVEMENTS.length}`, hx, y + 9, { font: 'small', color: '#ffd27a' });
-    ui.bar(hx + 28, y + 10, 90, 5, done / ACHIEVEMENTS.length, '#f0c040');
-    let close = ui.iconButton('ach:x', 'close', x + ACH_W - 22, y + 4, { style: 'red', size: 13, key: 'Escape', keyLabel: '' });
+    // the tally along the top rail
+    ui.text(`${done}/${ACHIEVEMENTS.length} EARNED`, x + il + 2, y + 8, { font: 'small', color: '#3a2008', shadow: '#f8dc90' });
+    ui.bar(x + il + 6 + ui.measure(`${done}/${ACHIEVEMENTS.length} EARNED`, 'small'), y + 9, 90, 5, done / ACHIEVEMENTS.length, '#f0c040');
     if (inp?.keyHit('ArrowRight')) this.sel = (this.sel + 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowLeft')) this.sel = (this.sel + ACHIEVEMENTS.length - 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowDown')) this.sel = Math.min(ACHIEVEMENTS.length - 1, this.sel + COLS);
     if (inp?.keyHit('ArrowUp')) this.sel = Math.max(0, this.sel - COLS);
-    // ---- the grid
-    const gx = x + 7, gy = y + 24;
+    // ---- the medals, pinned to the velvet
+    const gx = x + il + 2, gy = y + it + 4;
     ACHIEVEMENTS.forEach((a, i) => {
       const cx = gx + (i % COLS) * CW, cy = gy + Math.floor(i / COLS) * CH;
       const got = isDone(a.id), p = progress(a);
@@ -38,43 +48,46 @@ export class AchievementsPanel {
       ui.mark('ach:' + a.id, cx, cy, CW - 2, CH - 2);
       if (over) { this.sel = i; ui.cursor = 'point'; }
       const on = this.sel === i;
-      ui.frame(on ? 'cardSel' : 'dark', cx, cy, CW - 2, CH - 2);
+      if (on) { ui.fill(cx, cy, CW - 2, CH - 2, '#2a3678'); ui.rect(cx, cy, CW - 2, CH - 2, K.brass2); }
       const bob = got && on ? Math.round(Math.sin(this.t * 5) * 1) : 0;
-      ui.img(medal(a.emblem, a.tier, !got), cx + 2, cy + 2 + bob);
-      if (got && Math.sin(this.t * 2.5 + i * 1.3) > 0.85) { ui.fill(cx + 9, cy + 13, 1, 3, '#ffffff'); ui.fill(cx + 8, cy + 14, 3, 1, '#ffffff'); }
-      // progress bar (full + gold once done)
-      ui.bar(cx + 3, cy + 37, CW - 8, 4, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
+      // a little brass pin above each medal
+      ui.fill(cx + CW / 2 - 2, cy + 1, 3, 3, got ? K.brass1 : '#4a4a5a');
+      ui.img(medal(a.emblem, a.tier, !got), cx + Math.round((CW - 2 - 28) / 2), cy + 4 + bob);
+      if (got && Math.sin(this.t * 2.5 + i * 1.3) > 0.85) { ui.fill(cx + 12, cy + 15, 1, 3, '#ffffff'); ui.fill(cx + 11, cy + 16, 3, 1, '#ffffff'); }
+      ui.bar(cx + 4, cy + 38, CW - 10, 4, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
       let label = got ? 'DONE' : `${p}/${a.goal}`;
       if (ui.measure(label, 'small') > CW - 4) label = `${Math.floor((p / a.goal) * 100)}%`;
-      ui.text(label, cx + (CW - 2) / 2, cy + 41, { font: 'small', color: got ? '#ffd27a' : '#8a94b0', align: 'center' });
+      ui.text(label, cx + (CW - 2) / 2, cy + 44, { font: 'small', color: got ? K.brass2 : '#9aa4cc', shadow: '#0c0f26', align: 'center' });
       ui.block(cx, cy, CW - 2, CH - 2);
     });
-    // ---- the detail card
+    // ---- the card: a brass-edged plate on the velvet
     const a = ACHIEVEMENTS[this.sel], got = isDone(a.id), p = progress(a);
-    const dx = x + 7 + COLS * CW + 2, dy = y + 24, dw = 118, dh = 3 * CH - 2;
-    ui.frame('dark', dx, dy, dw, dh);
-    ui.img(medal(a.emblem, a.tier, !got), dx + 5, dy + 5);
+    const dx = gx + COLS * CW + 6, dy = gy, dw = DW - 4, dh = ROWS * CH - 2;
+    ui.fill(dx - 1, dy - 1, dw + 2, dh + 2, '#2e1404'); ui.fill(dx, dy, dw, dh, K.brass0); ui.fill(dx, dy, dw, 1, K.brass2);
+    ui.fill(dx + 2, dy + 2, dw - 4, dh - 4, '#101430');
+    ui.img(medal(a.emblem, a.tier, !got), dx + 6, dy + 6);
     let ty = dy + 6;
-    ty += ui.textBox(a.name.toUpperCase(), dx + 36, ty, dw - 40, { font: 'body', color: got ? '#ffd27a' : '#e8e0d0', shadow: '#000' });
-    ui.text(a.tier.toUpperCase(), dx + 36, ty + 1, { font: 'small', color: a.tier === 'gold' ? '#f0c040' : a.tier === 'silver' ? '#c4ccda' : '#e0905a' });
-    ty = Math.max(ty + 12, dy + 40);
-    ty += ui.textBox(a.desc, dx + 6, ty, dw - 12, { font: 'small', color: '#ffffff' }) + 3;
-    ui.bar(dx + 6, ty, dw - 12, 6, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
-    ui.text(got ? `UNLOCKED ${new Date(META.achievements.at[a.id] ?? Date.now()).toLocaleDateString()}` : `${p} / ${a.goal}`, dx + dw / 2, ty + 9, { font: 'small', color: got ? '#ffd27a' : '#c8d8ff', align: 'center' });
+    ty += ui.textBox(a.name.toUpperCase(), dx + 38, ty, dw - 42, { font: 'body', color: got ? K.brass2 : K.cream, shadow: '#000' });
+    ui.text(a.tier.toUpperCase(), dx + 38, ty + 1, { font: 'small', color: a.tier === 'gold' ? '#f0c040' : a.tier === 'silver' ? '#c4ccda' : '#e0905a' });
+    ty = Math.max(ty + ui.lh('small') + 3, dy + 42);
+    ty += ui.textBox(a.desc, dx + 7, ty, dw - 14, { font: 'body', color: '#ffffff', shadow: '#000' }) + 4;
+    ui.bar(dx + 7, ty, dw - 14, 6, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
+    ui.text(got ? `UNLOCKED ${new Date(META.achievements.at[a.id] ?? Date.now()).toLocaleDateString()}` : `${p} / ${a.goal}`, dx + dw / 2, ty + 9, { font: 'small', color: got ? K.brass2 : '#c8d8ff', align: 'center' });
     // the reward
     const c = COSMETIC[a.reward];
-    const ry = dy + dh - 34;
-    ui.fill(dx + 4, ry - 4, dw - 8, 1, '#3a3442');
-    ui.text('REWARD', dx + 6, ry, { font: 'small', color: '#ffd27a' });
-    ui.frame(got ? 'cardSel' : 'slot', dx + 6, ry + 9, 22, 22);
-    ui.img(cosmeticIcon(a.reward), dx + 7, ry + 10, { alpha: got ? 1 : 0.4 });
-    if (c) {
-      ui.text(SLOT_NAME[c.slot], dx + dw - 6, ry, { font: 'small', color: '#8a94b0', align: 'right' });
-      ui.textBox(c.name.toUpperCase(), dx + 32, ry + 10, dw - 36, { font: 'small', color: got ? '#ffffff' : '#a8a0b0' });
-    }
-    if (ui.button('ach:back', 'BACK', x + ACH_W - 66, y + ACH_H - 24, 58, 18, { style: 'dark' })) close = true;
-    ui.icon('left', x + 11, y + ACH_H - 19); ui.icon('right', x + 19, y + ACH_H - 19);
-    ui.text('browse', x + 28, y + ACH_H - 18, { font: 'small', color: '#c8d8ff', shadow: '#000' });
+    const ry = dy + dh - 40;
+    ui.fill(dx + 5, ry - 4, dw - 10, 1, '#3a3e6a');
+    ui.text('REWARD', dx + 7, ry, { font: 'small', color: K.brass2 });
+    if (c) ui.text(SLOT_NAME[c.slot], dx + dw - 7, ry, { font: 'small', color: '#8a94b0', align: 'right' });
+    ui.fill(dx + 7, ry + 11, 26, 26, '#04060c'); ui.fill(dx + 8, ry + 12, 24, 24, got ? '#3a2a10' : '#1a2040');
+    ui.img(cosmeticIcon(a.reward, 22 * ui.hd), dx + 9, ry + 13, { w: 22, h: 22, alpha: got ? 1 : 0.4 });
+    if (c) ui.textBox(c.name.toUpperCase(), dx + 38, ry + 14, dw - 44, { font: 'small', color: got ? '#ffffff' : '#a8a0b0' });
+    // the bottom rail: browse keys and BACK
+    const by = y + ACH_H - PANEL_IN.trophy[3] - 22;
+    let hx = gx;
+    hx += ui.icon('left', hx, by + 7) + 2; hx += ui.icon('right', hx, by + 7) + 5;
+    ui.text('browse', hx, by + 6, { font: 'small', color: '#c8d8ff', shadow: '#000' });
+    if (ui.button('ach:back', 'BACK', x + ACH_W - PANEL_IN.trophy[2] - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }
 }

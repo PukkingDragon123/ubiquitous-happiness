@@ -11,6 +11,8 @@
 import type { PixelUI } from '../ui/pixel/ui';
 import { getItem, ITEMS, RARITY_COLOR, statLines, stackCap, recipesWith, SETS, applyItems, STAT_LABEL, SKILL_NAMES, type SetState } from '../game/items';
 import { BASE_STATS, type ItemInst, type Stats } from '../game/run';
+import { photo } from '../ui/obj/studio';
+import { itemModel } from '../backpack/models';
 
 /** the v5 palette (DESIGN-UI.md) */
 export const K = {
@@ -47,6 +49,9 @@ export function modelWindow(ui: PixelUI, x: number, y: number, s: number, rarity
     ui.fill(cx - half, py + yy, half * 2, 1, yy < 0 ? K.teal2 : K.teal1);
   }
   ui.fill(cx - rx + 2, py - ry, rx * 2 - 4, 1, K.teal3);
+  // the bezel's inner bevel and its four rivets
+  ui.fill(x + 2, y + s - 3, s - 4, 1, K.brass2); ui.fill(x + s - 3, y + 2, 1, s - 4, K.brass2);
+  for (const [rx, ry] of [[x + 1, y + 1], [x + s - 4, y + 1], [x + 1, y + s - 4], [x + s - 4, y + s - 4]]) { ui.fill(rx, ry, 3, 3, K.brassD); ui.fill(rx, ry, 2, 2, K.brass2); ui.fill(rx, ry, 1, 1, K.brassW); }
   if (hot > 0) ui.fill(x + 3, y + 3, s - 6, s - 6, '#ffe8a0', 0.06 * hot);
   if (rarity) {
     const col = RARITY_COLOR[rarity as keyof typeof RARITY_COLOR] ?? rarity;
@@ -265,4 +270,24 @@ export class CloseX {
     if (!ui.down && !ui.pressed) this.armed = false;
     return clicked;
   }
+}
+
+/** a lit studio photo of an item's 3D model, px square (cached; null without GL) */
+const photos = new Map<string, HTMLCanvasElement | null>();
+export function itemPhoto(id: string, level: number, px: number): HTMLCanvasElement | null {
+  const k = `${id}|${level}|${px}`;
+  if (photos.has(k)) return photos.get(k)!;
+  let c: HTMLCanvasElement | null = null;
+  try { c = ITEMS[id] ? photo(itemModel(id), px, px, { yaw: -0.4, pitch: 0.42, fill: 0.78, ss: 2 }) : null; } catch { c = null; }
+  photos.set(k, c);
+  if (photos.size > 160) { const f = photos.keys().next().value; if (f !== undefined) photos.delete(f); }
+  return c;
+}
+/** a model window with the item's studio photo in it (for screens without a 3D stage) */
+export function photoWindow(ui: PixelUI, id: string, level: number, x: number, y: number, s: number) {
+  modelWindow(ui, x, y, s, getItem(id).rarity);
+  const inner = s - 8, px = Math.round(inner * ui.hd);
+  const pic = itemPhoto(id, level, px);
+  if (pic) ui.img(pic, x + 4, y + 3, { w: inner, h: inner });
+  else ui.item(id, x + 6, y + 6, s - 12, s - 12, level);
 }

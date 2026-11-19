@@ -17,7 +17,7 @@ import { psxMat } from '../player/psx';
 import { ctex, T, tone, bevel, rivet, rust, type Tones } from '../skills/texkit';
 import { chamferBox, lpCyl, lpCone, lpSphere, facet, boxUV } from '../gfx/lowpoly';
 import { hash2 } from '../core/math';
-import { drawText, measure } from '../ui/pixel/font';
+import { measure, glyphs } from '../ui/pixel/font';
 
 const TAU = Math.PI * 2;
 const matCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -521,16 +521,33 @@ export function signpostModel(boards: { text: string; dir: -1 | 0 | 1 }[], lante
     const font = 'body' as const;
     const tw = Math.max(24, measure(bd.text, font));
     const cw = tw + 16, chh = 20;
-    const cv = document.createElement('canvas'); cv.width = cw; cv.height = chh;
+    // v5: painted at 2x: a pale weathered plank face with two grain lines, a knot, worn rounded ends, two nails, and
+    // the letters CARVED in (a dark cut with a lit lower lip), so the distances read from across the reef
+    const S2 = 2, W2 = cw * S2, H2 = chh * S2;
+    const cv = document.createElement('canvas'); cv.width = W2; cv.height = H2;
     const x = cv.getContext('2d')!;
-    // plank page: tones in grain bands, a darker border, nail heads, then the letters burnt in
-    for (let yy = 0; yy < chh; yy++) for (let xx = 0; xx < cw; xx++) {
-      const band = (yy + Math.floor(Math.sin(xx * 0.21 + i) * 1.5)) % 5;
-      const c = yy === 0 || yy === chh - 1 || xx === 0 || xx === cw - 1 ? '#3e2814' : band === 0 ? '#7a5634' : band === 3 ? '#a07848' : '#8e6a40';
-      x.fillStyle = c; x.fillRect(xx, yy, 1, 1);
+    const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+    f(0, 0, W2, H2, '#3e2814');
+    f(2, 2, W2 - 4, H2 - 4, '#c49a68');
+    f(2, 2, W2 - 4, 3, '#dcb684'); f(2, H2 - 7, W2 - 4, 5, '#a87c4c');
+    // grain: two long wavy lines and short streaks, placed (not random)
+    for (let xx = 4; xx < W2 - 4; xx++) {
+      const g1 = Math.round(11 + Math.sin(xx * 0.07 + i) * 2), g2 = Math.round(H2 - 13 + Math.sin(xx * 0.05 + 2 + i) * 2);
+      if ((xx + i * 7) % 23 < 17) f(xx, g1, 1, 1, '#a87c4c');
+      if ((xx + i * 5) % 29 < 21) f(xx, g2, 1, 1, '#b08452');
     }
-    for (const nx of [3, cw - 4]) { x.fillStyle = '#c8c0b0'; x.fillRect(nx, 9, 1, 1); x.fillStyle = '#2a1a0c'; x.fillRect(nx + 1, 10, 1, 1); }
-    drawText(x, bd.text, Math.round((cw - tw) / 2), 4, { font, color: '#24120a', shadow: null });
+    const kx = Math.round(W2 * (i % 2 ? 0.78 : 0.22)), ky = H2 - 10;
+    f(kx - 3, ky - 1, 7, 3, '#8a6038'); f(kx - 2, ky, 5, 1, '#5a3a1c'); f(kx - 4, ky - 2, 9, 1, '#b08452');
+    // worn ends (lighter where weather rubs)
+    f(2, 2, 3, H2 - 4, '#d4ac78'); f(W2 - 5, 2, 3, H2 - 4, '#a87c4c');
+    for (const nx of [7, W2 - 9]) { f(nx, H2 / 2 - 2, 3, 3, '#3a3a40'); f(nx, H2 / 2 - 2, 1, 1, '#d8d8e0'); f(nx + 2, H2 / 2, 1, 1, '#1a1a20'); }
+    // the carved letters: a lit lip (offset down-right) under the dark cut, drawn 2x
+    const lip = glyphs(bd.text, { font, color: '#e8c898', shadow: null });
+    const cut = glyphs(bd.text, { font, color: '#2a140a', shadow: null });
+    x.imageSmoothingEnabled = false;
+    const lx = Math.round((W2 - tw * S2) / 2), ly = 4 * S2;
+    x.drawImage(lip.cv, lx + 1, ly + 1, lip.w * S2, lip.h * S2);
+    x.drawImage(cut.cv, lx, ly, cut.w * S2, cut.h * S2);
     const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.colorSpace = THREE.SRGBColorSpace;
     const bw = cw / 40, bh = 0.46;
     const board = mesh(chamferBox(bw, bh, 0.07, 0.02), wood);

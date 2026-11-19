@@ -4,16 +4,17 @@
 //
 //   top left      VITALS: our blobfish (a real BlobModel) in a brass PORTHOLE (water flashes red on a hit, pink on a
 //                 heal, the rim pulses red at one heart), a lacquered plate with a row of 3D jelly HEARTS, a clean
-//                 STAMINA bar (eases, leaves a pale chip, amber while regen waits, red when guard-broken, white on a
-//                 parry), a MANA bar and the kelp-tea FLASKS as little 3D bottles that slosh and empty
+//                 STAMINA glass tube in brass collars (the liquid eases, a meniscus and bubbles, a pale chip of what
+//                 you spent, amber while regen waits, red when guard-broken, white on a parry), a cut-crystal MANA
+//                 vial and the kelp-tea FLASKS as little 3D bottles that slosh and empty
 //                 RESOURCES: one brass strip under it, a turning model + a big rolling numeral per counter (pearls,
 //                 keys, bombs, the pack's cells); numbers roll and flash on change and a +n / -n floats off
 //   top right     NAVIGATION: one instrument: a lacquered plate with the area name, the stage pips, the parchment
 //                 STRIP MAP of the level in a recessed window, metres FROM HOME and the DEPTH readout, ending in the
-//                 brass DEPTH GAUGE (spring needle, record flag) that mirrors the porthole
+//                 brass DEPTH GAUGE (engraved knurled bezel, enamel face, spring needle, record flag) mirroring the porthole
 //   bottom left   the SKILLS: a hand of physical cards (keys 1-4), cooldown shadow + seconds
-//   bottom centre the BOSS: a crimson name ribbon (stamps in), a dark plate with the health bar (chip + flash), poise,
-//                 phase pips and two red gems that flare on hits
+//   bottom centre the BOSS: an engraved brass NAME PLATE with scrolled ends and enamel gems (stamps in), a riveted
+//                 iron housing with the health in a glass tube (chip + flash), poise, phase pips
 //   right         PICKUP cards: slide in fully on screen, the item's model turning in a display well, the name in
 //                 its rarity colour, the kind and one stat line; up to three stack
 //   centre        TITLE toasts (a banner, top centre) and the big AREA card for a new floor (letters stamp in)
@@ -35,7 +36,7 @@ import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
-import { PAL, plate, bigText, bigMeasure, bar, GLYPH, type BigOpts } from './obj/plates';
+import { PAL, plate, bigText, bigMeasure, bar, tube, solid, GLYPH, type BigOpts } from './obj/plates';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -126,7 +127,6 @@ const clean = (s: string) => s.replace(/[✓✔]/g, '').replace(/[^\x20-\x7E·]/
 type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
 
 // ------------------------------------------------------------------ materials
-const glassMat = () => new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, depthWrite: false });
 const brassMat = new THREE.MeshStandardMaterial({ color: '#d8a038', roughness: 0.32, metalness: 0.75, flatShading: true });
 const darkBrass = new THREE.MeshStandardMaterial({ color: '#6a4a1c', roughness: 0.5, metalness: 0.6, flatShading: true });
 
@@ -158,48 +158,100 @@ class Heart3D {
   }
 }
 
-/** a kelp-tea bottle that sloshes and empties */
+/**
+ * a kelp-tea bottle: the hand-painted flask prop (src/backpack/models/hud.ts), full or empty. It sloshes when its
+ * level changes, tips up while you drink it and swaps to the empty bottle when it's gone.
+ */
 class Flask3D {
   root = new THREE.Group();
-  private liq: THREE.Mesh; private surf: THREE.Mesh;
+  private tip = new THREE.Group();
+  private fullM = hudModel('flask'); private emptyM = hudModel('flaskEmpty');
   private full = 1; private slosh = 0; private t = Math.random() * 6;
-  constructor() {
-    const prof = [[0, -0.42], [0.3, -0.38], [0.36, -0.1], [0.28, 0.16], [0.12, 0.26], [0.12, 0.42], [0, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
-    const glass = new THREE.Mesh(new THREE.LatheGeometry(prof, 7), glassMat());
-    this.liq = new THREE.Mesh(new THREE.SphereGeometry(0.33, 7, 4, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: '#3a9a1a', roughness: 0.2, emissive: '#2a8a14', emissiveIntensity: 0.45 }));
-    this.liq.position.y = -0.1;
-    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.14, 8), new THREE.MeshStandardMaterial({ color: '#b07a44', roughness: 0.9, flatShading: true })); cork.position.y = 0.48;
-    this.surf = new THREE.Mesh(new THREE.CircleGeometry(0.3, 12), new THREE.MeshStandardMaterial({ color: '#8ae860', roughness: 0.15, emissive: '#4ab830', emissiveIntensity: 0.5, side: THREE.DoubleSide }));
-    this.surf.rotation.x = -Math.PI / 2;
-    const lc = document.createElement('canvas'); lc.width = 24; lc.height = 10; const lx = lc.getContext('2d')!;
-    lx.fillStyle = '#efe0b8'; lx.fillRect(0, 0, 24, 10); lx.fillStyle = '#b89a6a'; lx.fillRect(0, 0, 24, 1); lx.fillRect(0, 9, 24, 1);
-    lx.fillStyle = '#3a8a2a'; lx.fillRect(10, 2, 4, 6); lx.fillRect(9, 3, 1, 3); lx.fillRect(14, 3, 1, 3); lx.fillStyle = '#1a4a14'; lx.fillRect(11, 3, 1, 5);
-    const lt = new THREE.CanvasTexture(lc); lt.magFilter = THREE.NearestFilter; lt.minFilter = THREE.NearestFilter; lt.colorSpace = THREE.SRGBColorSpace;
-    const label = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.18, 12, 1, true, -0.9, 1.8), new THREE.MeshStandardMaterial({ map: lt, roughness: 0.9, side: THREE.DoubleSide }));
-    label.position.y = -0.08;
-    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 4, 10), new THREE.MeshStandardMaterial({ color: '#c8a060', roughness: 0.9 })); tie.rotation.x = Math.PI / 2; tie.position.y = 0.32;
-    this.root.add(this.liq, this.surf, glass, label, cork, tie);
-  }
+  constructor() { this.tip.add(this.fullM, this.emptyM); this.root.add(this.tip); }
   update(dt: number, level: number) {
     this.t += dt;
     if (Math.abs(level - this.full) > 0.01) this.slosh = 1;
     this.full += (level - this.full) * Math.min(1, dt * 6);
     this.slosh = Math.max(0, this.slosh - dt * 1.5);
-    this.liq.visible = this.full > 0.03;
-    this.liq.scale.set(1, Math.max(0.05, this.full), 1);
-    this.liq.position.y = -0.36 + this.full * 0.26;
-    this.surf.visible = this.full > 0.05 && this.full < 0.98;
-    this.surf.position.y = -0.4 + this.full * 0.5; this.surf.scale.setScalar(0.6 + Math.sin(Math.min(1, this.full) * Math.PI) * 0.45);
+    const drinking = level > 0.02 && level < 0.98;
+    this.fullM.visible = this.full > 0.08; this.emptyM.visible = !this.fullM.visible;
+    this.tip.rotation.z = drinking ? -0.9 * Math.sin(Math.min(1, (1 - level) * 3) * Math.PI / 2) : 0;
     this.root.rotation.z = Math.sin(this.t * 7) * 0.18 * this.slosh + Math.sin(this.t * 1.3) * 0.03;
-    this.liq.rotation.z = -this.root.rotation.z * 1.6;
+    this.root.rotation.y = Math.sin(this.t * 0.7) * 0.35;
   }
+}
+
+// ------------------------------------------------------------------ an engraved brass bezel ring (painted, flat)
+/**
+ * a brass bezel ring for a RingGeometry(rIn, rOut) at `res` texels per unit: lit by angle from the top left in four
+ * bands (a pixel-art torus), a bright outer lip, a knurled band, an engraved groove with verdigris in three places,
+ * eight slotted screws and a shaded inner bevel. Placed detail only.
+ */
+const bezelCache = new Map<string, HTMLCanvasElement>();
+function bezelRing(rIn: number, rOut: number, res: number, screws = 8): HTMLCanvasElement {
+  const key = `${rIn}|${rOut}|${res}|${screws}`;
+  const hit = bezelCache.get(key);
+  if (hit) return hit;
+  const S = Math.max(8, Math.round(rOut * 2 * res)), c = S / 2, ro = S / 2 - 0.5, ri = rIn * res;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const x = cv.getContext('2d')!;
+  const img = x.createImageData(S, S), D = img.data;
+  const B = ramp('#c8913a');
+  const put = (px: number, py: number, col: string) => { px = Math.round(px); py = Math.round(py); if (px < 0 || py < 0 || px >= S || py >= S) return; const n = parseInt(col.slice(1), 16), i = (py * S + px) * 4; D[i] = n >> 16; D[i + 1] = (n >> 8) & 255; D[i + 2] = n & 255; D[i + 3] = 255; };
+  const band = ro - ri;
+  for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+    const dx = px + 0.5 - c, dy = py + 0.5 - c, d = Math.hypot(dx, dy);
+    if (d > ro || d < ri - 0.5) continue;
+    const u = (d - ri) / band; // 0 inner .. 1 outer
+    const lit = -(dx + dy) / (Math.SQRT2 * (d || 1)); // 1 facing the top-left light
+    const ang = Math.atan2(dy, dx);
+    let col: string;
+    if (d > ro - 1) col = '#070d14';                                   // ink outline
+    else if (d > ro - 2) col = lit > 0.2 ? B[5] : lit > -0.4 ? B[3] : B[1]; // the outer lip
+    else if (u > 0.55) {                                                // the knurled band
+      const tick = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * Math.round(S * 1.1)) % 2 === 0;
+      col = tick ? (lit > 0 ? B[4] : B[2]) : (lit > 0 ? B[3] : B[1]);
+    } else if (u > 0.42) col = '#3a2408';                               // the engraved groove
+    else if (u > 0.33) col = lit > 0 ? B[5] : B[3];                     // its lit lower edge
+    else if (d < ri + 0.6) col = '#070d14';                             // inner ink
+    else col = lit > 0.5 ? B[4] : lit > -0.2 ? B[3] : lit > -0.7 ? B[2] : B[1]; // the inner bevel
+    put(px, py, col);
+  }
+  // verdigris in the groove, three places (a recess where water sits)
+  const gr = ri + band * 0.48;
+  for (const [a0, a1] of [[2.2, 2.55], [3.9, 4.05], [0.55, 0.7]]) for (let a = a0; a < a1; a += 0.5 / gr) { put(c + Math.cos(a) * gr - 0.5, c + Math.sin(a) * gr - 0.5, VERDI2[1]); if (a < (a0 + a1) / 2) put(c + Math.cos(a) * (gr + 1) - 0.5, c + Math.sin(a) * (gr + 1) - 0.5, VERDI2[0]); }
+  // the screws: domed heads over the knurl with a slot
+  const sr = ri + band * 0.74, hr = Math.max(1.6, band * 0.28);
+  for (let i = 0; i < screws; i++) {
+    const a = (i / screws) * Math.PI * 2 + Math.PI / screws;
+    const sx = c + Math.cos(a) * sr, sy = c + Math.sin(a) * sr;
+    for (let yy = -3; yy <= 3; yy++) for (let xx = -3; xx <= 3; xx++) {
+      const r = Math.hypot(xx, yy);
+      if (r > hr + 0.4) continue;
+      put(sx + xx - 0.5, sy + yy - 0.5, r > hr - 0.6 ? '#070d14' : xx + yy < -0.5 ? B[5] : xx + yy > 1 ? B[2] : B[4]);
+    }
+    const sa = a + 0.8;
+    for (const k of [-1, 0, 1]) put(sx + Math.cos(sa) * k * (hr - 0.8) - 0.5, sy + Math.sin(sa) * k * (hr - 0.8) - 0.5, B[0]);
+  }
+  x.putImageData(img, 0, 0);
+  bezelCache.set(key, cv);
+  return cv;
+}
+const VERDI2 = ['#2f5a4e', '#5a9a84'];
+function ringMesh(rIn: number, rOut: number) {
+  const tex = new THREE.CanvasTexture(document.createElement('canvas'));
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.RingGeometry(rIn, rOut, 64, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, alphaTest: 0.5 }));
+  m.userData.noPixel = true;
+  return { m, set(res: number) { const cv = bezelRing(rIn, rOut, res); if (tex.image !== cv) { tex.image = cv; tex.needsUpdate = true; } } };
 }
 
 // ------------------------------------------------------------------ the brass porthole the blobfish looks out of
 class Porthole3D {
   root = new THREE.Group();
   private water: THREE.MeshBasicMaterial;
-  private ring: THREE.MeshBasicMaterial;
+  private ringMat: THREE.MeshBasicMaterial;
+  private ring: ReturnType<typeof ringMesh>;
   private glint: THREE.Mesh;
   readonly R: number;
   constructor(R: number) {
@@ -216,18 +268,13 @@ class Porthole3D {
     const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
     this.water = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
     const back = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), this.water); back.position.z = -8;
-    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R, 3.4, 6, 32), brassMat);
-    const lip = new THREE.Mesh(new THREE.TorusGeometry(R - 3.2, 1.2, 4, 32), darkBrass); lip.position.z = 0.6;
-    const backing = new THREE.Mesh(new THREE.CylinderGeometry(R + 3.8, R + 3.8, 3, 32), darkBrass); backing.rotation.x = Math.PI / 2; backing.position.z = -4;
-    this.root.add(back, backing, bezel, lip);
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 1.8, 6), brassMat); b.rotation.x = Math.PI / 2;
-      b.position.set(Math.cos(a) * R, Math.sin(a) * R, 3.2); this.root.add(b);
-    }
+    // the bezel: a painted engraved brass ring over a dark brass backing (gives it thickness)
+    this.ring = ringMesh(R - 4.5, R + 4.5); this.ring.m.position.z = 3;
+    const backing = new THREE.Mesh(new THREE.CylinderGeometry(R + 4.5, R + 4.5, 4, 32), darkBrass); backing.rotation.x = Math.PI / 2; backing.position.z = -11;
+    this.root.add(back, backing, this.ring.m);
     // a hinge on the left and a dog-clamp on the right, like a real ship's port
-    const hinge = new THREE.Mesh(new THREE.BoxGeometry(4.5, 11, 4), brassMat); hinge.position.set(-R - 3, 0, -0.5);
-    const pin = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 13, 8), darkBrass); pin.position.set(-R - 3, 0, 1.6);
+    const hinge = new THREE.Mesh(new THREE.BoxGeometry(5, 12, 4), brassMat); hinge.position.set(-R - 4.5, 0, -1);
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 14, 8), darkBrass); pin.position.set(-R - 5, 0, 1.4);
     this.root.add(hinge, pin);
     // the glass: a faint pane and a hard crescent glint
     const glass = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, transparent: true, opacity: 0.08, depthWrite: false }));
@@ -237,17 +284,18 @@ class Porthole3D {
     const dot = new THREE.Mesh(new THREE.CircleGeometry(1.3, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false }));
     dot.position.set(-R * 0.18, R * 0.72, 25);
     // the warning rim: a red ring around the bezel that pulses at one heart
-    this.ring = new THREE.MeshBasicMaterial({ color: '#ff3a2a', transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(R + 3.6, R + 5.6, 40), this.ring); ring.position.z = -2;
+    this.ringMat = new THREE.MeshBasicMaterial({ color: '#ff3a2a', transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(R + 4.4, R + 6.6, 40), this.ringMat); ring.position.z = -2;
     this.root.add(glass, this.glint, dot, ring);
   }
   /** hurt / heal: 0..1 flashes; low: at one heart */
-  update(t: number, hurt: number, heal: number, low: boolean) {
+  update(t: number, hurt: number, heal: number, low: boolean, res = 1) {
+    this.ring.set(res);
     const c = this.water.color;
     c.setRGB(1, 1, 1);
     if (hurt > 0) c.lerp(new THREE.Color('#ff5040'), Math.min(1, hurt * 1.6) * 0.7);
     if (heal > 0) c.lerp(new THREE.Color('#ffc8f0'), Math.min(1, heal * 1.4) * 0.6);
-    this.ring.opacity = low ? 0.35 + 0.45 * Math.max(0, Math.sin(t * 7.5)) ** 2 : hurt * 0.6;
+    this.ringMat.opacity = low ? 0.35 + 0.45 * Math.max(0, Math.sin(t * 7.5)) ** 2 : hurt * 0.6;
     this.glint.rotation.z = Math.sin(t * 0.5) * 0.08;
   }
 }
@@ -257,18 +305,18 @@ class DepthGauge {
   root = new THREE.Group();
   private face: THREE.Mesh; private faceCv = document.createElement('canvas'); private faceTex: THREE.CanvasTexture;
   private needle = new THREE.Group(); private rec = new THREE.Group(); private glint: THREE.Mesh;
+  private bezel: ReturnType<typeof ringMesh>;
   private ang = 0; private angV = 0; private scaleMax = 0; private faceRes = 0; private lastTen = -1; private prevM = 0;
   readonly R: number;
   constructor(R = 24) {
     this.R = R;
-    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R, 3.4, 6, 32), brassMat);
-    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3.8, R + 3.8, 3, 32), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -4;
-    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8; const b = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 1.8, 6), brassMat); b.rotation.x = Math.PI / 2; b.position.set(Math.cos(a) * R, Math.sin(a) * R, 3.2); this.root.add(b); }
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(R + 4, 0, -0.5); crown.rotation.z = Math.PI / 2;
-    const knurl = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 3.8, 3, 10), darkBrass); knurl.position.set(R + 7.5, 0, -0.5); knurl.rotation.z = Math.PI / 2;
+    this.bezel = ringMesh(R - 4.5, R + 4.5); this.bezel.m.position.z = 3;
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 4.5, R + 4.5, 4, 32), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -3;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(R + 6, 0, -0.5); crown.rotation.z = Math.PI / 2;
+    const knurl = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 3.8, 3, 10), darkBrass); knurl.position.set(R + 9.5, 0, -0.5); knurl.rotation.z = Math.PI / 2;
     this.faceCv.width = this.faceCv.height = R * 2;
     this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace;
-    this.face = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), new THREE.MeshBasicMaterial({ map: this.faceTex, toneMapped: false }));
+    this.face = new THREE.Mesh(new THREE.CircleGeometry(R - 3.5, 40), new THREE.MeshBasicMaterial({ map: this.faceTex, toneMapped: false }));
     this.face.position.z = 0.5;
     // the needle: a black arrow with a red tip, a brass hub
     const nm = new THREE.MeshStandardMaterial({ color: '#141418', roughness: 0.5, flatShading: true });
@@ -283,32 +331,55 @@ class DepthGauge {
     // the glass cover with a moving glint
     this.glint = new THREE.Mesh(new THREE.RingGeometry(R - 6.5, R - 4.2, 20, 1, Math.PI * 0.58, Math.PI * 0.34), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false }));
     this.glint.position.z = 5;
-    this.root.add(back, bezel, crown, knurl, this.face, this.rec, this.needle, this.glint);
+    this.root.add(back, this.bezel.m, crown, knurl, this.face, this.rec, this.needle, this.glint);
   }
-  /** the face: cream enamel, a metre scale on a 270-degree sweep, major ticks with numbers, a coral danger arc */
+  /** the face: cream enamel with a chapter ring, a metre scale on a 270-degree sweep (minor / major ticks, numerals),
+   *  a coral danger arc with hatching, engraved rings, the maker's word and an anchor, the bezel's shadow crescent */
   private paintFace(max: number, res: number) {
-    const S = Math.max(16, Math.round(this.R * 2 * res)), R = S / 2;
+    const FR = this.R - 3.5;
+    const S = Math.max(16, Math.round(FR * 2 * res)), R = S / 2;
     if (this.faceCv.width !== S) { this.faceCv.width = this.faceCv.height = S; this.faceTex.dispose(); this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace; (this.face.material as THREE.MeshBasicMaterial).map = this.faceTex; (this.face.material as THREE.MeshBasicMaterial).needsUpdate = true; }
     const c = this.faceCv.getContext('2d')!;
     c.imageSmoothingEnabled = false;
-    c.fillStyle = PAL.cream; c.fillRect(0, 0, S, S);
-    // a flat inner disc a shade darker (the dial's chapter ring stays light)
-    c.fillStyle = '#e8d8b0'; c.beginPath(); c.arc(R, R, R * 0.62, 0, Math.PI * 2); c.fill();
+    const u = Math.max(1, Math.round(res));
+    const disc = (r: number, col: string) => { c.fillStyle = col; c.beginPath(); c.arc(R, R, r, 0, Math.PI * 2); c.fill(); };
+    const ringL = (r: number, col: string, lw = 1) => { c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.arc(R, R, r, 0, Math.PI * 2); c.stroke(); };
+    c.clearRect(0, 0, S, S);
+    disc(R, '#e2cfa2');                // the chapter ring (a step darker)
+    disc(R - 6 * u, PAL.cream);        // the enamel
+    disc(R * 0.36, '#ebdcb6');         // the hub field
+    ringL(R - 6 * u + 0.5, '#b89a6a'); ringL(R * 0.36, '#c8b48a');
     const at = (k: number, r: number): [number, number] => { const a = (-135 + 270 * k) * Math.PI / 180; return [R + Math.sin(a) * r, R - Math.cos(a) * r]; };
-    // the danger arc: the last quarter of the sweep
-    c.fillStyle = PAL.coral; c.beginPath(); c.arc(R, R, R - 2, (-45 - 90 + 202.5) * Math.PI / 180, (135 - 90) * Math.PI / 180); c.arc(R, R, R - 2 - Math.max(2, res * 2), (135 - 90) * Math.PI / 180, (-45 - 90 + 202.5) * Math.PI / 180, true); c.fill();
+    // the danger arc: the last fifth of the sweep in coral enamel, hatched at its start
+    const a0 = (-135 + 270 * 0.8 - 90) * Math.PI / 180, a1 = (135 - 90) * Math.PI / 180;
+    c.fillStyle = PAL.coral; c.beginPath(); c.arc(R, R, R - 1.5 * u, a0, a1); c.arc(R, R, R - 5 * u, a1, a0, true); c.fill();
+    c.strokeStyle = PAL.coral1; c.lineWidth = 1;
+    for (let k = 0.8; k < 0.84; k += 0.012) { const [x0, y0] = at(k, R - 1.5 * u), [x1, y1] = at(k + 0.01, R - 5 * u); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
     const step = max <= 60 ? 5 : max <= 150 ? 10 : max <= 400 ? 25 : 50;
     for (let v = 0; v <= max + 0.01; v += step / 5) {
       const k = v / max, major = Math.abs(v / step - Math.round(v / step)) < 0.01;
-      const [x0, y0] = at(k, R - 2), [x1, y1] = at(k, R - (major ? 4 + res * 2 : 2 + res * 1.5));
-      c.strokeStyle = major ? PAL.ink : '#7a6a50'; c.lineWidth = major ? Math.max(1, Math.round(res)) : 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+      const half = !major && Math.abs((v / step) * 2 - Math.round((v / step) * 2)) < 0.01;
+      const [x0, y0] = at(k, R - 1.5 * u), [x1, y1] = at(k, R - (major ? 7.5 : half ? 5.5 : 4) * u);
+      c.strokeStyle = major ? PAL.ink : '#6a5a40'; c.lineWidth = major ? Math.max(1, u) : 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
     }
     const font = res >= 2.5 ? 'body' : 'small';
-    for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R * 0.6); drawText(c, String(Math.round(max * k)), x, y - (font === 'body' ? 5 : 3), { font, color: PAL.ink, shadow: null, align: 'center' }); }
-    c.strokeStyle = '#8a7050'; c.lineWidth = 1; c.beginPath(); c.arc(R, R, R - 1.5, 0, Math.PI * 2); c.stroke();
+    const fh = font === 'body' ? 11 : 7;
+    for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R - 7.5 * u - fh * 0.9); drawText(c, String(Math.round(max * k)), x, y - fh / 2, { font, color: PAL.ink, shadow: null, align: 'center' }); }
+    // an anchor engraved above the hub (only where there is room to keep it clear)
+    if (S >= 80) {
+      const ax = Math.round(R), ay = Math.round(R - R * 0.62);
+      c.fillStyle = '#8a7250';
+      c.fillRect(ax, ay, 1, 6 * u); c.fillRect(ax - 2 * u, ay + u, 5 * u, 1); c.fillRect(ax - 3 * u, ay + 5 * u, 7 * u, 1); c.fillRect(ax - 3 * u, ay + 4 * u, 1, u); c.fillRect(ax + 3 * u, ay + 4 * u, 1, u);
+      c.fillRect(ax - u, ay - 2 * u, 3 * u, 1); c.fillRect(ax - u, ay - 2 * u, 1, 2 * u); c.fillRect(ax + u, ay - 2 * u, 1, 2 * u);
+    }
+    // the bezel's shadow: a flat crescent along the top-left inside edge
+    c.strokeStyle = 'rgba(58,36,8,0.45)'; c.lineWidth = 2 * u; c.beginPath(); c.arc(R, R, R - u, Math.PI * 1.0, Math.PI * 1.55); c.stroke();
+    // a hard cut so nothing bleeds past the round face
+    c.globalCompositeOperation = 'destination-in'; disc(R, '#000'); c.globalCompositeOperation = 'source-over';
     this.faceTex.needsUpdate = true;
   }
-  update(dt: number, t: number, d: NonNullable<HudData['depth']>, res = 1) {
+  update(dt: number, t: number, d: NonNullable<HudData['depth']>, res = 1, ringRes = 1) {
+    this.bezel.set(ringRes);
     // full scale: the bottom of this floor's shaft, rounded up to a clean number
     const span = d.floorBottom ?? d.floorMax ?? Math.max(d.m, d.record) + 1;
     const step = span <= 100 ? 20 : span <= 400 ? 50 : 100;
@@ -407,8 +478,6 @@ export class Hud {
   private flasks: Flask3D[] = [];
   private models: Record<'pearls' | 'keys' | 'bombs' | 'pack', THREE.Object3D>;
   private gauge = new DepthGauge(PR);
-  private gems: THREE.Mesh[] = [];
-  private gemMat = new THREE.MeshStandardMaterial({ color: '#ff5a4a', roughness: 0.12, flatShading: true, emissive: '#ff2a1a', emissiveIntensity: 0.9 });
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
   private stripCv = document.createElement('canvas');
@@ -430,7 +499,6 @@ export class Hud {
     this.port.root.userData.noPixel = false;
     this.models = { pearls: hudModel('pearlCoin'), keys: hudModel('key'), bombs: hudModel('bomb'), pack: itemModel('cutpursePouch') };
     for (const m of Object.values(this.models)) S.ui.add(m);
-    for (let i = 0; i < 2; i++) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(4, 0), this.gemMat); g.scale.z = 0.6; S.ui.add(g); this.gems.push(g); }
   }
   private roll(): Roll { return { v: -1, old: -1, t: 1, flash: 0, delta: [] }; }
 
@@ -491,12 +559,15 @@ export class Hud {
       const vit = this.vitals(ui, dt, s);
       this.resources(ui, s, vit);
       const navL = this.nav(ui, dt, s, vit.right);
-      void navL;
-      this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null);
+      this.topGap = [vit.right, navL];
+      // the boss bar keeps clear of the hand of skill cards on narrow screens
+      const last = (s.skills?.slots ?? []).reduce((a, sl, i) => (sl ? i : a), -1);
+      this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null, last >= 0 ? M + 20 + last * 41 + 26 : 10);
       this.hand(ui, dt, s.skills ?? null);
       this.pickups(ui, dt);
     } else for (const p of this.picks) p.t += dt;
-    if (s.menu) { for (const c of this.toasts) if (c.area) c.t = Math.min(c.t, 0.05); } else this.toastsDraw(ui, dt, !on);
+    // (behind a menu the title cards wait: their clocks stop until it closes)
+    if (!s.menu) this.toastsDraw(ui, dt, !on);
     this.prev = { ...s, combat: s.combat ? { ...s.combat } : s.combat };
   }
 
@@ -554,7 +625,7 @@ export class Hud {
     const frac = s.maxHp > 0 ? clamp01(s.hp / s.maxHp) : 0;
     const low = s.hp > 0 && s.hp <= 2;
     this.avatar.update(dt, frac, low);
-    this.port.update(this.t, this.hurtT, this.healT, low);
+    this.port.update(this.t, this.hurtT, this.healT, low, ui.k);
     const shake = this.hurtT > 0.5 ? Math.sin(this.t * 60) * (this.hurtT - 0.5) * 3 : 0;
     S.put(this.port.root, pc.x + shake, pc.y, 0);
     this.avatar.root.scale.setScalar(23);
@@ -571,7 +642,7 @@ export class Hud {
     const hasStam = !!c && c.staminaMax > 0, hasMana = !!s.maxMana;
     const flaskX = x0 + barW + 10;
     const right = Math.max(x0 + heartsW + 4, nF ? flaskX + nF * 11 + 1 : x0 + barW + 4) + 7;
-    const bottom = Math.max(by + (hasStam ? 7 : 0) + (hasMana ? 7 : 0) + 4, y0 + 40);
+    const bottom = Math.max(by + (hasStam ? 10 : 0) + (hasMana ? 8 : 0) + 3, y0 + 40);
     // the lacquered plate (behind everything; the porthole covers its left end)
     const px0 = pc.x, pw = right - px0, ph = bottom - y0;
     this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer'), ui.p(px0), ui.p(y0), { shadow: 2 });
@@ -597,12 +668,12 @@ export class Hud {
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
       const col = broken ? PAL.coral : c.staminaDelay > 0 ? '#e8a818' : '#2ac8a0';
       const jig = c.guard === 'riposte' ? Math.round(Math.sin(this.t * 30)) * 0.5 : 0;
-      bar(ui.ui, ui.p(x0), ui.p(yy + jig), ui.p(barW), Math.max(5, ui.p(6)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25 });
-      yy += 8;
+      tube(ui.ui, ui.p(x0 - 2), ui.p(yy + jig), ui.p(barW + 4), Math.max(7, ui.p(8)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25, t: this.t });
+      yy += 10;
     }
     if (hasMana) {
-      bar(ui.ui, ui.p(x0), ui.p(yy), ui.p(barW), Math.max(4, ui.p(4.5)), this.manaShown, { col: '#5a7aff', chip: this.manaChip });
-      yy += 7;
+      tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(6, ui.p(6)), this.manaShown, { col: '#5a7aff', chip: this.manaChip, t: this.t + 3, crystal: true });
+      yy += 8;
     }
     while (this.flasks.length < nF) { const f = new Flask3D(); S.ui.add(f.root); this.flasks.push(f); }
     this.flasks.forEach((f, i) => {
@@ -611,7 +682,7 @@ export class Hud {
       const drinking = c.drinking > 0 && i === c.flasks;
       f.update(dt, i < c.flasks ? 1 : drinking ? 1 - c.drinking : 0);
       f.root.scale.setScalar(13);
-      S.put(f.root, flaskX + 5 + i * 11, by + (hasMana ? 6 : 3), 8);
+      S.put(f.root, flaskX + 6 + i * 11, by + (hasMana ? 8 : 4), 8);
     });
     return { right, bottom: Math.max(bottom, pc.y + PR + 4) };
   }
@@ -688,7 +759,7 @@ export class Hud {
     // the area name and the stage pips
     if (m) {
       const nm = (m.name ?? '').toUpperCase();
-      ui.big(nm, cl, y0 + 5, 6, { color: PAL.brass2 });
+      ui.big(nm, cl + 6, y0 + 5, 6, { color: PAL.brass2 });
       const st = `${m.floor}/${m.floors}`;
       const sw = ui.bigW(st, 6);
       ui.big(st, cr, y0 + 5, 6, { color: PAL.cream, align: 'right' });
@@ -709,10 +780,10 @@ export class Hud {
     // the readouts: metres from home (left) and the depth (right, next to the gauge)
     const ry = y0 + h - 12;
     if (far !== undefined) {
-      const g = GLYPH.house(), gs = Math.max(1, Math.round(ui.k));
-      ui.ui.img(g, ui.p(cl), ui.p(ry + 1), { w: g.width * gs, h: g.height * gs });
-      const fw = ui.big(`${Math.round(far)}`, cl + g.width * gs / ui.k + 3, ry, 7.5, { color: PAL.cream });
-      ui.big('M FROM HOME', cl + g.width * gs / ui.k + 5 + fw, ry + 2, 5, { color: PAL.dim });
+      const g = GLYPH.house(), gs = Math.max(1, Math.round(ui.k)), fx = cl + 7;
+      ui.ui.img(g, ui.p(fx), ui.p(ry + 1), { w: g.width * gs, h: g.height * gs });
+      const fw = ui.big(`${Math.round(far)}`, fx + g.width * gs / ui.k + 3, ry, 7.5, { color: PAL.cream });
+      ui.big('M FROM HOME', fx + g.width * gs / ui.k + 5 + fw, ry + 2, 5, { color: PAL.dim });
     }
     if (d) {
       const dm = Math.round(d.m);
@@ -723,48 +794,46 @@ export class Hud {
       ui.big('M', cr, ry + 3, 5, { color: PAL.dim, align: 'right' });
       const g = GLYPH.down(), gs = Math.max(1, Math.round(ui.k));
       ui.ui.img(g, ui.p(cr - uw - 4 - tw) - g.width * gs - 2, ui.p(ry + 2), { w: g.width * gs, h: g.height * gs });
-      this.gauge.update(dt, this.t, d, ui.k * ui.ui.hd);
-      this.gauge.root.rotation.set(-0.08, -0.12 + Math.sin(this.t * 0.6) * 0.03, Math.sin(this.t * 1.1) * 0.02);
+      this.gauge.update(dt, this.t, d, ui.k * ui.ui.hd, ui.k);
       this.stage.put(this.gauge.root, gc.x, gc.y, 0);
     }
     return x0;
   }
 
   // ---------------------------------------------------------------- bottom centre: the boss
-  private bossBar(ui: DUi, dt: number, b: BossBar | null) {
-    for (const g of this.gems) g.visible = !!b;
+  private bossBar(ui: DUi, dt: number, b: BossBar | null, handR = 10) {
     if (!b) return;
     const ease = easeOutBack(this.bossIn * 1.6), fade = clamp01(this.bossIn * 3);
-    const BW = Math.max(180, Math.min(320, ui.w - 2 * 184));
+    let BW = Math.max(180, Math.min(320, ui.w - 2 * 184)), cx = ui.w / 2;
+    if (cx - BW / 2 - 14 < handR) { BW = Math.max(120, Math.min(320, ui.w - 10 - handR - 28)); cx = Math.max(handR + 14 + BW / 2, (handR + ui.w - 10) / 2); }
     const shake = Math.sin(this.t * 70) * this.bossShake * 2;
-    const bx = (ui.w - BW) / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
+    const bx = cx - BW / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
     // the dark plate with the bar
-    this.planes.draw(plate(ui.p(BW + 24), ui.p(24), 'lacquer', { rim: '#b04a3a', face: '#1a2a30' }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
+    this.planes.draw(plate(ui.p(BW + 24), ui.p(25), 'iron', { rim: '#b04a3a' }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
     const v = this.bossShown;
-    bar(ui.ui, ui.p(bx), ui.p(py + 6), ui.p(BW), Math.max(7, ui.p(9)), v, { col: '#d8303a', chip: this.bossChip, flash: this.bossFlash, ticks: 0.1, back: '#160a0e' });
+    tube(ui.ui, ui.p(bx - 4), ui.p(py + 6), ui.p(BW + 8), Math.max(9, ui.p(10)), v, { col: '#d8303a', chip: this.bossChip, flash: this.bossFlash, ticks: 0.1, t: this.t });
     const po = clamp01(b.poise ?? 1);
-    if (po < 0.999) bar(ui.ui, ui.p(bx), ui.p(py + 16.5), ui.p(BW), Math.max(3, ui.p(3)), po, { col: '#f2c66d', back: '#160a0e' });
+    if (po < 0.999) bar(ui.ui, ui.p(bx + 6), ui.p(py + 17.5), ui.p(BW - 12), Math.max(3, ui.p(3)), po, { col: '#f2c66d', back: '#160a0e' });
     // the phase pips, centred on the plate's bottom rim
     const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
-    if (n > 1) for (let i = 0; i < n; i++) { const px = ui.w / 2 + (i - (n - 1) / 2) * 10, pyy = py + 23; diamond(ui, px, pyy, 3.5, i < ph ? PAL.coral : '#3a2228', PAL.ink2); if (i < ph) diamond(ui, px - 0.5, pyy - 0.5, 1, '#ffd0c0', '#ffd0c0'); }
-    // the gems at the bar's ends flare on hits
-    this.gemMat.emissiveIntensity = 0.7 + this.bossFlash * 2 + Math.sin(this.t * 4) * 0.15;
-    this.gems.forEach((g, i) => { g.rotation.y += dt * (1.2 + this.bossFlash * 8); this.stage.put(g, i ? bx + BW + 6 : bx - 6, py + 10.5, 30); });
+    if (n > 1) for (let i = 0; i < n; i++) { const px = cx + (i - (n - 1) / 2) * 10, pyy = py + 23; diamond(ui, px, pyy, 3.5, i < ph ? PAL.coral : '#3a2228', PAL.ink2); if (i < ph) diamond(ui, px - 0.5, pyy - 0.5, 1, '#ffd0c0', '#ffd0c0'); }
     // the name ribbon stamps down onto the plate
     const name = b.name.toUpperCase();
     const st = clamp01((this.bossIn - 0.15) * 4), sEase = easeOutBack(st);
     const nw = ui.bigW(name, 9);
-    const rw = nw + 46, rh = 19;
-    const ry = py - 15 - (1 - sEase) * 10;
+    const rw = nw + 58, rh = 29;
+    const ry = py - 21 - (1 - sEase) * 10;
     if (st > 0) {
-      this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#a8323a' }), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(ry), { alpha: st });
-      ui.big(name, ui.w / 2 + shake, ry + 5, 9, { color: PAL.cream, color2: '#ffd8c8', align: 'center', alpha: st });
-      if (b.title) ui.big(clean(b.title).toUpperCase(), ui.w / 2, ry - 8, 5, { color: '#e8c0b0', align: 'center', alpha: st });
+      this.planes.draw(plate(ui.p(rw), ui.p(rh), 'nameplate'), ui.p(cx - rw / 2 + shake), ui.p(ry), { alpha: st, shadow: 2 });
+      ui.big(name, cx + shake, ry + (rh - 9) / 2 - 1, 9, { color: PAL.cream, color2: '#ffd8c8', align: 'center', alpha: st });
+      if (b.title) ui.big(clean(b.title).toUpperCase(), cx, ry - 8, 5, { color: '#f0d0c0', align: 'center', alpha: st });
       if (this.bossIn < 0.4 && st >= 1 && !this.bossStamped) { this.bossStamped = true; audio.play('thud_heavy1', { vol: 0.4, dry: true }); }
     }
     if (this.bossIn < 0.1) this.bossStamped = false;
   }
   private bossStamped = false;
+  /** the free span of the top row (between the vitals and the navigation instrument), D */
+  private topGap: [number, number] = [0, 9999];
 
   // ---------------------------------------------------------------- bottom left: the hand of skill cards
   private hand(ui: DUi, dt: number, sk: SkillHudState | null) {
@@ -811,25 +880,25 @@ export class Hud {
       const subMax = maxW - 44;
       while (sub.length > 4 && ui.bigW(sub, 4.5) > subMax) sub = sub.slice(0, -2).trimEnd() + '…'.replace('…', '');
       if (sub !== c.sub && !sub.endsWith('.')) sub = sub.replace(/[ .,]*$/, '') + '...';
-      const cw = Math.round(Math.max(136, Math.min(maxW, Math.max(nw, kw, ui.bigW(sub, 4.5)) + 46))), ch = 34;
+      const cw = Math.round(Math.max(136, Math.min(maxW, Math.max(nw, kw, ui.bigW(sub, 4.5)) + 48))), ch = 37;
       const inK = easeOutBack(c.t * 3.2), outK = clamp01((c.t - c.life + 0.35) / 0.35) ** 2;
       const x = ui.w - M - cw + (1 - inK) * (cw + 24) + outK * (cw + 24);
       const y = c.y;
       const a = 1 - outK;
       const R = ramp(c.color);
       this.planes.draw(plate(ui.p(cw), ui.p(ch), 'lacquer', { rim: c.color }), ui.p(x), ui.p(y), { alpha: a });
-      this.planes.draw(plate(ui.p(26), ui.p(26), 'well', { face: '#1d3a44' }), ui.p(x + 4), ui.p(y + 4), { alpha: a });
+      this.planes.draw(plate(ui.p(29), ui.p(29), 'disc', { face: '#2a5a60' }), ui.p(x + 4), ui.p(y + 4), { alpha: a });
       // a fresh card glows with its rarity for a moment
       if (c.t < 0.5) ui.fill(x + 1, y + 1, cw - 2, ch - 2, R[5], (0.5 - c.t) * 0.6);
       const cells = (c.model.userData.cells as number[] | undefined) ?? [1];
-      c.model.scale.setScalar((20 / Math.max(1, ...cells)) * (1 + Math.max(0, 0.3 - c.t) * 1.4));
+      c.model.scale.setScalar((22 / Math.max(1, ...cells)) * (1 + Math.max(0, 0.3 - c.t) * 1.4));
       c.model.rotation.set(0.3, -0.6 + Math.sin(this.t * 1.6 + c.y) * 0.6, 0);
       c.model.visible = a > 0.05;
-      this.stage.put(c.model, x + 17, y + 17, 40);
-      const tx = x + 35;
-      ui.big(c.title, tx, y + 5, 7, { color: R[4], alpha: a });
-      if (c.kind) ui.big(c.kind, tx, y + 15, 4.5, { color: PAL.dim, alpha: a });
-      if (sub) ui.big(sub, tx, y + 23, 4.5, { color: PAL.kelp2, alpha: a });
+      this.stage.put(c.model, x + 18.5, y + 18.5, 40);
+      const tx = x + 37;
+      ui.big(c.title, tx, y + 6, 7, { color: R[4], alpha: a });
+      if (c.kind) ui.big(c.kind, tx, y + 16.5, 4.5, { color: R[3], alpha: a });
+      if (sub) ui.big(sub, tx, y + 25, 4.5, { color: PAL.kelp2, alpha: a });
       ty += ch + 5;
     }
   }
@@ -843,10 +912,11 @@ export class Hud {
       if (c.area) {
         // a cinematic band across the upper screen, the name stamped in letter by letter, brass rules, the sub line
         const cy = ui.h * 0.25, cap = 20;
-        const bandA = clamp01(c.t * 4) * (1 - outK) * 0.38;
-        ui.fill(0, cy - 9, ui.w, cap + 29, PAL.ink2, bandA);
-        ui.fill(0, cy - 9, ui.w, 1, PAL.brass, bandA * 1.6);
-        ui.fill(0, cy + cap + 19, ui.w, 1, PAL.brass, bandA * 1.6);
+        // (planes drawn BEHIND the HUD's plates and cards, so the band never dims an instrument)
+        const bandA = clamp01(c.t * 4) * (1 - outK) * 0.4;
+        this.planes.draw(solid(PAL.ink2), 0, ui.p(cy - 9), { w: ui.ui.w, h: ui.p(cap + 29), alpha: bandA, back: true });
+        this.planes.draw(solid(PAL.brass), 0, ui.p(cy - 9), { w: ui.ui.w, h: 1, alpha: Math.min(1, bandA * 1.6), back: true });
+        this.planes.draw(solid(PAL.brass), 0, ui.p(cy + cap + 19), { w: ui.ui.w, h: 1, alpha: Math.min(1, bandA * 1.6), back: true });
         const tw = ui.bigW(c.title, cap);
         let lx = ui.w / 2 - tw / 2;
         const chars = [...c.title];
@@ -874,7 +944,9 @@ export class Hud {
       const inK = easeOutBack(c.t * 3.5);
       const cap = 9, tw = ui.bigW(c.title, cap), sw = c.sub ? ui.bigW(c.sub, 5.5) : 0;
       const rw = Math.max(tw + 50, sw + 30), rh = 21;
-      const x = ui.w / 2 - rw / 2, y = (hidden ? 14 : 12) - (1 - inK) * 30 - outK * 20;
+      // between the vitals and the navigation instrument; below them when the top row has no room
+      const [gl, gr] = this.topGap, fits = hidden || ui.w / 2 - rw / 2 > gl + 4 && ui.w / 2 + rw / 2 < gr - 4;
+      const x = ui.w / 2 - rw / 2, y = (hidden ? 14 : fits ? 12 : 96) - (1 - inK) * 30 - outK * 20;
       const a = clamp01(c.t * 5) * (1 - outK);
       this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#2c6b70' }), ui.p(x), ui.p(y), { alpha: a });
       ui.big(c.title, ui.w / 2, y + 5, cap, { color: c.color, align: 'center', alpha: a });

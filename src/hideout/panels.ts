@@ -1,92 +1,120 @@
-// Hideout panels in the pixel UI: the Sea Chest (browse the stash and materials) and the Workbench (craft gear
-// from materials, upgrade stash items). Both are wood panels with tabs, a scrolling list and a detail pane.
+// Hideout panels (v5), each in the material of the thing you opened (panelArt.ts):
+//   the SEA CHEST (stash): red planks, iron straps, a quilted velvet lining; tabs, a grid of what you keep, and the
+//     selected / hovered piece up close (a studio photo of its model, its card text from itemCard.ts)
+//   the WORKBENCH: an oak top with a leather work mat; CRAFT gear from materials or UPGRADE stash gear a level
+// Both: a brass name plate, the big close X (Esc, the X, or a click outside closes: the screen handles outside).
 import type { PixelUI } from '../ui/pixel/ui';
 import { META } from '../meta/meta';
-import { ITEMS, getItem, statLines, RARITY_COLOR, shapeSize, type ItemKind } from '../game/items';
+import { ITEMS, getItem, RARITY_COLOR, statLines, type ItemKind } from '../game/items';
 import type { ItemInst } from '../game/run';
 import { CRAFTS, craft, craftAvailable, stationName, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
 import { audio } from '../audio/audio';
+import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate, CloseX } from './itemCard';
+import { panelArt, wellArt, PANEL_IN, type PanelKind } from './panelArt';
 
-const TXT = { cream: '#f4e6c4', dim: '#c8a878', ink: '#2a1808', good: '#8aff7a', bad: '#ff7a6a', gold: '#ffd860' };
-
+/** a centred panel rect at most w x h (leaves room for the name plate above it) */
 export function panelRect(ui: PixelUI, w: number, h: number) {
-  const W = Math.min(w, ui.w - 16), H = Math.min(h, ui.h - 40);
-  return { x: Math.round((ui.w - W) / 2), y: Math.round((ui.h - H) / 2) + 4, w: W, h: H };
+  const W = Math.min(w, ui.w - 16), H = Math.min(h, ui.h - 24);
+  return { x: Math.round((ui.w - W) / 2), y: Math.round((ui.h - H) / 2) + 5, w: W, h: H };
+}
+export const STASH_SIZE: [number, number] = [600, 310];
+export const WORK_SIZE: [number, number] = [600, 310];
+
+/** the frame, the name plate and the close X; returns the inner content rect and whether the X was clicked */
+function frame(ui: PixelUI, kind: PanelKind, title: string, r: { x: number; y: number; w: number; h: number }, x: CloseX, id: string) {
+  ui.block(r.x, r.y - 10, r.w, r.h + 10);
+  ui.fill(r.x + 4, r.y + 5, r.w, r.h, '#000000', 0.4);
+  ui.img(panelArt(kind, r.w, r.h), r.x, r.y);
+  brassPlate(ui, title, r.x + r.w / 2, r.y - 9, { font: 'title' });
+  const close = x.draw(ui, id, r.x + r.w - 15, r.y - 7, 20);
+  const p = PANEL_IN[kind];
+  return { close, inner: { x: r.x + p[0], y: r.y + p[1], w: r.w - p[0] - p[2], h: r.h - p[1] - p[3] } };
 }
 
-/** detail pane for an item: big icon, name, rarity, desc, stat lines */
-function itemDetail(ui: PixelUI, id: string, level: number, x: number, y: number, w: number, nextLevel?: number): number {
-  const d = getItem(id);
-  ui.frame('slot', x, y, 44, 44);
-  const sz = shapeSize(d.shape);
-  const box = Math.max(sz.w, sz.h);
-  ui.item(id, x + 2 + Math.round((40 - (40 * sz.w) / box) / 2), y + 2 + Math.round((40 - (40 * sz.h) / box) / 2), Math.round((40 * sz.w) / box), Math.round((40 * sz.h) / box), level);
-  ui.text(d.name + (level > 1 ? ` +${level - 1}` : ''), x + 50, y + 2, { font: 'title', color: TXT.cream, shadow: '#1a0c04' });
-  ui.text(`${d.rarity} ${d.kind}`.toUpperCase(), x + 50, y + 17, { font: 'tiny', color: RARITY_COLOR[d.rarity] });
-  let yy = y + 28;
-  yy += ui.textBox(d.desc, x + 50, yy, w - 52, { font: 'small', color: TXT.dim });
-  yy = Math.max(yy, y + 48) + 2;
-  const lines = statLines(id, level);
-  const next = nextLevel ? statLines(id, nextLevel) : null;
-  lines.forEach((l, i) => {
-    yy += ui.textBox(l.text, x + 2, yy, w - 4, { font: 'small', color: l.good ? TXT.good : TXT.bad, shadow: '#000' });
-    if (next?.[i] && next[i].text !== l.text) yy += ui.textBox('→ ' + next[i].text, x + 10, yy, w - 12, { font: 'small', color: TXT.gold, shadow: '#000' });
-  });
-  if (d.note && !lines.some((l) => l.key === 'note')) { yy += ui.textBox(d.note(level), x + 2, yy, w - 4, { font: 'small', color: '#a8d8ff', shadow: '#000' }); }
-  return yy - y;
+/** the detail pane: the photo window, name / kind beside it, then stats, flavour, sets, fuses flowing round it */
+function detail(ui: PixelUI, id: string, level: number, x: number, y: number, w: number, h: number, o: { next?: number; n?: number } = {}): number {
+  const MW = Math.min(76, Math.round(w * 0.32));
+  photoWindow(ui, id, level, x, y, MW);
+  const hx = x + MW + 8, hw = w - MW - 8;
+  const hh = itemHead(ui, id, hx, y, hw, { level, n: o.n });
+  ui.clip(x - 2, y - 2, w + 4, h + 2);
+  const yy = y + hh + 3;
+  let used = yy - y + itemBody(ui, id, x, yy, w, { level, maxFuse: 1, flow: { y: y + MW + 2, x: hx, w: hw } });
+  // an upgrade preview: the next level's lines that change, in gold
+  if (o.next) {
+    const now = statLines(id, level), nx = statLines(id, o.next);
+    let ny = y + Math.max(used, MW) + 4;
+    for (let i = 0; i < nx.length; i++) {
+      if (now[i]?.text === nx[i].text) continue;
+      ui.text('→ ' + nx[i].text, x, ny, { font: 'body', color: K.brass2, shadow: K.ink2 });
+      ny += ui.lh('body');
+    }
+    used = ny - y;
+  }
+  ui.unclip();
+  return Math.max(used, MW);
 }
 
 export class StashPanel {
   tab = 0;
   sel: number | null = null;
+  private x = new CloseX();
   private tabs: { label: string; kinds: ItemKind[] | null }[] = [
-    { label: 'ALL', kinds: ['tool', 'trinket', 'ability'] }, { label: 'TOOLS', kinds: ['tool'] }, { label: 'TRINKETS', kinds: ['trinket'] }, { label: 'CORES', kinds: ['ability'] }, { label: 'MATERIALS', kinds: null },
+    { label: 'ALL', kinds: ['tool', 'trinket', 'ability', 'weapon', 'armor'] }, { label: 'TOOLS', kinds: ['tool', 'weapon', 'armor'] }, { label: 'TRINKETS', kinds: ['trinket'] }, { label: 'CORES', kinds: ['ability'] }, { label: 'MATERIALS', kinds: null },
   ];
   /** returns true when the panel wants to close */
   draw(ui: PixelUI): boolean {
-    const r = panelRect(ui, 340, 210);
-    ui.panel('wood', r.x, r.y, r.w, r.h, 'SEA CHEST');
-    let close = ui.iconButton('stashX', 'close', r.x + r.w - 22, r.y + 6, { style: 'red', key: 'Escape', keyLabel: '' });
-    const nt = ui.tabs('stashTabs', this.tabs.map((t) => t.label), this.tab, r.x + 10, r.y + 12, { font: 'small', h: 15 });
+    const r = panelRect(ui, ...STASH_SIZE);
+    const { close, inner } = frame(ui, 'chest', 'SEA CHEST', r, this.x, 'stashX');
+    const nt = ui.tabs('stashTabs', this.tabs.map((t) => t.label), this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
     if (nt !== this.tab) { this.tab = nt; this.sel = null; ui.resetList('stashL'); }
-    const inner = { x: r.x + 10, y: r.y + 32, w: r.w - 20, h: r.h - 42 };
     const kinds = this.tabs[this.tab].kinds;
+    const cy = inner.y + 26, ch = inner.h - 28;
     if (!kinds) {
-      // materials
+      // materials: two columns of icon, name and count
       const mats = Object.entries(META.materials).filter(([k, v]) => ITEMS[k] && v > 0).sort((a, b) => b[1] - a[1]);
-      if (!mats.length) ui.textBox('No materials yet. Collect ore, kelp, shells and scrap on runs and mail them home with the manatees.', inner.x + 6, inner.y + 8, inner.w - 12, { font: 'body', color: TXT.cream, shadow: '#000' });
-      const cols = 2;
-      ui.list('stashL', inner.x, inner.y, inner.w, inner.h, mats.length, 21, (i, x, y, w, hov) => {
+      ui.text(`${mats.reduce((a, [, n]) => a + n, 0)} PIECES`, inner.x + inner.w - 4, inner.y + 6, { font: 'small', color: K.cream2, shadow: K.ink2, align: 'right' });
+      ui.img(wellArt(inner.w, ch), inner.x, cy);
+      if (!mats.length) { ui.textBox('No materials yet. Bring ore, kelp, shells and scrap home from a run (or mail them with a manatee).', inner.x + 12, cy + 12, inner.w - 24, { font: 'body', color: K.cream, shadow: K.ink2 }); return close; }
+      ui.list('stashL', inner.x + 3, cy + 3, inner.w - 6, ch - 6, mats.length, 26, (i, x, y, w, hov) => {
         const [id, n] = mats[i];
-        ui.frame(hov ? 'slotBlue' : 'slot', x + 1, y + 1, w - 3, 20);
-        ui.item(id, x + 2, y + 2, 16, 16);
-        ui.text(getItem(id).name, x + 21, y + 8, { font: 'small', color: TXT.cream });
-        ui.text(`x${n}`, x + w - 6, y + 7, { font: 'title', color: TXT.gold, shadow: '#000', align: 'right' });
+        ui.fill(x + 2, y + 1, w - 6, 24, hov ? '#24484e' : '#152c32');
+        ui.fill(x + 2, y + 24, w - 6, 1, '#081418');
+        ui.fill(x + 4, y + 3, 20, 20, K.ink2);
+        const pic = itemPhoto(id, 1, 20 * ui.hd);
+        if (pic) ui.img(pic, x + 4, y + 3, { w: 20, h: 20 }); else ui.item(id, x + 4, y + 3, 20, 20);
+        ui.text(getItem(id).name, x + 30, y + 7, { font: 'body', color: RARITY_COLOR[getItem(id).rarity] === RARITY_COLOR.common ? K.cream : RARITY_COLOR[getItem(id).rarity], shadow: K.ink2 });
+        ui.text(`x${n}`, x + w - 10, y + 4, { font: 'title', color: K.brass2, shadow: K.ink2, align: 'right' });
         if (hov) ui.tooltip(ui.itemTip(id));
-      }, { cols });
+      }, { cols: 2, style: 'dark' });
       return close;
     }
     const items = META.stash.filter((s) => ITEMS[s.id] && kinds.includes(getItem(s.id).kind));
-    const listW = Math.min(inner.w - 140, 26 * 6 + 6);
-    if (!items.length) ui.textBox('Empty. Extract gear on a run (mail it home with a manatee) and it lands here.', inner.x + 4, inner.y + 6, listW - 8, { font: 'small', color: TXT.cream, shadow: '#000' });
-    const cell = 24, cols = Math.max(1, Math.floor((listW - 6) / cell));
-    const clicked = ui.list('stashL', inner.x, inner.y, listW, inner.h, items.length, cell, (i, x, y, _w, hov) => {
-      const it = items[i];
+    ui.text(`${items.length} OF ${META.stash.length}`, inner.x + inner.w - 4, inner.y + 6, { font: 'small', color: K.cream2, shadow: K.ink2, align: 'right' });
+    const dw = Math.min(268, Math.round(inner.w * 0.47)), gw = inner.w - dw - 8;
+    ui.img(wellArt(gw, ch), inner.x, cy);
+    const cell = 34, cols = Math.max(1, Math.floor((gw - 12) / cell));
+    const hov0: { it: ItemInst | null } = { it: null };
+    if (!items.length) ui.textBox('Nothing here yet. Gear you bring home from a run (or mail home with a manatee) lands in the chest.', inner.x + 10, cy + 10, gw - 20, { font: 'body', color: K.cream, shadow: K.ink2 });
+    const clicked = ui.list('stashL', inner.x + 4, cy + 4, gw - 8, ch - 8, items.length, cell, (i, x, y, _w, hov) => {
+      const it = items[i], d = getItem(it.id);
       const selected = this.sel === it.uid;
-      ui.frame(selected ? 'cardSel' : hov ? 'slotBlue' : 'slot', x + 1, y + 1, cell - 2, cell - 2);
-      ui.fill(x + 3, y + cell - 5, cell - 6, 1, RARITY_COLOR[getItem(it.id).rarity], 0.8);
-      ui.item(it.id, x + 4, y + 4, 16, 16, it.level ?? 1);
-      if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, x + cell - 3, y + 3, { font: 'tiny', color: TXT.good, outline: '#000', align: 'right' });
-      if (hov) ui.tooltip(ui.itemTip(it.id, it.level ?? 1));
-    }, { cols });
+      const X = x + 1, Y = y + 1, S = cell - 2;
+      ui.fill(X, Y, S, S, '#05090c');
+      ui.fill(X + 1, Y + 1, S - 2, S - 2, selected ? '#3a2a10' : hov ? '#24484e' : '#173a40');
+      ui.fill(X + 1, Y + 1, S - 2, 1, '#0b1d22'); ui.fill(X + 1, Y + S - 2, S - 2, 1, RARITY_COLOR[d.rarity]);
+      if (selected) ui.rect(X, Y, S, S, K.brass2);
+      const pic = itemPhoto(it.id, it.level ?? 1, Math.round((S - 4) * ui.hd));
+      if (pic) ui.img(pic, X + 2, Y + 1, { w: S - 4, h: S - 4 }); else ui.item(it.id, X + 4, Y + 3, S - 8, S - 8, it.level ?? 1);
+      if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, X + S - 3, Y + 2, { font: 'small', color: K.kelpL, outline: '#000', align: 'right' });
+      if (hov) hov0.it = it;
+    }, { cols, style: 'dark' });
     if (clicked >= 0) { this.sel = items[clicked].uid; audio.play('k_pluck1', { vol: 0.3, dry: true }); }
-    // detail
-    const dx = inner.x + listW + 8, dw = inner.x + inner.w - dx;
-    ui.frame('dark', dx - 2, inner.y, dw + 2, inner.h);
-    const it = items.find((s) => s.uid === this.sel) ?? items[0];
-    if (it) itemDetail(ui, it.id, it.level ?? 1, dx + 4, inner.y + 5, dw - 8);
-    ui.text(`${META.stash.length} ITEMS`, r.x + r.w - 30, r.y + 14, { font: 'small', color: TXT.dim, align: 'right' });
-    close = close || false;
+    // the detail: hovered, else selected, else the first
+    const dx = inner.x + gw + 8;
+    ui.img(wellArt(dw, ch), dx, cy);
+    const it: ItemInst | undefined = hov0.it ?? items.find((s) => s.uid === this.sel) ?? items[0];
+    if (it) detail(ui, it.id, it.level ?? 1, dx + 8, cy + 8, dw - 16, ch - 16);
     return close;
   }
 }
@@ -95,70 +123,79 @@ export class WorkshopPanel {
   tab = 0;
   sel = 0;
   private bang = 0;
+  private x = new CloseX();
   draw(ui: PixelUI, dt: number): boolean {
     this.bang = Math.max(0, this.bang - dt);
-    const r = panelRect(ui, 360, 214);
-    ui.panel('wood', r.x, r.y, r.w, r.h, 'WORKBENCH');
-    const close = ui.iconButton('wsX', 'close', r.x + r.w - 22, r.y + 6, { style: 'red', key: 'Escape', keyLabel: '' });
-    const nt = ui.tabs('wsTabs', ['CRAFT', 'UPGRADE'], this.tab, r.x + 10, r.y + 12, { font: 'small', h: 15 });
+    const r = panelRect(ui, ...WORK_SIZE);
+    const { close, inner } = frame(ui, 'bench', 'WORKBENCH', r, this.x, 'wsX');
+    const nt = ui.tabs('wsTabs', ['CRAFT', 'UPGRADE'], this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
     if (nt !== this.tab) { this.tab = nt; this.sel = 0; ui.resetList('wsL'); }
-    const inner = { x: r.x + 10, y: r.y + 32, w: r.w - 20, h: r.h - 42 };
-    const listW = 150;
-    const dx = inner.x + listW + 6, dw = inner.x + inner.w - dx;
-    ui.frame('dark', dx - 2, inner.y, dw + 2, inner.h);
+    const cy = inner.y + 26, ch = inner.h - 28;
+    const listW = Math.min(232, Math.round(inner.w * 0.4));
+    const dx = inner.x + listW + 8, dw = inner.x + inner.w - dx;
+    ui.img(wellArt(listW, ch), inner.x, cy);
+    ui.img(wellArt(dw, ch), dx, cy);
+    const rowH = 24;
+    const row = (x: number, y: number, w: number, sel: boolean, hov: boolean, id: string, level: number, dim: boolean, right: string, rightCol: string, lock: boolean) => {
+      ui.fill(x + 1, y + 1, w - 3, rowH - 2, sel ? '#3a2a10' : hov ? '#24484e' : '#152c32');
+      if (sel) ui.rect(x + 1, y + 1, w - 3, rowH - 2, K.brass2);
+      ui.fill(x + 1, y + rowH - 2, w - 3, 1, '#081418');
+      ui.fill(x + 3, y + 3, 18, 18, K.ink2);
+      const pic = itemPhoto(id, level, 18 * ui.hd);
+      if (pic) ui.img(pic, x + 3, y + 3, { w: 18, h: 18, alpha: dim ? 0.45 : 1 }); else ui.item(id, x + 3, y + 3, 18, 18, level, dim ? 0.45 : 1);
+      let name = getItem(id).name;
+      while (name.length > 4 && ui.measure(name, 'body') > w - 54) name = name.slice(0, -2) + '…';
+      ui.text(name, x + 26, y + 6, { font: 'body', color: dim ? '#7a8a88' : K.cream, shadow: K.ink2 });
+      if (lock) ui.icon('lock', x + w - 14, y + 7);
+      else if (right) ui.text(right, x + w - 8, y + 6, { font: 'body', color: rightCol, shadow: K.ink2, align: 'right' });
+    };
     if (this.tab === 0) {
       const list: Craft[] = [...CRAFTS].sort((a, b) => Number(craftAvailable(b)) - Number(craftAvailable(a)));
-      const clicked = ui.list('wsL', inner.x, inner.y, listW, inner.h, list.length, 19, (i, x, y, w, hov) => {
-        const c = list[i];
-        const av = craftAvailable(c);
-        const sel = i === this.sel;
-        ui.frame(sel ? 'cardSel' : hov ? 'slotBlue' : 'slot', x, y, w - 1, 18);
-        ui.item(c.out, x + 1, y + 1, 16, 16, 1, av ? 1 : 0.4);
-        ui.text(getItem(c.out).name, x + 19, y + 6, { font: 'small', color: av ? TXT.cream : '#8a7a6a' });
-        if (!av) ui.icon('lock', x + w - 10, y + 6);
-      });
+      const canMake = (c: Craft) => craftAvailable(c) && Object.entries(c.cost).every(([k, v]) => (META.materials[k] ?? 0) >= v);
+      const clicked = ui.list('wsL', inner.x + 4, cy + 4, listW - 8, ch - 8, list.length, rowH, (i, x, y, w, hov) => {
+        const c = list[i], av = craftAvailable(c);
+        row(x, y, w, i === this.sel, hov, c.out, 1, !av, canMake(c) ? '●' : '', K.kelpL, !av);
+      }, { style: 'dark' });
       if (clicked >= 0) { this.sel = clicked; audio.play('k_pluck1', { vol: 0.3, dry: true }); }
       const c = list[Math.min(this.sel, list.length - 1)];
       if (c) {
-        const h = itemDetail(ui, c.out, 1, dx + 4, inner.y + 5, dw - 8);
-        let yy = inner.y + 8 + Math.max(h, 60);
-        ui.text('NEEDS', dx + 4, yy, { font: 'small', color: TXT.dim }); yy += 10;
-        ui.costRow(c.cost, dx + 4, yy, { have: META.materials, showHave: true, size: 16 });
-        yy += 20;
+        const btnH = 22, by = cy + ch - btnH - 8;
+        const h = detail(ui, c.out, 1, dx + 8, cy + 8, dw - 16, by - cy - 40);
+        let yy = Math.min(cy + 8 + h + 6, by - 34);
+        ui.fill(dx + 8, yy - 3, dw - 16, 1, K.teal2);
+        ui.text('NEEDS', dx + 8, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += ui.lh('small') + 1;
+        ui.costRow(c.cost, dx + 8, yy, { have: META.materials, showHave: true, size: 18, font: 'body' });
         const av = craftAvailable(c);
-        if (!av) ui.text(`Build a ${stationName(c.station!)} first`, dx + 4, yy, { font: 'small', color: TXT.bad, shadow: '#000' });
-        const can = av && Object.entries(c.cost).every(([k, v]) => (META.materials[k] ?? 0) >= v);
-        if (ui.button('craft', 'CRAFT', dx + dw - 74, inner.y + inner.h - 24, 68, 19, { style: 'green', disabled: !can, icon: 'hammer', sfx: '' })) {
+        if (!av) ui.text(`build a ${stationName(c.station!)} first`, dx + 8, by + 6, { font: 'body', color: K.coralL, shadow: K.ink2 });
+        if (ui.button('craft', 'CRAFT', dx + dw - 98, by, 90, btnH, { style: 'green', disabled: !canMake(c), icon: 'hammer', sfx: '' })) {
           if (craft(c)) { audio.play('clank1', { vol: 0.5 }); audio.play('jin_good', { vol: 0.35, dry: true }); this.bang = 0.5; }
         }
       }
     } else {
       const list = upgradable();
-      if (!list.length) ui.textBox('Nothing to upgrade. Gear in your stash can be levelled up here.', inner.x + 4, inner.y + 6, listW - 8, { font: 'small', color: TXT.cream, shadow: '#000' });
-      const clicked = ui.list('wsL', inner.x, inner.y, listW, inner.h, list.length, 19, (i, x, y, w, hov) => {
+      if (!list.length) ui.textBox('Nothing to upgrade yet. Gear in your stash can be levelled up here.', inner.x + 10, cy + 10, listW - 20, { font: 'body', color: K.cream, shadow: K.ink2 });
+      const clicked = ui.list('wsL', inner.x + 4, cy + 4, listW - 8, ch - 8, list.length, rowH, (i, x, y, w, hov) => {
         const it = list[i];
-        const sel = i === this.sel;
-        ui.frame(sel ? 'cardSel' : hov ? 'slotBlue' : 'slot', x, y, w - 1, 18);
-        ui.item(it.id, x + 1, y + 1, 16, 16, it.level ?? 1);
-        ui.text(getItem(it.id).name, x + 19, y + 6, { font: 'small', color: TXT.cream });
-        ui.text(`L${it.level ?? 1}`, x + w - 4, y + 6, { font: 'small', color: TXT.gold, align: 'right' });
-      });
-      if (clicked >= 0) this.sel = clicked;
+        row(x, y, w, i === this.sel, hov, it.id, it.level ?? 1, false, `L${it.level ?? 1}`, K.brass2, false);
+      }, { style: 'dark' });
+      if (clicked >= 0) { this.sel = clicked; audio.play('k_pluck1', { vol: 0.3, dry: true }); }
       const it: ItemInst | undefined = list[Math.min(this.sel, list.length - 1)];
       if (it) {
         const lv = it.level ?? 1;
-        const h = itemDetail(ui, it.id, lv, dx + 4, inner.y + 5, dw - 8, lv + 1);
-        let yy = inner.y + 8 + Math.max(h, 60);
+        const btnH = 22, by = cy + ch - btnH - 8;
+        const h = detail(ui, it.id, lv, dx + 8, cy + 8, dw - 16, by - cy - 40, { next: lv + 1 });
+        let yy = Math.min(cy + 8 + h + 6, by - 34);
         const cost = upgradeCost(it) ?? {};
-        ui.text(`LEVEL ${lv} → ${lv + 1}`, dx + 4, yy, { font: 'small', color: TXT.gold }); yy += 10;
-        ui.costRow(cost, dx + 4, yy, { have: META.materials, showHave: true, size: 16 });
+        ui.fill(dx + 8, yy - 3, dw - 16, 1, K.teal2);
+        ui.text(`LEVEL ${lv} → ${lv + 1}`, dx + 8, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += ui.lh('small') + 1;
+        ui.costRow(cost, dx + 8, yy, { have: META.materials, showHave: true, size: 18, font: 'body' });
         const can = Object.entries(cost).every(([k, v]) => (META.materials[k] ?? 0) >= v);
-        if (ui.button('upg', 'UPGRADE', dx + dw - 80, inner.y + inner.h - 24, 74, 19, { style: 'gold', disabled: !can, icon: 'star', sfx: '' })) {
+        if (ui.button('upg', 'UPGRADE', dx + dw - 108, by, 100, btnH, { style: 'gold', disabled: !can, icon: 'star', sfx: '' })) {
           if (upgrade(it)) { audio.play('powerup1', { vol: 0.4, dry: true }); this.bang = 0.5; }
         }
       }
     }
-    if (this.bang > 0) ui.fill(r.x, r.y, r.w, r.h, '#ffffff', this.bang * 0.25);
+    if (this.bang > 0) ui.fill(r.x, r.y, r.w, r.h, '#fff4d0', this.bang * 0.25);
     return close;
   }
 }

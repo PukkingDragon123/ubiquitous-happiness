@@ -102,51 +102,6 @@ export function canvasPlane(cv: HTMLCanvasElement, w = cv.width, h = cv.height):
 }
 
 /**
- * v5: a 2D pixel canvas drawn UNDER the 3D objects of a host PixelUI's layer (the host's own canvas stays on top),
- * so a screen can lay plates / panel frames, then 3D miniatures, then text, all in one overlay:
- *
- *   const under = new UnderLayer();
- *   each frame (after host.begin()):  under.begin(host, dt); ...under.ui.fill() / img()...; under.end()
- *
- * The under canvas is a second PixelUI (same size and scale as the host, no input of its own) whose quad is moved
- * into the host's scene and drawn FIRST in the opaque pass (renderOrder -100, blended by hand), so every opaque or
- * transparent 3D object on the host's stage draws over it.
- */
-export class UnderLayer {
-  ui: PixelUI;
-  private mounted: THREE.Scene | null = null;
-  private dev = [0, 0];
-  private quad: THREE.Mesh | null = null;
-  constructor(private order = -100) {
-    // constructed lazily from the host's class so this module needs no runtime import of the kit
-    this.ui = null as unknown as PixelUI;
-  }
-  begin(host: PixelUI, dt: number) {
-    if (!this.ui) this.ui = new (host.constructor as new () => PixelUI)();
-    const [dw, dh] = host.deviceSize;
-    if (dw !== this.dev[0] || dh !== this.dev[1]) { this.dev = [dw, dh]; this.ui.resize(dw, dh, 1); }
-    if (!this.quad) {
-      const q = this.ui.layer.scene.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
-      if (q) {
-        const m = q.material as THREE.MeshBasicMaterial;
-        m.transparent = false; m.blending = THREE.CustomBlending;
-        m.blendSrc = THREE.SrcAlphaFactor; m.blendDst = THREE.OneMinusSrcAlphaFactor;
-        m.blendSrcAlpha = THREE.OneFactor; m.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
-        m.needsUpdate = true;
-        q.renderOrder = this.order;
-        this.quad = q;
-      }
-    }
-    if (this.quad && this.mounted !== host.layer.scene) { host.layer.scene.add(this.quad); this.mounted = host.layer.scene; }
-    if (this.quad) this.quad.visible = true;
-    this.ui.begin(null, dt);
-  }
-  end() { this.ui?.end(); }
-  /** hide (a screen that stops drawing it) */
-  hide() { if (this.quad) this.quad.visible = false; }
-}
-
-/**
  * v5: painted 2D canvases (plates, panel skins, slot frames, the strip map) drawn as crisp planes BEHIND a stage's
  * 3D objects, in UI pixels, immediate-mode (no full-screen canvas upload: each canvas is a cached texture):
  *
@@ -176,7 +131,7 @@ export class PlanePool {
     return t;
   }
   /** draw canvas `cv` with its top-left at UI px (x, y); w / h default to the canvas size; dirty re-uploads it */
-  draw(cv: HTMLCanvasElement, x: number, y: number, o: { w?: number; h?: number; z?: number; alpha?: number; dirty?: boolean; tint?: string; shadow?: number } = {}): THREE.Mesh {
+  draw(cv: HTMLCanvasElement, x: number, y: number, o: { w?: number; h?: number; z?: number; alpha?: number; dirty?: boolean; tint?: string; shadow?: number; back?: boolean } = {}): THREE.Mesh {
     // a soft drop shadow: the same silhouette in ink, offset down-right, under it
     if (o.shadow) this.draw(cv, x + o.shadow, y + o.shadow, { w: o.w, h: o.h, z: o.z, alpha: (o.alpha ?? 1) * 0.4, tint: '#000000' });
     const tex = this.tex(cv, o.dirty);
@@ -193,7 +148,9 @@ export class PlanePool {
     m.scale.set(w, h, 1);
     m.position.set(Math.round(x) + w / 2, -(Math.round(y) + h / 2), (o.z ?? -300) + this.used * 0.05);
     m.visible = a > 0.003;
-    m.renderOrder = -50 + this.used * 0.001;
+    // back: under every other plate this frame (a backdrop band)
+    m.renderOrder = (o.back ? -60 : -50) + this.used * 0.001;
+    if (o.back) m.position.z -= 20;
     this.used++;
     return m;
   }

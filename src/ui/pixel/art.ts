@@ -5,6 +5,8 @@
 //   keycap('R') / keycap('ESC')    -> a little 3D keycap with the label
 //   cursor('hammer')               -> { cv, hx, hy } (hot spot)
 import { drawText, measure } from './font';
+import { keycapBody } from './skins';
+export { keycapBody, closeArt, KEYCAP_H } from './skins';
 
 type Pal = Record<string, string>;
 const P: Pal = {
@@ -180,83 +182,6 @@ export function keycap(label: string, dark = false): HTMLCanvasElement {
   return c;
 }
 
-/** v5 keycap art (no label): a chunky cream key (or dark lacquer) with a 2 px side, ink outline, rounded corners */
-export const KEYCAP_H = 13;
-export function keycapBody(w: number, h = KEYCAP_H, dark = false, down = false): HTMLCanvasElement {
-  const key = `kcb|${w}|${h}|${dark}|${down}`;
-  let c = iconCache.get(key);
-  if (c) return c;
-  c = document.createElement('canvas'); c.width = w; c.height = h;
-  const x = c.getContext('2d')!;
-  const ink = '#0b1622';
-  const face = dark ? '#2a4a52' : '#f3e7c9', top = dark ? '#4a7a80' : '#fffaf0', side = dark ? '#0c2429' : '#b9a476', shade = dark ? '#1d3a40' : '#d9c59b';
-  const t0 = down ? 2 : 0;
-  // outline with 1 px rounded corners
-  x.fillStyle = ink; x.fillRect(1, t0, w - 2, h - t0); x.fillRect(0, t0 + 1, w, h - t0 - 2);
-  x.fillStyle = side; x.fillRect(1, t0 + 1, w - 2, h - t0 - 2);
-  x.fillStyle = face; x.fillRect(1, t0 + 1, w - 2, h - t0 - 4 + (down ? 2 : 0));
-  x.fillStyle = shade; x.fillRect(w - 2, t0 + 2, 1, h - t0 - 5 + (down ? 2 : 0)); x.fillRect(2, h - 4 + (down ? 2 : 0), w - 4, 1);
-  x.fillStyle = top; x.fillRect(2, t0 + 1, w - 4, 1); x.fillRect(1, t0 + 2, 1, Math.max(1, h - t0 - 6));
-  iconCache.set(key, c);
-  return c;
-}
-
-/**
- * the v5 close widget: a coral key in a brass bezel with a bold cream X. The canvas is `size` wide and size + 3 tall:
- * the plate (size x size) rests 1 px down on a 2 px lip, lifts on hover and sinks on press, like a button.
- */
-export function closeArt(size: number, state: 'normal' | 'hover' | 'down' | 'disabled'): HTMLCanvasElement {
-  const S = Math.max(11, Math.round(size));
-  const key = `close|${S}|${state}`;
-  let c = iconCache.get(key);
-  if (c) return c;
-  c = document.createElement('canvas'); c.width = S; c.height = S + 3;
-  const x = c.getContext('2d')!;
-  const dis = state === 'disabled';
-  const P = dis
-    ? { ink: '#0b1622', b4: '#b8b2a6', b3: '#9a9488', b2: '#7a756c', b1: '#55514a', lip: '#33302c', f3: '#9a9690', f2: '#77736e', f1: '#57534f', xs: '#3a3836', x: '#d8d4cc' }
-    : { ink: '#0b1622', b4: '#fff1c2', b3: '#f2c66d', b2: state === 'hover' ? '#dba552' : '#c8913a', b1: '#8a5a24', lip: '#5a3810', f3: '#ff9a84', f2: state === 'hover' ? '#f0685a' : state === 'down' ? '#c8463c' : '#e0564a', f1: '#a8342c', xs: '#6e1a14', x: '#fffaf0' };
-  const px = (xx: number, yy: number, col: string) => { x.fillStyle = col; x.fillRect(xx, yy, 1, 1); };
-  const top = state === 'hover' ? 0 : state === 'down' ? 3 : 1;
-  const lip = state === 'down' ? 0 : state === 'hover' ? 3 : 2;
-  const bz = S >= 18 ? 2 : 1;
-  const ringOf = (xx: number, yy: number) => {
-    const dx = Math.min(xx, S - 1 - xx), dy = Math.min(yy, S - 1 - yy);
-    if ((dx === 0 && dy < 2) || (dy === 0 && dx < 2)) return -1;
-    if (dx === 1 && dy === 1) return 0;
-    return Math.min(dx, dy);
-  };
-  // the lip: the plate's silhouette, lower, in dark brass
-  if (lip) for (let yy = 0; yy < S; yy++) for (let xx = 0; xx < S; xx++) { const d = ringOf(xx, yy); if (d >= 0) px(xx, yy + top + lip, d === 0 ? P.ink : P.lip); }
-  for (let yy = 0; yy < S; yy++) for (let xx = 0; xx < S; xx++) {
-    const d = ringOf(xx, yy);
-    if (d < 0) continue;
-    const Y = yy + top;
-    if (d === 0) { px(xx, Y, P.ink); continue; }
-    if (d <= bz) {
-      const lit = yy === d || xx === d, shade = S - 1 - yy === d || S - 1 - xx === d;
-      px(xx, Y, d === 1 ? (lit ? P.b4 : shade ? P.b1 : P.b2) : lit ? P.b3 : shade ? P.b1 : P.b2);
-      continue;
-    }
-    if (d === bz + 1) { px(xx, Y, P.ink); continue; }
-    const fy = yy - (bz + 2), fh = S - 2 * (bz + 2);
-    px(xx, Y, fy === 0 ? P.f3 : fy === fh - 1 ? P.f1 : P.f2);
-  }
-  // the X: two strokes (2 px thick on big keys) with a dark shadow down-right
-  const a = bz + 2, n = S - 2 * a, m = Math.max(1, Math.round(n * 0.2)), len = n - 2 * m, thick = S >= 16;
-  for (const [col, o] of [[P.xs, 1], [P.x, 0]] as const) {
-    for (let i = 0; i < len; i++) {
-      const p = a + m + i;
-      for (const qy of [a + m + i, a + m + len - 1 - i]) {
-        px(p + o, qy + top + o, col);
-        if (thick) px(p + o + (qy === a + m + i ? 1 : -1) * 0 + 1, qy + top + o, col);
-      }
-    }
-  }
-  iconCache.set(key, c);
-  return c;
-}
-
 /** mouse glyph: which button is highlighted ('L', 'R', 'M' wheel) */
 export function mouseGlyph(btn: 'L' | 'R' | 'M'): HTMLCanvasElement {
   const L = btn === 'L' ? 'y' : 'l', R = btn === 'R' ? 'y' : 'l', M = btn === 'M' ? 'y' : 'g';
@@ -277,36 +202,37 @@ export function mouseGlyph(btn: 'L' | 'R' | 'M'): HTMLCanvasElement {
 export type CursorName = 'arrow' | 'point' | 'grab' | 'hammer' | 'rotate' | 'remove' | 'busy';
 const CURSORS: Record<CursorName, { rows: string[]; hx: number; hy: number }> = {
   arrow: { hx: 1, hy: 1, rows: [
-    'k..........',
-    'kk.........',
-    'kwk........',
-    'kwwk.......',
-    'kwwwk......',
-    'kwwwwk.....',
-    'kwwwwwk....',
-    'kwwwwwwk...',
-    'kwwwwwwwk..',
-    'kwwwwkkkkk.',
-    'kwwkwk.....',
-    'kwk.kwk....',
-    'kk..kwk....',
-    'k....kwk...',
-    '.....kk....',
+    'k...........',
+    'kk..........',
+    'kWk.........',
+    'kWwk........',
+    'kWwwk.......',
+    'kWwwwk......',
+    'kWwwwwk.....',
+    'kWwwwwlk....',
+    'kWwwwwllk...',
+    'kWwwwlllgk..',
+    'kWwwkkkkkkk.',
+    'kWwkWlk.....',
+    'kWk.kWlk....',
+    'kk..kWlk....',
+    'k....kWlk...',
+    '.....kkk....',
   ] },
   point: { hx: 5, hy: 1, rows: [
     '....kk......',
-    '...kwwk.....',
-    '...kwwk.....',
-    '...kwwk.....',
-    '...kwwkkk...',
-    '...kwwkwwkk.',
-    '.kkkwwkwwkwk',
-    'kwwkwwwwwkwk',
-    'kwwwwwwwwwwk',
-    '.kwwwwwwwwwk',
-    '..kwwwwwwwk.',
-    '..kwwwwwwwk.',
-    '...kwwwwwk..',
+    '...kWwk.....',
+    '...kWwk.....',
+    '...kWwk.....',
+    '...kWwkkk...',
+    '...kWwkWwkk.',
+    '.kkkWwkWwkWk',
+    'kWwkWwwwwkwk',
+    'kWwwwwwwwwlk',
+    '.kWwwwwwwwlk',
+    '..kwwwwwwlk.',
+    '..kwwwwwllk.',
+    '...kwwwllk..',
     '...kkkkkkk..',
   ] },
   grab: { hx: 6, hy: 6, rows: [
