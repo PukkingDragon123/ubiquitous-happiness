@@ -18,7 +18,7 @@ import { Motes } from '../hideout/ocean';
 import { CosmeticPuppet } from '../cosmetics/rig';
 import { makeMeadowChunked, meadowLook, MC, type MeadowItem } from '../world/meadow';
 import { Kit } from '../hideout/kit';
-import { TITLE_LOOK, rockPage, SAND, KELP, FISH, WHALE, RAY, boulder, kelpGeo, kelpMat, fishGeo, whaleGeo, flukeGeo, KELP_T } from './art';
+import { TITLE_LOOK, rockPage, SAND, KELP, WHALE, RAY, boulder, kelpGeo, kelpMat, fishGeo, fishMat, whaleGeo, flukeGeo, KELP_T } from './art';
 import { Signpost } from './sign';
 
 export const SIGN_X = 0;
@@ -163,7 +163,7 @@ export class TravelSet {
     for (const x of [-48, -31, -17, 6.5, 18]) this.vents.push(new THREE.Vector3(x, floorAt(x, -3) + 0.1, -3 - (x % 3)));
 
     // ---- fish: a school cruising along with the hero, one milling far back, one circling by the sign
-    const fm = psxMat(FISH(), { rough: 0.35, metal: 0.3, side: THREE.DoubleSide });
+    const fm = fishMat();
     const school = (n2: number, kind: School['kind'], c: THREE.Vector3, r: number, sp: number, spread: THREE.Vector3) => {
       const mesh = new THREE.InstancedMesh(fishGeo(), fm, n2);
       mesh.frustumCulled = false;
@@ -262,7 +262,7 @@ export class TravelSet {
         let x: number, y: number, z: number, yaw: number;
         if (sc.kind === 'cruise') { x = cx + f.o.x + Math.sin(t * 0.8 + f.ph) * 0.3; y = cy + f.o.y + Math.sin(t * 1.1 + f.ph) * 0.2; z = cz + f.o.z; yaw = 0; }
         else { const a = f.ph + t * sc.sp; x = cx + Math.cos(a) * sc.r + f.o.x; y = cy + Math.sin(a * 2 + i) * 0.3 + f.o.y; z = cz + Math.sin(a) * sc.r * 0.6 + f.o.z; yaw = Math.atan2(-Math.cos(a) * 0.6 * Math.sign(sc.sp), -Math.sin(a) * Math.sign(sc.sp)); }
-        this.e.set(0, yaw, Math.sin(t * 9 + i) * 0.15);
+        this.e.set(0, yaw, Math.sin(t * 1.3 + i) * 0.06);
         this.q.setFromEuler(this.e);
         this.m4.compose(this.v.set(x, y, z), this.q, this.s.set(f.s, f.s, f.s));
         sc.mesh.setMatrixAt(i, this.m4);

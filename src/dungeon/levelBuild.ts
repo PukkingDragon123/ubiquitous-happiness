@@ -374,7 +374,8 @@ export class LevelBuild {
         if (f.kind === 'end') return;
         if (l.side === 'upper') {
           // the high lane: a post on the lid's near end, the board pointing on along the top
-          const sign = forkSignModel([laneBoard(f, l, 1)], { lantern: false });
+          // (a tall post: the lower lane's board and its HUD tag fit between the two)
+          const sign = forkSignModel([laneBoard(f, l, 1)], { lantern: false, lift: 1.2 });
           sign.root.position.set(l.x0 + 0.7, l.y0 - 0.06, -0.75); sign.root.rotation.y = 0.05;
           this.group.add(sign.root); this.props3d.push(sign.root);
           keep(f, sign, i); board(f, i, sign);

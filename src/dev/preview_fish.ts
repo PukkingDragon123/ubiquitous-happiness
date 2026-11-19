@@ -9,6 +9,7 @@ import type { Game, Screen } from '../game/game';
 import { MockScreen } from './mockWorld';
 import { buildFish, SPECIES, FishModel } from '../fish';
 import { buildMantisModel } from '../fish/mantis';
+import { fishGeo, fishMat } from '../title/art';
 import { textSprite, STYLES } from '../ui/text';
 import { spawnCreature, SeaTurtle } from '../creatures';
 import type { Entity } from '../game/types';
@@ -34,9 +35,9 @@ class FishGallery extends MockScreen {
     if (one) {
       list.forEach((s, i) => {
         // non-fish rigs (the mantis shrimp) stand in as a static model with the FishModel calls stubbed
-        if (s === 'mantis') {
-          const g = buildMantisModel().body;
-          const m = { group: g, length: 1.5, mesh: g.children[0], material: (g.children[0] as THREE.Mesh).material, update() {}, setJaw() {}, lookAt() {}, setMorph() {}, species: 'mantis' } as unknown as FishModel;
+        if (s === 'mantis' || s === 'titlefish') {
+          const g = s === 'mantis' ? buildMantisModel().body : new THREE.Group().add(new THREE.Mesh(fishGeo(), fishMat()));
+          const m = { group: g, length: 1.5, mesh: g.children[0], material: (g.children[0] as THREE.Mesh).material, update() {}, setJaw() {}, lookAt() {}, setMorph() {}, species: s } as unknown as FishModel;
           add(m, new THREE.Vector3(i * 2, -4, 0)); return;
         }
         const m = buildFish(s, i + 1); add(m, new THREE.Vector3(i * m.length * 1.4, -4, 0));

@@ -338,9 +338,8 @@ function paintPage(): { A: Atlas; R: Reg } {
       return x % 12 === 0 ? N[1] : (x + y) % 3 === 0 ? N[3] : N[2];
     });
   });
-  R.capTop = A.paint('mCapTop', 16, 16, (p, w, h) => {
+  R.capTop = A.paint('mCapTop', 16, 16, (p) => {
     p.fill((x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); return d > 6.5 ? N[3] : d < 1.5 ? N[3] : (x === 7 || y === 7) && d > 2.5 ? N[1] : N[2]; });
-    void w; void h;
   });
   R.visor = A.paint('mVisor', 16, 8, (p) => p.fill((_x, y) => (y === 1 ? hex('#2a2a34') : y === 2 ? hex('#16161c') : hex('#08080b'))));
   R.badge = A.paint('mBadge', 16, 16, (p) => {
@@ -836,7 +835,9 @@ function built(): Built {
   const s = b.s;
   // a gentle top light baked in the vertex colours (the undersides a touch darker)
   // (the paddle a shade darker: banked toward the camera it catches the full sun)
-  s.paintSince(0, (p, n, c) => { const k = (0.9 + 0.1 * n[1]) * (p[0] < -1.5 ? 0.86 : 1); return [c[0] * k, c[1] * k, c[2] * k]; });
+  s.paintSince(0, (p, n, c) => { const k = (0.9 + 0.1 * n[1]) * (p[0] < -1.5 ? 0.76 : p[0] < -1.3 ? 0.88 : 1); return [c[0] * k, c[1] * k, c[2] * k]; });
+  // Build.bind() parked each vertex's two bones and blend weight in the soup's sway channel (the prop material has
+  // no sway, so it ignores it); they move into skinIndex / skinWeight here and the channel is cleared
   const geo = s.geometry();
   const sw = geo.getAttribute('aSway') as THREE.BufferAttribute;
   const n = sw.count, si = new Uint16Array(n * 4), wt = new Float32Array(n * 4);

@@ -73,7 +73,47 @@ export const KELP = () => ctex('titleKelp', 64, 64, (p) => {
     }
   }
 });
-export const FISH = () => ctex('titleFish', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, y < 5 ? '#2a4a6a' : y < 7 ? '#d8e8f0' : y < 9 ? '#5a90b0' : '#c0d8e4'); rect(p, 0, 7, 16, 1, '#f0c050'); });
+/**
+ * The title's schooling fish: a blue-and-gold fusilier (Caesio teres). 32x32 page, side-projected: the body in
+ * the top half (u tail -> nose, v back -> belly), the fins below (the forked tail left, dorsal / anal right).
+ * Royal blue back and flank, the gold saddle running from mid-back over the tail stock into a gold tail with
+ * dark lobe tips, a pale blue-white belly, a black eye in a silver ring, a dark gill line. Hand-placed pixels.
+ */
+export const FISH = () => ctex('titleFish2', 32, 32, (p) => {
+  const BLUE = ['#0e2a66', '#1a46a0', '#2a64c8', '#4a8ae4', '#8ab8f4', '#d4e6f8'];
+  const GOLD = ['#7a5208', '#b88412', '#e8b828', '#ffe070'];
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) {
+    // the gold saddle: from x ~20 back, its lower edge sloping down to the tail stock
+    const goldEdge = x > 22 ? -1 : 3 + Math.round((22 - x) * 0.3);
+    let c = y >= 13 ? tone(BLUE, 5) : y >= 11 ? tone(BLUE, 4) : y >= 8 ? tone(BLUE, 3) : tone(BLUE, 2);
+    if (y === 0) c = tone(BLUE, 1);
+    if (y <= goldEdge) c = tone(GOLD, y === goldEdge ? 2 : 3);
+    if (y === goldEdge + 1 && x < 21) c = tone(BLUE, 1);
+    if (y === 12 && x > 4 && x < 27) c = tone(BLUE, 3);                 // the faint lower flank line
+    p.set(x, y, c);
+  }
+  // head: dark gill line, the eye (black pupil in a silver ring), the mouth
+  for (let y = 3; y < 11; y++) p.set(24, y, tone(BLUE, 1));
+  for (const [x, y, c] of [[27, 5, '#e8f0f8'], [28, 5, '#e8f0f8'], [26, 6, '#c8d8e8'], [27, 6, '#0a0a12'], [28, 6, '#0a0a12'], [29, 6, '#c8d8e8'], [27, 7, '#0a0a12'], [28, 7, '#1a1a2a'], [26, 7, '#c8d8e8'], [29, 7, '#a8b8c8'], [27, 8, '#a8b8c8'], [28, 8, '#a8b8c8']] as const) p.set(x, y, c);
+  p.set(28, 6, '#ffffff');
+  for (const x of [30, 31]) p.set(x, 9, tone(BLUE, 0));
+  // fins: forked tail (u 0..15: root at the right, tips at the left; v 16 top lobe .. 31 bottom lobe)
+  for (let y = 16; y < 32; y++) for (let x = 0; x < 16; x++) {
+    const v = (y - 16) / 15, lobe = Math.abs(v - 0.5) * 2;
+    let c = tone(GOLD, x > 11 ? 2 : lobe > 0.7 ? 3 : 2);
+    if (x < 3 && lobe > 0.55) c = tone(['#2a1c08'], 0);                // dark lobe tips
+    if ((y & 3) === 0 && x > 3) c = tone(GOLD, 1);                      // fin rays
+    p.set(x, y, c);
+  }
+  // dorsal (rows 16..23) and anal (24..31): blue-grey membrane, gold toward the rear, a dark edge
+  for (let y = 16; y < 32; y++) for (let x = 16; x < 32; x++) {
+    const top = y < 24, k = top ? y - 16 : 31 - y;
+    let c = x < 22 ? tone(GOLD, 2) : tone(BLUE, k > 5 ? 3 : 2);
+    if (k === 7) c = tone(BLUE, 0);
+    if ((x & 1) === 0 && k < 6) c = tone(BLUE, 1);
+    p.set(x, y, c);
+  }
+});
 export const WHALE = () => ctex('titleWhale', 32, 32, (p) => {
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, tone(T.slate, y < 18 ? 1 + ((x * 3 + y) % 11 === 0 ? 1 : 0) : y < 20 ? 2 : (x % 3 === 0 ? 2 : 3)));
   for (const [x, y] of [[5, 6], [17, 9], [25, 4], [9, 14]]) { p.set(x, y, tone(T.slate, 3)); p.set(x + 1, y, tone(T.slate, 3)); }
@@ -194,19 +234,67 @@ export function kelpMat() {
   return m;
 }
 
+/**
+ * A fusilier, ~0.4 m, nose +x: a fusiform body lofted from hexagonal rings (laterally compressed), a forked tail,
+ * a long low dorsal and a small anal fin, little pectorals. ~80 triangles; side-projected uvs into FISH()'s page.
+ * The tail beats in the vertex shader (fishMat), so the geometry keeps x = along the body.
+ */
 export function fishGeo() {
+  const P: number[] = [], UV: number[] = [];
+  const bodyUV = (x: number, y: number): [number, number] => [Math.min(1, Math.max(0, (x + 0.15) / 0.335)), 1 - Math.min(0.5, Math.max(0, (0.055 - y) / 0.11 * 0.5))];
+  const tri = (a: V3, b: V3, c: V3, ua: [number, number], ub: [number, number], uc: [number, number]) => { P.push(...a, ...b, ...c); UV.push(...ua, ...ub, ...uc); };
+  // body: stations x, half height, half width, centre y
+  const st: [number, number, number, number][] = [[0.15, 0.022, 0.011, -0.004], [0.1, 0.04, 0.019, 0.0], [0.03, 0.051, 0.023, 0.001], [-0.04, 0.047, 0.02, 0.0], [-0.1, 0.029, 0.012, 0.0], [-0.14, 0.013, 0.006, 0.0]];
+  const ring = ([x, h, w, cy]: [number, number, number, number]): V3[] => [[x, cy + h, 0], [x, cy + h * 0.45, w], [x, cy - h * 0.55, w * 0.9], [x, cy - h, 0], [x, cy - h * 0.55, -w * 0.9], [x, cy + h * 0.45, -w]];
+  const R = st.map(ring);
+  const nose: V3 = [0.185, -0.006, 0], tailP: V3 = [-0.15, 0, 0];
+  const quad = (a: V3, b: V3, c: V3, d: V3) => { tri(a, b, c, bodyUV(a[0], a[1]), bodyUV(b[0], b[1]), bodyUV(c[0], c[1])); tri(a, c, d, bodyUV(a[0], a[1]), bodyUV(c[0], c[1]), bodyUV(d[0], d[1])); };
+  for (let j = 0; j < 6; j++) { const a = R[0][j], b = R[0][(j + 1) % 6]; tri(nose, b, a, bodyUV(nose[0], nose[1]), bodyUV(b[0], b[1]), bodyUV(a[0], a[1])); }
+  for (let i = 0; i + 1 < R.length; i++) for (let j = 0; j < 6; j++) quad(R[i][j], R[i][(j + 1) % 6], R[i + 1][(j + 1) % 6], R[i + 1][j]);
+  for (let j = 0; j < 6; j++) { const a = R[R.length - 1][j], b = R[R.length - 1][(j + 1) % 6]; tri(a, b, tailP, bodyUV(a[0], a[1]), bodyUV(b[0], b[1]), bodyUV(tailP[0], tailP[1])); }
+  // forked tail (fins page: u 0..0.5 tips -> root, v 0.5..1 rows)
+  const fu = (u: number, v: number): [number, number] => [u * 0.5, 0.5 - v * 0.5];
+  const r0: V3 = [-0.135, 0.016, 0], r1: V3 = [-0.135, -0.016, 0], tipU: V3 = [-0.245, 0.068, 0], tipD: V3 = [-0.245, -0.068, 0], notch: V3 = [-0.195, 0, 0];
+  tri(r0, tipU, notch, fu(1, 0.38), fu(0, 0), fu(0.4, 0.5)); tri(r0, notch, r1, fu(1, 0.38), fu(0.4, 0.5), fu(1, 0.62)); tri(r1, notch, tipD, fu(1, 0.62), fu(0.4, 0.5), fu(0, 1));
+  // dorsal (long, low, highest in front) and anal fins (fins page right half)
+  const du = (u: number, v: number): [number, number] => [0.5 + u * 0.5, 0.5 - v * 0.25];
+  const au = (u: number, v: number): [number, number] => [0.5 + u * 0.5, 0.25 - v * 0.25];
+  tri([0.06, 0.049, 0], [-0.09, 0.033, 0], [0.025, 0.085, 0], du(1, 0), du(0, 0), du(0.75, 1));
+  tri([-0.09, 0.033, 0], [-0.04, 0.062, 0], [0.025, 0.085, 0], du(0, 0), du(0.3, 0.8), du(0.75, 1));
+  tri([-0.02, -0.046, 0], [-0.1, -0.029, 0], [-0.045, -0.072, 0], au(1, 0), au(0, 0), au(0.5, 1));
+  // pectorals: small blades behind the gill line
+  for (const s of [1, -1]) tri([0.085, -0.008, s * 0.02], [0.06, -0.02, s * 0.022], [0.035, -0.03, s * 0.045], fu(1, 0.45), fu(1, 0.55), fu(0.2, 0.5));
   const g = new THREE.BufferGeometry();
-  const P: number[] = [
-    0.18, 0, 0, 0, 0.05, 0, 0, 0, 0.025, 0.18, 0, 0, 0, 0, 0.025, 0, -0.05, 0, 0.18, 0, 0, 0, -0.05, 0, 0, 0, -0.025, 0.18, 0, 0, 0, 0, -0.025, 0, 0.05, 0,
-    0, 0.05, 0, -0.14, 0, 0, 0, 0, 0.025, 0, 0, 0.025, -0.14, 0, 0, 0, -0.05, 0, 0, -0.05, 0, -0.14, 0, 0, 0, 0, -0.025, 0, 0, -0.025, -0.14, 0, 0, 0, 0.05, 0,
-    -0.12, 0, 0, -0.22, 0.06, 0, -0.22, -0.06, 0,
-  ];
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  const uv: number[] = [];
-  for (let i = 0; i < P.length / 3; i++) uv.push(0.5 - P[i * 3] * 2, 0.5 + P[i * 3 + 1] * 7);
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
   g.computeVertexNormals();
   return g;
+}
+/** the school's material: the FISH page, double sided (fins), and a tail beat that grows toward the tail with
+ *  each instance's own phase (from its position), on the kelp clock */
+export function fishMat() {
+  const m = psxMat(FISH(), { rough: 0.4, metal: 0.25 });
+  m.side = THREE.DoubleSide; // (psxMat's own `side` option is currently swallowed by a comment in psx.ts)
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    prev?.call(m, sh, r);
+    sh.uniforms.uKelpT = KELP_T;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uKelpT;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vec3 io = instanceMatrix[3].xyz;
+          #else
+            vec3 io = vec3(0.0);
+          #endif
+          float ph = uKelpT * 10.0 + io.x * 3.1 + io.y * 5.7 + io.z * 2.3;
+          float s = clamp((0.11 - position.x) / 0.36, 0.0, 1.0);
+          transformed.z += sin(ph - position.x * 16.0) * 0.03 * s * s + sin(ph) * 0.003;
+        }`);
+  };
+  m.customProgramCacheKey = chainKey(m, prev, '|fishBeat');
+  return m;
 }
 
 export function whaleGeo() {

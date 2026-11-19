@@ -756,7 +756,7 @@ export interface ForkSign {
  * with barnacles, boards stacked down from the top, a lantern) or hanging on two ropes from a point above
  * (o.hang = metres from the attachment down to the bottom of the boards).
  */
-export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lantern?: boolean; hang?: number; texel?: number; row?: boolean } = {}): ForkSign {
+export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lantern?: boolean; hang?: number; texel?: number; row?: boolean; lift?: number } = {}): ForkSign {
   const root = new THREE.Group();
   const TEXEL = o.texel ?? BOARD_TEXEL;
   const wood = M('wood', woodPage, { rough: 0.9 });
@@ -766,7 +766,7 @@ export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lant
   // boards stack down the post, or (row) sit side by side at one height
   const stackH = o.row ? Math.max(...lay.map((L) => L.ch * TEXEL)) : lay.reduce((s, L) => s + L.ch * TEXEL + GAP, -GAP);
   const hanging = o.hang !== undefined;
-  const H = hanging ? 0 : 0.85 + stackH + 0.18;
+  const H = hanging ? 0 : 0.85 + (o.lift ?? 0) + stackH + 0.18;
   let y = hanging ? -Math.max(0.3, o.hang! - stackH) : H - 0.12;
   if (!hanging) {
     const pole = mesh(lpCyl(0.13, H, 6, 0.11), wood); pole.position.y = H / 2; root.add(pole);
