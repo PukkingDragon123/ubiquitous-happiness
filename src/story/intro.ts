@@ -544,7 +544,7 @@ export class IntroScreen implements Screen {
     this.tag(this.dad);
     this.bark('dad', 'Ha! Fast as a sea slug!', 2.2);
     this.mom.tx = H - 4; this.mom.ty = fy + 0.9;
-    this.setGoal({ text: 'Now tag Mom', keys: [['WASD', 'swim']] });
+    this.setGoal({ text: 'Now tag Mom', keys: [['WASD', ''], ['ARROWS', 'swim']] });
     await this.wait(0.8);
     this.bark('mom', 'Now tag Mommy!', 2.4);
     await this.until(() => { this.meet(this.mom, H - 4, fy + 0.9); return this.near(this.kid, this.mom, 1.3); });
@@ -646,7 +646,7 @@ export class IntroScreen implements Screen {
     this.letterbox(0.35, 0.6);
     this.free(false, [H - 9, H + 9]);
     this.followKid(9.5, 0.6);
-    this.setGoal({ text: 'Grab the bread!', keys: [['WASD', 'swim']] });
+    this.setGoal({ text: 'Grab the bread!', keys: [['WASD', ''], ['ARROWS', 'swim']] });
     this.target = { x: bxx, y: byy, label: 'BREAD' };
     const tg0 = this.clock;
     await this.until(() => {
@@ -889,7 +889,7 @@ export class IntroScreen implements Screen {
     this.letterbox(0.35, 0.8);
     this.free(false, [cx - 14, cx + 4]);
     this.followKid(10, 0.7);
-    this.setGoal({ text: 'Swim to the shop', keys: [['WASD', 'swim']] });
+    this.setGoal({ text: 'Swim to the shop', keys: [['WASD', ''], ['ARROWS', 'swim']] });
     await this.until(() => k.x > cx - 3.4);
     this.setGoal(null);
     name.hide();
@@ -1374,6 +1374,8 @@ export class IntroScreen implements Screen {
       }
       // training: the kid can't drop below half its health
       if (k.hp < k.maxHp / 2) k.hp = Math.ceil(k.maxHp / 2);
+      // never stuck: after a dozen shells Mr. Crab calls it a day
+      if (thrown >= 12 && !inFlight && parries < 2) { this.bark('crab', 'Alright, alright. You\'ll learn it the hard way.', 2.6); return true; }
       return parries >= 2 && !inFlight;
     });
     this.crabMode = 'follow';
@@ -1427,14 +1429,14 @@ export class IntroScreen implements Screen {
     }
     const sign = this.t3d.add('MAIL BUOY', mb.x, -1.4, -0.4, T3D.name, { size: 0.4, angle: -0.2 });
     this.target = { x: mb.x, y: -2.5, label: 'MAIL' };
-    this.setGoal({ text: 'Swim to the mail buoy', keys: [['WASD', 'swim']] });
+    this.setGoal({ text: 'Swim to the mail buoy', keys: [['WASD', ''], ['ARROWS', 'swim']] });
     this.bark('crab', 'Glass is worth something. Mail it home: the manatee carries it. Ring the bell at the buoy.', 4);
     let greeted = false, sent = false, rangT = -1, listen = true;
     this.world.on('extract', () => { if (listen) sent = true; });
     await this.until(() => {
       const nearBuoy = Math.abs(k.x - mb.x) < 6, canRing = Math.abs(k.x - mb.x) < 4.5 && k.y > -8;
       if (nearBuoy) this.target = null;
-      if (mb.manatee.state === 'away') this.setGoal(canRing ? { text: 'Ring the bell', keys: [['E', 'ring']] } : { text: nearBuoy ? 'Swim up to the bell' : 'Swim to the mail buoy', keys: [['WASD', 'swim']] });
+      if (mb.manatee.state === 'away') this.setGoal(canRing ? { text: 'Ring the bell', keys: [['E', 'ring']] } : { text: nearBuoy ? 'Swim up to the bell' : 'Swim to the mail buoy', keys: [['WASD', ''], ['ARROWS', 'swim']] });
       else {
         if (rangT < 0) rangT = this.clock;
         if (!mb.present) this.setGoal({ text: 'Marge is on her way...' });

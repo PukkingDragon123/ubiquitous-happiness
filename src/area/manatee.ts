@@ -927,7 +927,10 @@ export class Manatee {
     if (this.state === 'away') { this.root.visible = false; return; }
     this.root.visible = true;
     const p = w.player, dist = Math.hypot(p.x - this.x, p.y - this.y);
-    const top = this.anchor ? this.ceiling : Math.min(this.ceiling, w.water.heightAt(this.x) - 0.55);
+    // the highest her chest goes: under the ceiling in the deep; by the buoy a little under the surface, or just high
+    // enough for her nostrils to break it when she comes up for a breath
+    const sea = w.water.heightAt(this.x + this.side * 1.1);
+    const top = this.anchor ? this.ceiling : this.surfacing ? sea - 0.3 : Math.min(this.ceiling, sea - 0.55);
     let floor = -1e9;
     for (const dx of [-1.6, -0.6, 0.4, 1.2]) floor = Math.max(floor, w.terrain.floorAt(this.x + dx));
     let tx = this.x, ty = this.y, spd = 0, slow = 2;
@@ -945,11 +948,12 @@ export class Manatee {
       // up for air now and then, never while the blobfish is close (the hand-over prompt must not drop out):
       // if it swims up mid-trip she comes straight back down
       const near = dist < 7.5;
-      if (this.surfacing === 0) { if (!near) this.breatheT -= dt; if (this.breatheT <= 0) this.surfacing = 1; }
+      if (this.surfacing === 0) { if (!near) this.breatheT -= dt; if (this.breatheT <= 0) { this.surfacing = 1; this.surfaceT = 0; } }
       else if (near) { this.surfacing = 0; this.breatheT = 8 + Math.random() * 6; }
       if (this.surfacing === 1) {
-        ty = top; spd = 1.8; slow = 1;
-        if (this.y > top - 0.15) { this.surfacing = 2; this.surfaceT = 1.6; this.puff(w); }
+        ty = top + 0.1; spd = 2; slow = 0.8;
+        this.surfaceT += dt;
+        if (this.y > top - 0.12 || this.surfaceT > 6) { this.surfacing = 2; this.surfaceT = 1.6; this.puff(w); }
       } else if (this.surfacing === 2) {
         ty = top; spd = 0.6;
         this.surfaceT -= dt;
@@ -964,7 +968,7 @@ export class Manatee {
     }
     this.steer(dt, tx, ty, spd, slow);
     this.x += this.vx * dt; this.y += this.vy * dt;
-    this.collide(w, top);
+    this.collide(dt, w, top);
     this.face(dt, p.x);
     this.animate(dt, p.x, p.y);
   }
@@ -975,7 +979,7 @@ export class Manatee {
     if (this.hoverY === null) this.hoverY = -4.2;
     if (Math.abs(p.x - buoyX) < 10 && Math.abs(p.y + 0.35 - this.hoverY) > 1.4) this.hoverY = p.y + 0.35;
     this.hoverY = clamp(this.hoverY, lo, hi);
-    return [buoyX + this.leaveDir * 2.1, this.hoverY];
+    return [buoyX + this.leaveDir * 1.9, this.hoverY];
   }
 
   private steer(dt: number, tx: number, ty: number, spd: number, slow: number) {
@@ -986,7 +990,7 @@ export class Manatee {
   }
 
   /** keep all of her (snout to paddle, flippers and bag too) out of the rock, the sand and the ceiling */
-  private collide(w: World, top: number) {
+  private collide(dt: number, w: World, top: number) {
     const hx = Math.cos(this.yawG.rotation.y);
     for (const [mx, my, r] of HULL) {
       const px = this.x + (mx - ANCHOR_X) * SCALE * hx, py = this.y + my * SCALE, rr = r * SCALE;
@@ -997,7 +1001,8 @@ export class Manatee {
       const vn = this.vx * n.x + this.vy * n.y;
       if (vn < 0) { this.vx -= n.x * vn; this.vy -= n.y * vn; }
     }
-    if (this.y > top) { this.y = top; if (this.vy > 0) this.vy = 0; }
+    // (eased back under, not snapped: the limit drops when a breath ends)
+    if (this.y > top) { this.y -= Math.min(this.y - top, Math.max(1.5 * dt, (this.y - top - 0.4))); if (this.vy > 0) this.vy = 0; }
   }
 
   /** she faces the way she swims, or the blobfish once it has settled on her other side (no flip-flopping) */

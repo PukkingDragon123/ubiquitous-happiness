@@ -835,7 +835,7 @@ export function bubbleWord(text: string, st: T3DStyle, cap = 0.5, fizz = 10): TH
       for (let i = 0; i < n; i++) {
         const b = ph[i], k = (t * 0.22 * b.sp + b.o) % 1;
         const x = seeds[b.s * 2] + Math.sin(t * 2 + i) * cap * 0.06, y = seeds[b.s * 2 + 1] + k * cap * 2.2;
-        const r = cap * (0.035 + (i % 3) * 0.015) * Math.sin(Math.min(1, k * 1.25) * Math.PI);
+        const r = cap * (0.06 + (i % 3) * 0.03) * Math.sin(Math.min(1, k * 1.25) * Math.PI);
         m4.compose(v.set(x, y, cap * 0.12), q, sc.setScalar(Math.max(1e-4, r)));
         cl.setMatrixAt(i, m4);
       }

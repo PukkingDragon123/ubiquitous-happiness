@@ -10,7 +10,7 @@ import { Kit } from './kit';
 import { Page, Rect, paintSwatch, paintEye, grad, dmix, C, mix, shade } from './page';
 import { V3, add, sub, scale, norm, cross } from '../gfx/loft';
 import { FishModel, SpeciesAsset } from './model';
-import { kitAsset, paintRect } from './kitutil';
+import { kitAsset, paintRect, cells } from './kitutil';
 import { seaTurtle } from './turtle';
 import { jellyfish } from './jelly';
 import { crab, crabBase } from './crab';
@@ -100,12 +100,13 @@ function seaCucumber(): SpeciesAsset {
   const rad = (f: number) => R0 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.02 + f * 0.96)), 0.32) * (1 + 0.06 * Math.sin(f * 9 + 1));
   paintRect(pg, bodyR, (u, v, i, j) => {
     const top = Math.cos(v * TAU);
-    let c = grad(['#4a2a14', '#7a4a20', '#a8702e', '#c89850', '#e8c890'])(0.25 + (1 - top) * 0.35 + vnoise(i * 0.15, j * 0.2, 3) * 0.25, i, j);
-    const [f1, , id] = worley(i, j * 1.4, 7, 13);
-    if (f1 < 2.2 + id * 1.2 && top > -0.4) c = mix(c, C('#1a0e08'), 0.85);
-    else if (f1 < 3.4 && top > -0.4) c = shade(c, 0.85);
+    let c = grad(['#4a2a14', '#7a4a20', '#a8702e', '#c89850', '#e8c890'])(0.3 + (1 - top) * 0.35, i, j);
+    // dark leopard spots with a soft brown halo (a jittered lattice, not noise)
+    const q = cells(i, j * 1.4, 9, 0.7, 13);
+    if (q.d < 0.26 && top > -0.4) c = mix(c, C('#1a0e08'), 0.85);
+    else if (q.d < 0.38 && top > -0.4) c = shade(c, 0.85);
     if (top < -0.55) c = mix(c, C('#e0c8a0'), 0.6);
-    return [c, 1, 0.55, vnoise(i * 0.5, j * 0.5, 7)];
+    return [c, 1, 0.55, q.d < 0.38 ? 0.2 : 0.6];
   });
   paintSwatch(pg, papR, ['#ffd0a0', '#ff6a30', '#d02a10', '#801808'], 0.4);
   paintSwatch(pg, tentR, ['#fff0d0', '#e8c890', '#a87040'], 0.5);

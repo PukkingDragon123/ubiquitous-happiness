@@ -532,7 +532,8 @@ export class Packing {
       this.cards = skills.slice(0, 5).map((id) => ({ id, c: new AbilityMedallion(id, { d: 44 }) }));
     }
     this.stage.attach(ui);
-    const cw = 52, x0 = Math.round(ui.w / 2 - ((this.cards.length - 1) * cw) / 2);
+    // the medallion row starts right of the YOUR BUILD sign (x 12..312) so none hides behind it
+    const cw = 52, x0 = Math.max(12 + 300 + 34, Math.round(ui.w / 2 - ((this.cards.length - 1) * cw) / 2));
     this.cards.forEach((c, i) => {
       const x = x0 + i * cw, y = 40;
       const hov = ui.hover(x - 22, y - 22, 44, 44) ? 1 : 0;
