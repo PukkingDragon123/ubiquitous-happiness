@@ -157,9 +157,8 @@ function buildManatee(scen: Scenery): ManateeParts {
   P.bag.box([-0.03, 0.02, 0.165], [0.06, 0.08, 0.02], scen.props.get('brass'));
   for (let i = 0; i < 3; i++) { const x = -0.18 + i * 0.13; P.bag.quad([x, 0.12, 0.06 + i * 0.02], [x + 0.16, 0.12, 0.06 + i * 0.02], [x + 0.16 + 0.02 * i, 0.28, 0.06 + i * 0.02], [x + 0.02 * i, 0.28, 0.06 + i * 0.02], R.env); }
   // strap: a loop over the back
-  const strap: V3[] = [];
-  // (bag-local: the bag hangs at z = 0.6 on the flank, so the loop is centred 0.6 back, over the body's middle)
-  for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI; strap.push([0.1, 0.14 + Math.sin(a) * 0.6, Math.cos(a) * 0.66 - 0.6]); }
+  // (a short strap up the flank; a full loop over the back read as a stick poking out of her side-on)
+  const strap: V3[] = [[0.1, 0.14, 0.02], [0.1, 0.3, -0.04], [0.1, 0.42, -0.14]];
   P.bag.tube(strap, () => 0.025, 3, R.leather);
   P.flap.box([-0.26, -0.02, 0.0], [0.52, 0.04, 0.2], R.leather);
   return P;
@@ -235,7 +234,7 @@ export class Manatee {
     if (this.state === 'away') { this.root.visible = false; return; }
     this.root.visible = true;
     const p = w.player;
-    const waitX = buoyX - 1.6, waitY = Math.min(-2.4, buoyY - 2.6);
+    const waitX = buoyX - 1.6, waitY = Math.min(-4.6, buoyY - 4.6);
     if (this.state === 'arriving') { if (this.swim(dt, waitX, waitY, 2.2) < 0.4) this.state = 'waiting'; }
     else if (this.state === 'waiting' && this.anchor) {
       // post-office hours (the dungeon): she hovers by her pillar box, a slow lazy figure-eight, no trips to the
@@ -246,7 +245,9 @@ export class Manatee {
       if (near && this.wave <= 0 && Math.random() < dt * 0.35) this.wave = 2;
     } else if (this.state === 'waiting') {
       // hang under the buoy; come up for air every so often; turn to face the blobfish
-      this.breathe -= dt;
+      // no trips to the surface while the blobfish is close (the hand-over prompt would flicker off)
+      const close = Math.hypot(p.x - this.x, p.y - this.y) < 6;
+      if (!close || this.breathe < 0) this.breathe -= dt;
       const ty = this.breathe < 0 && this.breathe > -3 ? -0.75 : waitY;
       if (this.breathe < -3) this.breathe = 9 + Math.random() * 6;
       if (this.breathe < 0 && this.breathe > -0.1) { w.fx.splash(this.x + 1.3, 0.6); w.sfx('splash_s', this.x, 0.4); }
@@ -273,7 +274,9 @@ export class Manatee {
       if (want !== side) { this.faceHold += dt; if (this.faceHold > 0.5) { side = want; this.faceHold = 0; } } else this.faceHold = 0;
     } else if (Math.abs(this.vx) > 0.15) { side = this.vx > 0 ? 1 : -1; this.faceHold = 0; }
     this.faceSide = side;
-    this.yaw = dampAngle(this.yaw, side > 0 ? 0 : Math.PI, 1.4, dt);
+    // while she waits, a slight 3/4 turn toward the camera so her face reads (side-on she is a grey blimp)
+    const turn = this.state === 'waiting' && sp < 0.6 ? 0.32 : 0;
+    this.yaw = dampAngle(this.yaw, side > 0 ? -turn : Math.PI + turn, 1.4, dt);
     // swim cycle: the tail paddle beats up and down, the body follows; flippers scull
     const beat = 0.5 + Math.min(1.4, sp * 0.6);
     this.phase += dt * beat * 2.2;
@@ -452,7 +455,7 @@ export class MailBuoy implements Entity {
       this.eta -= dt;
       if (this.eta <= 0) {
         const side = this.x > 0 ? 1 : -1;
-        m.arrive(this.x + side * 34, this.x);
+        m.arrive(this.x + side * 18, this.x);
         this.waitLeft = this.window;
         w.sfx('honk1', this.x, 0.5);
         w.emit('manatee', { state: 'arriving', x: this.x });
