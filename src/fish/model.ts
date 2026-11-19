@@ -83,7 +83,9 @@ export class FishModel {
       alphaToCoverage: !a.transparent, transparent: !!a.transparent, depthWrite: !a.transparent,
       emissive: em ? new THREE.Color(1, 1, 1) : new THREE.Color(0, 0, 0), emissiveMap: em, emissiveIntensity: o.emissive ?? a.emissive,
     });
-    if (a.alphaTest) m.alphaTest = a.alphaTest;
+    // the game renders without MSAA, so alpha-to-coverage alone never cuts anything: cut fin notches, frays and
+    // free rays with an alpha test (the clean-pixel pass leaves the map alpha at 0 or 1)
+    m.alphaTest = a.alphaTest ?? (a.transparent ? 0 : 0.5);
     if (m instanceof THREE.MeshPhysicalMaterial) { m.clearcoat = cc; m.clearcoatRoughness = a.clearcoatRough ?? 0.32; }
     if (m.normalMap) m.normalScale.set(a.normalScale, a.normalScale);
     swimMaterial(m, a.uni, this.inst, o.flags ?? a.flags, a.uwo);

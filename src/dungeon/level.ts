@@ -419,12 +419,22 @@ export function genLevel(o: LevelOpts): LevelPlan {
     ...Array.from({ length: R.caches }, () => ({ kind: 'small' as const, cache: true })),
   ];
   const spots = r.shuffle(quiet.filter(([q0, q1]) => q1 - q0 > 2 && !plan.chests.some((c) => c.x > q0 - 2 && c.x < q1 + 2)));
+  const clear = (cx: number) => !plan.dips.some((d) => cx > d.x0 - 1 && cx < d.x1 + 1) && !plan.steps.some((st) => cx > st.x0 - 1 && cx < st.x1 + 1);
   extras.forEach((e, i) => {
     const sp = spots[i % Math.max(1, spots.length)];
     if (!sp) return;
-    const cx = r.range(sp[0], sp[1]) + (i >= spots.length ? 1.6 : 0);
-    chest(e.kind!, cx, shelfAt(plan, cx), e.cache ? { cache: true } : {});
+    let cx = r.range(sp[0], sp[1]) + (i >= spots.length ? 1.6 : 0);
+    for (let k = 0; k < 8 && !clear(cx); k++) cx = r.range(sp[0], sp[1]);
+    if (clear(cx)) chest(e.kind!, cx, shelfAt(plan, cx), e.cache ? { cache: true } : {});
   });
+  // a route chest that landed on a boulder mound / a shaft's lip sits on top of it, not inside
+  for (const c of plan.chests) {
+    if (c.arena !== undefined || c.poi !== undefined || c.fork !== undefined) continue;
+    for (const s of plan.solids) {
+      if ((s.kind !== 'mound' && s.kind !== 'lip') || c.x < s.x0 - 0.6 || c.x > s.x1 + 0.6 || c.y > s.y1 || c.y < s.y0 - 2.5) continue;
+      c.x = Math.max(s.x0 + 0.7, Math.min(s.x1 - 0.7, c.x)); c.y = s.y1;
+    }
+  }
   plan.explored = new Array(Math.ceil(plan.W / BIN) + 1).fill(0);
   return plan;
 }

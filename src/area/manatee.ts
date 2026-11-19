@@ -119,8 +119,8 @@ const FLIP_X = 0.64, FLIP_TH = 2.08;
 const FLIP_ROOT = surfX(FLIP_X, FLIP_TH, -0.06);
 const KNOT = surfX(0.965, PI, 0.05);
 /** the flipper's long axis at rest (+z side) */
-const FLIP_DIR = norm([-0.3, -0.8, 0.52]);
-const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _z = new THREE.Vector3(0, 0, 1);
+const FLIP_DIR = norm([-0.3, -0.8, 0.52]), FLIP_W = norm(cross([0, 0, 1], FLIP_DIR)), FLIP_T = cross(FLIP_DIR, FLIP_W);
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
 const BAG = { x: -0.13, top: -0.43, h: 0.33, hl: 0.24 };
 const OFF = 0.032; // jacket thickness over the hide
 
@@ -206,7 +206,8 @@ function paintPage(): { A: Atlas; R: Reg } {
       for (let i = 0; i < len; i++) {
         const y = wrapRow(p, y0 + i), x = Math.round(x0 + Math.sin(i * 0.45 + ph) * amp), back = Math.cos(TH(y)) > 0.55;
         if (back && !strong) { p.set(x, y, K[1]); continue; }
-        p.set(x, y, strong ? K[1] : K[2]); p.set(x + 1, y, strong ? K[4] : mix(K[3], K[4], 0.5));
+        p.set(x, y, strong ? K[1] : K[2]);
+        if (strong) p.set(x + 1, y, K[4]); else if (i % 3 === 1) p.set(x + 1, y, mix(K[3], K[4], 0.35));
       }
     };
     for (let g = 0; g < 30; g++) {
@@ -567,7 +568,7 @@ class Build {
   flipper() {
     const { s, R } = this;
     const from = s.count;
-    const L = FLIP_DIR, W = norm(cross([0, 0, 1], L)), T = cross(L, W);
+    const L = FLIP_DIR, W = FLIP_W, T = FLIP_T;
     const LEN = 0.5;
     const path = (t: number) => add(add(FLIP_ROOT, mul(L, LEN * t)), add(mul(W, -0.07 * t * t), mul(T, 0.03 * t)));
     const prof: [number, number, number][] = [[-0.04, 0.075, 0.052], [0.14, 0.08, 0.045], [0.32, 0.092, 0.037], [0.52, 0.108, 0.031], [0.72, 0.118, 0.027], [0.88, 0.106, 0.023], [0.97, 0.07, 0.017]];
@@ -1076,7 +1077,7 @@ export class Manatee {
     if (this.munchT <= 0 && this.talkK < 0.1) { this.munchK = 1.1; this.munchT = 5 + Math.random() * 6; }
     this.munchK = Math.max(0, this.munchK - dt);
     const mu = this.munchK > 0 ? Math.max(0, Math.sin(((1.1 - this.munchK) / 1.1) * TAU * 2)) : 0;
-    b.jaw.rotation.z = -0.26 * open - 0.07 * mu;
+    b.jaw.rotation.z = -0.42 * open - 0.08 * mu;
     b.lip.rotation.z = 0.05 * open - 0.07 * mu;
     b.lip.scale.set(1, 1 + 0.05 * open, 1 + 0.06 * open + 0.14 * mu);
     // flippers: slow sculling, tucked back when she cruises, the near one waves
@@ -1124,10 +1125,14 @@ export class Manatee {
     bone.rotation.set(rx, ry, rz);
     if (wave <= 0.001) return;
     // the wave: the flipper swings up beside her face and waggles to and fro (fore and aft, so it reads side-on)
+    // (whole frames, not just the long axis, so the palm turns to face the camera instead of going edge-on)
     _qa.copy(bone.quaternion);
-    _v1.set(FLIP_DIR[0], FLIP_DIR[1], FLIP_DIR[2] * side);
-    _v2.set(0.3, 0.82, 0.48 * side).normalize().applyAxisAngle(_z, Math.sin(this.t * 8) * 0.42);
-    _qb.setFromUnitVectors(_v1, _v2);
+    const a = Math.sin(this.t * 8) * 0.42, ca = Math.cos(a), sa = Math.sin(a);
+    const L2 = norm([0.3 * ca - 0.82 * sa, 0.3 * sa + 0.82 * ca, 0.48]), W2 = norm(cross([0, 0, 1], L2)), T2 = cross(L2, W2);
+    const m = (v: V3): THREE.Vector3 => new THREE.Vector3(v[0], v[1], v[2] * side);
+    _m1.makeBasis(m(FLIP_DIR), m(FLIP_W), m(FLIP_T)).transpose();
+    _m2.makeBasis(m(L2), m(W2), m(T2)).multiply(_m1);
+    _qb.setFromRotationMatrix(_m2);
     bone.quaternion.slerpQuaternions(_qa, _qb, wave);
   }
 

@@ -114,14 +114,14 @@ export interface FinPaint {
   over?: (u: number, v: number, c: RGB, i: number, j: number) => RGB | null;
 }
 
-/** dithered mix: pixel-art blend between two colours (k quantised to 5 levels with ordered dither) */
-export function dmix(a: RGB, b: RGB, k: number, x: number, y: number): RGB {
-  const q = Math.round(Math.max(0, Math.min(4, k * 4 + (bayer(x, y) - 0.5) * 0.9))) / 4;
+/** stepped mix: pixel-art blend between two colours, k quantised to 5 clean levels (no dither) */
+export function dmix(a: RGB, b: RGB, k: number, _x: number, _y: number): RGB {
+  const q = Math.round(Math.max(0, Math.min(4, k * 4))) / 4;
   return mix(a, b, q);
 }
-/** smooth multi-stop gradient with fine dithered banding (soft hue-shifted ramps) */
+/** multi-stop gradient in clean quantised steps (hue-shifted ramps, no dither) */
 export function grad(cols: (string | RGB)[], steps = 14) {
-  const r = ramp(cols, steps, 0.55);
+  const r = ramp(cols, steps, 0);
   return (t: number, x: number, y: number) => r(t, x, y);
 }
 

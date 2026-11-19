@@ -569,10 +569,10 @@ export class FishBuilder extends Kit {
         else if (front && da < eps * 1.9) { c = mix(c, creaseC, 0.85); }
         else if (front && lipC && da < 0.28) { c = mix(c, lipC, 0.85 * (1 - da / 0.28) + 0.2); }
       }
-      // painted sheen band (upper flank), dithered
+      // painted sheen band (upper flank): two clean steps, no dither
       if (s.sheen) {
-        const hb = Math.exp(-(((ctx.yn - 0.35) / 0.22) ** 2)) * Math.abs(ctx.side);
-        if (hb * s.sheen > bayer(i, j) * 0.9 + 0.05) c = shade(c, 1.12);
+        const hb = Math.exp(-(((ctx.yn - 0.35) / 0.22) ** 2)) * Math.abs(ctx.side) * s.sheen;
+        if (hb > 0.5) c = shade(c, 1.12); else if (hb > 0.25) c = shade(c, 1.05);
       }
       pg.set(r.x + i, r.y + j, c, 255, rough, hgt);
       if (s.glow) { const g = s.glow(ctx); if (g) pg.setGlow(r.x + i, r.y + j, g); }
@@ -631,8 +631,9 @@ export function counter(cols: string[], steps = 7, mid = 0.5, k = 1) {
   return (yn: number, x: number, y: number): RGB => {
     let t = 1 - (yn * k * 0.5 + mid);
     t = Math.max(0, Math.min(1, t));
-    let q = t * steps + (bayer(x, y) - 0.5) * 0.85;
+    let q = t * steps;
     q = Math.round(Math.max(0, Math.min(steps, q))) / steps;
+    void x; void y;
     const f = q * (cs.length - 1), i0 = Math.min(cs.length - 2, Math.floor(f));
     return mix(cs[i0], cs[i0 + 1], f - i0);
   };

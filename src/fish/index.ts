@@ -72,7 +72,9 @@ export function cleanTexture(tex: THREE.Texture, colors = 14, down = 2) {
     let r = 0, g = 0, b = 0, a = 0, n = 0;
     for (let j = 0; j < down; j++) for (let i = 0; i < down; i++) {
       const k = ((y * down + j) * W + x * down + i) * 4;
-      if (src[k + 3] > 127) { r += src[k]; g += src[k + 1]; b += src[k + 2]; n++; }
+      // alpha-weighted, so a texel that ends up opaque from several half-transparent ones keeps their colour
+      const wa = src[k + 3];
+      if (wa > 0) { r += src[k] * wa; g += src[k + 1] * wa; b += src[k + 2] * wa; n += wa; }
       a += src[k + 3];
     }
     const o = (y * w + x) * 4;

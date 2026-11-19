@@ -163,6 +163,8 @@ const AREA_NAME = (id: string) => (isHadal(id) ? biomeDef(id).name : AREA_LIST.f
 const FAR = 1e9;
 
 export class DungeonScreen implements Screen {
+  /** dev / tests: the level generator and the route graph (console: dungeon.constructor.dev.genLevel({...})) */
+  static dev = { genLevel, crossroads };
   name = 'dungeon';
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(36, 1, 0.1, 1200);

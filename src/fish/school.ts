@@ -27,7 +27,7 @@ export class FishSchool {
     geo.setAttribute('aInstFx', this.fx);
     const mat = new THREE.MeshPhysicalMaterial({
       map: a.map, normalMap: a.normalMap, roughnessMap: a.roughnessMap, roughness: 1, metalness: 0, vertexColors: true,
-      alphaToCoverage: true, clearcoat: a.clearcoat ?? 0.5, clearcoatRoughness: a.clearcoatRough ?? 0.3,
+      alphaToCoverage: true, alphaTest: 0.5, clearcoat: a.clearcoat ?? 0.5, clearcoatRoughness: a.clearcoatRough ?? 0.3,
     });
     mat.normalScale.set(a.normalScale, a.normalScale);
     swimMaterial(mat, a.uni, null, { ...a.flags, inst: true }, a.uwo);

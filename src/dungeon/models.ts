@@ -721,11 +721,13 @@ export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lant
     const dz = Math.max(0, Math.min(3, b.danger ?? 0));
     const iconsL = [...Array(dz).fill('skull'), ...(b.giant ? ['giant'] : [])] as string[];
     const iconsR = (b.icons ?? []) as string[];
-    const rowW = iconsL.reduce((s, k) => s + iconW(k), 0) + (dz === 0 && !b.giant ? measure('SAFE', 'small') + 4 : 0) + 8 + iconsR.reduce((s, k) => s + iconW(k), 0);
+    const rowW = iconsL.reduce((s, k) => s + iconW(k), 0) + (b.danger === 0 && !b.giant ? measure('SAFE', 'small') + 4 : 0) + 8 + iconsR.reduce((s, k) => s + iconW(k), 0);
     const cw = Math.max(aw + Math.max(tw, nw, rowW) + 14, 60);
-    const rowH = Math.max(9, ...[...iconsL, ...iconsR].map((k) => iconH(k)));
-    const ch = Math.max(6 + 11 + 3 + rowH + (b.note ? 2 + 7 : 0) + 5, arrow ? arrowH(arrow) + 10 : 0);
-    return { b, arrow, aw, iconsL, iconsR, cw, ch, dz, rowH };
+    // a plain board (a distance, DEAD END) has no danger / reward row
+    const row = b.danger !== undefined || iconsR.length > 0 || !!b.giant;
+    const rowH = row ? Math.max(9, ...[...iconsL, ...iconsR].map((k) => iconH(k))) : 0;
+    const ch = Math.max(6 + 11 + (row ? 3 + rowH : 0) + (b.note ? 2 + 7 : 0) + 5, arrow ? arrowH(arrow) + 10 : 0);
+    return { b, arrow, aw, iconsL, iconsR, cw, ch, dz, rowH, row };
   });
   const H = 0.9 + lay.reduce((s, l) => s + l.ch * PX + 0.12, 0) + (o.header ? 0.62 : 0);
   const pole = mesh(lpCyl(0.13, H, 6, 0.11), wood); pole.position.y = H / 2; root.add(pole);
@@ -757,11 +759,11 @@ export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lant
     // the danger, left; the reward, right
     let ix = cx - 1;
     const iy = 6 + 11 + 3, rh = L.rowH;
-    if (!L.dz && !L.b.giant) { carve(x, 'SAFE', 'small', ix + 1, iy + Math.round((rh - 7) / 2), S, '#1e4a1a', '#cfe8a8'); ix += measure('SAFE', 'small') + 4; }
+    if (L.b.danger === 0 && !L.b.giant) { carve(x, 'SAFE', 'small', ix + 1, iy + Math.round((rh - 7) / 2), S, '#1e4a1a', '#cfe8a8'); ix += measure('SAFE', 'small') + 4; }
     for (const k of L.iconsL) { paintIcon(x, k, ix, iy + Math.round((rh - iconH(k)) / 2), S); ix += iconW(k); }
     let rx = L.cw - 6;
     for (const k of [...L.iconsR].reverse()) { rx -= iconW(k); paintIcon(x, k, rx, iy + Math.round((rh - iconH(k)) / 2), S); }
-    if (L.b.note) carve(x, L.b.note, 'small', cx, iy + rh + 2, S, '#3a1c0a', '#ecd0a0');
+    if (L.b.note) carve(x, L.b.note, 'small', cx, L.row ? iy + rh + 2 : 6 + 11 + 2, S, '#3a1c0a', '#ecd0a0');
     const bw = L.cw * PX, bh = L.ch * PX;
     const pivot = new THREE.Group();
     // boards hang to the side they point (left boards left of the post, the rest to the right)

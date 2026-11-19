@@ -350,13 +350,15 @@ export class LevelBuild {
       if (sign.lamp) this.signLamps.push(sign.lamp);
     };
     for (const sg of plan.signs) {
-      if (sg.kind === 'dead') { const sign = forkSignModel([{ title: 'DEAD END', note: 'TURN BACK', dir: -1, danger: 0, icons: [] }], { lantern: false }); signAt(sg.x, sign, -0.8); continue; }
+      if (sg.kind === 'dead') { const sign = forkSignModel([{ title: 'DEAD END', note: 'TURN BACK', dir: -1 }], { lantern: false }); signAt(sg.x, sign, -0.8); continue; }
       if ((sg.kind !== 'fork' && sg.kind !== 'lane') || sg.fork === undefined) continue;
       const f = plan.forks[sg.fork];
       if (!f) continue;
       const list = this.forkSigns.get(f.id) ?? [];
       if (sg.kind === 'fork') {
         const boards = f.lanes.map((l) => laneBoard(f, l, f.kind === 'end' ? 1 : l.side === 'upper' ? 'ur' : 'dr'));
+        // the end of a floor: how far you've come, too (the way home is back along the journey)
+        if (f.kind === 'end') boards.push({ title: `HOME ${Math.round((plan.far0 + sg.x) / 5) * 5} M`, dir: -1 });
         const sign = forkSignModel(boards, { header: f.kind === 'end' ? 'CROSSROADS' : 'THE WAY SPLITS' });
         signAt(sg.x, sign);
         list.push({ sign });

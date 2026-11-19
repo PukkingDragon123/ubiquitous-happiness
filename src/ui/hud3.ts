@@ -41,7 +41,6 @@ import { HealClam3D } from './obj/clam';
 import { HP_PER, HEAL_ITEM, hpify } from '../combat/types';
 import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
-import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
 import { skin } from './pixel/skins';

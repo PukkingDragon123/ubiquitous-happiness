@@ -395,9 +395,8 @@ const pufferfish: FishSpec = {
     let col = grad(['#5a4a1c', '#7a6424', '#a08638', '#c0a650', '#d8c890', '#f0ead8', '#fbf8f0'])(0.4 - c.yn * 0.62, c.px, c.py);
     // dark brown spots on the back and flanks (rounded, larger toward the back)
     if (c.yn > -0.25) {
-      const sx = c.X * 120, sy = c.Y * 120 + (c.Z > 0 ? 0 : 50);
-      const n = noise2(sx * 0.9, sy * 0.9, 5);
-      if (n > 0.66) col = dmix(col, C('#3a2a10'), Math.min(1, (n - 0.66) * 12), c.px, c.py);
+      const q = cells(c.X + 1, c.Y + (c.Z > 0 ? 0 : 0.5), 0.045 - c.t * 0.012, 0.7, 23);
+      if (q.d < 0.3 && ((q.id >>> 3) % 5) !== 0) col = q.d < 0.24 ? C('#3a2a10') : mix(col, C('#3a2a10'), 0.5);
     }
     // faint belly lines
     if (c.yn < -0.35 && ((c.py + Math.round(c.t * 30)) % 7) === 0) col = shade(col, 0.92);
@@ -525,9 +524,9 @@ const anglerfish: FishSpec = {
   paint: (c) => {
     let col = grad(['#141016', '#1e1820', '#2a2028', '#3a2a30', '#4a3438'])(0.35 - c.yn * 0.45, c.px, c.py);
     // velvety mottling + sparse pale pores
-    const n = noise2(c.X * 40, c.Y * 40 + (c.Z > 0 ? 0 : 30), 8);
-    col = shade(col, 0.85 + n * 0.3);
-    if (hash2(c.px, c.py, 3) < 0.012) col = mix(col, C('#8a7a80'), 0.6);
+    // a few pale skin filaments / pores in a sparse staggered row along the flank (hand-laid, not speckle)
+    const q = cells(c.X + 1, c.Y + (c.Z > 0 ? 0 : 0.3), 0.05, 0.6, 29);
+    if (q.d < 0.09 && c.yn > -0.4 && c.yn < 0.6) col = mix(col, C('#8a7a80'), 0.55);
     // photophore row
     if (photophore(c)) col = C('#a0f8ff');
     return col;
@@ -592,7 +591,7 @@ const ichthyosaur: FishSpec = {
       if (fr < w) col = dmix(col, C('#18100a'), Math.min(1, (w - fr) * 14) * (c.yn < -0.3 ? 0.7 : 1), c.px, c.py);
     }
     // freckles on the snout
-    if (c.t < 0.17 && c.yn > -0.2 && hash2(c.px >> 1, c.py >> 1, 6) < 0.08) col = shade(col, 0.6);
+    if (c.t < 0.17 && c.yn > -0.2) { const q = cells(c.X, c.Y + (c.Z > 0 ? 0 : 0.4), 0.06, 0.6, 31); if (q.d < 0.18) col = shade(col, 0.6); }
     return col;
   },
   fins: [
@@ -704,8 +703,9 @@ const grouper: FishSpec = {
   paint: (c) => {
     let col = grad(['#2a3424', '#3a4630', '#52604a', '#6e7a62', '#8a947a', '#b0b49c', '#ccccb4'])(0.38 - c.yn * 0.6, c.px, c.py);
     // dark irregular blotches arranged in vertical bands
-    const n = noise2(c.X * 9, c.yl * 30, 3) + 0.3 * Math.sin(c.t * 28);
-    if (n > 0.68 && c.yn > -0.6) col = dmix(col, C('#1e261a'), Math.min(1, (n - 0.68) * 6), c.px, c.py);
+    const q = cells(c.X + 1, c.Y + (c.Z > 0 ? 0 : 0.4), 0.075, 0.6, 43);
+    const band = Math.sin(c.t * 28) > -0.2;
+    if (band && q.d < 0.36 && c.yn > -0.6) col = q.d < 0.28 ? C('#1e261a') : mix(col, C('#1e261a'), 0.5);
     // pale spots
     if (c.sid < 0.12 && c.sd < 0.55 && c.t > 0.1) col = mix(col, C('#d8dcc4'), 0.7);
     return col;
@@ -860,7 +860,10 @@ const spermWhale: FishSpec = {
     // wrinkles: wavy horizontal grooves behind the head
     if (c.t > 0.3) { const wv = Math.sin(c.py * 1.7 + Math.sin(c.px * 0.21) * 2.0); if (wv > 0.85) col = shade(col, 0.8); }
     // pale scars + lips
-    if (hash2(c.px >> 2, c.py >> 1, 9) < 0.03 && c.t < 0.5) col = mix(col, C('#a8a8a8'), 0.6);
+    for (const [t0, y0, k] of [[0.08, 0.3, 0.9], [0.14, 0.1, -0.6], [0.2, 0.5, 0.4], [0.27, -0.2, 1.2], [0.34, 0.35, -0.3]] as [number, number, number][]) {
+      const dt = c.t - t0, dy = c.yn - y0 - dt * k * 6;
+      if (dt > 0 && dt < 0.05 && Math.abs(dy) < 0.035) col = mix(col, C('#a8a8a8'), 0.55);
+    }
     if (c.t < 0.24 && c.yn < -0.55) col = mix(col, C('#d8d4cc'), 0.7);
     // dorsal knuckles
     if (c.t > 0.66 && c.t < 0.86 && c.yn > 0.85 && (Math.floor(c.t * 60) % 2 === 0)) col = shade(col, 1.15);
@@ -952,10 +955,12 @@ const stonefish: FishSpec = {
   scales: { w: 5, h: 5, k: 0.9, rim: 0.2, hi: 0.08, bump: 1.4 },
   rough: 0.9, sheen: 0.04,
   paint: (c) => {
-    let col = grad(['#3a2e22', '#5a4632', '#7a6040', '#8e7450', '#a08a62', '#b8a07a'])(0.45 + noise2(c.X * 6, c.yl * 18, 7) * 0.5 - c.yn * 0.2, c.px, c.py);
-    const n = noise2(c.X * 14, c.yl * 40, 11);
-    if (n > 0.7) col = dmix(col, C('#a8582a'), 0.6, c.px, c.py);       // rust blotches
-    if (n < 0.22) col = dmix(col, C('#c8c0a8'), 0.55, c.px, c.py);      // pale crust
+    const big = cells(c.X + 1, c.Y + (c.Z > 0 ? 0 : 0.3), 0.06, 0.8, 41);
+    let col = grad(['#3a2e22', '#5a4632', '#7a6040', '#8e7450', '#a08a62', '#b8a07a'])(0.25 + ((big.id >>> 4) % 4) * 0.15 - c.yn * 0.2, c.px, c.py);
+    if (big.seam < 0.06) col = shade(col, 0.72);                           // dark cracks between the crusts
+    const k = (big.id >>> 7) % 6;
+    if (k === 0 && big.d < 0.45) col = mix(col, C('#a8582a'), 0.6);        // rust patches
+    else if (k === 1 && big.d < 0.4) col = mix(col, C('#c8c0a8'), 0.55);   // pale crust
     if (c.sd < 0.3 && c.sid > 0.8) col = shade(col, 1.25);                // warts catch the light
     return col;
   },

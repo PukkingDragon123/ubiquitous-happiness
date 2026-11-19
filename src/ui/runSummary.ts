@@ -274,7 +274,7 @@ export class RunSummaryCard {
     planes.draw(solid('#c8aa7a'), lx0 + 2, wy + wh - 9, { w: rx0 - lx0 - 4, h: 7, alpha: sa });
     planes.draw(solid('#e2c898'), lx0 + 2, wy + wh - 9, { w: rx0 - lx0 - 4, h: 1, alpha: sa });
     planes.draw(solid('#a88a5a'), lx0 + 2, wy + wh - 4, { w: rx0 - lx0 - 4, h: 1, alpha: sa });
-    planes.drawTiled(caustics(), lx0 + 2, wy + 2, rx0 - lx0 - 4, wh - 4, { tile: 84, ox: -t * 0.025, oy: t * 0.016, alpha: 0.16 * sa });
+    planes.drawTiled(caustics(), lx0 + 2, wy + 2, rx0 - lx0 - 4, wh - 4, { tile: 150, ox: -t * 0.018, oy: t * 0.012, alpha: 0.08 * sa });
     const loot = this.loot;
     const lbl = loot.length ? `MADE IT HOME - ${loot.length} THING${loot.length > 1 ? 'S' : ''}` : 'MADE IT HOME';
     const pw = ui.measure(lbl, 'small') + 28;
