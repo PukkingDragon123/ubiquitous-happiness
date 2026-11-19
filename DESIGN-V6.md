@@ -21,6 +21,9 @@ User feedback (2026-11-19), in their words, then what it means:
   value (a number + bar) shown with the blobfish avatar, no heart icons; the HUD strip map is removed; the journey
   gets **crossroads**: the way forks, signposts say where each branch leads (biome, danger, reward), and the branch you
   swim into decides what comes next. No map — you navigate by signposts, distance from home and the depth gauge.
+- (follow-up) "never ever use lazy simple pixel art; the death screen UI looks really bad" → no flat fills / plain
+  boxes / generic shapes anywhere: every pixel-art element gets hand-crafted 4–6 tone hue-shifted ramps, texture,
+  wear and ocean detail. The death screen (death moment + LOST AT SEA summary) is redone as a dramatic, ornate scene.
 
 ## Owners (v6)
 | Area | Owner |
