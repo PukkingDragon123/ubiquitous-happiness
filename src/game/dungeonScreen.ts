@@ -68,13 +68,15 @@ import { DungeonWorld } from '../dungeon/world';
 import { Pickup, type PickKind } from '../dungeon/pickups';
 import { PufferBomb } from '../dungeon/bomb';
 import { packAdd, packCells, packTotals, packLoose, packFits } from '../dungeon/pack';
-import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, type Reward } from '../dungeon/rewards';
+import { RunSummaryCard, type RunSummary } from '../ui/runSummary';
+import { codexSeen, codexBeaten, codexKnown, codexEntries } from '../ui/codex';
+import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, rollBig, bigChance, type Reward } from '../dungeon/rewards';
 import { journeyStrip, legOf, type JourneyLeg } from '../dungeon/minimap';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 
 // ------------------------------------------------------------------ save / resume
-export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number; chests?: number; far?: number }
+export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number; chests?: number; far?: number; fish?: number; giants?: number }
 interface FloorLoot { kind: PickKind; id?: string; x: number; y: number; n: number; level: number }
 export interface DungeonSave {
   v: 4;
@@ -116,6 +118,8 @@ export interface DungeonResult extends RunResult {
   far: number;
   /** what the run's materials (mailed + brought home) did for the house: counts before -> after per piece */
   home: HomeGoal[];
+  /** the dungeon already showed agent L's RunSummaryCard for this ending (flow can skip its own result card) */
+  summaryShown: boolean;
 }
 
 export interface DungeonEnter { cfg?: RunConfig; resume?: boolean | DungeonSave }
@@ -123,6 +127,16 @@ export interface DungeonEnter { cfg?: RunConfig; resume?: boolean | DungeonSave 
 type Phase = 'play' | 'dead' | 'descend' | 'done';
 interface Fight { arena: ArenaPlan; pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[]; ents: Entity[]; clearT: number; boss: BossEntity | null; bossDone: boolean; bossDeadT: number; t: number }
 
+/** an enemy's codex page id (agent L's src/ui/codex.ts: fish by species, giants by role; bosses by their id) */
+const CODEX_FISH: Record<string, string> = { puffer: 'pufferfish', angler: 'anglerfish' };
+function codexIdOf(kind: string): string | null {
+  if (!kind || kind === 'dummy' || kind === 'corpse' || kind === 'blind') return null;
+  const k = kind.replace(/^human:/, '');
+  if (CODEX_FISH[k]) return CODEX_FISH[k];
+  // a giant human: its role's own page if one is registered (K), else the codex's Diver
+  if (/^human:/.test(kind) || ['harpoon', 'spear', 'knife', 'net', 'medic', 'heavy', 'titan'].includes(k)) return codexEntries().some((e) => e.id === k) ? k : 'diver';
+  return k;
+}
 const AREA_NAME = (id: string) => (isHadal(id) ? biomeDef(id).name : AREA_LIST.find((a) => a.id === id)?.name ?? biomeDef(id).name);
 const FAR = 1e9;
 
@@ -233,7 +247,7 @@ export class DungeonScreen implements Screen {
 
   enter(data?: unknown) {
     const d = (data ?? {}) as DungeonEnter;
-    this.ended = false; this.paused = false; this.seq = []; this.deadT = -1; this.killer = null; this.mail = null; this.phase = 'play';
+    this.ended = false; this.paused = false; this.seq = []; this.deadT = -1; this.killer = null; this.mail = null; this.phase = 'play'; this.summary = null;
     this.game.timeScale = 1;
     POST.uDesat.value = 0; POST.uPulse.value = 0; POST.uFade.value = 0;
     const q = new URLSearchParams(location.search);
@@ -607,7 +621,10 @@ export class DungeonScreen implements Screen {
     const pk = depthPearls(depthOf(plan, c.y));
     const luck = this.luck(c.y);
     const kind = c.ck === 'big' || c.ck === 'locked' || c.ck === 'sunken' || c.ck === 'elite' ? c.ck : 'small';
-    const rewards = c.plan?.items ? c.plan.items.map((id) => ({ kind: 'item' as const, id })) : rollChest(this.world.rng, kind, baseOf(plan.area), luck, pk);
+    const rewards: Reward[] = c.plan?.items ? c.plan.items.map((id) => ({ kind: 'item' as const, id })) : rollChest(this.world.rng, kind, baseOf(plan.area), luck, pk);
+    // the boss's chest: a better shot at one of the big pieces
+    const bossChest = c.plan?.arena !== undefined && plan.arenas[c.plan.arena]?.kind === 'boss';
+    if (bossChest && this.world.rng.chance(bigChance('boss', luck))) { const b = rollBig(this.world.rng); if (b) rewards.unshift({ kind: 'item', id: b }); }
     if (c.plan?.poi !== undefined) { const poi = plan.pois[c.plan.poi]; if (poi) { poi.done = true; poi.taken = true; } }
     // the loot bursts out a beat after the lid swings
     this.after(0.35, () => this.spawnRewards(rewards, c.x, c.y + 0.9, true));
@@ -1004,6 +1021,29 @@ export class DungeonScreen implements Screen {
     this.save();
   }
 
+  // ---- the codex (agent L's field journal): a creature's first time on screen, and its kills
+  private codexT = 0;
+  private codexMet = new WeakSet<Entity>();
+  private updateCodex(dt: number) {
+    if ((this.codexT -= dt) > 0) return;
+    this.codexT = 0.4;
+    const cam = this.camera, dist = Math.max(4, cam.position.z);
+    const hh = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * dist, hw = hh * cam.aspect;
+    for (const e of this.world.entities) {
+      if (!e.alive || e.team !== 'enemy' || this.codexMet.has(e)) continue;
+      if (Math.abs(e.x - cam.position.x) > hw * 0.9 || Math.abs(e.y - cam.position.y) > hh * 0.9) continue;
+      this.codexMet.add(e);
+      const id = codexIdOf(e.kind);
+      if (!id) continue;
+      const known = codexKnown(id);
+      codexSeen(id, depthOf(this.plan, e.y));
+      if (!known && codexEntries().some((q) => q.id === id)) {
+        this.text.pop('NEW IN THE CODEX', e.x, e.y + e.r + 0.9, 'gold', { size: 0.24, life: 1.6 });
+        audio.play('page1', { vol: 0.35, dry: true });
+      }
+    }
+  }
+
   // ---- post office
   private mailUsed = 0;
   /** parcels per post office: a picked stack or item is one parcel, whatever its size (v4's big items fit too) */
@@ -1213,7 +1253,7 @@ export class DungeonScreen implements Screen {
       won, floor: this.floorIdx + 1, floors: this.floors.length, kills: this.tally.kills,
       maxDepth: Math.round(this.maxDepth), record: Math.round(this.maxDepth) > this.recordBefore,
       packLost: won ? [] : items, mailed: [...this.mailed], broughtHome: won ? items : [],
-      far: Math.round(this.farNow()), home: [],
+      far: Math.round(this.farNow()), home: [], summaryShown: false,
     };
   }
 
@@ -1254,6 +1294,30 @@ export class DungeonScreen implements Screen {
     this.game.timeScale = 1;
     (window as unknown as { lastDungeonResult: DungeonResult }).lastDungeonResult = r;
     if (this.onEnd) { this.onEnd(r); return; }
+    // the run summary (agent L's card) first; CONTINUE goes home
+    r.summaryShown = true;
+    this.summary = { card: new RunSummaryCard(this.summaryOf(r)), r };
+    this.game.post.fadeTo?.(r.won ? 0.55 : 0.25, 1.2, r.won ? '#d8f0ff' : '#000000');
+  }
+  private summary: { card: RunSummaryCard; r: DungeonResult; go?: boolean } | null = null;
+  private summaryOf(r: DungeonResult): RunSummary {
+    const t = this.tally;
+    return {
+      result: r.won ? 'surfaced' : 'lost', depth: r.maxDepth, distance: r.far, time: t.time, floors: r.floor,
+      kills: { fish: t.fish ?? 0, giants: t.giants ?? 0 }, loot: [...r.mailed, ...r.broughtHome], pearls: t.pearls, record: r.record,
+      cause: r.won ? undefined : r.killer ? `Taken by ${r.killer.name}` : undefined,
+    };
+  }
+  /** the summary card over the frozen sea (the only thing running once the run has ended) */
+  private updateSummary(dt: number) {
+    const sm = this.summary!;
+    this.water?.update(this.game.renderer, dt, this.camLook.x);
+    this.fx?.update(dt);
+    this.game.cursor = 'none';
+    this.hud.draw(dt, { ...this.hudState(null), menu: true }, this.game.input, (ui) => { if (sm.card.draw(ui, dt) === 'continue') sm.go = true; });
+    if (sm.go) { this.summary = null; this.leave(sm.r); }
+  }
+  private leave(r: DungeonResult) {
     const flow = (window as unknown as { flow?: { runEnded?: (r: DungeonResult) => void } }).flow;
     if (flow?.runEnded) { flow.runEnded(r); return; }
     if (this.game.get('hideout')) { this.game.go('hideout', {}); if (this.game.get('result')) this.game.openModal('result', r); }
@@ -1291,8 +1355,12 @@ export class DungeonScreen implements Screen {
   private wire() {
     const w = this.world;
     w.on('kill', (d) => {
+      const cid = codexIdOf(String(d.kind ?? ''));
+      if (cid) codexBeaten(cid);
       if (d.boss || !this.level) return;
       this.tally.kills++; this.run.kills++;
+      if (d.family === 'human' || /^human:/.test(String(d.kind))) this.tally.giants = (this.tally.giants ?? 0) + 1;
+      else this.tally.fish = (this.tally.fish ?? 0) + 1;
       // the dungeon drops the loot (K's enemies only report the kill): fish -> materials, humans -> gear and scrap
       const x = Number(d.x) || this.player.x, y = Number(d.y) || this.player.y;
       // size: K sends 'small' | 'medium' | 'large' (or a number)
@@ -1347,6 +1415,7 @@ export class DungeonScreen implements Screen {
   // ================================================================ frame
   update(dt: number) {
     const w = this.world, p = this.player, inp = this.game.input, lvl = this.level;
+    if (this.summary) { this.updateSummary(dt); return; }
     if (!w || !lvl || this.ended) return;
     // ---- pause
     if (inp.hit('pause') && !this.mail && this.phase !== 'dead' && this.phase !== 'descend') { this.paused = !this.paused; audio.play(this.paused ? 'k_open1' : 'k_close1', { vol: 0.5, dry: true }); }
@@ -1398,6 +1467,7 @@ export class DungeonScreen implements Screen {
     if (this.fight) this.updateFight(dt);
     this.updateGroups(dt);
     this.updateShopTalk();
+    this.updateCodex(dt);
     // ---- input: bombs, the bag
     if (this.phase === 'play' && p.alive && !this.mail) {
       if (inp.keyHit('KeyG')) this.dropBomb();

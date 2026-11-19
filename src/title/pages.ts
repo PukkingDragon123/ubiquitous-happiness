@@ -59,7 +59,7 @@ export class SettingsPanel {
 
 const LINES: [string, string, string?][] = [
   ['BLOBFISH: REEL REBELLION', '#ffd27a', 'title'], ['', ''], ['A revenge story, 30 metres down', W], ['Made with three.js', W], ['', ''],
-  ['FONTS', H], ['Alagard — Hewett Tsoi', W], ['m6x11plus, m5x7 — Daniel Linssen', W], ['Jacquard 24, Tiny5, Pixelify Sans — OFL', W], ['TBME Goofy — from Chewy (Apache 2.0)', W], ['', ''],
+  ['FONTS', H], ['Jersey 10 / 15 / 20 — OFL', W], ['Alagard — Hewett Tsoi', W], ['m6x11plus, m5x7 — Daniel Linssen', W], ['Jacquard 24, Tiny5, Pixelify Sans — OFL', W], ['TBME Goofy — from Chewy (Apache 2.0)', W], ['', ''],
   ['SOUND & MUSIC', H], ['CC0 / public domain recordings', W], ['Kenney, rubberduck, Memoraphile', W], ['cynicmusic, joth, TAD, umplix', W], ['OpenGameArt.org contributors', W], ['US National Park Service', W], ['', ''],
   ['ALSO', H], ['Water from FISHTOP', W], ['People from Limbophobia', W], ['Every texture painted in code', W], ['Every hat woven by hand', W], ['', ''],
   ['Full list in CREDITS.md', D], ['', ''], ['thanks for playing', '#ffd27a'],

@@ -21,6 +21,8 @@ import { spawnEnemy, spawnBoss, setArena } from '../combat';
 import type { Arena, EnemyKind, BossEntity, FloorId } from '../combat';
 import { TrainingDummy } from '../combat/dummy';
 import { Text3DLayer, Float3D } from '../ui/text3d';
+import { codexEntries } from '../ui/codex';
+import { photo } from '../ui/obj/studio';
 import { kitMat } from '../humans/diveGear';
 import { band, nz, hh } from '../humans/fabric';
 
@@ -115,6 +117,7 @@ class CombatPreview extends MockScreen {
     this.spawned = []; this.dummy = null; this.boss = null; this.autoT = 0; this.autoKey = null; this.autoMove = null;
     this.spawnAll();
     this.makeHud();
+    if (q.get('codex')) this.codexSheet();
     (window as unknown as { combatPreview: unknown }).combatPreview = {
       world: this.world, blob: this.blob, arena: a,
       spawn: (k: EnemyKind, x = 3, y = a.floor + 2) => spawnEnemy(this.world, k, x, y, { arena: a }),
@@ -170,6 +173,22 @@ class CombatPreview extends MockScreen {
     inp.pressed.add(key); inp.down.add(key);
     this.autoKey = key; this.autoT = mode === 'block' ? 1.2 : 0.08;
     console.log(`[auto] ${mode} pressed ${Math.round(left * 1000)}ms before ${c.move!.id}`);
+  }
+
+  /** &codex=1: a contact sheet of the combat codex photos (fish + giants) */
+  private codexSheet() {
+    const ids = ['moray', 'crab', 'pufferfish', 'jellyfish', 'barracuda', 'anglerfish', 'lionfish', 'stonefish', 'mantis', 'harpoon', 'knife', 'net', 'heavy', 'medic'];
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;background:#1a1410;display:flex;flex-wrap:wrap;gap:4px;padding:6px;z-index:20;align-content:flex-start';
+    for (const e of codexEntries()) {
+      if (!ids.includes(e.id) || !e.model) continue;
+      const cell = document.createElement('div');
+      cell.style.cssText = 'color:#f0e0c0;font:11px monospace;text-align:center;background:#2a2018;padding:2px';
+      try { const c = photo(e.model(), 150, 100, { yaw: -0.55, pitch: 0.12, fill: 0.88, ss: 2 }); cell.appendChild(c); } catch (err) { cell.textContent = 'ERR ' + err; }
+      const t = document.createElement('div'); t.textContent = `${e.name} ${'*'.repeat(e.danger ?? 0)}`; cell.appendChild(t);
+      d.appendChild(cell);
+    }
+    document.body.appendChild(d);
   }
 
   private revive() {

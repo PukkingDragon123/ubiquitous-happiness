@@ -9,8 +9,9 @@
 import * as THREE from 'three';
 import { buildProp } from './models';
 import { PIECES, isBuilt, homeProgress, type Piece } from './rebuild';
-import { buildShell, pieceModel, ghostOf, floorOutline, rubbleHeap, GoalBoard, IN, WALL_T, DOOR_W, type Shell } from './pieces';
+import { buildShell, pieceModel, ghostOf, floorOutline, rubbleHeap, lectern, GoalBoard, IN, WALL_T, DOOR_W, type Shell } from './pieces';
 import { damp } from '../core/math';
+import { TEX } from './tex';
 
 export interface Spot {
   piece: Piece;
@@ -34,6 +35,7 @@ export interface Spot {
 export const PORCH = { x0: -3.6, x1: 3.6, z0: IN.z1 + WALL_T, z1: 10.2, set: new THREE.Vector3(0, 0, 7.6), stand: new THREE.Vector3(0, 0, 6.15) };
 export const BOARD_AT = new THREE.Vector3(-2.3, 0, 3.35);
 export const CRAB_HOME = new THREE.Vector3(-3.35, 0, 2.55);
+export const CODEX_AT = new THREE.Vector3(2.7, 0, 3.45);
 
 const CELL = 0.25, GX0 = IN.x0 - 0.5, GZ0 = IN.z0 - 0.5, GW = Math.ceil((IN.x1 - IN.x0 + 1) / CELL), GD = Math.ceil((PORCH.z1 - IN.z0 + 0.5) / CELL);
 
@@ -42,6 +44,7 @@ export class House {
   shell: Shell;
   spots = new Map<string, Spot>();
   board = new GoalBoard();
+  codex: THREE.Group;
   hemi: THREE.HemisphereLight;
   sun: THREE.DirectionalLight;
   warm: THREE.PointLight;
@@ -60,6 +63,9 @@ export class House {
     // the goal board stands inside by the front door, facing the room's front (the camera)
     this.board.group.position.copy(BOARD_AT); this.board.group.rotation.y = 0.18;
     this.group.add(this.board.group);
+    // the codex: a field journal open on a lectern by the door
+    this.codex = lectern(); this.codex.position.copy(CODEX_AT); this.codex.rotation.y = -0.25;
+    this.group.add(this.codex);
     // ---- lights: a cold key through the broken roof, the water's hemisphere, a warm fill that grows with the home
     this.hemi = new THREE.HemisphereLight('#2e5470', '#1a1410', 0.9);
     this.sun = new THREE.DirectionalLight('#8ac8e8', 1.6);
@@ -76,7 +82,7 @@ export class House {
     this.group.add(this.hemi, this.sun, this.sun.target, this.warm, this.porchLamp, new THREE.AmbientLight('#1a2030', 0.35));
     // the window's cold shaft of light (shown once the window is built)
     const g = new THREE.PlaneGeometry(1.9, 4.4); g.translate(0, -2.2, 0);
-    this.windowShaft = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+    this.windowShaft = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: TEX.ray(), color: '#7ad8ff', transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
     this.windowShaft.position.set(0, 2.5, IN.z0 + 0.3); this.windowShaft.rotation.x = -0.75; this.windowShaft.renderOrder = 7;
     this.group.add(this.windowShaft);
     // ---- the porch: flat stepping stones out of the door, a lantern post
@@ -199,6 +205,7 @@ export class House {
       if (isBuilt(p.id) || s.grow > 0.5) box(p.x, p.z, p.w, p.d, p.yaw);
     }
     box(BOARD_AT.x, BOARD_AT.z, 1.3, 0.5, 0.18);
+    box(CODEX_AT.x, CODEX_AT.z, 0.5, 0.45, 0);
     // the fallen beam and the corner heaps while the house is a ruin
     if (this.shell.rubble[0]?.visible) { box(-4.7, 3.0, 1.5, 2.2, 0); box(4.9, 3.6, 1.1, 1.1, 0); box(5.3, 1.7, 1.0, 1.0, 0); }
   }

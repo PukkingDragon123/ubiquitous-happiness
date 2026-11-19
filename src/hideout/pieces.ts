@@ -410,6 +410,24 @@ export class GoalBoard {
   }
 }
 
+// ------------------------------------------------------------------ the codex lectern
+/** a driftwood lectern with the big field journal (the CODEX) lying open on it, a sea-glass paperweight */
+export function lectern(): THREE.Group {
+  const k = new Kit(), wood = MAT.wood('drift');
+  k.slab(wood, 0.5, 0.06, 0.4, 0, 0, 0);
+  k.box(wood, 0.12, 0.9, 0.12, 0, 0.5, 0);
+  k.box(wood, 0.62, 0.05, 0.46, 0, 0.98, 0.0, { rx: 0.35 });
+  k.box(MAT.leather('brown'), 0.6, 0.05, 0.42, 0, 1.03, 0.02, { rx: 0.35 });
+  const page = MAT.plain('#e8d8b0/0.9');
+  for (const s of [-1, 1]) k.box(page, 0.27, 0.025, 0.36, s * 0.14, 1.065, 0.03, { rx: 0.35, rz: s * -0.06 });
+  for (let i = 0; i < 5; i++) k.box(MAT.plain('#5a4630/0.9'), 0.18, 0.004, 0.012, -0.14, 1.08 + i * 0.012, -0.04 + i * 0.05, { rx: 0.35, chamfer: 0 });
+  k.box(MAT.plain('#c8241c/0.6'), 0.02, 0.005, 0.22, 0.02, 1.075, 0.12, { rx: 0.35, chamfer: 0 });
+  k.sphere(MAT.plain('#5ac8a8/0.1/0.3'), 0.045, 0.2, 1.11, -0.02, { w: 6, h: 4, sy: 0.7 });
+  const g = k.build();
+  g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
 // ------------------------------------------------------------------ ghosts (unbuilt spots)
 const GHOST = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.08, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 const GHOST_HOT = new THREE.MeshBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 0.22, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });

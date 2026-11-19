@@ -167,7 +167,12 @@ export function genLevel(o: LevelOpts): LevelPlan {
         // a shaft: an overhanging lip narrows the top of the drop, so you swim over it and down
         if (kind === 'shaft') solid('lip', sx - 3.2, sx + w * 0.35, level - 0.6, level + 0.9);
         // a big drop is a vista: the camera pulls back over the edge and a signpost marks how far you've come
-        if (drop >= 4.5) { plan.vistas.push(sx); plan.signs.push({ x: sx - 2.6, y: level, kind: 'vista' }); }
+        // (a signpost only every ~110 m or so: a stage of the voyage, not a fence)
+        if (drop >= 4.5) {
+          plan.vistas.push(sx);
+          const last = plan.signs[plan.signs.length - 1];
+          if (!last || sx - last.x > 110) plan.signs.push({ x: sx - 2.6, y: level, kind: 'vista' });
+        }
       }
       const upper = level, lower = level - drop;
       const f = r.next();

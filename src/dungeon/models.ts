@@ -536,7 +536,8 @@ export function signpostModel(boards: { text: string; dir: -1 | 0 | 1 }[], lante
     const board = mesh(chamferBox(bw, bh, 0.07, 0.02), wood);
     const off = bd.dir * (bw / 2 - 0.15);
     board.position.set(off, y, 0.02); g.add(board);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.04, bh - 0.04), psxMat(tex, { rough: 0.9 }));
+    // the painted face glows a touch (the lantern's light on it), so the distances read in the dark of the deep
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.04, bh - 0.04), psxMat(tex, { rough: 0.9, emissive: '#ffe8c0', emissiveK: 0.45, emissiveMap: tex }));
     face.position.set(off, y, 0.057); g.add(face);
     if (bd.dir) {
       // the arrow's point: a wedge on the board's far end

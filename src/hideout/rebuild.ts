@@ -39,7 +39,7 @@ export const PIECES: Piece[] = [
   P({ id: 'wardrobe', name: 'Wardrobe', unlock: 'Cosmetics: hats, skins, scarves', cost: { driftwood: 4, seashell: 3, cork: 2 }, x: -2.9, z: -4.0, yaw: 0, w: 1.3, d: 0.65 }),
   P({ id: 'sofa', name: 'Sofa', unlock: 'A place to sit (cosier)', cost: { kelp: 5, cork: 3, driftwood: 2 }, x: 0.2, z: 0.9, yaw: Math.PI, w: 1.9, d: 0.85 }),
   P({ id: 'window', name: 'Window', unlock: 'Daylight through the round window', cost: { seaGlass: 4, copperOre: 1 }, x: 0, z: -4.5, yaw: 0, w: 2, d: 0.3, wall: 2.15 }),
-  P({ id: 'lampB', name: 'Lamp', unlock: 'More warm light', cost: { seaGlass: 2, copperOre: 1 }, x: 1.75, z: 1.45, yaw: 0, w: 0.6, d: 0.6 }),
+  P({ id: 'lampB', name: 'Lamp', unlock: 'More warm light', cost: { seaGlass: 2, copperOre: 1 }, x: 2.05, z: 1.35, yaw: 0, w: 0.6, d: 0.6 }),
   P({ id: 'door', name: 'Front Door', unlock: 'A proper door (cosy and snug)', cost: { driftwood: 5, scrap: 2, rustyNail: 3 }, x: 0, z: 4.5, yaw: 0, w: 1.8, d: 0.4, wall: 0 }),
 ];
 export const PIECE: Record<string, Piece> = Object.fromEntries(PIECES.map((p) => [p.id, p]));

@@ -158,6 +158,27 @@ export class GroundWave implements Entity {
   }
 }
 
+/**
+ * a still-life version of the kit for photographs (the codex): glowing goggles, a few dead fish and a lantern
+ * hung on the rig at rest (rig space, scale 1)
+ */
+export function dressForPhoto(rig: { model: { dive: { mask: THREE.Object3D | null; ports: THREE.Mesh[] }; bones: Record<string, THREE.Object3D> }; group: THREE.Group }, o: { lantern?: boolean; trophies?: number } = {}) {
+  const glow = new THREE.MeshStandardMaterial({ color: '#d8ff70', emissive: new THREE.Color('#c8ff40'), emissiveIntensity: 2.6, roughness: 0.2, flatShading: true });
+  const mask = rig.model.dive.mask;
+  if (mask && mask.children[1]) (mask.children[1] as THREE.Mesh).material = glow;
+  for (const port of rig.model.dive.ports) port.material = glow;
+  rig.group.updateMatrixWorld(true);
+  const hips = rig.model.bones.hips.getWorldPosition(new THREE.Vector3());
+  rig.group.worldToLocal(hips);
+  for (let i = 0; i < (o.trophies ?? 3); i++) {
+    const c = fishCard(i, 0.36);
+    c.rotation.z = -Math.PI / 2 + (i - 1) * 0.15;
+    c.position.set(hips.x + (i - 1) * 0.1, hips.y - 0.08, 0.16 + (i % 2) * 0.02);
+    rig.group.add(c);
+  }
+  if (o.lantern) { const L = lanternMesh(); L.g.scale.setScalar(0.55); L.g.position.set(hips.x + 0.14, hips.y - 0.06, 0.2); rig.group.add(L.g); }
+}
+
 interface Hanger { m: THREE.Object3D; line: THREE.Line | null; ang: number; vel: number; off: THREE.Vector3; len: number }
 
 export class GiantKit {

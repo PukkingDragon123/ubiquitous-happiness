@@ -49,6 +49,8 @@ export interface DungeonHudState {
   where: string;
   /** the depth gauge (also handed to L's Hud as data.depth) */
   depth: DepthHud;
+  /** a full-screen card is up (the run summary): the HUD tucks away and the cursor shows */
+  menu?: boolean;
 }
 
 const C = { white: '#f4f0e6', red: '#ff6a5a', ink: '#06080e' };
@@ -69,19 +71,19 @@ export class DungeonHud {
 
   draw(dt: number, s: DungeonHudState, input: Parameters<PixelUI['begin']>[0], extra?: (ui: PixelUI) => void): string | null {
     const ui = this.ui;
-    ui.drawCursor = s.paused || !!s.mail;
+    ui.drawCursor = s.paused || !!s.mail || !!s.menu;
     ui.begin(input, dt);
     this.t += dt;
     // menus are physical objects: the HUD tucks itself away while the journal / mailbag is open
     // the depth gauge's data rides along as data.depth (agent L's brass gauge reads it)
     const data = { ...s.data, depth: s.depth } as HudData;
-    this.l.drawInto(ui, dt, s.paused || s.mail ? { ...data, hidden: true } : data);
+    this.l.drawInto(ui, dt, s.paused || s.mail || s.menu ? { ...data, hidden: true } : data);
     // (the depth reads once, on the brass gauge's plaque: no separate counter)
     this.k = Math.max(1, ui.h / 360);
     this.journal.visible = s.paused && !s.mail; this.bag.visible = !!s.mail; this.tag.visible = false;
     for (const [uid, m] of this.mailModels) if (!s.mail?.items.some((i) => i.uid === uid)) { m.removeFromParent(); this.mailModels.delete(uid); }
     let out: string | null = null;
-    if (s.prompt && !s.paused && !s.mail) this.prompt(s.prompt);
+    if (s.prompt && !s.paused && !s.mail && !s.menu) this.prompt(s.prompt);
     extra?.(ui);
     if (s.mail) out = this.mailPicker(s.mail);
     if (s.paused) out = this.pauseMenu(s) ?? out;
@@ -166,10 +168,10 @@ export class DungeonHud {
     const ui = this.ui;
     this.build();
     // the bag grows sideways for a big pack (v4's larger grid) so it never runs off the screen
-    const cols = Math.min(10, Math.max(6, Math.ceil(m.items.length / 6))), cell = 30;
+    const cols = Math.min(10, Math.max(6, Math.ceil(m.items.length / 6))), cell = 36;
     const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
     const rows = Math.max(1, Math.ceil(m.items.length / cols));
-    const w = Math.max(250, cols * cell + 32), h = rows * cell + 86;
+    const w = Math.max(290, cols * cell + 32), h = rows * cell + 86;
     const x = Math.round((ui.w - w) / 2), y = Math.round((ui.h - h) / 2) + 8;
     const st = this.l.stage, k = this.k;
     (this.bag.getObjectByName('body') as THREE.Mesh).scale.set(w / k, h / k, 1);
@@ -206,7 +208,7 @@ export class DungeonHud {
     });
     if (!m.items.length) ui.text('YOUR PACK IS EMPTY', x + w / 2, y + 40, { font: 'small', color: '#3a2410', shadow: null, align: 'center' });
     const by = y + h - 28;
-    if (ui.button('mail:send', `SEND ${m.picked.size} HOME`, x + 14, by, w / 2 - 18, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
+    if (ui.button('mail:send', m.picked.size ? `SEND ${m.picked.size}` : 'SEND', x + 14, by, w / 2 - 18, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
     if (ui.button('mail:close', 'DONE', x + w / 2 + 4, by, w / 2 - 18, 18, { style: 'wood', key: 'Escape' })) out = 'mail:close';
     if (m.items.some((i) => ITEMS[i.id]?.kind === 'material') && ui.button('mail:mats', 'ALL MATERIALS', x + w / 2 - 50, y + h + 4, 100, 16, { style: 'wood', key: 'KeyA' })) out = 'mail:mats';
     // what the parcel builds at home: the house's goal (and anything else it helps), counts before -> after

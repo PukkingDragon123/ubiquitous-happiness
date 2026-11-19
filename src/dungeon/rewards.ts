@@ -24,6 +24,21 @@ export function rollMaterial(rng: Rng, area: string): string {
 
 const ARCH = ['mage', 'warrior', 'summoner', 'tinkerer', 'rogue'];
 /** a gear roll (never a material): archetype gear only once its hideout station is built, untagged gear always */
+/** v4's big items (3x3 to 4x4, agent L): rare finds from big chests, sunken treasure and champions, never the shop */
+export const BIG_ITEMS = ['giantClam', 'shipWheel', 'rustAnchor', 'sunkenChest', 'harpoonGun'];
+const isBig = (id: string) => BIG_ITEMS.includes(id);
+/** one big item (epic more often than legendary), or null when none exist */
+export function rollBig(rng: Rng): string | null {
+  const ok = BIG_ITEMS.filter((id) => ITEMS[id]);
+  if (!ok.length) return null;
+  return rng.weighted(ok, (id) => (ITEMS[id].rarity === 'legendary' ? 1 : 2.5));
+}
+/** the chance a chest / champion holds a big item */
+export function bigChance(kind: 'big' | 'sunken' | 'elite' | 'boss', luck: number): number {
+  const base = { big: 0.1, sunken: 0.22, elite: 0.06, boss: 0.3 }[kind];
+  return Math.min(0.6, base + Math.max(0, luck) * 0.015);
+}
+
 export function rollGear(rng: Rng, luck: number, tier: 'room' | 'treasure' | 'boss' | 'shop' = 'room'): string {
   let arch = new Set<string>(), unlocks = new Set<string>();
   try { const p = stationPerks(); arch = new Set(p.arch); unlocks = new Set(p.unlocks); } catch { /* hideout not loaded */ }
@@ -33,10 +48,11 @@ export function rollGear(rng: Rng, luck: number, tier: 'room' | 'treasure' | 'bo
     const tags = (d.tags ?? []).filter((t) => ARCH.includes(t));
     return !tags.length || tags.some((t) => arch.has(t));
   };
-  const pool = (d: ItemDef) => ok(d) && (tier !== 'boss' || d.rarity !== 'common') && (tier !== 'treasure' || d.rarity !== 'common' || rng.chance(0.3));
+  // (big items only come from their own rolls: rollBig)
+  const pool = (d: ItemDef) => ok(d) && !isBig(d.id) && (tier !== 'boss' || d.rarity !== 'common') && (tier !== 'treasure' || d.rarity !== 'common' || rng.chance(0.3));
   const L = luck + (tier === 'boss' ? 2.5 : tier === 'treasure' ? 1 : 0);
   const id = rollItem(rng, pool, L);
-  return ITEMS[id] && ITEMS[id].kind !== 'material' ? id : rollItem(rng, (d) => d.kind !== 'material' && !d.craftOnly, L);
+  return ITEMS[id] && ITEMS[id].kind !== 'material' && !isBig(id) ? id : rollItem(rng, (d) => d.kind !== 'material' && !d.craftOnly && !isBig(d.id), L);
 }
 
 /** Isaac-style room-clear reward: often a pearl or a heart, sometimes a key / bomb / material, rarely gear */
@@ -98,6 +114,8 @@ export function rollChest(rng: Rng, kind: 'small' | 'locked' | 'big' | 'sunken' 
     case 'sunken': out.push({ kind: 'item', id: rollGear(rng, luck + 2, 'treasure') }); pearls(rng.int(6, 9)); if (rng.chance(0.5)) mat(); break;
     case 'elite': mat(); if (rng.chance(0.6)) out.push({ kind: 'item', id: rollGear(rng, luck + 0.5) }); pearls(rng.int(2, 3)); break;
   }
+  // the rare big find: a 3x3-4x4 piece (a build in itself)
+  if ((kind === 'big' || kind === 'sunken' || kind === 'elite') && rng.chance(bigChance(kind, luck))) { const b = rollBig(rng); if (b) out.unshift({ kind: 'item', id: b }); }
   return out;
 }
 

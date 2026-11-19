@@ -25,6 +25,9 @@ import { ENEMY_INFO } from './types';
 export { setArena, arenaOf } from './arena';
 export { bindArena } from './roster';
 export { PlayerCombat } from './moveset';
+export { codexId, registerCombatCodex } from './codex';
+import { registerCombatCodex } from './codex';
+registerCombatCodex();
 export { attackPlayer } from './resolve';
 export { BOSS_INFO } from '../bosses';
 

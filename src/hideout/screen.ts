@@ -30,7 +30,8 @@ import { SettingsPanel } from '../title/pages';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 import { HubPlayer } from './player';
 import { Tag, type TagLine } from './tag';
-import { House, PORCH, BOARD_AT, CRAB_HOME } from './house';
+import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT } from './house';
+import { CodexBook, codexCount } from '../ui/codex';
 import { IN, outlineOf, setGhostHot } from './pieces';
 import { PIECE, PIECES, isBuilt, canAfford, costLines, buildPiece, nextGoal, ensureHome } from './rebuild';
 import { BuildScene } from './buildscene';
@@ -47,7 +48,7 @@ export interface HideoutOpts {
   /** the pause card's SIGNPOST: back to the title */ onMenu?: () => void;
 }
 type Mode = 'free' | 'panel' | 'build' | 'packing' | 'swim' | 'sit' | 'sleep';
-type Panel = 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'pause' | 'settings';
+type Panel = 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'pause' | 'settings' | 'codex';
 
 /** a clickable thing in the house */
 interface Thing { id: string; obj: () => THREE.Object3D | null; stand: () => THREE.Vector3; face: () => THREE.Vector3; tag: () => TagLine[]; use: () => void; reach?: number }
@@ -81,6 +82,7 @@ export class HideoutScreen implements Screen {
   private ward = new WardrobePanel();
   private ach = new AchievementsPanel();
   private settings = new SettingsPanel();
+  private codexBook = new CodexBook();
   private things: Thing[] = [];
   private hoverThing: Thing | null = null;
   private outline: { id: string; g: THREE.Group } | null = null;
@@ -154,6 +156,7 @@ export class HideoutScreen implements Screen {
     // the open doorway works before the door is rebuilt
     T.push({ id: 'doorway', reach: 1.3, obj: () => null, stand: () => new THREE.Vector3(0, 0, IN.z1 - 0.7), face: () => new THREE.Vector3(0, 1, IN.z1 + 1), tag: () => [{ text: 'OUT', font: 'title' }, { text: 'pack and swim out', color: '#3a2810' }], use: () => this.goOut() });
     T.push({ id: 'board', reach: 1.4, obj: () => this.house.board.group, stand: () => BOARD_AT.clone().add(new THREE.Vector3(0.2, 0, 0.95)), face: () => BOARD_AT.clone().setY(1), tag: () => this.goalTag(), use: () => this.showGoal() });
+    T.push({ id: 'codex', reach: 1.2, obj: () => this.house.codex, stand: () => CODEX_AT.clone().add(new THREE.Vector3(-0.2, 0, -0.85)), face: () => CODEX_AT.clone().setY(1), tag: () => { const c = codexCount(); return [{ text: 'CODEX', font: 'title' }, { text: `field journal · ${c.known}/${c.total} met`, color: '#3a2810' }]; }, use: () => this.openPanel('codex') });
     T.push({ id: 'crab', reach: 1.5, obj: () => this.crab.group, stand: () => this.crab.group.position.clone().add(new THREE.Vector3(0.9, 0, 0.6)), face: () => this.crab.group.position.clone().setY(0.5), tag: () => [{ text: 'MR. CRAB', font: 'title' }, { text: 'your landlord and builder', color: '#3a2810' }], use: () => this.crabTalk() });
     this.things = T;
   }
@@ -258,6 +261,7 @@ export class HideoutScreen implements Screen {
     if (p === 'wardrobe') { this.ward.open(); audio.play('cloth1', { vol: 0.3 }); }
     if (p === 'trophy') { this.ach.open(); audio.play('shimmer1', { vol: 0.3 }); }
     if (p === 'settings') this.settings.open();
+    if (p === 'codex') { this.codexBook.open(); audio.play('page1', { vol: 0.45, dry: true }); }
     if (p === 'pause') audio.play('k_open1', { vol: 0.35, dry: true });
   }
   private closePanel() {
@@ -276,6 +280,7 @@ export class HideoutScreen implements Screen {
       case 'trophy': return { x: Math.round((ui.w - ACH_W) / 2), y: Math.max(4, Math.round((ui.h - ACH_H) / 2)), w: ACH_W, h: ACH_H };
       case 'settings': return { x: Math.round((ui.w - 236) / 2), y: Math.round((ui.h - 182) / 2), w: 236, h: 182 };
       case 'pause': return { x: Math.round((ui.w - 140) / 2), y: Math.round((ui.h - 104) / 2), w: 140, h: 104 };
+      case 'codex': return { x: 0, y: 0, w: ui.w, h: ui.h };
     }
   }
   private drawPanel(dt: number, live: boolean) {
@@ -294,6 +299,8 @@ export class HideoutScreen implements Screen {
       case 'trophy': close = this.ach.draw(ui, r.x, r.y, dt); break;
       case 'settings': close = this.settings.draw(ui, r.x, r.y, dt); break;
       case 'pause': close = this.pauseCard(r); break;
+      // the codex closes itself (Esc, its button, a click outside the book)
+      case 'codex': if (!this.codexBook.draw(ui, dt)) { this.panel = null; this.mode = 'free'; this.modeT = 0; } return;
     }
     // a click outside the panel closes it (not on the frame it opened)
     if (live && this.modeT > 0.2 && ui.pressed && !ui.hover(r.x - 2, r.y - 2, r.w + 4, r.h + 4)) close = true;
@@ -519,7 +526,7 @@ export class HideoutScreen implements Screen {
     }
     // the door swings open while the hero passes through the doorway
     const ds = this.house.spots.get('door');
-    if (ds?.door) { const p = this.hero.root.position; const near = Math.abs(p.x) < 1.6 && Math.abs(p.z - IN.z1) < 1.6; ds.door.rotation.y = damp(ds.door.rotation.y, near || this.mode === 'packing' ? 1.6 : 0, 5, dt); }
+    if (ds?.door) { const p = this.hero.root.position; const near = Math.abs(p.x) < 1.3 && p.z > IN.z1 - 1.1 && p.z < IN.z1 + 1.4; ds.door.rotation.y = damp(ds.door.rotation.y, near || this.mode === 'packing' ? 1.6 : 0, 5, dt); }
     this.ocean.update(dt, this.camera);
     this.dust.update(dt, this.t, 'burst'); this.sparks.update(dt, this.t, 'burst');
     if (Math.random() < dt * 5) this.dust.emit((Math.random() - 0.5) * 11, 0.4 + Math.random() * 2.8, (Math.random() - 0.5) * 8, { vy: -0.03, vx: (Math.random() - 0.5) * 0.08, life: 5, size: 0.03 });
@@ -682,20 +689,11 @@ export class HideoutScreen implements Screen {
   }
   private objective() {
     const ui = this.ui, g = nextGoal();
-    const x = 8, y = 8;
-    if (!g) { ui.text('HOME SWEET HOME  ·  go out the front door to dive', x, y, { font: 'small', color: '#ffe8b0', shadow: '#000' }); return; }
+    if (!g) { ui.objective('Home rebuilt! Out the front door to dive', undefined, { x: 8, y: 8, id: 'objective' }); return; }
     const parts = costLines(g.id);
-    let w = ui.measure('NEXT', 'small') + ui.measure(g.name, 'title') + 18;
-    for (const [, h, n] of parts) w += ui.measure(`${Math.min(h, n)}/${n}`, 'small') + 24;
-    ui.fill(x - 4, y - 4, w + 8, 18, '#120a06', 0.6);
-    let xx = x;
-    xx += ui.text('NEXT', xx, y + 2, { font: 'small', color: '#e0b878', shadow: '#000' }) + 6;
-    xx += ui.text(g.name, xx, y, { font: 'title', color: canAfford(g.id) ? '#aaf08a' : '#ffe8b0', shadow: '#000' }) + 8;
-    for (const [m, h, n] of parts) {
-      ui.item(m, xx, y - 2, 14, 14);
-      xx += 16;
-      xx += ui.text(`${Math.min(h, n)}/${n}`, xx, y + 2, { font: 'small', color: h >= n ? '#aaf08a' : '#ffb0a0', shadow: '#000' }) + 8;
-    }
-    ui.mark('objective', x - 4, y - 4, w + 8, 18);
+    const have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
+    let y = 8;
+    y += ui.objective(`Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y, w: 190, id: 'objective', pulse: canAfford(g.id) }) + 2;
+    for (const [m, h, n] of parts) y += ui.objective(MAT_NAME(m), [h, n], { x: 14, y, w: 150, icon: m, small: true }) + 2;
   }
 }
