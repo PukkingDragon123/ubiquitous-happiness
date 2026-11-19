@@ -17,6 +17,10 @@ User feedback (2026-11-19), in their words, then what it means:
 - "the hearts and elixir UI super detailed; show a blobfish instead of hearts; what is elixir even; make it all ocean
   themed" → health is shown as little blobfish (full / hurt / empty), super detailed; the heal flasks become an
   obviously ocean-themed, self-explanatory healing item; everything ocean themed.
+- (follow-up) "make you got HP instead of hearts, and don't show map but have crossroads" → health is an HP
+  value (a number + bar) shown with the blobfish avatar, no heart icons; the HUD strip map is removed; the journey
+  gets **crossroads**: the way forks, signposts say where each branch leads (biome, danger, reward), and the branch you
+  swim into decides what comes next. No map — you navigate by signposts, distance from home and the depth gauge.
 
 ## Owners (v6)
 | Area | Owner |
@@ -25,7 +29,8 @@ User feedback (2026-11-19), in their words, then what it means:
 | Sea life realism (`src/creatures/*`, `src/fish/*`, turtle/ray/eel/jelly/crab models wherever they live) | agent C6 |
 | Manatee rebuild + suit + bug fixes (`src/area/manatee.ts`) | agent M6 |
 | UI kit chunky + wood/kelp/algae detail (`src/ui/pixel/*`, `src/hideout/panelArt.ts`, `src/hideout/seaFx.ts`, `src/hideout/tag.ts`, `src/backpack/backpack.ts` visuals, `src/achievements/toast.ts`) | agent U6 |
-| HUD: blobfish health, ocean heal item, all HUD/summary/in-run panels chunky + detailed (`src/ui/hud3.ts`, `src/ui/obj/*`, `src/ui/runSummary.ts`, `src/dungeon/hud.ts`, heal-item naming/text in `src/combat/*`) | agent H6 |
+| HUD: HP (number + bar) with the blobfish avatar instead of hearts, remove the strip map, ocean heal item, all HUD/summary/in-run panels chunky + detailed (`src/ui/hud3.ts`, `src/ui/obj/*`, `src/ui/runSummary.ts`, `src/dungeon/hud.ts`, heal-item naming/text in `src/combat/*`) | agent H6 |
+| Crossroads in the journey, no strip map (`src/dungeon/*` level gen/flow, `src/game/dungeonScreen.ts` flow) | agent J6 |
 | Integration, QA, publish | lead |
 
 Testing rules as before: own build + port, tsc green, mouse-test, screenshots at 1280x720 and 1920x1080, never commit,
