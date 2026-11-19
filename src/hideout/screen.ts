@@ -26,15 +26,15 @@ import { CamRig } from './camera';
 import { StashPanel, WorkshopPanel, panelRect, stashRect, WORK_SIZE } from './panels';
 import { WardrobePanel, wardRect } from './wardrobe';
 import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
-import { SettingsPanel } from '../title/pages';
+import { SettingsPanel, SETTINGS_W, SETTINGS_H } from '../title/pages';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 import { HubPlayer } from './player';
 import { Tag, type TagLine } from './tag';
 import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT } from './house';
 import { CodexBook, codexCount } from '../ui/codex';
-import { brassPlate, CloseX } from './itemCard';
+import { brassPlate } from './itemCard';
 import { IN, outlineOf, setGhostHot, setGhostState, pulseGhosts } from './pieces';
-import { PIECE, PIECES, isBuilt, canAfford, costLines, buildPiece, nextGoal, ensureHome } from './rebuild';
+import { PIECE, PIECES, isBuilt, canAfford, costLines, costOf, buildPiece, nextGoal, ensureHome } from './rebuild';
 import { BuildScene } from './buildscene';
 import { Packing, type TableConfig } from './packing';
 import { MrCrab } from '../story/crab';
@@ -296,7 +296,7 @@ export class HideoutScreen implements Screen {
       case 'workshop': return panelRect(ui, ...WORK_SIZE);
       case 'wardrobe': return wardRect(ui);
       case 'trophy': return { x: Math.round((ui.w - ACH_W) / 2), y: Math.max(4, Math.round((ui.h - ACH_H) / 2)), w: ACH_W, h: ACH_H };
-      case 'settings': return { x: Math.round((ui.w - 236) / 2), y: Math.round((ui.h - 182) / 2), w: 236, h: 182 };
+      case 'settings': return { x: Math.round((ui.w - SETTINGS_W) / 2), y: Math.round((ui.h - SETTINGS_H) / 2), w: SETTINGS_W, h: SETTINGS_H };
       case 'pause': return { x: Math.round((ui.w - 176) / 2), y: Math.round((ui.h - 126) / 2) + 6, w: 176, h: 126 };
       case 'codex': return { x: 0, y: 0, w: ui.w, h: ui.h };
     }
@@ -326,19 +326,18 @@ export class HideoutScreen implements Screen {
     if (live && this.modeT > 0.1 && input.keyHit('Escape')) close = true;
     if (close && this.panel === p) this.closePanel();
   }
-  private pauseX = new CloseX();
   private pauseCard(r: { x: number; y: number; w: number; h: number }): boolean {
     const ui = this.ui;
     ui.fill(0, 0, ui.w, ui.h, '#000000', 0.35);
-    ui.panel('wood', r.x, r.y, r.w, r.h);
+    ui.panel('wood', r.x, r.y, r.w, r.h, undefined, { id: 'home:pause' });
     brassPlate(ui, 'HOME', r.x + r.w / 2, r.y - 9, { font: 'title' });
-    let close = this.pauseX.draw(ui, 'pz:x', r.x + r.w - 15, r.y - 7, 20);
-    let yy = r.y + 20;
-    const bw = r.w - 28, bh = 24;
+    let close = ui.closeButton('pz:x', r.x + r.w - 16, r.y - 5, { size: 20, key: null });
+    let yy = r.y + 22;
+    const bw = r.w - 28, bh = 22;
     if (ui.button('pz:back', 'CONTINUE', r.x + 14, yy, bw, bh, { style: 'green', font: 'body' })) close = true;
-    yy += bh + 6;
+    yy += bh + 8;
     if (ui.button('pz:set', 'SETTINGS', r.x + 14, yy, bw, bh, { style: 'wood', font: 'body' })) { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
-    yy += bh + 6;
+    yy += bh + 8;
     if (ui.button('pz:title', 'SIGNPOST', r.x + 14, yy, bw, bh, { style: 'dark', font: 'body' })) { this.panel = null; this.mode = 'free'; this.opts.onMenu?.(); return false; }
     return close;
   }
@@ -758,9 +757,7 @@ export class HideoutScreen implements Screen {
     if (!g) { ui.objective('Home rebuilt! Out the front door to dive', undefined, { x: 8, y: 8, id: 'objective' }); return; }
     const parts = costLines(g.id);
     const have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
-    let y = 8;
-    const head = canAfford(g.id) ? `Ready! Build the ${g.name.toLowerCase()}` : `Build the ${g.name.toLowerCase()}`;
-    y += ui.objective(head, [have, need], { x: 8, y, w: Math.max(190, ui.measure(head, 'body') + 64), id: 'objective', pulse: canAfford(g.id), done: false }) + 2;
-    for (const [m, h, n] of parts) y += ui.objective(MAT_NAME(m), [h, n], { x: 14, y, w: 150, icon: m, small: true }) + 2;
+    const ready = canAfford(g.id);
+    ui.objective(ready ? `Ready! Build the ${g.name.toLowerCase()}` : `Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y: 8, id: 'objective', cost: costOf(g.id), have: META.materials, ready });
   }
 }

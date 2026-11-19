@@ -14,7 +14,6 @@ import type { PixelUI } from './pixel/ui';
 import { photo } from './obj/studio';
 import { SPECS } from '../fish/species';
 import { buildFish } from '../fish';
-import { CloseX } from '../hideout/itemCard';
 
 export type CodexKind = 'fish' | 'giant';
 export interface CodexEntry {
@@ -124,7 +123,6 @@ export class CodexBook {
   private tab: CodexKind = 'fish';
   private sel = '';
   private scroll = 0;
-  private x = new CloseX();
   get isOpen() { return this.on; }
   open(tab: CodexKind = this.tab) { this.on = true; this.t = 0; this.tab = tab; }
   close() { this.on = false; }
@@ -162,7 +160,7 @@ export class CodexBook {
       if (ui.button('codex:tab:' + k, `${label} ${c.known}/${c.total}`, tx, y + 26, 92, 16, { style: this.tab === k ? 'gold' : 'wood', font: 'small', on: this.tab === k })) { this.tab = k; this.scroll = 0; this.sel = ''; }
       tx += 96;
     }
-    if (this.x.draw(ui, 'codex:close', x + W - 12, y - 14, 20)) { this.close(); return false; }
+    if (ui.closeButton('codex:close', x + W - 12, y - 14, { size: 20, key: null })) { this.close(); return false; }
     // the entry grid (left page)
     const list = codexEntries(this.tab);
     const cell = 46, cols = Math.max(1, Math.floor((half - 24) / cell));

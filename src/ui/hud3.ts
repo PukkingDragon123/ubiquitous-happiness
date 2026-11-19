@@ -36,6 +36,7 @@ import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
+import { skin } from './pixel/skins';
 import { PAL, plate, bigText, bigMeasure, bar, tube, solid, GLYPH, type BigOpts } from './obj/plates';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
@@ -455,7 +456,8 @@ function paintStrip(cv: HTMLCanvasElement, m: StripMap, t: number) {
 
 // ------------------------------------------------------------------ pickup cards / title toasts
 interface PickCard { id: string; title: string; sub: string; kind: string; color: string; t: number; life: number; y: number; model: THREE.Object3D }
-interface Toast { title: string; sub: string; color: string; t: number; life: number; area?: boolean }
+interface Toast { title: string; sub: string; color: string; t: number; life: number; area?: boolean; banner?: 'danger' | 'gold'; landed?: boolean }
+interface CodexNote { name: string; model: THREE.Object3D | null; t: number; y: number }
 interface Roll { v: number; old: number; t: number; flash: number; delta: { n: number; t: number }[] }
 
 // layout (D)
@@ -510,6 +512,29 @@ export class Hud {
     this.toasts.push({ title: clean(title), sub: clean(sub), t: 0, life, color });
   }
   /** the big card for a new floor: the area's name stamped across the upper screen, a sub line under it */
+  /**
+   * a big moment, stamped across the middle of the screen (boss intro, CHALLENGE, CLEARED, VICTORY, SURFACING): the
+   * title slams down on an engraved plate ('danger': a brass name plate with red enamel gems; 'gold': a gold cloth
+   * ribbon), the sub line on a dark strip under it. A newer banner replaces an older one.
+   */
+  banner(title: string, sub = '', style: 'danger' | 'gold' = 'gold', life = 2.8) {
+    this.toasts = this.toasts.filter((c) => !c.banner);
+    this.toasts.push({ title: clean(title).toUpperCase(), sub: clean(sub).toUpperCase(), t: 0, life, color: style === 'danger' ? '#ffd8c8' : PAL.cream, banner: style });
+  }
+  /** a creature met for the first time: a journal note slides into the right-hand lane, under the pickup cards,
+   *  with the creature turning on a medallion (`model` is any 3D object; it is sized to fit). Notes queue. */
+  codex(name: string, model: THREE.Object3D | null = null) {
+    if (this.notes.length >= 4) { const old = this.notes.splice(1, 1)[0]; old?.model?.removeFromParent(); }
+    if (model) {
+      const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+      const holder = new THREE.Group(); model.position.sub(c); holder.add(model);
+      holder.userData.fit = 1 / Math.max(1e-3, size.x, size.y, size.z * 0.6);
+      this.stage.ui.add(holder);
+      model = holder;
+    }
+    this.notes.push({ name: clean(name), model, t: 0, y: -1 });
+  }
+  private notes: CodexNote[] = [];
   areaCard(name: string, sub = '', color = PAL.cream, life = 4.2) {
     this.toasts = this.toasts.filter((c) => !c.area);
     this.toasts.push({ title: clean(name).toUpperCase(), sub: clean(sub).toUpperCase(), t: 0, life, color, area: true });
@@ -901,6 +926,35 @@ export class Hud {
       if (sub) ui.big(sub, tx, y + 25, 4.5, { color: PAL.kelp2, alpha: a });
       ty += ch + 5;
     }
+    this.codexNotes(ui, dt, ty);
+  }
+
+  /** the codex notes, one at a time, under the pickup cards: a cream journal slip, the creature on a medallion */
+  private codexNotes(ui: DUi, dt: number, ty: number) {
+    const n = this.notes[0];
+    for (const q of this.notes) if (q !== n && q.model) q.model.visible = false;
+    if (!n) return;
+    n.t += dt;
+    const life = this.notes.length > 1 ? 2.2 : 3;
+    if (n.t >= life) { n.model?.removeFromParent(); this.notes.shift(); return; }
+    if (n.y < 0) n.y = ty;
+    n.y = lerp(n.y, ty, 1 - Math.exp(-dt * 10));
+    const head = 'NEW IN THE CODEX';
+    const cw = Math.round(Math.max(134, Math.max(ui.bigW(n.name, 7), ui.bigW(head, 4.5) + 12) + 50)), ch = 33;
+    const inK = easeOutBack(n.t * 3.2), outK = clamp01((n.t - life + 0.35) / 0.35) ** 2;
+    const x = ui.w - M - cw + (1 - inK) * (cw + 24) + outK * (cw + 24), y = n.y, a = 1 - outK;
+    this.planes.draw(skin('paper', ui.p(cw), ui.p(ch)), ui.p(x), ui.p(y), { alpha: a, shadow: 2 });
+    this.planes.draw(plate(ui.p(27), ui.p(27), 'disc', { face: '#b8d4cc', rim: PAL.brass }), ui.p(x + 4), ui.p(y + 3), { alpha: a });
+    if (n.model) {
+      n.model.visible = a > 0.05;
+      n.model.scale.setScalar(22 * (n.model.userData.fit as number) * (1 + Math.max(0, 0.3 - n.t) * 1.2));
+      n.model.rotation.set(0.15, -0.7 + Math.sin(this.t * 1.4) * 0.5, 0);
+      this.stage.put(n.model, x + 17.5, y + 16.5, 40);
+    }
+    const g = GLYPH.book(), gs = Math.max(1, Math.round(ui.k));
+    ui.ui.img(g, ui.p(x + 36), ui.p(y + 6), { w: g.width * gs, h: g.height * gs, alpha: a });
+    ui.big(head, x + 38 + g.width * gs / ui.k + 2, y + 6, 4.5, { color: '#8a5a24', outline: null, shadow: null, alpha: a });
+    ui.big(n.name, x + 36, y + 16, 7.5, { color: '#2a1a0c', outline: null, shadow: '#d9c59b', alpha: a });
   }
 
   // ---------------------------------------------------------------- title toasts and the floor's area card
@@ -938,6 +992,31 @@ export class Hud {
         }
         const sa = clamp01((c.t - 0.7) * 3) * (1 - outK);
         if (c.sub && sa > 0) ui.big(c.sub, ui.w / 2, cy + cap + 7, 6.5, { color: PAL.cream, align: 'center', alpha: sa });
+        continue;
+      }
+      if (c.banner) {
+        // the slam: the title starts big and lands on its plate, a shake as it hits, then it lifts away
+        const cy = ui.h * 0.36, cap = 20;
+        const st = clamp01(c.t / 0.16), capNow = cap * (1 + (1 - st) * 0.8);
+        if (st >= 1 && !c.landed) { c.landed = true; audio.play('thud_heavy1', { vol: c.banner === 'danger' ? 0.45 : 0.25, dry: true }); }
+        const a = clamp01(c.t * 7) * (1 - outK);
+        const shake = c.t > 0.16 && c.t < 0.4 ? Math.sin(c.t * 90) * (0.4 - c.t) * 6 : 0;
+        const tw = ui.bigW(c.title, cap);
+        const y = cy - outK * 10;
+        if (c.banner === 'danger') {
+          const rw = tw + 70, rh = 38;
+          this.planes.draw(plate(ui.p(rw), ui.p(rh), 'nameplate'), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(y - rh / 2), { alpha: a * st, shadow: 3 });
+        } else {
+          const rw = tw + 76, rh = 36;
+          this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#c8913a' }), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(y - rh / 2), { alpha: a * st, shadow: 3 });
+        }
+        ui.big(c.title, ui.w / 2 + shake, y - capNow / 2 - 1, capNow, { color: c.color, color2: c.banner === 'danger' ? '#ff9a84' : PAL.brass2, align: 'center', alpha: a });
+        const sa = clamp01((c.t - 0.35) * 4) * (1 - outK);
+        if (c.sub && sa > 0) {
+          const sw = ui.bigW(c.sub, 6) + 18, sy = y + 22;
+          this.planes.draw(plate(ui.p(sw), ui.p(14), 'well', { face: PAL.ink }), ui.p(ui.w / 2 - sw / 2), ui.p(sy), { alpha: sa * 0.95 });
+          ui.big(c.sub, ui.w / 2, sy + 4, 6, { color: PAL.cream, align: 'center', alpha: sa });
+        }
         continue;
       }
       // the toast: a ribbon drops in at the top centre

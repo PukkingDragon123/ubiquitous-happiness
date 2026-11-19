@@ -7,7 +7,7 @@ import { SLOTS, SLOT_NAME, bySlot, owned, equippedLook, equip, COSMETIC, type Sl
 import { cosmeticIcon } from '../cosmetics/icons';
 import { achFor, progress } from '../achievements';
 import { audio } from '../audio/audio';
-import { K, brassPlate, CloseX } from './itemCard';
+import { K, brassPlate } from './itemCard';
 import { panelArt, PANEL_IN } from './panelArt';
 
 const CELL = 28, ROW = 46;
@@ -23,7 +23,6 @@ export class WardrobePanel {
   /** an item was equipped this frame */
   equipped: string | null = null;
   private t = 0;
-  private x = new CloseX();
   open() { this.t = 0; this.hover = null; }
   /** returns true to close */
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
@@ -38,7 +37,7 @@ export class WardrobePanel {
     ui.fill(x + 4, y + 5, W, H, '#000000', 0.4);
     ui.img(panelArt('wardrobe', W, H), x, y);
     brassPlate(ui, 'WARDROBE', x + W / 2, y - 9, { font: 'title' });
-    let close = this.x.draw(ui, 'ward:x', x + W - 15, y - 7, 20);
+    let close = ui.closeButton('ward:x', x + W - 16, y - 6, { size: 20, key: null });
     const [il, it] = PANEL_IN.wardrobe;
     const ix = x + il + 2, iw = W - il * 2 - 4;
     const n = SLOTS.reduce((a, s) => a + bySlot(s).filter((c) => owned(c.id)).length, 0), tot = SLOTS.reduce((a, s) => a + bySlot(s).length, 0);

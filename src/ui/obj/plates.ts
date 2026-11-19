@@ -604,6 +604,7 @@ export const GLYPH = {
   fish: () => pixGlyph('fish', ['...kkk...k', '.kkwwwk.kk', 'kwkwwwwkwk', 'kwwwwwwwwk', '.kkwwwk.kk', '...kkk...k'], { k: PAL.ink2, w: PAL.sea2 }),
   star: () => pixGlyph('star', ['...k...', '..kwk..', 'kkwwwkk', '.kwwwk.', '.kwkwk.', 'kk...kk'], { k: PAL.ink2, w: PAL.brass2 }),
   check: () => pixGlyph('check', ['......kk', '.....kgk', 'kk..kgk.', 'kgkkgk..', '.kggk...', '..kk....'], { k: PAL.ink2, g: PAL.kelp2 }),
+  book: () => pixGlyph('book', ['.kkkk.kkkk.', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kkkkkkkkkkk', '.rr.....rr.'], { k: '#3a2410', w: PAL.cream, b: '#a08a64', r: PAL.coral }),
   parcel: () => pixGlyph('parcel', ['kkkkkkkkk', 'kbbbrbbbk', 'kbbbrbbbk', 'krrrrrrrk', 'kbbbrbbbk', 'kbbbrbbbk', 'kkkkkkkkk'], { k: PAL.ink2, b: '#c8a070', r: PAL.coral }),
   parcelOff: () => pixGlyph('parcelOff', ['k.k.k.k.k', '.........', 'k.......k', '.........', 'k.......k', '.........', 'k.k.k.k.k'], { k: '#6fb8b0' }),
 };

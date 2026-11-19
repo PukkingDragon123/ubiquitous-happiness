@@ -70,6 +70,7 @@ import { PufferBomb } from '../dungeon/bomb';
 import { packAdd, packCells, packTotals, packLoose, packFits } from '../dungeon/pack';
 import { RunSummaryCard, type RunSummary } from '../ui/runSummary';
 import { codexSeen, codexBeaten, codexKnown, codexEntries } from '../ui/codex';
+import { buildFish } from '../fish';
 import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, rollBig, bigChance, type Reward } from '../dungeon/rewards';
 import { journeyStrip, legOf, type JourneyLeg } from '../dungeon/minimap';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
@@ -1049,7 +1050,11 @@ export class DungeonScreen implements Screen {
       const known = codexKnown(id);
       codexSeen(id, depthOf(this.plan, e.y));
       if (!known && codexEntries().some((q) => q.id === id)) {
-        this.text.pop('NEW IN THE CODEX', e.x, e.y + e.r + 0.9, 'gold', { size: 0.24, life: 1.6 });
+        // a journal note in the HUD's right-hand lane (never over the instruments), with the creature turning on it
+        const entry = codexEntries().find((q) => q.id === id)!;
+        let model: THREE.Object3D | null = null;
+        try { model = entry.model ? entry.model() : entry.kind === 'fish' ? buildFish(entry.id, 3).group : null; } catch { model = null; }
+        this.hud.l.codex(entry.name, model);
         audio.play('page1', { vol: 0.35, dry: true });
       }
     }
@@ -1401,10 +1406,10 @@ export class DungeonScreen implements Screen {
 
   private after(t: number, fn: () => void) { this.seq.push({ t, fn }); }
 
-  private title3d(title: string, sub: string, st: T3DStyle, life = 3, at?: { x: number; y: number }) {
-    const x = at?.x ?? this.camLook.x, y = at?.y ?? this.camLook.y + 2.2;
-    this.t3d.add(title, x, y, 1.4, st, { size: 0.72, life, enter: 'drop', stagger: 0.05 });
-    if (sub) this.t3d.add(sub, x, y - 0.78, 1.4, T3D.sub, { size: 0.24, life: life - 0.2, delay: 0.45, stagger: 0.015 });
+  /** the run's big moments (boss intro, CHALLENGE, CLEARED, VICTORY, SURFACING): a HUD banner stamped across the
+   *  middle of the screen (v5; it used to be 3D text in the world, which menus and the HUD could cover) */
+  private title3d(title: string, sub: string, st: T3DStyle, life = 3, _at?: { x: number; y: number }) {
+    this.hud.l.banner(title, sub, st === T3D.danger ? 'danger' : 'gold', life);
   }
 
   private damageNumbers(dt: number) {

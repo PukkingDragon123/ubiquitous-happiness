@@ -13,6 +13,7 @@ import { itemModel } from '../../backpack/models';
 import { skillItem, SKILL_NAMES, RARITY_COLOR, type Rarity } from '../../game/items';
 import { drawText, wrap } from '../pixel/font';
 import { canvasPlane } from './stage';
+import { ramp } from './pixtex';
 
 const METAL: Record<Rarity, { base: string; hi: string; gem: string }> = {
   common: { base: '#8a6a4a', hi: '#c8a070', gem: '#d8d2c4' },
@@ -58,6 +59,7 @@ export class SkillCard3D {
   private ledger = new THREE.Group();
   private ledgerK = 0;
   private hov = 0; private rx = 0; private ry = 0; private t = 0;
+  private sweep!: THREE.Mesh; private flashM!: THREE.Mesh; private flashT = 0; private prevCd = 0; private winH = 1; private winY = 0;
   readonly w: number; readonly h: number;
   readonly skill: string;
 
@@ -90,12 +92,30 @@ export class SkillCard3D {
     art.position.set(0, win.y, 0);
     this.tilt.add(art);
     // cooldown shadow over the art (scaled from the top)
-    this.shade = new THREE.Mesh(new THREE.PlaneGeometry(win.w, win.h), new THREE.MeshBasicMaterial({ color: '#04060c', transparent: true, opacity: 0.72, toneMapped: false, depthWrite: false }));
+    this.shade = new THREE.Mesh(new THREE.PlaneGeometry(win.w, win.h), new THREE.MeshBasicMaterial({ color: '#06101a', transparent: true, opacity: 0.78, toneMapped: false, depthWrite: false }));
     this.shade.position.set(0, win.y, W * 0.005);
     this.tilt.add(this.shade);
     const frameMat = new THREE.MeshStandardMaterial({ color: met.base, roughness: 0.32, metalness: 0.65, flatShading: true, emissive: met.hi, emissiveIntensity: 0.05 });
     const frame = new THREE.Mesh(frameGeo(W, H, win, W * 0.06), frameMat);
     this.tilt.add(frame);
+    // v5: the frame's FACE is hand-painted (engraved rarity metal, filigree corners, worn edges, a set rarity gem,
+    // the window's inset bevel) on a plane over the extruded frame, whose bevel still catches the light around it
+    const face = canvasPlane(paintCardFace(W, H, win, rarity, W >= 90), W, H);
+    face.position.z = W * 0.062;
+    (face.material as THREE.MeshBasicMaterial).alphaTest = 0.5;
+    this.tilt.add(face);
+    // the art sits under glass: two diagonal streaks and a lit top edge
+    const pane = canvasPlane(paintGlass(Math.round(win.w), Math.round(win.h)), win.w, win.h);
+    pane.position.set(0, win.y, W * 0.03);
+    (pane.material as THREE.MeshBasicMaterial).depthWrite = false;
+    this.tilt.add(pane);
+    // cooldown: a bright sweep line rides the shadow's edge; a white flash when the skill comes back
+    this.sweep = new THREE.Mesh(new THREE.PlaneGeometry(win.w, Math.max(0.8, W * 0.035)), new THREE.MeshBasicMaterial({ color: '#fff1c2', transparent: true, opacity: 0.9, toneMapped: false, depthWrite: false }));
+    this.sweep.position.set(0, win.y, W * 0.02);
+    this.flashM = new THREE.Mesh(new THREE.PlaneGeometry(win.w, win.h), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, toneMapped: false, depthWrite: false }));
+    this.flashM.position.set(0, win.y, W * 0.025);
+    this.tilt.add(this.sweep, this.flashM);
+    this.winH = win.h; this.winY = win.y;
     // name plaque (bottom)
     const pw = W * 0.86, ph = H * 0.18;
     // a walnut plate in a brass bezel, standing proud of the frame (whose bevelled face is at +0.06 W)
@@ -121,7 +141,7 @@ export class SkillCard3D {
     for (const sx of [-1, 1]) {
       const g = new THREE.Mesh(new THREE.OctahedronGeometry(W * 0.07, 0), this.gemMat);
       g.scale.set(1, 1, 0.6);
-      g.position.set(sx * W * 0.38, H * 0.42, W * 0.05);
+      g.position.set(sx * W * 0.38, H * 0.42, W * 0.09);
       this.tilt.add(g); this.gems.push(g);
     }
     // the sand timer (shown while on cooldown)
@@ -179,6 +199,12 @@ export class SkillCard3D {
     const ph = (this.shade.geometry as THREE.PlaneGeometry).parameters.height;
     this.shade.position.y = this.h * 0.1 + (ph * (1 - cd)) / 2;
     this.timer.visible = cd > 0.001;
+    this.sweep.visible = cd > 0.001;
+    this.sweep.position.y = this.winY + this.winH / 2 - this.winH * cd;
+    if (this.prevCd > 0.001 && cd <= 0.001) this.flashT = 1;
+    this.prevCd = cd;
+    this.flashT = Math.max(0, this.flashT - dt * 3);
+    (this.flashM.material as THREE.MeshBasicMaterial).opacity = this.flashT * 0.85;
     if (this.timer.visible) this.timer.rotation.z = Math.floor(this.t * 1.2) % 2 ? Math.PI : Math.min(Math.PI, (this.t * 1.2 % 1) * 6) ;
     const ready = s.ready ?? cd <= 0;
     this.gemMat.emissiveIntensity = ready ? 0.7 + Math.sin(this.t * 4) * 0.25 + this.hov * 0.6 : 0.05;
@@ -190,4 +216,97 @@ export class SkillCard3D {
     this.ledger.visible = this.ledgerK > 0.01;
     this.ledger.rotation.y = -Math.PI / 2 * (1 - this.ledgerK);
   }
+}
+
+// ------------------------------------------------------------------ the painted card face
+const faceCache = new Map<string, HTMLCanvasElement>();
+/**
+ * the card's frame face at 1 texel per unit (UI px on the HUD): an ink outline, an engraved band of the rarity's
+ * metal (lit top / left, shaded bottom / right, a groove down its middle), filigree curls in the corners, edges
+ * rubbed bright where hands hold it, the window's inset bevel, an engraved lower panel with a set rarity gem and a
+ * scratch or two. The window is cut out (the art shows through). Placed detail only.
+ */
+function paintCardFace(Wf: number, Hf: number, win: { w: number; h: number; y: number }, rarity: Rarity, big: boolean): HTMLCanvasElement {
+  const w = Math.round(Wf), h = Math.round(Hf);
+  const key = `${w}|${h}|${rarity}|${big}`;
+  const hit = faceCache.get(key);
+  if (hit) return hit;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const x = cv.getContext('2d')!;
+  const img = x.createImageData(w, h), D = img.data;
+  const M = ramp(METAL[rarity].base), G = ramp(RARITY_COLOR[rarity]);
+  const put = (px: number, py: number, col: string, a = 255) => {
+    px = Math.round(px); py = Math.round(py);
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const n = parseInt(col.slice(1, 7), 16), i = (py * w + px) * 4; D[i] = n >> 16; D[i + 1] = (n >> 8) & 255; D[i + 2] = n & 255; D[i + 3] = a;
+  };
+  const alpha = (px: number, py: number) => (px < 0 || py < 0 || px >= w || py >= h ? 0 : D[(py * w + px) * 4 + 3]);
+  const r = Math.max(2, Math.round(w * 0.1));
+  const wx0 = Math.round((w - win.w) / 2), ww = Math.round(win.w), wy0 = Math.round(h / 2 - (win.y + win.h / 2)), wh = Math.round(win.h);
+  const inWin = (px: number, py: number) => px >= wx0 && px < wx0 + ww && py >= wy0 && py < wy0 + wh;
+  const inCard = (px: number, py: number) => {
+    const dx = Math.max(0, r - px, px - (w - 1 - r)), dy = Math.max(0, r - py, py - (h - 1 - r));
+    return dx * dx + dy * dy <= r * r + 0.5;
+  };
+  const band = Math.max(3, wx0);
+  for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+    if (!inCard(px, py) || inWin(px, py)) continue;
+    const edge = !inCard(px - 1, py) || !inCard(px + 1, py) || !inCard(px, py - 1) || !inCard(px, py + 1);
+    if (edge) { put(px, py, '#0b1622'); continue; }
+    const d = Math.min(px, py, w - 1 - px, h - 1 - py);
+    const tl = py < h - 1 - py ? py <= px && py <= w - 1 - px : false;
+    const left = px <= py && px <= h - 1 - py && px < w / 2;
+    const lit = tl || left;
+    // the window's inset bevel: shadow on its top / left lip, a reflected light on its bottom / right
+    const wdx = px < wx0 ? wx0 - px : px >= wx0 + ww ? px - (wx0 + ww - 1) : 0, wdy = py < wy0 ? wy0 - py : py >= wy0 + wh ? py - (wy0 + wh - 1) : 0;
+    if (Math.max(wdx, wdy) === 1 && wdx <= 1 && wdy <= 1) { put(px, py, '#0b1622'); continue; }
+    if (Math.max(wdx, wdy) === 2 && wdx <= 2 && wdy <= 2) { put(px, py, px >= wx0 + ww || py >= wy0 + wh ? M[5] : M[1]); continue; }
+    let c: string;
+    if (d === 1) c = lit ? M[5] : M[1];
+    else if (d === 2) c = lit ? M[4] : M[2];
+    else c = py < h * 0.3 ? M[4] : M[3];
+    // a groove down the middle of the side bands
+    if (band >= 5 && d === Math.floor(band / 2) && py > r && py < h - r) c = M[1];
+    if (band >= 5 && d === Math.floor(band / 2) + 1 && py > r && py < h - r) c = M[5];
+    put(px, py, c);
+  }
+  // the lower panel (under the window): two engraved rules and, on HUD cards, the set rarity gem in its middle
+  const py0 = wy0 + wh + 3, py1 = h - 3;
+  if (py1 - py0 >= 4) {
+    for (let px = wx0 + 1; px < wx0 + ww - 1; px++) { put(px, py0, M[1]); put(px, py0 + 1, M[5]); if (py1 - py0 >= 8) { put(px, py1 - 2, M[1]); put(px, py1 - 1, M[5]); } }
+    // a scratch across the panel (fixed)
+    for (let k = 0; k < 4; k++) put(wx0 + Math.round(ww * 0.72) + k, py0 + 3 + (k >> 1), M[5]);
+  }
+  const gem = (cx: number, cy: number, R: number) => {
+    for (let dy = -R - 1; dy <= R + 1; dy++) for (let dx = -R - 1; dx <= R + 1; dx++) {
+      const m = Math.abs(dx) + Math.abs(dy);
+      if (m > R + 1) continue;
+      put(cx + dx, cy + dy, m === R + 1 ? M[0] : m === R ? '#0b1622' : dy < 0 && dx <= 0 ? G[4] : dx + dy > 0 ? G[2] : G[3]);
+    }
+    put(cx - Math.max(1, R - 2), cy - Math.max(1, R - 2) + 1, '#ffffff');
+  };
+  const gr = Math.max(2, Math.round(w / 14));
+  if (!big && py1 - py0 >= 2 * gr + 2) gem(Math.round(w / 2), Math.round((py0 + py1) / 2), gr);
+  else gem(Math.round(w / 2), Math.max(gr + 2, Math.round(wy0 / 2)), gr);
+  // filigree curls in the four corners of the band
+  if (band >= 4) for (const [cx, cy, sx, sy] of [[band - 1, band - 1, 1, 1], [w - band, band - 1, -1, 1], [band - 1, h - band, 1, -1], [w - band, h - band, -1, -1]]) {
+    put(cx, cy, M[5]); put(cx - sx, cy, M[5]); put(cx, cy - sy, M[5]); put(cx - sx, cy - sy, M[1]);
+    if (band >= 6) { put(cx - 2 * sx, cy, M[1]); put(cx, cy - 2 * sy, M[1]); }
+  }
+  // the rim rubbed bright where fingers hold it (bottom corners and the sides' middles)
+  for (const [px, py] of [[2, h - 4], [3, h - 3], [w - 3, h - 4], [w - 4, h - 3], [1, Math.round(h * 0.55)], [1, Math.round(h * 0.55) + 1], [w - 2, Math.round(h * 0.45)]]) if (alpha(px, py)) put(px, py, M[5]);
+  x.putImageData(img, 0, 0);
+  faceCache.set(key, cv);
+  return cv;
+}
+/** glass over the art: a lit top edge, two diagonal streaks, transparent elsewhere */
+function paintGlass(w: number, h: number): HTMLCanvasElement {
+  const cv = document.createElement('canvas'); cv.width = Math.max(2, w); cv.height = Math.max(2, h);
+  const x = cv.getContext('2d')!;
+  x.fillStyle = 'rgba(255,255,255,0.28)'; x.fillRect(0, 0, w, 1);
+  x.fillStyle = 'rgba(255,255,255,0.22)';
+  for (let k = 0; k < Math.min(w, h) * 0.55; k++) { x.fillRect(Math.round(w * 0.12) + k, Math.round(h * 0.55) - k, 2, 1); }
+  x.fillStyle = 'rgba(255,255,255,0.14)';
+  for (let k = 0; k < Math.min(w, h) * 0.3; k++) x.fillRect(Math.round(w * 0.3) + k, Math.round(h * 0.5) - k, 1, 1);
+  return cv;
 }

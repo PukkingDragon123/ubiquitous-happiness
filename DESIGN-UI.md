@@ -51,6 +51,14 @@ fibre lines, a fold, a stain edge and stitched or tacked borders; leather with s
 with 4–6 tone bevels and engraved label plates. Detail is structured and placed on purpose (no random noise / dither /
 speckle), uses hue-shifted ramps, the 2x canvas density where available, and never fights the text.
 
+## Ocean + woody + animated (user, 2026-11-19: "no coffee ring, make UI feel more ocean, animate, more woody")
+No office-desk motifs (coffee rings, ruled paper, tacks, watermarks). Wood is the dominant material: driftwood and
+weathered ship planks, chunky grain, knots, salt bleaching, nails, rope lashing; teal is a sea-worn paint accent.
+Ocean motifs: barnacles and shells on corners, kelp draped over edges, net and rope trim, sea glass, brass ship
+fittings; insets read as wet sand, sailcloth or dark water behind glass. Everything has subtle constant life: rising
+bubbles, swaying kelp, slow caustic shimmer, hover splashes, water-wobble pop-ins (cheap overlays, no big per-frame
+repaints).
+
 ## Owners (v5 UI pass) — edit only your files; ask the lead for anything else
 | Area | Owner |
 | --- | --- |

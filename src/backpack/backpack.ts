@@ -28,7 +28,7 @@ import { UiStage, contactShadow } from '../ui/obj/stage';
 import { itemModel } from './models';
 import { audio } from '../audio/audio';
 import { easeOutBack } from '../core/math';
-import { K, modelWindow, itemHead, itemBody, buildLines, setRow, CloseX, footprint } from '../hideout/itemCard';
+import { K, modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
@@ -291,7 +291,6 @@ export class BackpackScreen implements Screen {
   private toasts: { text: string; sub: string; x: number; y: number; t: number; col: string }[] = [];
   private L!: Layout;
   private prevCursor: Game['cursor'] | null = null;
-  private closeBtn = new CloseX();
   private overClose = false;
   private cardItem: { uid: number; key: string; o: THREE.Object3D; sh: THREE.Mesh } | null = null;
   private cardPop = 0;
@@ -474,7 +473,7 @@ export class BackpackScreen implements Screen {
     this.drawPlanLabel();
     this.drawFx(dt);
     this.syncModels();
-    if (this.closeBtn.draw(fg, 'bp:close', this.L.closeX + cslide, this.L.closeY, this.L.close)) this.close();
+    if (fg.closeButton('bp:close', this.L.closeX + cslide, this.L.closeY, { size: this.L.close, key: null })) this.close();
     fg.cursor = this.overClose ? 'point' : ui.cursor;
     ui.end();
     fg.end();
@@ -493,7 +492,7 @@ export class BackpackScreen implements Screen {
     ui.img(art, x, y);
     // the name plate on the flap, the capacity counter riveted into its right end
     const used = packCells(run.items).used, full = used >= GRID_CELLS;
-    const cap = `${used}/${GRID_CELLS}`;
+    const cap = `${fg.count('bp:used', used)}/${GRID_CELLS}`;
     const tw = fg.measure('BACKPACK', 'title'), cw = fg.measure(cap, 'body') + 10, ph = fg.cap('title') + 9;
     const pw = tw + 20 + cw + 4, px = Math.round(x + art.width / 2 - pw / 2), py = y - 4;
     fg.fill(px + 1, py + 2, pw, ph, '#000000', 0.45);
@@ -715,7 +714,7 @@ export class BackpackScreen implements Screen {
     if (live) this.shown = { it: live, t: 0.3 };
     else if (this.shown) { this.shown.t -= dt; if (this.shown.t <= 0 || !run.items.includes(this.shown.it)) this.shown = null; }
     const it = this.shown?.it ?? null;
-    ui.panel('wood', x, y, w, h);
+    ui.panel('wood', x, y, w, h, undefined, { id: 'bp:card' });
     const pad = 11;
     const ix = x + pad, iw = w - pad * 2;
     fg.clip(x + 6, y + 6, w - 12, h - 12);
@@ -810,7 +809,7 @@ export class BackpackScreen implements Screen {
     const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
     if (L.setsH < 30) return;
     const x = L.colX + cs, y = L.setsY, w = L.colW, h = L.setsH;
-    ui.panel('wood', x, y, w, h);
+    ui.panel('wood', x, y, w, h, undefined, { id: 'bp:sets' });
     const pad = 11;
     fg.text('SET BONUSES', x + pad, y + pad - 2, { font: 'body', color: K.brass2, outline: K.ink2 });
     let yy = y + pad + fg.lh('body') + 1;
@@ -894,7 +893,7 @@ export class BackpackScreen implements Screen {
   private interact() {
     const ui = this.ui, L = this.L, inp = this.game.input;
     if (this.closing) return;
-    this.overClose = ui.hover(L.closeX - 2, L.closeY - 2, L.close + 4, L.close + 4);
+    this.overClose = ui.hover(L.closeX - 2, L.closeY - 2, L.close + 4, L.close + 7);
     this.hover = this.held || this.overClose ? null : this.itemAt(ui.mx, ui.my);
     if (this.hover || this.held) ui.cursor = this.held ? 'grab' : 'point';
     const rotate = inp.keyHit('KeyR') || ui.rpressed;

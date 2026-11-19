@@ -232,46 +232,6 @@ export function brassPlate(ui: PixelUI, text: string, cx: number, y: number, o: 
   return w;
 }
 
-/** the big brass-ringed red X (close). Interaction is the caller's: pass hover / down */
-export function closeX(ui: PixelUI, x: number, y: number, s: number, hover: boolean, down: boolean) {
-  x = Math.round(x); y = Math.round(y + (down ? 2 : hover ? -1 : 0));
-  const r = s / 2, cx = x + r - 0.5, cy = y + r - 0.5;
-  // drop shadow, brass ring, red enamel, the X
-  for (let yy = 0; yy < s; yy++) for (let xx = 0; xx < s; xx++) {
-    const d = Math.hypot(xx - r + 0.5, yy - r + 0.5);
-    if (d > r) continue;
-    let col = d > r - 1 ? K.ink2 : d > r - 3 ? (yy + xx < s * 0.9 ? K.brass2 : K.brass0) : d > r - 4 ? K.brassD : (yy < r * 0.7 ? (hover ? '#ff7a62' : '#e85a48') : hover ? '#d84a3a' : '#b83a30');
-    if (d <= r - 4 && yy < r * 0.45 && xx < r) col = hover ? '#ff9a80' : '#f07060';
-    ui.fill(x + xx, y + yy, 1, 1, col);
-  }
-  const a = Math.max(2, Math.round(s * 0.2)), t = Math.max(2, Math.round(s / 9));
-  for (let i = -a; i <= a; i++) {
-    ui.fill(cx + i - t / 2 + 1, cy + i - t / 2 + 1, t, t, '#3a0806');
-    ui.fill(cx + i - t / 2 + 1, cy - i - t / 2 + 1, t, t, '#3a0806');
-  }
-  for (let i = -a; i <= a; i++) {
-    ui.fill(cx + i - t / 2, cy + i - t / 2, t, t, '#fff4ec');
-    ui.fill(cx + i - t / 2, cy - i - t / 2, t, t, '#fff4ec');
-  }
-}
-
-/** a close X with press-and-release click semantics; marks its rect (for tests) and blocks the mouse */
-export class CloseX {
-  private armed = false;
-  draw(ui: PixelUI, id: string, x: number, y: number, s: number): boolean {
-    const over = ui.hover(x - 2, y - 2, s + 4, s + 4);
-    ui.mark(id, x, y, s, s);
-    ui.block(x - 2, y - 2, s + 4, s + 4);
-    if (over) ui.cursor = 'point';
-    if (ui.pressed) this.armed = over;
-    const down = this.armed && ui.down && over;
-    closeX(ui, x, y, s, over, down);
-    const clicked = this.armed && ui.released && over;
-    if (!ui.down && !ui.pressed) this.armed = false;
-    return clicked;
-  }
-}
-
 /** a lit studio photo of an item's 3D model, px square (cached; null without GL) */
 const photos = new Map<string, HTMLCanvasElement | null>();
 export function itemPhoto(id: string, level: number, px: number): HTMLCanvasElement | null {

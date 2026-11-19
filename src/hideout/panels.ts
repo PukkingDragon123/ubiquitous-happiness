@@ -9,7 +9,7 @@ import { ITEMS, getItem, RARITY_COLOR, statLines, type ItemKind } from '../game/
 import type { ItemInst } from '../game/run';
 import { CRAFTS, craft, craftAvailable, stationName, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
 import { audio } from '../audio/audio';
-import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate, CloseX } from './itemCard';
+import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate } from './itemCard';
 import { panelArt, wellArt, PANEL_IN, type PanelKind } from './panelArt';
 
 /** a centred panel rect at most w x h (leaves room for the name plate above it) */
@@ -26,13 +26,19 @@ export function stashRect(ui: PixelUI) {
 }
 export const WORK_SIZE: [number, number] = [600, 310];
 
+/** the panel rect rising into place for its first moments on screen (a 0.2 s overshoot) */
+function pop(ui: PixelUI, id: string, r: { x: number; y: number; w: number; h: number }) {
+  const k = Math.min(1, ui.anim('pop:' + id) / 0.2), e = k >= 1 ? 1 : 1 + 2.4 * (k - 1) ** 3 + 1.4 * (k - 1) ** 2;
+  return { ...r, y: r.y + Math.round((1 - e) * 18) };
+}
+
 /** the frame, the name plate and the close X; returns the inner content rect and whether the X was clicked */
-function frame(ui: PixelUI, kind: PanelKind, title: string, r: { x: number; y: number; w: number; h: number }, x: CloseX, id: string) {
+function frame(ui: PixelUI, kind: PanelKind, title: string, r: { x: number; y: number; w: number; h: number }, id: string) {
   ui.block(r.x, r.y - 10, r.w, r.h + 10);
   ui.fill(r.x + 4, r.y + 5, r.w, r.h, '#000000', 0.4);
   ui.img(panelArt(kind, r.w, r.h), r.x, r.y);
   brassPlate(ui, title, r.x + r.w / 2, r.y - 9, { font: 'title' });
-  const close = x.draw(ui, id, r.x + r.w - 15, r.y - 7, 20);
+  const close = ui.closeButton(id, r.x + r.w - 16, r.y - 6, { size: 20, key: null });
   const p = PANEL_IN[kind];
   return { close, inner: { x: r.x + p[0], y: r.y + p[1], w: r.w - p[0] - p[2], h: r.h - p[1] - p[3] } };
 }
@@ -64,14 +70,13 @@ function detail(ui: PixelUI, id: string, level: number, x: number, y: number, w:
 export class StashPanel {
   tab = 0;
   sel: number | null = null;
-  private x = new CloseX();
   private tabs: { label: string; kinds: ItemKind[] | null }[] = [
     { label: 'ALL', kinds: ['tool', 'trinket', 'ability', 'weapon', 'armor'] }, { label: 'TOOLS', kinds: ['tool', 'weapon', 'armor'] }, { label: 'TRINKETS', kinds: ['trinket'] }, { label: 'CORES', kinds: ['ability'] }, { label: 'MATERIALS', kinds: null },
   ];
   /** returns true when the panel wants to close */
   draw(ui: PixelUI): boolean {
-    const r = stashRect(ui);
-    const { close, inner } = frame(ui, 'chest', 'SEA CHEST', r, this.x, 'stashX');
+    const r = pop(ui, 'stash', stashRect(ui));
+    const { close, inner } = frame(ui, 'chest', 'SEA CHEST', r, 'stashX');
     const nt = ui.tabs('stashTabs', this.tabs.map((t) => t.label), this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
     if (nt !== this.tab) { this.tab = nt; this.sel = null; ui.resetList('stashL'); }
     const kinds = this.tabs[this.tab].kinds;
@@ -129,11 +134,10 @@ export class WorkshopPanel {
   tab = 0;
   sel = 0;
   private bang = 0;
-  private x = new CloseX();
   draw(ui: PixelUI, dt: number): boolean {
     this.bang = Math.max(0, this.bang - dt);
-    const r = panelRect(ui, ...WORK_SIZE);
-    const { close, inner } = frame(ui, 'bench', 'WORKBENCH', r, this.x, 'wsX');
+    const r = pop(ui, 'work', panelRect(ui, ...WORK_SIZE));
+    const { close, inner } = frame(ui, 'bench', 'WORKBENCH', r, 'wsX');
     const nt = ui.tabs('wsTabs', ['CRAFT', 'UPGRADE'], this.tab, inner.x + 2, inner.y + 2, { font: 'body', h: 18, gap: 2 });
     if (nt !== this.tab) { this.tab = nt; this.sel = 0; ui.resetList('wsL'); }
     const cy = inner.y + 26, ch = inner.h - 28;

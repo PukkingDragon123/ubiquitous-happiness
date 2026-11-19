@@ -7,7 +7,7 @@ import { ACHIEVEMENTS, progress, isDone } from '../achievements';
 import { medal } from '../achievements/medals';
 import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC, SLOT_NAME } from '../cosmetics';
-import { K, brassPlate, CloseX } from './itemCard';
+import { K, brassPlate } from './itemCard';
 import { panelArt, PANEL_IN } from './panelArt';
 
 const COLS = 8, CW = 38, CH = 56, DW = 160;
@@ -18,7 +18,6 @@ export const ACH_H = PANEL_IN.trophy[1] + PANEL_IN.trophy[3] + ROWS * CH + 28;
 export class AchievementsPanel {
   private sel = 0;
   private t = 0;
-  private x = new CloseX();
   open() { this.t = 0; }
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
     this.t += dt;
@@ -29,7 +28,7 @@ export class AchievementsPanel {
     ui.fill(x + 4, y + 5, ACH_W, ACH_H, '#000000', 0.4);
     ui.img(panelArt('trophy', ACH_W, ACH_H), x, y);
     brassPlate(ui, 'TROPHY CASE', x + ACH_W / 2, y - 9, { font: 'title' });
-    let close = this.x.draw(ui, 'ach:x', x + ACH_W - 15, y - 7, 20);
+    let close = ui.closeButton('ach:x', x + ACH_W - 16, y - 6, { size: 20, key: null });
     const [il, it] = PANEL_IN.trophy;
     const done = META.achievements.unlocked.length;
     // the tally along the top rail
