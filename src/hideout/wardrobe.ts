@@ -8,7 +8,7 @@ import { cosmeticIcon } from '../cosmetics/icons';
 import { achFor, progress } from '../achievements';
 import { audio } from '../audio/audio';
 import { K, brassPlate } from './itemCard';
-import { panelArt, PANEL_IN } from './panelArt';
+import { panelArt, PANEL_IN, drawerArt, cellArt } from './panelArt';
 import { wobble, SeaFx } from './seaFx';
 import { panelLife } from './panels';
 
@@ -44,14 +44,11 @@ export class WardrobePanel {
     const [il, it] = PANEL_IN.wardrobe;
     const ix = x + il + 2, iw = W - il * 2 - 4;
     const n = SLOTS.reduce((a, s) => a + bySlot(s).filter((c) => owned(c.id)).length, 0), tot = SLOTS.reduce((a, s) => a + bySlot(s).length, 0);
-    ui.text(`${n}/${tot} OWNED`, x + W - il - 4, y + 7, { font: 'small', color: K.brass2, shadow: '#060c0a', align: 'right' });
     const rowsH = H - it - PANEL_IN.wardrobe[3] - 24, rowH = Math.min(ROW, Math.floor(rowsH / SLOTS.length));
     SLOTS.forEach((slot: Slot, si) => {
       const ry = y + it + 2 + si * rowH;
-      // a recessed drawer per slot: its name, what you wear, the items
-      ui.fill(ix - 2, ry, iw + 4, rowH - 3, '#08120e');
-      ui.fill(ix - 1, ry + 1, iw + 2, rowH - 5, '#12221a');
-      ui.fill(ix - 1, ry + rowH - 5, iw + 2, 1, '#2c5040');
+      // a drawer per slot (painted 1x: a plank rim, a kelp-paper bed, a lit front lip): its name, what you wear, the items
+      ui.img(drawerArt(iw + 4, rowH - 3), ix - 2, ry);
       ui.text(SLOT_NAME[slot].toUpperCase(), ix + 3, ry + 3, { font: 'body', color: K.brass2, shadow: '#060c0a' });
       const cur = COSMETIC[look[slot]];
       ui.text(cur ? cur.name : '', ix + iw - 3, ry + 4, { font: 'small', color: K.cream2, shadow: '#060c0a', align: 'right' });
@@ -62,15 +59,14 @@ export class WardrobePanel {
         const over = ui.hover(cx, cy, CELL - 2, CELL - 2);
         ui.mark('ward:' + c.id, cx, cy, CELL - 2, CELL - 2);
         ui.block(cx, cy, CELL - 2, CELL - 2);
-        ui.fill(cx, cy, CELL - 2, CELL - 2, '#04080a');
-        ui.fill(cx + 1, cy + 1, CELL - 4, CELL - 4, on ? '#3a2a10' : over ? '#24484e' : '#173a40');
-        ui.fill(cx + 1, cy + 1, CELL - 4, 1, '#0b1d22');
+        // a cubby per piece (wooden rim, water, a sand bed; brass when worn); the icon at 1x like the kit
+        ui.img(cellArt(CELL - 2, on ? 'on' : over ? 'hover' : 'off'), cx, cy);
         const S = CELL - 6;
-        ui.img(cosmeticIcon(c.id, S * ui.hd), cx + 2, cy + 2, { w: S, h: S, alpha: own ? 1 : 0.3 });
-        if (!own) ui.icon('lock', cx + CELL - 11, cy + CELL - 12);
-        if (on) { ui.rect(cx - 1, cy - 1, CELL, CELL, K.brass2); if (Math.sin(this.t * 4 + i) > 0.6) ui.fill(cx + CELL - 5, cy, 1, 1, '#ffffff'); }
+        ui.img(cosmeticIcon(c.id, S), cx + 2, cy + 2, { w: S, h: S, alpha: own ? 1 : 0.3 });
+        if (!own) ui.icon('lock', cx + CELL - 12, cy + CELL - 13);
+        if (on && Math.sin(this.t * 4 + i) > 0.6) { ui.fill(cx + CELL - 6, cy + 1, 1, 3, '#ffffff'); ui.fill(cx + CELL - 7, cy + 2, 3, 1, '#ffffff'); }
         if (over) {
-          ui.rect(cx, cy, CELL - 2, CELL - 2, '#ffffff');
+          ui.rect(cx - 1, cy - 1, CELL, CELL, '#bff0ff');
           ui.cursor = own ? 'point' : 'arrow';
           this.hover = c.id;
           const tip: TipLine[] = [{ text: c.name, font: 'title', color: own ? '#2a1808' : '#5a4a3a' }, { text: c.desc, color: '#3a2810', gap: 1 }];
@@ -95,6 +91,10 @@ export class WardrobePanel {
     if (this.hover && this.hover !== this.lastHover) this.fx.burst(ui.mx, ui.my - 4, 4);
     this.lastHover = this.hover;
     panelLife(ui, this.fx, { x, y, w: W, h: H }, { x: ix, y: y + it, w: iw, h: H - it - PANEL_IN.wardrobe[3] }, 5, dt);
+    // the tally on a little brass plate on the bottom rail, beside BACK (clear of the close X)
+    const tally = `${n}/${tot} OWNED`, tw = Math.ceil(ui.measure(tally, 'small')) + 16, tx = x + W - il - 90 - tw;
+    ui.frame('brass', tx, by + 3, tw, 15);
+    ui.text(tally, tx + tw / 2, by + 3 + Math.round((15 - ui.cap('small')) / 2), { font: 'small', color: '#3a2008', shadow: '#f8dc90', align: 'center' });
     if (ui.button('ward:back', 'BACK', x + W - il - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }

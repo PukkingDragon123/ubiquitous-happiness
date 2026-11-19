@@ -39,7 +39,7 @@ import { pixelize, ramp } from './obj/pixtex';
 import { BlobAvatar } from './obj/blobAvatar';
 import { HealClam3D } from './obj/clam';
 import { HP_PER, HEAL_ITEM, hpify } from '../combat/types';
-import { SkillCard3D } from './obj/cards';
+import { AbilityMedallion } from './obj/medallion';
 import { hudModel, itemModel } from '../backpack/models';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
@@ -376,6 +376,8 @@ interface Roll { v: number; old: number; t: number; flash: number; delta: { n: n
 // layout (D)
 const M = 8;
 const PR = 24;
+/** the ability medallions: diameter, first centre x, spacing */
+const MD = 46, HX = M + 25, HS = 51;
 
 export class Hud {
   private pixT = 0;
@@ -402,7 +404,7 @@ export class Hud {
   private farShown = -1; private depthShown = -1;
   private models: Record<'pearls' | 'keys' | 'bombs' | 'pack', THREE.Object3D>;
   private gauge = new DepthGauge(PR);
-  private cards: SkillCard3D[] = [];
+  private cards: AbilityMedallion[] = [];
   private cardIds: string[] = [];
   private stamShown = 1; private stamChip = 1; private stamChipHold = 0; private stamFlash = 0;
   private manaShown = 0; private manaChip = 0;
@@ -512,7 +514,7 @@ export class Hud {
       this.topGap = [vit.right, navL];
       // the boss bar keeps clear of the hand of skill cards on narrow screens
       const last = (s.skills?.slots ?? []).reduce((a, sl, i) => (sl ? i : a), -1);
-      this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null, last >= 0 ? M + 20 + last * 41 + 26 : 10);
+      this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null, last >= 0 ? HX + last * HS + MD / 2 + 4 : 10);
       this.hand(ui, dt, s.skills ?? null);
       this.pickups(ui, dt);
     } else for (const p of this.picks) p.t += dt;
@@ -945,12 +947,17 @@ export class Hud {
   /** the free span of the top row (between the vitals and the navigation instrument), D */
   private topGap: [number, number] = [0, 9999];
 
-  // ---------------------------------------------------------------- bottom left: the hand of skill cards
+  // ---------------------------------------------------------------- bottom left: the ability medallions
+  /**
+   * the skills (keys 1-4) as round brass porthole MEDALLIONS (src/ui/obj/medallion.ts): per-skill art behind glass, a
+   * clockwise wipe of dark water while cooling down with the seconds over it, a glint + ring pulse + bubble burst when
+   * ready again, a keycap on the rim, a sink when its key is pressed, a brass halo on the selected one
+   */
   private hand(ui: DUi, dt: number, sk: SkillHudState | null) {
     const ids = (sk?.slots ?? []).map((x) => x?.id ?? '');
     if (ids.join('|') !== this.cardIds.join('|')) {
       for (const c of this.cards) c.root.removeFromParent();
-      this.cards = ids.map((id) => (id ? new SkillCard3D(id, { w: 36 }) : null)).filter((c): c is SkillCard3D => !!c);
+      this.cards = (sk?.slots ?? []).map((sl) => (sl ? new AbilityMedallion(sl.id, { d: MD, color: sl.color }) : null)).filter((c): c is AbilityMedallion => !!c);
       for (const c of this.cards) this.stage.ui.add(c.root);
       this.cardIds = ids;
     }
@@ -959,22 +966,26 @@ export class Hud {
     sk.slots.forEach((sl, i) => {
       if (!sl) return;
       const c = this.cards[k++]; if (!c) return;
-      const x = M + 20 + i * 41, y = ui.h - 36;
-      const hov = ui.hover(x - c.w / 2, y - c.h / 2, c.w, c.h) ? 1 : 0;
+      const x = HX + i * HS, y = ui.h - MD / 2 - 9;
+      const hov = ui.hover(x - MD / 2, y - MD / 2, MD, MD) ? 1 : 0;
       const cd = sl.cdMax > 0 ? clamp01(sl.cd / sl.cdMax) : 0;
-      const ready = cd <= 0 && sl.mana <= sk.mana;
-      c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / (c.w / 2) : 0, my: hov ? (ui.my - y) / (c.h / 2) : 0, cd, ready, selected: i === sk.sel });
+      const noMana = sl.mana > sk.mana;
+      const ready = cd <= 0 && !noMana;
+      const pressed = !!ui.ui.input?.down.has('Digit' + (i + 1));
+      c.update(dt, { hover: hov, cd, ready, selected: i === sk.sel, pressed, noMana });
       this.stage.put(c.root, x, y, 30);
-      c.root.rotation.z = (i - 1.5) * -0.05;
-      // the key on a little brass disc on the frame, the cooldown seconds big over the art
-      const lift = i === sk.sel ? 5 : 0;
-      const kx = x - c.w / 2 + 2, ky = y - c.h / 2 - 3 - lift;
-      gem(ui.ui, ui.p(kx + 3), ui.p(ky + 4), Math.max(3, ui.p(5.5)), i === sk.sel ? '#f2c66d' : '#c8913a');
-      ui.big(String(i + 1), kx + 3, ky + 1, 6, { color: PAL.ink, outline: null, shadow: null, align: 'center' });
-      if (cd > 0) ui.big(String(Math.ceil(sl.cd)), x, y - 9, 11, { color: '#ffffff', align: 'center' });
-      else if (!ready) ui.big('MANA', x, y - 4, 4.5, { color: PAL.sea2, align: 'center' });
+      // the key on a keycap set into the rim (top left), the cooldown seconds big over the water, MANA when short
+      const kw = ui.ui.keycapW(String(i + 1));
+      const lift = i === sk.sel ? 4 : 0;
+      ui.ui.keycap(String(i + 1), ui.p(x - MD * 0.36) - Math.round(kw / 2), ui.p(y - MD * 0.36 - lift) - 7, false, pressed);
+      if (cd > 0) ui.big(String(Math.ceil(sl.cd)), x, y - 6, 12, { color: '#ffffff', color2: '#cfe8f0', align: 'center' });
+      else if (noMana) ui.big('MANA', x, y - 2.5, 5, { color: PAL.sea2, align: 'center' });
+      // the ready burst: kit bubbles rise off the rim the moment it comes back
+      if (this.cdPrev[i] > 0 && cd <= 0) for (let b = 0; b < 5; b++) ui.ui.bubble(ui.p(x - 8 + b * 4), ui.p(y - MD / 2), { r: 1 + (b % 2), vy: -18 - b * 3 });
+      this.cdPrev[i] = cd;
     });
   }
+  private cdPrev: number[] = [0, 0, 0, 0];
 
   // ---------------------------------------------------------------- right: pickup cards
   private pickups(ui: DUi, dt: number) {

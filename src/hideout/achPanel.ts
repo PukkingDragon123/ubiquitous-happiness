@@ -8,7 +8,7 @@ import { medal } from '../achievements/medals';
 import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC, SLOT_NAME } from '../cosmetics';
 import { K, brassPlate } from './itemCard';
-import { panelArt, PANEL_IN } from './panelArt';
+import { panelArt, PANEL_IN, cushionArt, plateArt, cellArt } from './panelArt';
 import { wobble, SeaFx } from './seaFx';
 import { panelLife } from './panels';
 
@@ -49,10 +49,9 @@ export class AchievementsPanel {
       ui.mark('ach:' + a.id, cx, cy, CW - 2, CH - 2);
       if (over) { this.sel = i; ui.cursor = 'point'; }
       const on = this.sel === i;
-      if (on) { ui.fill(cx, cy, CW - 2, CH - 2, '#2a3678'); ui.rect(cx, cy, CW - 2, CH - 2, K.brass2); }
+      // a velvet cushion per medal with a brass hook at its top (brass-framed when selected)
+      ui.img(cushionArt(CW - 2, CH - 2, on ? 'on' : over ? 'hover' : 'off'), cx, cy);
       const bob = got && on ? Math.round(Math.sin(this.t * 5) * 1) : 0;
-      // a little brass pin above each medal
-      ui.fill(cx + CW / 2 - 2, cy + 1, 3, 3, got ? K.brass1 : '#4a4a5a');
       ui.img(medal(a.emblem, a.tier, !got), cx + Math.round((CW - 2 - 28) / 2), cy + 4 + bob);
       if (got && Math.sin(this.t * 2.5 + i * 1.3) > 0.85) { ui.fill(cx + 12, cy + 15, 1, 3, '#ffffff'); ui.fill(cx + 11, cy + 16, 3, 1, '#ffffff'); }
       ui.bar(cx + 4, cy + 38, CW - 10, 4, got ? 1 : p / a.goal, got ? '#f0c040' : '#5ac8ff');
@@ -64,8 +63,8 @@ export class AchievementsPanel {
     // ---- the card: a brass-edged plate on the velvet
     const a = ACHIEVEMENTS[this.sel], got = isDone(a.id), p = progress(a);
     const dx = gx + COLS * CW + 6, dy = gy, dw = DW - 4, dh = ROWS * CH - 2;
-    ui.fill(dx - 1, dy - 1, dw + 2, dh + 2, '#2e1404'); ui.fill(dx, dy, dw, dh, K.brass0); ui.fill(dx, dy, dw, 1, K.brass2);
-    ui.fill(dx + 2, dy + 2, dw - 4, dh - 4, '#101430');
+    ui.fill(dx + 2, dy + 2, dw, dh, '#000000', 0.35);
+    ui.img(plateArt(dw, dh), dx, dy);
     ui.img(medal(a.emblem, a.tier, !got), dx + 6, dy + 6);
     let ty = dy + 6;
     ty += ui.textBox(a.name.toUpperCase(), dx + 38, ty, dw - 42, { font: 'body', color: got ? K.brass2 : K.cream, shadow: '#000' });
@@ -77,11 +76,11 @@ export class AchievementsPanel {
     // the reward
     const c = COSMETIC[a.reward];
     const ry = dy + dh - 40;
-    ui.fill(dx + 5, ry - 4, dw - 10, 1, '#3a3e6a');
+    ui.fill(dx + 7, ry - 4, dw - 14, 1, '#0d1430'); ui.fill(dx + 7, ry - 3, dw - 14, 1, '#3e4c84');
     ui.text('REWARD', dx + 7, ry, { font: 'small', color: K.brass2 });
     if (c) ui.text(SLOT_NAME[c.slot], dx + dw - 7, ry, { font: 'small', color: '#8a94b0', align: 'right' });
-    ui.fill(dx + 7, ry + 11, 26, 26, '#04060c'); ui.fill(dx + 8, ry + 12, 24, 24, got ? '#3a2a10' : '#1a2040');
-    ui.img(cosmeticIcon(a.reward, 22 * ui.hd), dx + 9, ry + 13, { w: 22, h: 22, alpha: got ? 1 : 0.4 });
+    ui.img(cellArt(26, got ? 'on' : 'off'), dx + 7, ry + 11);
+    ui.img(cosmeticIcon(a.reward, 22), dx + 9, ry + 13, { w: 22, h: 22, alpha: got ? 1 : 0.4 });
     if (c) ui.textBox(c.name.toUpperCase(), dx + 38, ry + 14, dw - 44, { font: 'small', color: got ? '#ffffff' : '#a8a0b0' });
     // the bottom rail: browse keys and BACK
     const by = y + ACH_H - PANEL_IN.trophy[3] - 22;

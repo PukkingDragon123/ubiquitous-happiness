@@ -956,8 +956,9 @@ export class IntroScreen implements Screen {
   }
   /** a lesson's name card: a big bubble word up ahead of the kid (and the key under it) */
   private lessonCard(title: string, sub: string) {
-    const k = this.kid;
-    const x = k.x + 2.4, y = Math.min(-2.2, Math.max(k.y + 2.3, this.floorAt(k.x) + 4.4));
+    // over the middle of the shot the lesson just framed, in its upper half
+    const c = this.camFn();
+    const x = c.x, y = Math.min(-1.6, c.y + c.dist * 0.17);
     this.t3d.add(title, x, y, 0.4, T3D.title, { size: 0.62, life: 2.8, enter: 'drop', stagger: 0.07, angle: 0.15 });
     if (sub) this.t3d.add(sub, x, y - 0.72, 0.4, T3D.sub, { size: 0.26, life: 2.6, delay: 0.5, stagger: 0.03, angle: 0.15 });
     audio.play('jin_arrive', { vol: 0.32, dry: true, rate: 1.15 });
@@ -1369,7 +1370,6 @@ export class IntroScreen implements Screen {
       if (k.hp < k.maxHp / 2) k.hp = Math.ceil(k.maxHp / 2);
       return parries >= 2 && !inFlight;
     });
-    k.hp = k.maxHp;
     this.crabMode = 'follow';
     this.followKid(11.5, 0.7);
   }

@@ -606,11 +606,13 @@ export class PixelUI {
   }
   /** a kit icon at this canvas's density; returns its width (UI px) */
   icon(name: string, x: number, y: number, alpha = 1) { const i = iconTex(name); this.img(i, x, y, { alpha, w: i.width, h: i.height }); return i.width; }
-  /** item icon fitted to a size box (nearest-safe downsample) */
+  /**
+   * item icon fitted to a size box at 1 texel per UI px (v6: the same chunky pixel size as the kit), re-rasterised
+   * at the cell size that fits or fitted without inventing colours (itemIconBox)
+   */
   item(id: string, x: number, y: number, w: number, h = w, level = 1, alpha = 1) {
-    // rendered at the canvas density: a 24 UI px slot gets a 72 px model icon on a 3x canvas
-    const hd = this.hd;
-    this.img(itemIconBox(id, Math.round(w * hd), Math.round(h * hd), level), x, y, { alpha, w, h });
+    const W = Math.max(1, Math.round(w)), H = Math.max(1, Math.round(h));
+    this.img(itemIconBox(id, W, H, level), x, y, { alpha, w: W, h: H });
   }
   /**
    * a keycap with a label in the screen font ('E', 'ESC', 'TAB', 'SPC'...): KEYCAP_H (13) UI px tall. Returns its

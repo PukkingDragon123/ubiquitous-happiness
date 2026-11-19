@@ -417,15 +417,14 @@ export function windowArt(s: number): HTMLCanvasElement {
       if (ix + iy === Math.round(IW * 0.12) && k < 0.4) t = 7;
       if (iy < 2 || ix < 1) t = 1;
       let c: C = WA[t];
-      // the sand mound the model stands on
-      const my = IH * 0.78, mrx = IW * 0.4, mry = Math.max(3, IH * 0.12);
+      // a low sand mound the model stands on (a lit crest, a shaded underside, its shadow) on a darker sand floor
+      const my = IH * 0.8, mrx = IW * 0.3, mry = Math.max(2, IH * 0.075);
       const e = ((ix - IW / 2) / mrx) ** 2 + ((iy - my) / mry) ** 2;
-      const floor = iy > my + mry * 0.4 + Math.sin(ix * 0.4) * 0.8;
-      if (e <= 1 || floor) {
-        const SW = SA.map((q) => [Math.round(q[0] * 0.7 + WA[4][0] * 0.3), Math.round(q[1] * 0.7 + WA[4][1] * 0.3), Math.round(q[2] * 0.7 + WA[4][2] * 0.3)] as C);
-        const top = e <= 1 && e > 0.72 && iy < my;
-        c = top ? SW[5] : e <= 1 ? (iy < my ? SW[4] : SW[3]) : (ix * 2 + iy) % 9 === 0 ? SW[1] : SW[2];
-      }
+      const fl = IH * 0.9 + Math.round(Math.sin(ix * 0.35) * 0.8);
+      const SW = SA.map((q) => [Math.round(q[0] * 0.66 + WA[4][0] * 0.34), Math.round(q[1] * 0.66 + WA[4][1] * 0.34), Math.round(q[2] * 0.66 + WA[4][2] * 0.34)] as C);
+      if (e <= 1) c = iy < my - mry * 0.45 ? SW[5] : iy < my ? SW[4] : iy < my + mry * 0.5 ? SW[3] : SW[2];
+      else if (iy >= fl) c = iy === Math.ceil(fl) ? SW[3] : (ix + iy * 3) % 8 === 0 ? SW[0] : SW[1];
+      else if (e <= 1.5 && iy > my) c = WA[1];
       px.set(x, y, c);
     }
     // rivets in the bezel's corners, verdigris beside them
@@ -452,41 +451,54 @@ export function emptyChestArt(): HTMLCanvasElement {
       px.set(x, y, c, e > 0.82 ? 150 : 255);
     }
     // the chest's shadow on the sand
-    for (let y = 56; y < 63; y++) for (let x = 34; x < 100; x++) { const e = ((x - 66) / 34) ** 2 + ((y - 59) / 3.5) ** 2; if (e < 1) px.shade(x, y, 0.55); }
-    // the open lid, tipped back: its inside (dark planks) between iron bands
-    const X0 = 42, X1 = 90, LT = 14, LB = 33;
+    for (let y = 57; y < 64; y++) for (let x = 34; x < 100; x++) { const e = ((x - 66) / 34) ** 2 + ((y - 60) / 3.5) ** 2; if (e < 1) px.shade(x, y, 0.55); }
+    // the open lid, tipped back: its inside face (dark planks between iron bands), its top edge catching the light
+    const X0 = 40, X1 = 92, LT = 12, LB = 35;
+    const lin = (y: number) => Math.round((LB - y) * 0.34);
     for (let y = LT; y < LB; y++) {
-      const inset = Math.round((LB - y) * 0.18);
+      const inset = lin(y);
       for (let x = X0 + inset; x < X1 - inset; x++) {
         const edge = x === X0 + inset || x === X1 - inset - 1 || y === LT;
-        const pl = Math.floor((y - LT) / 5), gr = ((x + pl * 7) % 13) < 2 && (y - LT) % 5 === 2;
-        px.set(x, y, edge ? INK : (y - LT) % 5 === 0 ? TIMBER[1] : gr ? TIMBER[1] : y === LT + 1 ? TIMBER[4] : TIMBER[pl % 2 ? 2 : 3]);
+        const v = y - LT, pl = Math.floor(v / 5);
+        let c = TIMBER[pl % 2 ? 1 : 2];
+        if (v % 5 === 0) c = TIMBER[0];
+        else if (((x + pl * 7) % 13) < 3 && v % 5 === 2) c = TIMBER[0];
+        if (y === LT + 1) c = TIMBER[7]; else if (y === LT + 2) c = TIMBER[5];
+        if (x === X0 + inset + 1 && !edge) c = TIMBER[4];
+        px.set(x, y, edge ? INK : c);
       }
     }
-    for (const bx of [X0 + 9, X1 - 11]) for (let y = LT + 1; y < LB; y++) { const inset = Math.round((LB - y) * 0.18); const xx = bx + (bx < 66 ? inset : -inset); px.set(xx, y, R.iron[3]); px.set(xx + 1, y, R.iron[2]); px.set(xx + 2, y, R.iron[1]); }
-    // the body: planks, iron bands with rivets, a brass lock plate hanging open
-    const BT = 33, BB = 57, B0 = 38, B1 = 94;
-    band(px, B0 + 1, BT + 4, B1 - B0 - 2, BB - BT - 5, true, TIMBER, 12, { lit: 0 });
+    for (const fb of [0.22, 0.78]) for (let y = LT + 1; y < LB; y++) {
+      const inset = lin(y), x0 = X0 + inset, x1 = X1 - inset, xx = Math.round(x0 + (x1 - x0) * fb) - 1;
+      px.set(xx, y, R.iron[3]); px.set(xx + 1, y, R.iron[2]); px.set(xx + 2, y, R.iron[1]);
+    }
+    // the body: planks, iron bands with rivets, a brass lock plate; the top open on the empty dark inside
+    const BT = 35, BB = 59, B0 = 38, B1 = 94;
+    band(px, B0 + 1, BT + 7, B1 - B0 - 2, BB - BT - 8, true, TIMBER, 12, { lit: 0 });
     for (let y = BT; y < BB; y++) for (let x = B0; x < B1; x++) {
       const out = x === B0 || x === B1 - 1 || y === BB - 1 || y === BT;
       if (out) { px.set(x, y, INK); continue; }
-      if (y < BT + 4) px.set(x, y, y === BT + 1 ? WA[1] : WA[0]);                     // the empty dark inside
+      if (y < BT + 7) {
+        // the inside: the back wall's planks in shadow, then nothing but dark water down in it
+        const v = y - BT;
+        px.set(x, y, v <= 2 ? (((x + 3) % 11) === 0 ? TIMBER[0] : TIMBER[1]) : v === 3 ? TIMBER[0] : WA[v === 4 ? 1 : 0]);
+      }
     }
-    for (let x = B0 + 1; x < B1 - 1; x++) { px.set(x, BT + 4, TIMBER[7]); px.set(x, BT + 3, TIMBER[2]); }
+    for (let x = B0 + 1; x < B1 - 1; x++) { px.set(x, BT + 7, TIMBER[8]); px.set(x, BT + 8, TIMBER[6]); }
     for (const bx of [B0 + 8, B1 - 11]) {
-      for (let y = BT + 3; y < BB - 1; y++) { px.set(bx, y, INK); px.set(bx + 1, y, R.iron[4]); px.set(bx + 2, y, R.iron[3]); px.set(bx + 3, y, R.iron[2]); px.set(bx + 4, y, INK); }
-      rivet(px, bx + 1, BT + 7, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')])); rivet(px, bx + 1, BB - 6, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')]));
+      for (let y = BT + 7; y < BB - 1; y++) { px.set(bx, y, INK); px.set(bx + 1, y, R.iron[4]); px.set(bx + 2, y, R.iron[3]); px.set(bx + 3, y, R.iron[2]); px.set(bx + 4, y, INK); }
+      rivet(px, bx + 1, BT + 10, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')])); rivet(px, bx + 1, BB - 6, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')]));
     }
     const lx = 62;
-    for (let y = BT + 4; y < BT + 13; y++) for (let x = lx; x < lx + 9; x++) {
-      const e = x === lx || x === lx + 8 || y === BT + 4 || y === BT + 12;
-      px.set(x, y, e ? INK : y === BT + 5 ? BRS[7] : x === lx + 1 ? BRS[6] : y === BT + 11 ? BRS[2] : BRS[4]);
+    for (let y = BT + 7; y < BT + 16; y++) for (let x = lx; x < lx + 9; x++) {
+      const e = x === lx || x === lx + 8 || y === BT + 7 || y === BT + 15;
+      px.set(x, y, e ? INK : y === BT + 8 ? BRS[7] : x === lx + 1 ? BRS[6] : y === BT + 14 ? BRS[2] : BRS[4]);
     }
-    px.set(lx + 4, BT + 8, INK); px.set(lx + 4, BT + 9, INK); px.set(lx + 3, BT + 9, INK);
+    px.set(lx + 4, BT + 11, INK); px.set(lx + 4, BT + 12, INK); px.set(lx + 3, BT + 12, INK);
     // sea life: barnacles on the body, algae along its foot, a sea star and a kelp blade on the sand
     stamp(px, SPR.barnacleM, B0 + 2, BB - 6, { onlyOn: true }); stamp(px, SPR.barnacleS, B0 + 6, BB - 4, { onlyOn: true });
-    algae(px, 66, BB - 2, 18, 2, 3.1, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 && y > BT + 4 });
-    coralline(px, B1 - 4, BT + 14, 2, 4, 9, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 });
+    algae(px, 66, BB - 2, 18, 2, 3.1, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 && y > BT + 8 });
+    coralline(px, B1 - 4, BT + 16, 2, 4, 9, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 && y > BT + 8 });
     stamp(px, SPR.star, 104, 54);
     stamp(px, SPR.scallop, 18, 55);
     kelpBlade(px, bladePath(26, 54, 0.1, -1, 34, 1.6, 0.8), 4, { free: true });

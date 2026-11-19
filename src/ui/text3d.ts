@@ -15,7 +15,8 @@
 //
 //   new Float3D(t3d)   a FloatText that sends the big pops (titles, item names, crits, WAVE n) to 3D and keeps the
 //                      small hints flat; hand it to a World as world.text.
-//   bubbleWord('BLOBFISH', T3D.logo, 0.5)   a static bubble word (a Group, centred) for props such as the title sign
+//   bubbleWord('BLOBFISH', T3D.logo, 0.5)   a static bubble word (a Group, centred, with a fizz of tiny bubbles rising
+//                                          off it) for props such as the title sign
 import * as THREE from 'three';
 import { glyphs, measure, capH, type FontName } from './pixel/font';
 import { FloatText, type StyleName } from './text';
@@ -801,13 +802,14 @@ export class Text3DLayer {
  * A word of bubble letters as a plain Group (centred on the origin, cap height `cap` metres, no entrance): for props
  * that own their own placement. The glass still jiggles (its clock ticks whenever it renders).
  */
-export function bubbleWord(text: string, st: T3DStyle, cap = 0.5): THREE.Group {
+export function bubbleWord(text: string, st: T3DStyle, cap = 0.5, fizz = 10): THREE.Group {
   const g = new THREE.Group();
   const face = faceOf(st.font);
   const ch = capH(face);
   const vox = cap / Math.max(5, ch);
   const lw = measure(text, face);
   const mat = glassMat(st);
+  const seeds: number[] = [];
   let pen = 0;
   for (const c of text) {
     const gl = bubbleGlyph(c, st);
@@ -819,6 +821,27 @@ export function bubbleWord(text: string, st: T3DStyle, cap = 0.5): THREE.Group {
     m.scale.setScalar(vox);
     m.onBeforeRender = tick;
     g.add(m);
+    for (let k = 0; k + 2 < gl.pts.length; k += 9) seeds.push(m.position.x + gl.pts[k] * vox, gl.pts[k + 1] * vox);
+  }
+  // a fizz of tiny bubbles that peel off the letters and rise, forever (the logo is never quite still)
+  if (fizz > 0 && seeds.length) {
+    const n = Math.min(fizz, 32);
+    const cl = bubbleCluster(n, st.top);
+    const ph = Array.from({ length: n }, (_, i) => ({ s: (i * 7) % (seeds.length / 2), o: i / n, sp: 0.6 + ((i * 37) % 10) / 20 }));
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    cl.onBeforeRender = () => {
+      tick();
+      const t = U_TIME.value;
+      for (let i = 0; i < n; i++) {
+        const b = ph[i], k = (t * 0.22 * b.sp + b.o) % 1;
+        const x = seeds[b.s * 2] + Math.sin(t * 2 + i) * cap * 0.06, y = seeds[b.s * 2 + 1] + k * cap * 2.2;
+        const r = cap * (0.035 + (i % 3) * 0.015) * Math.sin(Math.min(1, k * 1.25) * Math.PI);
+        m4.compose(v.set(x, y, cap * 0.12), q, sc.setScalar(Math.max(1e-4, r)));
+        cl.setMatrixAt(i, m4);
+      }
+      cl.instanceMatrix.needsUpdate = true;
+    };
+    g.add(cl);
   }
   g.userData.width = lw * vox;
   return g;

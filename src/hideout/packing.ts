@@ -2,7 +2,7 @@
 // open sea chest (the stash) and the open backpack side by side on the sand, lit by a porch lantern:
 //   - drag loot and gear (agent L's 3D item models) from the chest into the pack's grid (click packs / unpacks,
 //     R or right click turns while dragging, materials stack); the chest pages with two brass knobs
-//   - your BUILD laid out: a 3D skill card for every skill the packed gear grants (L's SkillCard3D), and a
+//   - your BUILD laid out: an ability medallion for every skill the packed gear grants (src/ui/obj/medallion.ts), and a
 //     pinned paper note (v5, top left) with the set bonuses, the stat changes and the mastery
 //   - a small brass MASTERY dial (click a half / scroll / A D) with a brass label plate and ◄ ► under it
 //   - SWIM OUT: the painted sign, or the big green button (Enter) -> onDive(cfg); HOME: the sign, the button (Esc)
@@ -25,7 +25,7 @@ import type { PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
 import { drawText } from '../ui/pixel/font';
 import { UiStage } from '../ui/obj/stage';
-import { SkillCard3D } from '../ui/obj/cards';
+import { AbilityMedallion } from '../ui/obj/medallion';
 import { audio } from '../audio/audio';
 import { paintTag } from './tag';
 import { K, itemHead, itemBody, buildLines } from './itemCard';
@@ -116,7 +116,7 @@ export class Packing {
   private lid = new THREE.Group();
   private bagFlap = new THREE.Group();
   private stage = new UiStage();
-  private cards: { id: string; c: SkillCard3D }[] = [];
+  private cards: { id: string; c: AbilityMedallion }[] = [];
   private cardKey = '';
   private drag: Drag | null = null;
   private flash = { text: '', t: 0 };
@@ -528,13 +528,14 @@ export class Packing {
     if (key !== this.cardKey) {
       this.cardKey = key;
       for (const c of this.cards) c.c.root.removeFromParent();
-      this.cards = skills.slice(0, 5).map((id) => ({ id, c: new SkillCard3D(id, { w: 44 }) }));
+      // (v6: the skills are round ability MEDALLIONS, the same pieces the run's HUD shows)
+      this.cards = skills.slice(0, 5).map((id) => ({ id, c: new AbilityMedallion(id, { d: 44 }) }));
     }
     this.stage.attach(ui);
     const cw = 52, x0 = Math.round(ui.w / 2 - ((this.cards.length - 1) * cw) / 2);
     this.cards.forEach((c, i) => {
       const x = x0 + i * cw, y = 40;
-      const hov = ui.hover(x - 22, y - 32, 44, 64) ? 1 : 0;
+      const hov = ui.hover(x - 22, y - 22, 44, 44) ? 1 : 0;
       this.stage.put(c.c.root, x, y, 10);
       c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
     });

@@ -10,7 +10,7 @@ import type { ItemInst } from '../game/run';
 import { CRAFTS, craft, craftAvailable, stationName, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
 import { audio } from '../audio/audio';
 import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate } from './itemCard';
-import { panelArt, wellArt, PANEL_IN, type PanelKind } from './panelArt';
+import { panelArt, wellArt, rowArt, cellArt, emptyChestArt, PANEL_IN, type PanelKind } from './panelArt';
 import { bubbles, kelp, caustics, wobble, SeaFx } from './seaFx';
 
 /** a centred panel rect at most w x h (leaves room for the name plate above it) */
@@ -80,6 +80,33 @@ function detail(ui: PixelUI, id: string, level: number, x: number, y: number, w:
   return Math.max(used, MW);
 }
 
+/**
+ * the sea chest's empty state in its detail pane: the empty chest on the sand (bubbles rising out of it) and how loot
+ * gets home, three hint rows with their keys / icons. `tab`: the filter that is empty (blank when the chest is).
+ */
+function emptyChest(ui: PixelUI, x: number, y: number, w: number, h: number, tab: string) {
+  const art = emptyChestArt();
+  const ax = x + Math.round((w - art.width) / 2), ay = y + 6;
+  ui.img(art, ax, ay);
+  bubbles(ui, ax + 50, ay + 36, 32, ui.t, 9, 3, 30);
+  let yy = ay + art.height + 4;
+  const head = tab ? `NO ${tab} YET` : 'EMPTY... FOR NOW';
+  ui.text(head, x + w / 2, yy, { font: 'title', color: K.brass2, outline: K.ink2, align: 'center' });
+  yy += ui.lh('title') + 2;
+  const tx = x + 12, tw = w - 24;
+  const rows: [string, string][] = [
+    ['TAB', 'On a dive, drag finds into your backpack.'],
+    ['mail', "Mail them home from the manatee's post office: mail is safe even if you sink."],
+    ['crown', 'Beat the last boss and your whole pack comes home.'],
+  ];
+  for (const [k, t] of rows) {
+    if (yy + ui.lh('body') > y + h - 4) break;
+    const kw = k === 'TAB' ? ui.keycap('TAB', tx, yy) : ui.icon(k, tx + 2, yy + 1) + 2;
+    yy += Math.max(ui.textBox(t, tx + Math.max(kw, 24) + 4, yy + 1, tw - Math.max(kw, 24) - 4, { font: 'small', color: K.cream, shadow: K.ink2 }), 15) + 4;
+  }
+  if (yy + ui.lh('small') < y + h - 4) ui.text('It all lands in this chest.', x + w / 2, yy + 2, { font: 'small', color: K.dim, shadow: K.ink2, align: 'center' });
+}
+
 export class StashPanel {
   tab = 0;
   sel: number | null = null;
@@ -104,9 +131,8 @@ export class StashPanel {
       if (!mats.length) { ui.textBox('No materials yet. Bring ore, kelp, shells and scrap home from a run (or mail them with a manatee).', inner.x + 12, cy + 12, inner.w - 24, { font: 'body', color: K.cream, shadow: K.ink2 }); return close; }
       ui.list('stashL', inner.x + 3, cy + 3, inner.w - 6, ch - 6, mats.length, 26, (i, x, y, w, hov) => {
         const [id, n] = mats[i];
-        ui.fill(x + 2, y + 1, w - 6, 24, hov ? '#24484e' : '#152c32');
-        ui.fill(x + 2, y + 24, w - 6, 1, '#081418');
-        ui.fill(x + 4, y + 3, 20, 20, K.ink2);
+        // a driftwood plank row with an icon cubby (painted 1x, panelArt.rowArt)
+        ui.img(rowArt(w - 6, 24, hov ? 'hover' : 'off', i, 20), x + 2, y + 1);
         const pic = itemPhoto(id, 1, 20 * ui.hd);
         if (pic) ui.img(pic, x + 4, y + 3, { w: 20, h: 20 }); else ui.item(id, x + 4, y + 3, 20, 20);
         ui.text(getItem(id).name, x + 30, y + 7, { font: 'body', color: RARITY_COLOR[getItem(id).rarity] === RARITY_COLOR.common ? K.cream : RARITY_COLOR[getItem(id).rarity], shadow: K.ink2 });
@@ -122,15 +148,18 @@ export class StashPanel {
     ui.img(wellArt(gw, ch), inner.x, cy);
     const cell = 34, cols = Math.max(1, Math.floor((gw - 12) / cell));
     const hov0: { it: ItemInst | null } = { it: null };
-    if (!items.length) ui.textBox('Nothing here yet. Gear you bring home from a run (or mail home with a manatee) lands in the chest.', inner.x + 10, cy + 10, gw - 20, { font: 'body', color: K.cream, shadow: K.ink2 });
+    if (!items.length) {
+      const th = ui.textBox('Nothing here yet. Gear you bring home from a run (or mail home with a manatee) lands in the chest.', inner.x + 10, cy + 10, gw - 20, { font: 'body', color: K.cream, shadow: K.ink2 });
+      // the empty cubbies waiting for it, faint
+      const gx0 = inner.x + 4 + Math.round((gw - 8 - cols * cell) / 2), gy0 = cy + 10 + th + 8;
+      for (let ry = gy0, row = 0; ry + cell <= cy + ch - 6 && row < 6; ry += cell, row++) for (let c = 0; c < cols; c++) ui.img(cellArt(cell - 2), gx0 + c * cell + 1, ry + 1, { alpha: 0.35 + 0.1 * Math.max(0, 2 - row) });
+    }
     const clicked = ui.list('stashL', inner.x + 4, cy + 4, gw - 8, ch - 8, items.length, cell, (i, x, y, _w, hov) => {
       const it = items[i], d = getItem(it.id);
       const selected = this.sel === it.uid;
       const X = x + 1, Y = y + 1, S = cell - 2;
-      ui.fill(X, Y, S, S, '#05090c');
-      ui.fill(X + 1, Y + 1, S - 2, S - 2, selected ? '#3a2a10' : hov ? '#24484e' : '#173a40');
-      ui.fill(X + 1, Y + 1, S - 2, 1, '#0b1d22'); ui.fill(X + 1, Y + S - 2, S - 2, 1, RARITY_COLOR[d.rarity]);
-      if (selected) ui.rect(X, Y, S, S, K.brass2);
+      // a cubby per piece (wooden rim, water, a sand bed; brass when selected) with a gem in its rarity colour
+      ui.img(cellArt(S, selected ? 'on' : hov ? 'hover' : 'off', RARITY_COLOR[d.rarity]), X, Y);
       const pic = itemPhoto(it.id, it.level ?? 1, Math.round((S - 4) * ui.hd));
       if (pic) ui.img(pic, X + 2, Y + 1, { w: S - 4, h: S - 4 }); else ui.item(it.id, X + 4, Y + 3, S - 8, S - 8, it.level ?? 1);
       if ((it.level ?? 1) > 1) ui.text(`+${(it.level ?? 1) - 1}`, X + S - 3, Y + 2, { font: 'small', color: K.kelpL, outline: '#000', align: 'right' });
@@ -142,6 +171,7 @@ export class StashPanel {
     ui.img(wellArt(dw, ch), dx, cy);
     const it: ItemInst | undefined = hov0.it ?? items.find((s) => s.uid === this.sel) ?? items[0];
     if (it) detail(ui, it.id, it.level ?? 1, dx + 8, cy + 8, dw - 16, ch - 16);
+    else emptyChest(ui, dx, cy, dw, ch, META.stash.length > 0 ? this.tabs[this.tab].label : '');
     // a little burst of bubbles off each piece you point at
     const hu = (hov0.it as ItemInst | null)?.uid ?? -1;
     if (hu !== this.lastHov && hu >= 0) this.fx.burst(ui.mx, ui.my - 4, 4);
@@ -168,11 +198,9 @@ export class WorkshopPanel {
     ui.img(wellArt(listW, ch), inner.x, cy);
     ui.img(wellArt(dw, ch), dx, cy);
     const rowH = 24;
-    const row = (x: number, y: number, w: number, sel: boolean, hov: boolean, id: string, level: number, dim: boolean, right: string, rightCol: string, lock: boolean) => {
-      ui.fill(x + 1, y + 1, w - 3, rowH - 2, sel ? '#3a2a10' : hov ? '#24484e' : '#152c32');
-      if (sel) ui.rect(x + 1, y + 1, w - 3, rowH - 2, K.brass2);
-      ui.fill(x + 1, y + rowH - 2, w - 3, 1, '#081418');
-      ui.fill(x + 3, y + 3, 18, 18, K.ink2);
+    const row = (x: number, y: number, w: number, sel: boolean, hov: boolean, id: string, level: number, dim: boolean, right: string, rightCol: string, lock: boolean, i: number) => {
+      // a driftwood plank row with an icon cubby (brass-trimmed when selected)
+      ui.img(rowArt(w - 3, rowH - 2, sel ? 'sel' : hov ? 'hover' : 'off', i, 18), x + 1, y + 1);
       const pic = itemPhoto(id, level, 18 * ui.hd);
       if (pic) ui.img(pic, x + 3, y + 3, { w: 18, h: 18, alpha: dim ? 0.45 : 1 }); else ui.item(id, x + 3, y + 3, 18, 18, level, dim ? 0.45 : 1);
       let name = getItem(id).name;
@@ -186,7 +214,7 @@ export class WorkshopPanel {
       const canMake = (c: Craft) => craftAvailable(c) && Object.entries(c.cost).every(([k, v]) => (META.materials[k] ?? 0) >= v);
       const clicked = ui.list('wsL', inner.x + 4, cy + 4, listW - 8, ch - 8, list.length, rowH, (i, x, y, w, hov) => {
         const c = list[i], av = craftAvailable(c);
-        row(x, y, w, i === this.sel, hov, c.out, 1, !av, canMake(c) ? '●' : '', K.kelpL, !av);
+        row(x, y, w, i === this.sel, hov, c.out, 1, !av, canMake(c) ? '●' : '', K.kelpL, !av, i);
       }, { style: 'dark' });
       if (clicked >= 0) { this.sel = clicked; audio.play('k_pluck1', { vol: 0.3, dry: true }); }
       const c = list[Math.min(this.sel, list.length - 1)];
@@ -208,7 +236,7 @@ export class WorkshopPanel {
       if (!list.length) ui.textBox('Nothing to upgrade yet. Gear in your stash can be levelled up here.', inner.x + 10, cy + 10, listW - 20, { font: 'body', color: K.cream, shadow: K.ink2 });
       const clicked = ui.list('wsL', inner.x + 4, cy + 4, listW - 8, ch - 8, list.length, rowH, (i, x, y, w, hov) => {
         const it = list[i];
-        row(x, y, w, i === this.sel, hov, it.id, it.level ?? 1, false, `L${it.level ?? 1}`, K.brass2, false);
+        row(x, y, w, i === this.sel, hov, it.id, it.level ?? 1, false, `L${it.level ?? 1}`, K.brass2, false, i);
       }, { style: 'dark' });
       if (clicked >= 0) { this.sel = clicked; audio.play('k_pluck1', { vol: 0.3, dry: true }); }
       const it: ItemInst | undefined = list[Math.min(this.sel, list.length - 1)];
