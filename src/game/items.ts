@@ -185,7 +185,7 @@ const DEFS: ItemDef[] = [
     desc: 'Points to whatever you want most. Usually snacks.', stats: (s, l) => { s.speed += 0.2 * l; s.luck += 0.3 * l; } },
   { id: 'sharkNecklace', name: 'Shark Tooth Necklace', kind: 'trinket', shape: [[0, 0], [1, 0]], rarity: 'epic', tags: ['warrior'], maxLevel: 3,
     desc: 'Wear the bite you survived.', stats: (s, l) => { s.swordDmg += 0.3 * l; },
-    note: (l) => `Kills: ${12 * l}% chance to heal half a heart`,
+    note: (l) => `Kills: ${12 * l}% chance to heal 10 HP`,
     hook: (run, it) => run.on('kill', (d) => { if (chance(0.12 * (it.level || 1)) && heal(run, 1)) proc(run, it.id, 'Chomp!', d); }) },
   { id: 'anglerLantern', name: 'Anglerfish Lantern', kind: 'trinket', shape: [[0, 0], [0, 1]], rarity: 'epic', tags: ['summoner', 'fire'], maxLevel: 3, glow: 1.2,
     desc: 'Borrowed from a very angry fish.', stats: (s, l) => { s.magnet += 0.6 * l; s.luck += 0.4 * l; },
@@ -195,7 +195,7 @@ const DEFS: ItemDef[] = [
     desc: 'Iridescent, slippery, suspiciously large.', stats: (s, l) => { s.armor += 0.06 * l; s.speed += 0.15 * l; } },
   { id: 'starfish', name: 'Lucky Starfish', kind: 'trinket', shape: [[0, 0]], rarity: 'uncommon', tags: ['summoner', 'water'], maxLevel: 3, look: 'soft',
     desc: 'Grows back whatever it loses. Teaches you to, too.',
-    note: (l) => `New area: heal ${l} half-heart${l > 1 ? 's' : ''}`,
+    note: (l) => `New area: heal ${l * 10} HP`,
     hook: (run, it) => run.on('enterNode', () => { if (heal(run, it.level || 1)) proc(run, it.id, 'Regrow!'); }) },
   { id: 'crabClaw', name: 'Crab Claw', kind: 'trinket', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 3,
     desc: 'The crab wants it back. The crab can wait.', stats: (s, l) => { s.lineCut += 0.35 * l; s.swordDmg += 0.15 * l; } },
@@ -609,7 +609,7 @@ export const SETS: Record<string, SetDef> = {
     { n: 6, text: '30% of spells are free, +2 Mana/s', stats: (s) => { s.manaRegen += 2; } },
   ] },
   warrior: { tag: 'warrior', name: 'Reefguard', color: '#ff8a5a', kind: 'build', tiers: [
-    { n: 2, text: '+1 Heart, +5% Armor', stats: (s) => { s.maxHp += 2; s.armor += 0.05; } },
+    { n: 2, text: '+20 Max HP, +5% Armor', stats: (s) => { s.maxHp += 2; s.armor += 0.05; } },
     { n: 4, text: '+0.5 Sword Dmg, warrior skills +20%', stats: (s) => { s.swordDmg += 0.5; } },
     { n: 6, text: 'Spin attacks unleash a shockwave, +10% Armor', stats: (s) => { s.armor += 0.1; } },
   ] },
@@ -634,7 +634,7 @@ export const SETS: Record<string, SetDef> = {
   ] },
   frost: { tag: 'frost', name: 'Brine Frost', color: '#8ae0ff', kind: 'element', tiers: [
     { n: 2, text: '+5% Armor', stats: (s) => { s.armor += 0.05; } },
-    { n: 4, text: '+1 Heart, +5% Armor', stats: (s) => { s.maxHp += 2; s.armor += 0.05; } },
+    { n: 4, text: '+20 Max HP, +5% Armor', stats: (s) => { s.maxHp += 2; s.armor += 0.05; } },
   ] },
   shock: { tag: 'shock', name: 'Stormbound', color: '#c8f4ff', kind: 'element', tiers: [
     { n: 2, text: '+0.3 Swing Rate', stats: (s) => { s.swordRate += 0.3; } },
@@ -780,7 +780,7 @@ export function statLines(id: string, level = 1): StatLine[] {
       const [label, dec] = STAT_LABEL[k]!;
       let v: string;
       if (PCT.has(k)) v = `${Math.round(diff * 100)}%`;
-      else if (k === 'maxHp' || k === 'biteHeal') v = `${diff / 2 === Math.round(diff / 2) ? diff / 2 : (diff / 2).toFixed(1)} ${Math.abs(diff) === 2 ? 'heart' : 'hearts'}`;
+      else if (k === 'maxHp' || k === 'biteHeal') v = `${Math.round(diff * 10)}`;
       else v = diff.toFixed(dec).replace(/\.?0+$/, '') || '0';
       out.push({ key: k, text: `${diff > 0 ? '+' : ''}${v} ${label}`, good: diff > 0 });
     }

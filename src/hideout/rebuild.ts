@@ -33,7 +33,7 @@ const P = (p: Piece) => p;
 export const PIECES: Piece[] = [
   P({ id: 'stash', name: 'Stash Chest', unlock: 'A stash: keep what you bring home', cost: { driftwood: 3 }, x: 5.15, z: -0.6, yaw: -Math.PI / 2, w: 1.5, d: 0.75 }),
   P({ id: 'workbench', name: 'Workbench', unlock: 'Crafting and upgrades', cost: { seashell: 4, coralShard: 3 }, x: 5.2, z: -3.2, yaw: -Math.PI / 2, w: 1.9, d: 0.75 }),
-  P({ id: 'bed', name: 'Bed', unlock: '+1 heart on every run', cost: { kelp: 4, cork: 2, seashell: 2 }, x: -5.0, z: -2.0, yaw: Math.PI / 2, w: 2.0, d: 1.15 }),
+  P({ id: 'bed', name: 'Bed', unlock: '+20 Max HP on every run', cost: { kelp: 4, cork: 2, seashell: 2 }, x: -5.0, z: -2.0, yaw: Math.PI / 2, w: 2.0, d: 1.15 }),
   P({ id: 'lampA', name: 'Lamp', unlock: 'Warm light (cosier)', cost: { seaGlass: 2, coralShard: 1 }, x: -5.35, z: 0.25, yaw: 0, w: 0.6, d: 0.6 }),
   P({ id: 'trophy', name: 'Trophy Shelf', unlock: 'Achievements', cost: { driftwood: 3, lineScrap: 3 }, x: 3.2, z: -4.05, yaw: 0, w: 2.2, d: 0.5, wall: 0 }),
   P({ id: 'wardrobe', name: 'Wardrobe', unlock: 'Cosmetics: hats, skins, scarves', cost: { driftwood: 4, seashell: 3, cork: 2 }, x: -2.9, z: -4.0, yaw: 0, w: 1.3, d: 0.65 }),

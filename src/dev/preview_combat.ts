@@ -243,7 +243,7 @@ class CombatPreview extends MockScreen {
     const bar = (v: number, m: number, n = 20) => '#'.repeat(Math.round((v / m) * n)).padEnd(n, '.');
     const last = b.combat.parryLog[b.combat.parryLog.length - 1];
     const bb = this.boss?.bar();
-    this.hud.textContent = `HP ${b.hp}/${b.maxHp}  STA [${bar(h.stamina, h.staminaMax)}] ${Math.round(h.stamina)}  TEA ${'o'.repeat(h.flasks)}${'.'.repeat(h.flasksMax - h.flasks)}\n` +
+    this.hud.textContent = `HP ${b.hp}/${b.maxHp}  STA [${bar(h.stamina, h.staminaMax)}] ${Math.round(h.stamina)}  CLAMS ${'o'.repeat(h.flasks)}${'.'.repeat(h.flasksMax - h.flasks)}\n` +
       `guard ${h.guard}${h.parryWindow > 0 ? ' (window)' : ''}  move ${h.move ?? '-'}${h.charge ? ' charge ' + h.charge.toFixed(2) : ''}${h.iframes ? '  IFRAMES' : ''}  mana ${b.mana.toFixed(0)}\n` +
       `last parry: ${last ? last.result + ' ' + last.dt + 'ms' : '-'}  ${this.dummy ? 'dummy: ' + (this.dummy.attacks ? 'attacking' : 'still') + ' (\\)' : ''}` +
       (bb ? `\nBOSS ${bb.name} ${bb.title}  [${bar(bb.hp, bb.max, 30)}] phase ${bb.phase}/${bb.phases}` : '');

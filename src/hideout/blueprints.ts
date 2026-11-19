@@ -67,7 +67,7 @@ const LIST: Blueprint[] = [
   B({ id: 'aquarium', name: 'Aquarium', cat: 'cozy', size: [2, 1], cost: { seaGlass: 6, glassLens: 1, kelp: 2, copperOre: 1 }, use: 'poke', unlock: 'runs:1',
     desc: 'A fish tank. Inside a cave. Under the sea. Do not ask.' }),
   B({ id: 'bunk', name: 'Bunk Bed', cat: 'cozy', size: [2, 1], wall: true, cost: { driftwood: 8, kelp: 6, rustyNail: 4 }, unlock: 'runs:2',
-    station: { arch: 'any', perk: 'Well rested: start each run with +1 half heart' },
+    station: { arch: 'any', perk: 'Well rested: start each run with +10 HP' },
     desc: 'Top bunk for you, bottom bunk for the sock pile.' }),
   B({ id: 'recordPlayer', name: 'Record Player', cat: 'cozy', size: [1, 1], cost: { copperOre: 2, pearl: 1, driftwood: 2 }, use: 'music',
     desc: 'Click to change the hideout record.' }),
@@ -183,7 +183,7 @@ export function stationsBuilt(): string[] { return homeStations(); }
 export function stationPerks(): { unlocks: string[]; perks: string[]; arch: Arch[] } {
   const b = homeStations();
   const perks: string[] = [];
-  if (b.includes('bunk')) perks.push('Bed: +1 heart on every run');
+  if (b.includes('bunk')) perks.push('Bed: +20 Max HP on every run');
   if (b.includes('workbench')) perks.push('Workbench: archetype gear can turn up on runs');
   const arch: Arch[] = b.includes('workbench') ? ['mage', 'warrior', 'summoner', 'tinkerer', 'rogue'] : [];
   return { unlocks: [], perks, arch };

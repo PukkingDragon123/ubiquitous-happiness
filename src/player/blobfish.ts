@@ -525,7 +525,7 @@ export class Blobfish implements SkillCaster {
     this.model.play('hurt', true);
     w.sfx('hit_squish1', this.x, 0.9); w.sfx('squeak', this.x, 0.5, 0.8);
     w.fx.emit('goo', this.x, this.y, { n: 8, speed: 3, life: 0.8, size: 0.12 });
-    w.fx.emit('heart', this.x, this.y + 0.5, { n: 1, vy: 1.2, life: 0.8, size: 0.25, grav: 0 });
+    w.fx.emit('bubble', this.x, this.y + 0.4, { n: 4, spread: 0.25, vy: 1.2, life: 0.9 });
     w.game.addShake(0.22); w.game.freeze(0.08); w.game.flash('#ff2040', 0.18);
     w.emit('hurt', { dmg });
     if (this.hp <= 0) this.die(w);
@@ -536,7 +536,7 @@ export class Blobfish implements SkillCaster {
     const before = this.hp;
     this.hp = Math.min(this.maxHp, this.hp + n);
     if (this.hp > before) {
-      w.fx.emit('heart', this.x, this.y + 0.4, { n: 3, spread: 0.3, vy: 1.4, life: 1, size: 0.22, grav: 0 });
+      w.fx.emit('sparkle', this.x, this.y + 0.4, { n: 6, spread: 0.35, vy: 1.2, life: 0.9, color: '#ff9ab8' }); w.fx.emit('bubbleS', this.x, this.y + 0.2, { n: 5, spread: 0.3, vy: 1.4, life: 1.1 });
       w.sfx('shimmer1', this.x, 0.5);
       this.setExpr('happy', 0.8);
     }
