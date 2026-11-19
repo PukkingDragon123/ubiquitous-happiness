@@ -1,5 +1,6 @@
-// Dialogue: chunky pixel-art speech bubbles anchored over the speaker in 3D (they follow the entity and stay on
-// screen, the tail pointing at the speaker even when it is off to one side), a typewriter with per-character voice
+// Dialogue: sailcloth speech bubbles with a rope edge (kit skin 'sail'), the speaker's name on a little driftwood
+// plaque, a trail of sea bubbles for the tail and a gentle bob while the words come. Anchored over the speaker in 3D
+// (they follow the entity and stay on screen, the tail pointing at the speaker even when it is off to one side), a typewriter with per-character voice
 // blips (pitch per speaker), punctuation pauses, inline emphasis tags and a speaker name tag. Lines can offer up to
 // three choices (click or 1-3). Advance with click / E / Space; hold to fast-forward.
 //
@@ -185,8 +186,8 @@ export class Dialogue {
     for (const [a, b] of lines) w = Math.max(w, m(plain.slice(a, b)));
     const lh = ui.lh(FONT);
     const nameW = sp.name ? ui.measure(sp.name, 'small') + 14 : 0;
-    w = Math.ceil(Math.max(w + 20, nameW + 22, 56));
-    const h = lines.length * lh + (bark ? 12 : 16);
+    w = Math.ceil(Math.max(w + 24, nameW + 26, 60));
+    const h = lines.length * lh + (bark ? 16 : 22);
     return { line, sp, chs, lines, shown: 0, t: 0, doneT: 0, pause: 0, w, h, bark, life, pick: -1, blip: 0 };
   }
 
@@ -316,75 +317,67 @@ export class Dialogue {
     const bar = this.bar();
     const anchor = a.sp.anchor?.() ?? null;
     const W = a.w, H = a.h;
-    const pop = Math.min(1, a.t / 0.14);
+    const pop = Math.min(1, a.t / 0.16);
     const m = 6;
     let bx: number, by: number, tx: number | null = null, ty = 0;
     if (anchor) {
       const s = this.project(anchor);
       bx = s.x - W / 2;
-      by = s.y - H - 14;
-      // keep on screen (and off the letterbox bars), leaving room for the name plate on top
-      const minY = bar + m + 9, maxY = ui.h - bar - m - H - 4;
+      by = s.y - H - 20;
+      // keep on screen (and off the letterbox bars), leaving room for the name plaque on top
+      const minY = bar + m + 10, maxY = ui.h - bar - m - H - 4;
       const cx = Math.max(m, Math.min(ui.w - m - W, bx));
       const cy = Math.max(minY, Math.min(maxY, by));
-      tx = Math.max(cx + 10, Math.min(cx + W - 11, s.x));
+      tx = Math.max(cx + 12, Math.min(cx + W - 13, s.x));
       ty = s.y;
       bx = cx; by = cy;
-      if (s.y < by) ty = s.y;
     } else {
-      // narrator / off-screen: a caption bubble low in the frame
+      // narrator / off-screen: a caption low in the frame
       bx = (ui.w - W) / 2; by = ui.h - bar - H - 12;
     }
-    // pop: rise 5 px and fade in, a small overshoot
-    const k = pop < 1 ? 1 - Math.pow(1 - pop, 3) : 1;
-    bx = Math.round(bx); by = Math.round(by + (1 - k) * 5);
+    // pop: rise 6 px with a soft overshoot; a gentle bob (like a sail on a swell) while the words are coming
+    const typed = a.shown >= a.chs.length;
+    const k = pop < 1 ? 1 - Math.pow(1 - pop, 3) * Math.cos(pop * 4) : 1;
+    const bob = typed ? 0 : Math.round(Math.sin(this.t * 4.2) * 1.2);
+    bx = Math.round(bx); by = Math.round(by + (1 - k) * 6 + bob);
     const alpha = Math.min(1, pop * 2.5);
-    const bg = a.bark ? '#f8eed4' : '#fdf6e2', shade = '#e8d8b0', edge = '#cdb78a', line = KIT.ink;
     const f = (x: number, y: number, w: number, h: number, c: string, al = 1) => ui.fill(x, y, w, h, c, al * alpha);
     ui.block(bx, by, W, H);
-    // ---- drop shadow, then the body: an ink outline with 3 px rounded corners, a lit top row, a card edge
-    f(bx + 3, by + 3, W - 2, H - 1, '#000000', 0.22);
-    f(bx + 3, by, W - 6, H, line); f(bx, by + 3, W, H - 6, line); f(bx + 1, by + 1, W - 2, H - 2, line);
-    f(bx + 3, by + 1, W - 6, H - 2, bg); f(bx + 1, by + 3, W - 2, H - 6, bg); f(bx + 2, by + 2, W - 4, H - 4, bg);
-    f(bx + 3, by + 1, W - 6, 1, '#ffffff');
-    f(bx + 3, by + H - 3, W - 6, 1, shade); f(bx + 3, by + H - 2, W - 6, 1, edge); f(bx + 1, by + H - 4, 1, 1, shade); f(bx + W - 2, by + H - 4, 1, 1, shade);
-    f(bx + 2, by + H - 3, 1, 1, edge); f(bx + W - 3, by + H - 3, 1, 1, edge);
-    // ---- tail toward the speaker: a chunky wedge, ink outlined
+    // ---- the tail: a little trail of bubbles drifting from the sail toward the speaker
     if (tx !== null) {
-      const down = ty > by + H;
-      const up = ty < by;
+      const down = ty > by + H, up = ty < by;
       if (down || up) {
-        const x0 = Math.round(tx), lean = Math.sign(Math.round(tx) - (bx + W / 2)) || 1;
-        for (let i = 0; i < 8; i++) {
-          const w = Math.max(1, 7 - i);
-          const yy = down ? by + H - 2 + i : by + 1 - i;
-          const xx = x0 - Math.floor(w / 2) + Math.round(i * 0.6 * lean);
-          f(xx - 1, yy, w + 2, 1, line);
-          if (i < 7) f(xx, yy, w, 1, i < 2 ? (down ? edge : bg) : bg);
-        }
+        const ex = Math.round(tx), ey = down ? by + H : by;
+        const dist = Math.min(26, Math.max(8, Math.abs(ty - ey) - 4));
+        const lean = Math.max(-8, Math.min(8, (ex - (bx + W / 2)) * 0.15));
+        [[0.18, 4], [0.52, 3], [0.86, 2]].forEach(([q, r], i) => {
+          const px = ex + lean * q + Math.sin(this.t * 3 + i * 1.7) * 0.8, py = ey + (down ? 1 : -1) * (3 + dist * q) + Math.sin(this.t * 2.4 + i) * 0.6;
+          this.trailBubble(Math.round(px), Math.round(py), r, alpha);
+        });
       }
     }
-    // ---- name plate in the speaker's colour, riding the top edge
+    // ---- the body: a sailcloth card with a twisted rope edge (and a soft shadow under it)
+    f(bx + 3, by + 3, W, H, '#000000', 0.22);
+    ui.frame('sail', bx, by, W, H, alpha);
+    // ---- the speaker's name on a little driftwood plaque nailed over the top edge, a stripe of their colour
     if (a.sp.name) {
-      const nw = Math.ceil(ui.measure(a.sp.name, 'small')) + 10, nh = 13;
-      const nx = bx + 8, ny = by - 8;
-      f(nx + 1, ny, nw - 2, nh, line); f(nx, ny + 1, nw, nh - 2, line);
-      f(nx + 1, ny + 1, nw - 2, nh - 2, a.sp.color);
-      f(nx + 1, ny + 1, nw - 2, 1, '#ffffff', 0.45);
-      f(nx + 1, ny + nh - 2, nw - 2, 1, '#000000', 0.3);
-      ui.text(a.sp.name, nx + 5, ny + 3, { font: 'small', color: '#ffffff', outline: '#0b1622', alpha });
+      const nw = Math.ceil(ui.measure(a.sp.name, 'small')) + 18, nh = 14;
+      const nx = bx + 9, ny = by - 9;
+      ui.frame('plaque', nx, ny, nw, nh, alpha);
+      f(nx + 4, ny + nh - 3, nw - 8, 1, a.sp.color, 0.9);
+      ui.text(a.sp.name, nx + nw / 2, ny + 3, { font: 'small', color: KIT.ink, shadow: '#e6dec8', align: 'center', alpha });
     }
     // ---- the text, one character at a time (a fresh letter pops up a pixel)
     const lh = ui.lh(FONT);
     const plain = a.chs.map((c) => c.c).join('');
     const shown = Math.floor(a.shown);
-    const top = by + (a.bark ? 6 : 8);
+    const top = by + (a.bark ? 8 : 10);
     a.lines.forEach(([s, e], li) => {
       const y = top + li * lh;
       for (let i = s; i < e && i < shown; i++) {
         const ch = a.chs[i];
         if (ch.c === ' ') continue;
-        const xx = bx + 10 + ui.measure(plain.slice(s, i), FONT);
+        const xx = bx + 12 + ui.measure(plain.slice(s, i), FONT);
         let dx = 0, dy = 0;
         if (ch.shake) { const q = Math.floor(this.t * 20) + i * 7; dx = ((q * 13) % 3) - 1; dy = ((q * 7) % 3) - 1; }
         if (ch.wave) dy += Math.round(Math.sin(this.t * 7 - i * 0.7) * 1.5);
@@ -393,20 +386,31 @@ export class Dialogue {
         ui.text(ch.c, xx + dx, y + dy, { font: FONT, color: ch.color, shadow: null, alpha });
       }
     });
-    // ---- continue prompt (click / E) on the bottom edge, bobbing; or the choices
-    const typed = a.shown >= a.chs.length;
+    // ---- continue prompt (click / E) in the bottom-right corner, bobbing; or the choices
     if (!a.bark && typed && !a.line.choices?.length && a.line.auto === undefined) {
       const b = Math.round(Math.max(0, Math.sin(this.t * 6)) * 2);
       const kw = ui.keycapW('E');
-      const px = bx + W - kw - 8, py = by + H - 9 - b;
+      const px = bx + W - kw - 9, py = by + H - 15 - b;
       ui.keycap('E', px, py);
-      // a bobbing brass arrow beside the key, inside the bubble
+      // a bobbing brass arrow beside the key, inside the sail
+      const line = KIT.ink;
       const ax = px - 10, ay = py + 3;
       f(ax, ay, 7, 1, line); f(ax + 1, ay + 1, 5, 1, KIT.brass[2]); f(ax, ay + 1, 1, 1, line); f(ax + 6, ay + 1, 1, 1, line);
       f(ax + 1, ay + 2, 5, 1, line); f(ax + 2, ay + 2, 3, 1, KIT.brass[2]); f(ax + 1, ay + 2, 1, 1, line); f(ax + 5, ay + 2, 1, 1, line);
       f(ax + 2, ay + 3, 3, 1, line); f(ax + 3, ay + 3, 1, 1, KIT.brass[3]); f(ax + 3, ay + 4, 1, 1, line);
     }
     if (!a.bark && typed && a.line.choices?.length) this.choices(a, bx, by, W, H);
+  }
+
+  /** one bubble of the tail trail: an ink-rimmed sea bubble (r 1..3 UI px) with a glint, readable on any backdrop */
+  private trailBubble(cx: number, cy: number, r: number, alpha: number) {
+    const ui = this.ui;
+    for (let y = -r - 1; y <= r + 1; y++) for (let x = -r - 1; x <= r + 1; x++) {
+      const d = Math.hypot(x, y);
+      if (d > r + 0.75) continue;
+      const col = d > r - 0.25 ? KIT.ink : x + y < -r * 0.6 ? '#ffffff' : d > r - 1.2 ? '#bfeef0' : '#e8f8f2';
+      ui.fill(cx + x, cy + y, 1, 1, col, alpha * (col === '#e8f8f2' ? 0.85 : 1));
+    }
   }
 
   private choices(a: Active, bx: number, by: number, W: number, H: number) {

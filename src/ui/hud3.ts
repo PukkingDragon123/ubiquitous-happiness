@@ -966,7 +966,7 @@ export class Hud {
     const cw = Math.round(Math.max(134, Math.max(ui.bigW(n.name, 7), ui.bigW(head, 4.5) + 12) + 50)), ch = 33;
     const inK = easeOutBack(n.t * 3.2), outK = clamp01((n.t - life + 0.35) / 0.35) ** 2;
     const x = ui.w - M - cw + (1 - inK) * (cw + 24) + outK * (cw + 24), y = n.y, a = 1 - outK;
-    this.planes.draw(skin('paper', ui.p(cw), ui.p(ch)), ui.p(x), ui.p(y), { alpha: a, shadow: 2 });
+    this.planes.draw(skin('paper', ui.p(cw), ui.p(ch), ui.ui.hd), ui.p(x), ui.p(y), { w: ui.p(cw), h: ui.p(ch), alpha: a, shadow: 2 });
     this.planes.draw(plate(ui.p(27), ui.p(27), 'disc', { face: '#b8d4cc', rim: PAL.brass }), ui.p(x + 4), ui.p(y + 3), { alpha: a });
     if (n.model) {
       n.model.visible = a > 0.05;

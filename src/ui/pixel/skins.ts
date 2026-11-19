@@ -24,20 +24,21 @@
 //   cream          the same frame around a sailcloth inset (dark ink text): notes, letters, summaries
 //   dark           a rope-trimmed card over dark water (light text): settings, sub-panels, choice rows
 //   paper          a sailcloth card with a stitched hem and a card edge (dark text): tooltips, tags, objectives
+//   sail           a sailcloth card with a twisted rope edge (dark text): dialogue speech bubbles
 //   inset          a recessed dark-water well inside a panel; insetCream: a wet-sand well (dark text)
 //   slot           a recessed item slot; slotBlue (dashed blueprint slot), slotTv
 //   plaque         a salt-bleached driftwood plank sign (dark ink text); brass: an engraved brass plate
 //   blueprint / card / cardSel / tv   unchanged structural looks
 
 export type SkinKind = 'wood' | 'stone' | 'blueprint' | 'paper' | 'tv' | 'dark' | 'slot' | 'slotBlue' | 'slotTv' | 'card' | 'cardSel' | 'plaque'
-  | 'cream' | 'inset' | 'insetCream' | 'brass';
+  | 'cream' | 'inset' | 'insetCream' | 'brass' | 'sail';
 export type BtnStyle = 'wood' | 'blue' | 'tv' | 'red' | 'green' | 'gold' | 'stone' | 'dark' | 'brass';
 export type BtnState = 'normal' | 'hover' | 'down' | 'disabled' | 'on';
 
 export const PAD: Record<SkinKind, [number, number, number, number]> = {
   wood: [9, 9, 9, 9], stone: [9, 9, 9, 9], cream: [10, 10, 10, 10], blueprint: [7, 7, 7, 7], paper: [6, 5, 6, 7], tv: [5, 5, 5, 5],
   dark: [6, 6, 6, 6], slot: [2, 2, 2, 2], slotBlue: [2, 2, 2, 2], slotTv: [2, 2, 2, 2], card: [4, 4, 4, 4], cardSel: [4, 4, 4, 4],
-  plaque: [6, 4, 6, 5], brass: [6, 4, 6, 5], inset: [4, 4, 4, 4], insetCream: [4, 4, 4, 4],
+  plaque: [6, 4, 6, 5], brass: [6, 4, 6, 5], inset: [4, 4, 4, 4], insetCream: [4, 4, 4, 4], sail: [7, 7, 7, 7],
 };
 
 /** the kit palette: use these for anything drawn next to the skins */
@@ -406,8 +407,8 @@ function sailTex(ix: number, iy: number, IW: number, IH: number, di: number, d: 
   return c;
 }
 
-/** a rope-trimmed card: ink, a 2 UI px twisted rope border, ink, then dark water */
-function paintDark(uw: number, uh: number, d: number) {
+/** a rope-trimmed card: ink, a 2 UI px twisted rope border, ink, then dark water (or sailcloth: the speech bubble) */
+function paintDark(uw: number, uh: number, d: number, inset: 'water' | 'sail' = 'water') {
   const t = new Tx(uw, uh, d);
   const W = t.W, H = t.H;
   const big = uw > 70 && uh > 50;
@@ -425,7 +426,8 @@ function paintDark(uw: number, uh: number, d: number) {
       const c = across < 0.3 ? (tw ? ROPE[5] : ROPE[4]) : across < 0.7 ? (tw ? ROPE[3] : ROPE[2]) : ROPE[1];
       t.set(x, y, c); continue;
     }
-    t.set(x, y, waterTex(x - 4 * d, y - 4 * d, W - 8 * d, H - 8 * d, r - 4, d, big), 248);
+    if (inset === 'sail') t.set(x, y, sailTex(x - 4 * d, y - 4 * d, W - 8 * d, H - 8 * d, r - 4, d, false));
+    else t.set(x, y, waterTex(x - 4 * d, y - 4 * d, W - 8 * d, H - 8 * d, r - 4, d, big), 248);
   }
   // knots of rope at the corners
   if (uw > 30 && uh > 20) for (const [cx, cy] of [[2, 2], [uw - 2, 2], [2, uh - 2], [uw - 2, uh - 2]]) {
@@ -617,6 +619,7 @@ export function skin(kind: SkinKind, w: number, h: number, d = 1): HTMLCanvasEle
       case 'paper': return paintPaper(w, h, d);
       case 'tv': return paintTv(w, h, d);
       case 'dark': return paintDark(w, h, d);
+      case 'sail': return paintDark(w, h, d, 'sail');
       case 'plaque': return paintPlaque(w, h, d);
       case 'brass': return paintBrass(w, h, d);
       case 'inset': return paintInset(w, h, d, false);

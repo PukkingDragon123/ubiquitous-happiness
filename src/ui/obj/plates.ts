@@ -162,18 +162,20 @@ function edgeD(x: number, y: number, w: number, h: number, r = 2) {
 
 // ------------------------------------------------------------------ driftwood, rope, nails, barnacles, shells
 const WOOD = '#9a7a58';
-/** a barnacle seen from above (5 px): a cream cone ring, a dark mouth */
+/** a barnacle seen from above: a cream cone with ridges, a dark mouth (7 px big / 5 px small) */
 function barnacle(p: Px, cx: number, cy: number, big = true) {
-  const rows = big ? ['.kkk.', 'kwlwk', 'kldlk', 'kwlsk', '.kkk.'] : ['.kk.', 'kwlk', 'klsk', '.kk.'];
-  const pal: Record<string, string> = { k: '#3a3328', w: '#f2ead6', l: '#cfc4a8', s: '#a89c80', d: '#2a221a' };
-  const o = big ? 2 : 1;
+  const rows = big
+    ? ['..kkk..', '.kwwlk.', 'kwlrlsk', 'kwrddsk', 'klldssk', '.kssak.', '..kkk..']
+    : ['.kkk.', 'kwlsk', 'kldsk', 'klssk', '.kkk.'];
+  const pal: Record<string, string> = { k: '#3a3328', w: '#f6eedc', l: '#d8cdb0', r: '#ece2c8', s: '#a89c80', a: '#8a7e64', d: '#241c14' };
+  const o = big ? 3 : 2;
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - o + x, cy - o + y, c); } });
 }
-/** a little scallop shell: a fan with ribs, pink-cream, an ink edge (7x6) */
+/** a scallop shell: a fan with ribs, pink-cream, an ink edge (9x8) */
 function shell(p: Px, cx: number, cy: number) {
-  const rows = ['..kkk..', '.kwpwk.', 'kpwpwpk', 'kwpwpwk', '.kpwpk.', '..kkk..'];
+  const rows = ['...kkk...', '..kwpwk..', '.kwpwpwk.', 'kpwpwpwpk', 'kwpwpwpwk', '.kpwpwpk.', '..kkkkk..', '..kpkpk..'];
   const pal: Record<string, string> = { k: '#5a2a24', w: '#ffe8d8', p: '#e8a89a' };
-  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - 3 + x, cy - 3 + y, c); } });
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - 4 + x, cy - 4 + y, c); } });
 }
 /** an iron nail head with a rust streak running down from it */
 function nail(p: Px, cx: number, cy: number, streak = 3) {
@@ -251,8 +253,8 @@ function paintBoard(p: Px, o: PlateOpts & { wood?: string }) {
   for (const rx of o.rope ?? []) ropeV(p, Math.round(rx), 1, h - 2);
   // barnacles on two corners
   if ((o.barnacles ?? true) && w >= 48 && h >= 22) {
-    barnacle(p, w - 6, h - 6); barnacle(p, w - 11, h - 4, false); barnacle(p, w - 5, h - 11, false);
-    barnacle(p, 5, 5, false);
+    barnacle(p, w - 7, h - 7); barnacle(p, w - 13, h - 5, false); barnacle(p, w - 5, h - 13, false);
+    barnacle(p, 6, 6, false);
   }
 }
 
@@ -277,9 +279,9 @@ function paintSign(p: Px, o: PlateOpts) {
   }
   ropeH(p, 30, w - 33, ny0 - 3, 4);
   // barnacle clusters and shells on the corners
-  for (const [cx, cy] of [[w - 12, h - 10], [10, 11]] as [number, number][]) { barnacle(p, cx, cy); barnacle(p, cx + 5, cy - 3, false); barnacle(p, cx - 5, cy + 2, false); barnacle(p, cx - 1, cy + 5, false); }
-  shell(p, w - 12, 10); shell(p, 12, h - 11);
-  barnacle(p, w - 18, 7, false); barnacle(p, 17, h - 7, false);
+  for (const [cx, cy] of [[w - 13, h - 12], [11, 12]] as [number, number][]) { barnacle(p, cx, cy); barnacle(p, cx + 7, cy - 4); barnacle(p, cx - 7, cy + 3, false); barnacle(p, cx - 1, cy + 7, false); }
+  shell(p, w - 13, 12); shell(p, 13, h - 13);
+  barnacle(p, w - 22, 8, false); barnacle(p, 21, h - 8, false);
 }
 
 // ------------------------------------------------------------------ caustics (a tiled light web, animated by UV offset)

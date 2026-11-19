@@ -20,8 +20,8 @@ import { audio } from '../audio/audio';
 import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
 import { skin, PAD } from '../ui/pixel/skins';
-import { closeArt } from '../ui/pixel/art';
-import { PAL, plate, bigText, bar, GLYPH, solid, caustics, kelp } from '../ui/obj/plates';
+import { closeArt } from '../ui/pixel/skins';
+import { PAL, plate, bigText, bar, GLYPH, solid, caustics } from '../ui/obj/plates';
 import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
@@ -94,7 +94,8 @@ export class DungeonHud {
     this.pauseT = s.paused ? this.pauseT + dt : 0;
     this.pauseF = s.paused ? this.pauseF + 1 : 0;
     if (s.prompt && !s.paused && !s.mail && !s.menu) this.prompt(s.prompt, dt); else { this.promptA = 0; this.promptKey = ''; }
-    extra?.(ui);
+    // (speech bubbles wait while the post office or the pause card is up: they would sit on top of the panel)
+    if (!s.mail && !s.paused) extra?.(ui);
     if (s.mail) out = this.mailPanel(s.mail);
     if (s.paused) out = this.pauseCard(s) ?? out;
     ui.end();
@@ -159,12 +160,14 @@ export class DungeonHud {
     // under the stand (the seabed's foreground is quiet), a pointer up to it; kept clear of the HUD's top row
     const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2)));
     const y = Math.round(Math.max(96, Math.min(ui.h - h - 8, at.y + 16))) + Math.round((1 - pop) * 8);
-    ui.img(skin('wood', w, h), x + 3, y + 3, { alpha: 0.35 * a });
-    ui.img(skin('wood', w, h), x, y, { alpha: a });
+    ui.fill(x + 3, y + 3, w, h, '#000000', 0.3 * a);
+    ui.frame('wood', x, y, w, h, a);
+    // the kit's living decorations; only the caustic light when the card sits high (its bubbles would rise into the HUD)
+    if (y >= 130) ui.panelFx('wood', x, y, w, h, 'shopcard', a); else ui.caustic(x + 7, y + 7, w - 14, h - 14, 0.11 * a);
     const px = Math.round(Math.max(x + 12, Math.min(x + w - 13, at.x)));
     for (let i = 0; i < 6; i++) ui.fill(px - i, y - 1 - i + 1, i * 2 + 1, 1, i === 5 ? PAL.ink2 : '#2a6b6f', a);
     const ix = x + 11, iy = y + 11;
-    ui.img(skin('slot', 38, 38), ix, iy, { alpha: a });
+    ui.frame('slot', ix, iy, 38, 38, a);
     if (d) ui.item(sh.id, ix + 3, iy + 3, 32, 32, 1, a);
     else { const g = hudArt(sh.id === 'heart' ? 'heart' : sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
     const tx = ix + 46;
@@ -207,12 +210,12 @@ export class DungeonHud {
     const a = Math.min(1, this.mailT * 7);
     planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
     ui.block(0, 0, ui.w, ui.h);
-    planes.draw(skin('wood', W, H), x, y, { alpha: a, shadow: 3 });
+    planes.draw(skin('wood', W, H, ui.hd), x, y, { w: W, h: H, alpha: a, shadow: 3 });
     planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 64, ox: this.t * 0.02, oy: this.t * 0.012, alpha: 0.16 * a });
     // the header: the title on a brass plaque over the top edge, one line of what this is, the close X
     const title = 'POST OFFICE';
     const tw = ui.measure(title, 'title');
-    planes.draw(skin('plaque', tw + 30, 25), x + 14, y - 11, { alpha: a });
+    planes.draw(skin('plaque', tw + 30, 25, ui.hd), x + 14, y - 11, { w: tw + 30, h: 25, alpha: a });
     ui.text(title, x + 29, y - 11 + Math.round((23 - ui.cap('title')) / 2), { font: 'title', color: INK, shadow: null, alpha: a });
     let out: string | null = null;
     if (this.closeBtn('mail:x', x + W - 27, y + 6)) out = 'mail:close';
@@ -234,7 +237,7 @@ export class DungeonHud {
     ui.text(m.used > m.capacity ? 'TOO MANY!' : left > 0 ? `${left} LEFT` : 'BAG FULL', lx, rowY + 3, { font: 'small', color: m.used > m.capacity ? PAL.coral2 : left > 0 ? PAL.dim : PAL.brass2, alpha: a });
     // the pack: every item as a 3D model in a slot
     const gy = rowY + 22;
-    planes.draw(skin('inset', gridW + 8, gridH + 8), gx - 4, gy - 4, { alpha: a });
+    planes.draw(skin('inset', gridW + 8, gridH + 8, ui.hd), gx - 4, gy - 4, { w: gridW + 8, h: gridH + 8, alpha: a });
     const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
     const kk = st.ui.scale.x || 1;
     m.items.forEach((it, i) => {
@@ -244,7 +247,7 @@ export class DungeonHud {
       const h = ui.hover(ix, iy, cell, cell);
       ui.mark('mail:' + it.uid, ix, iy, cell, cell);
       if (h) ui.cursor = 'point';
-      planes.draw(skin('slot', cell, cell), ix, iy, { alpha: a });
+      planes.draw(skin('slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a });
       if (on) { ui.rect(ix - 1, iy - 1, cell + 2, cell + 2, PAL.ink2); ui.rect(ix, iy, cell, cell, PAL.brass2); ui.rect(ix + 1, iy + 1, cell - 2, cell - 2, PAL.brass); }
       let mo = this.mailModels.get(it.uid);
       if (!mo) { mo = itemModel(it.id); const sh2 = contactShadow(1.0, 0.8, 0.5); sh2.position.set(0.08, -0.08, -0.4); mo.add(sh2); st.ui.add(mo); this.mailModels.set(it.uid, mo); }
@@ -275,7 +278,7 @@ export class DungeonHud {
     }
     // what the parcel builds at home
     const rx = x + W - pad - goalsW, ry = rowY - 4, rh = gy + gridH + 4 - ry;
-    planes.draw(skin('inset', goalsW, rh), rx, ry, { alpha: a });
+    planes.draw(skin('inset', goalsW, rh, ui.hd), rx, ry, { w: goalsW, h: rh, alpha: a });
     ui.text('BUILDS AT HOME', rx + 8, ry + 6, { font: 'small', color: PAL.brass2, alpha: a });
     let yy = ry + 6 + ui.lh('small') + 3;
     if (!m.goals.length) ui.textBox('Nothing left to build: everything you send goes to your stash.', rx + 8, yy, goalsW - 16, { font: 'small', color: PAL.dim });
@@ -310,7 +313,8 @@ export class DungeonHud {
     if (ui.button('mail:mats', 'ALL MATERIALS', gx + bw + 6, by, 140, 24, { style: 'brass', key: 'KeyA', disabled: !hasMats })) out = 'mail:mats';
     if (ui.button('mail:close', 'DONE', x + W - pad - 96, by, 96, 24, { style: 'wood', key: 'Escape' })) out = 'mail:close';
     // kelp hanging over the panel's corners, swaying
-    kelp(ui, x + W - 8, y - 2, 34, this.t, 0.5, a); kelp(ui, x + 4, y + 8, 22, this.t, 2.2, a);
+    ui.kelp(x + W - 5, y + 30, 1, 17, 0.5); ui.ropeEnd(x + 6, y + H - 3, 6, 1.3);
+    if (Math.floor(this.t * 0.8) !== Math.floor((this.t - 1 / 60) * 0.8)) ui.bubble(x + 20 + ((Math.floor(this.t * 0.8) * 61) % Math.max(1, W - 40)), y + 4, { r: 1 + (Math.floor(this.t) % 2), vy: -14 });
     // clicking outside the panel closes it (no way to get stuck in it)
     if (ui.pressed && !ui.hover(x - 4, y - 14, W + 8, H + 18)) out = out ?? 'mail:close';
     return out;
@@ -323,7 +327,7 @@ export class DungeonHud {
     const h = ui.hover(x, y, size, size);
     ui.mark(id, x, y, size, size);
     if (h) ui.cursor = 'point';
-    ui.img(closeArt(size, h && ui.down ? 'down' : h ? 'hover' : 'normal'), x, y);
+    ui.img(closeArt(size, h && ui.down ? 'down' : h ? 'hover' : 'normal', ui.hd), x, y, { w: size, h: size + 3 });
     if (h && ui.pressed) { audio.play('k_close1', { vol: 0.4, dry: true }); return true; }
     return false;
   }
@@ -336,12 +340,11 @@ export class DungeonHud {
     const H = 16 + 22 + 8 + ui.lh('body') + ui.lh('small') + 6 + 3 * 30 + 2 + wrap(note, 'small', W - 36, ui.hd).length * ui.lh('small') + 16;
     const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - e) * 20);
     const a = Math.min(1, this.pauseT * 8);
-    const planes = this.l.planes;
-    planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
+    ui.fill(0, 0, ui.w, ui.h, PAL.ink2, 0.6 * a);
     ui.block(0, 0, ui.w, ui.h);
-    planes.draw(skin('wood', W, H), x, y, { alpha: a, shadow: 3 });
-    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 64, ox: this.t * 0.02, oy: this.t * 0.012, alpha: 0.16 * a });
-    kelp(ui, x + W - 9, y - 1, 30, this.t, 1.1, a);
+    ui.fill(x + 3, y + 3, W, H, '#000000', 0.35 * a);
+    ui.frame('wood', x, y, W, H, a);
+    ui.panelFx('wood', x, y, W, H, 'pausecard', a);
     const cap = 22;
     bigText(ui, 'PAUSED', x + W / 2, y + 16, { cap, color: PAL.cream, color2: PAL.brass2, align: 'center', alpha: a });
     // where you are: the area, metres from home, the depth
