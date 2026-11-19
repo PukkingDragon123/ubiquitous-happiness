@@ -347,7 +347,7 @@ export class Packing {
       this.setCount(g, it.n ?? 1, foot);
     }
     const list = this.chestEntries();
-    const cols = 8, rows = 3, per = cols * rows, cw = (CHEST.w - 0.18) / cols, ch = (CHEST.d - 0.18) / rows;
+    const cols = 5, rows = 2, per = cols * rows, cw = (CHEST.w - 0.18) / cols, ch = (CHEST.d - 0.18) / rows;
     const pages = Math.max(1, Math.ceil(list.length / per));
     this.page = Math.min(this.page, pages - 1);
     this.knobs[0].visible = this.page > 0; this.knobs[1].visible = this.page < pages - 1;
