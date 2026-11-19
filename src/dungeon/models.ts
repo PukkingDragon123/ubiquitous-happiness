@@ -581,7 +581,8 @@ export function ropeModel(h: number): { root: THREE.Group; lamp: THREE.Mesh } {
  * driftwood boards as the crossroads (forkSignModel), a little smaller.
  */
 export function signpostModel(boards: { text: string; dir: -1 | 0 | 1 }[], lantern = true): THREE.Group {
-  return forkSignModel(boards.map((b) => ({ title: b.text, dir: b.dir })), { lantern, texel: 1 / 27 }).root;
+  // the boards side by side on one crossbar (home to the left, onward to the right): a low, wide signpost
+  return forkSignModel(boards.map((b) => ({ title: b.text, dir: b.dir })), { lantern, texel: 1 / 27, row: true }).root;
 }
 
 // ------------------------------------------------------------------ v6 crossroads signs
@@ -724,6 +725,16 @@ function paintBoardFace(L: BoardLay): HTMLCanvasElement {
   return cv;
 }
 
+/** a lashed driftwood log lying along x (a crossbeam over a crossroads pit), len long, centred */
+export function logBeam(len: number): THREE.Group {
+  const g = new THREE.Group();
+  const wood = M('wood', woodPage, { rough: 0.9 });
+  const log = mesh(lpCyl(0.17, len, 7, 0.15), wood); log.rotation.z = Math.PI / 2; g.add(log);
+  const rope = M('lashing', () => null, { color: '#c8a868', rough: 0.95 });
+  for (const sx of [-len / 2 + 0.35, len / 2 - 0.35]) for (let k = 0; k < 3; k++) { const w = mesh(lpCyl(0.2, 0.05, 7), rope); w.rotation.z = Math.PI / 2; w.position.x = sx + (k - 1) * 0.08; g.add(w); }
+  return g;
+}
+
 export interface ForkSign {
   root: THREE.Group;
   /** the board pivots (stamp / board up) */
@@ -745,14 +756,15 @@ export interface ForkSign {
  * with barnacles, boards stacked down from the top, a lantern) or hanging on two ropes from a point above
  * (o.hang = metres from the attachment down to the bottom of the boards).
  */
-export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lantern?: boolean; hang?: number; texel?: number } = {}): ForkSign {
+export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lantern?: boolean; hang?: number; texel?: number; row?: boolean } = {}): ForkSign {
   const root = new THREE.Group();
   const TEXEL = o.texel ?? BOARD_TEXEL;
   const wood = M('wood', woodPage, { rough: 0.9 });
   const all = o.header ? [{ title: o.header, dir: 0 as SignDir }, ...specs] : specs;
   const lay = all.map(layBoard);
   const GAP = 0.14;
-  const stackH = lay.reduce((s, L) => s + L.ch * TEXEL + GAP, -GAP);
+  // boards stack down the post, or (row) sit side by side at one height
+  const stackH = o.row ? Math.max(...lay.map((L) => L.ch * TEXEL)) : lay.reduce((s, L) => s + L.ch * TEXEL + GAP, -GAP);
   const hanging = o.hang !== undefined;
   const H = hanging ? 0 : 0.85 + stackH + 0.18;
   let y = hanging ? -Math.max(0.3, o.hang! - stackH) : H - 0.12;
@@ -798,15 +810,17 @@ export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lant
     const xb = mesh(chamferBox(bw * 0.95, 0.2, 0.06, 0.02), M('woodDark', woodPage, { rough: 0.95, color: '#6a5040' }));
     xb.rotation.z = -Math.atan2(bh * 0.75, bw); xb.position.set(0, 0, 0.1); xb.visible = false; pivot.add(xb);
     crosses.push({ m: xb, t: 0, on: false, board: pivot, face });
-    y -= bh + GAP;
+    if (!o.row) y -= bh + GAP;
   });
   let lamp: THREE.Mesh | null = null;
   if (!hanging && o.lantern !== false) {
     const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
-    const arm = mesh(new THREE.BoxGeometry(0.5, 0.06, 0.06), wood); arm.position.set(-0.25, H - 0.05, 0); root.add(arm);
+    // on an arm off the post's top (a row of boards: on top of the post, clear of them)
+    const lx = o.row ? 0 : -0.45, ly = o.row ? H + 0.3 : H - 0.3;
+    if (!o.row) { const arm = mesh(new THREE.BoxGeometry(0.5, 0.06, 0.06), wood); arm.position.set(-0.25, H - 0.05, 0); root.add(arm); }
     lamp = new THREE.Mesh(lpSphere(0.13, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd890').multiplyScalar(2.2) }));
-    lamp.position.set(-0.45, H - 0.3, 0); lamp.name = 'lamp'; root.add(lamp);
-    for (const dy of [0.16, -0.16]) { const cap = mesh(lpCyl(0.11, 0.06, 6), brass); cap.position.set(-0.45, H - 0.3 + dy, 0); root.add(cap); }
+    lamp.position.set(lx, ly, 0); lamp.name = 'lamp'; root.add(lamp);
+    for (const dy of [0.16, -0.16]) { const cap = mesh(lpCyl(0.11, 0.06, 6), brass); cap.position.set(lx, ly + dy, 0); root.add(cap); }
   }
   const easeBack = (t: number) => { const c = 2.2; t = Math.min(1, t) - 1; return 1 + (c + 1) * t * t * t + c * t * t; };
   return {

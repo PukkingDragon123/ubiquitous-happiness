@@ -37,7 +37,7 @@ import type { LampHandle } from '../gfx/lighting';
 import { LevelTerrain } from './terrain';
 import { ArenaGate, CrackedLid } from './gates';
 import { bedAt, sandAt, shelfAt, depthOf, type LevelPlan, type ForkPlan, type ForkLane, type CurrentPlan } from './level';
-import { grateModel, ropeModel, postBox, signpostModel, disposeModel, forkSignModel, arenaGateModel, type ForkSign, type SignBoardSpec, type SignDir, type SignIconKind } from './models';
+import { grateModel, ropeModel, postBox, signpostModel, disposeModel, forkSignModel, arenaGateModel, logBeam, type ForkSign, type SignBoardSpec, type SignDir, type SignIconKind } from './models';
 import { Currents } from './currents';
 import { additiveMaterial } from '../world/mats';
 
@@ -315,7 +315,8 @@ export class LevelBuild {
       } else {
         // stalactites under the lid (off the play plane, so they frame the cave without blocking it)
         for (let x = b.x0 + 0.8; x < b.x1 - 0.5; x += r.range(1.2, 2.4)) {
-          const z = r.chance(0.5) ? r.range(-2.8, -1.3) : r.range(1.3, 2.6);
+          // (none in front over the cave's mouth: the low lane's board hangs there)
+          const z = r.chance(0.5) || x < b.x0 + 6.5 ? r.range(-2.8, -1.3) : r.range(1.3, 2.6);
           this.hang(r, x, b.y0 + 0.25, z, r.range(0.25, 0.5), r.range(0.8, 2.2));
         }
         // a cave lid: boulders piled on the roof, and the cave's back wall behind the play plane
@@ -331,8 +332,10 @@ export class LevelBuild {
   private signLamps: THREE.Mesh[] = [];
   /** every exit pit's grate (grate = the first, for older callers) */
   grates: { root: THREE.Group; leaves: THREE.Group[] }[] = [];
-  /** per fork: its signposts (the crossroads sign and each lane's), the seal bars per lane */
-  forkSigns = new Map<number, { sign: ForkSign; lane?: number }[]>();
+  /** per fork: each lane's board (lane index), the seal bars per lane */
+  forkSigns = new Map<number, { sign: ForkSign; lane: number }[]>();
+  /** each lane board's world rect (centre x / y, size): the HUD tag shows the route when you swim up to one */
+  laneBoards: { fork: number; lane: number; x: number; y: number; w: number; h: number }[] = [];
   seals = new Map<number, ArenaGate[][]>();
   currents: Currents | null = null;
   /** the glow rising out of each crossroads pit (lit by the pooled lamps when near) */
@@ -349,26 +352,40 @@ export class LevelBuild {
       this.group.add(sign.root); this.props3d.push(sign.root);
       if (sign.lamp) this.signLamps.push(sign.lamp);
     };
+    // (v6.1) every lane is signposted at its own mouth, big: the place, the arrow, the danger, the reward (the
+    // route words show in a HUD tag when you swim up to a board). Plan sign entries only place the end-of-floor
+    // overview post and the dead ends, so older v6 saves rebuild the same way.
+    const keep = (f: ForkPlan, sign: ForkSign, lane: number) => { const list = this.forkSigns.get(f.id) ?? []; list.push({ sign, lane }); this.forkSigns.set(f.id, list); };
+    const board = (f: ForkPlan, lane: number, sign: ForkSign) => {
+      const r = sign.rects[0], o = sign.root.position;
+      this.laneBoards.push({ fork: f.id, lane, x: o.x + r.x, y: o.y + r.y, w: r.w, h: r.h });
+    };
     for (const sg of plan.signs) {
-      if (sg.kind === 'dead') { const sign = forkSignModel([{ title: 'DEAD END', note: 'TURN BACK', dir: -1 }], { lantern: false }); signAt(sg.x, sign, -0.8); continue; }
-      if ((sg.kind !== 'fork' && sg.kind !== 'lane') || sg.fork === undefined) continue;
+      if (sg.kind === 'dead') { const sign = forkSignModel([{ title: 'DEAD END', dir: -1 }], { lantern: false }); signAt(sg.x, sign, -0.8); continue; }
+      if (sg.kind !== 'fork' || sg.fork === undefined) continue;
       const f = plan.forks[sg.fork];
-      if (!f) continue;
-      const list = this.forkSigns.get(f.id) ?? [];
-      if (sg.kind === 'fork') {
-        const boards = f.lanes.map((l) => laneBoard(f, l, f.kind === 'end' ? 1 : l.side === 'upper' ? 'ur' : 'dr'));
-        // the end of a floor: how far you've come, too (the way home is back along the journey)
-        if (f.kind === 'end') boards.push({ title: `HOME ${Math.round((plan.far0 + sg.x) / 5) * 5} M`, dir: -1 });
-        const sign = forkSignModel(boards, { header: f.kind === 'end' ? 'CROSSROADS' : 'THE WAY SPLITS' });
-        signAt(sg.x, sign);
-        list.push({ sign });
-      } else if (sg.lane !== undefined && f.lanes[sg.lane]) {
-        // a pit's own sign stands back from its lip, the board hung on the near side pointing down into it
-        const sign = forkSignModel([{ ...laneBoard(f, f.lanes[sg.lane], 'dr'), hang: -1 }], { lantern: false });
-        signAt(sg.x, sign, -0.7);
-        list.push({ sign, lane: sg.lane });
-      }
-      this.forkSigns.set(f.id, list);
+      if (!f || f.kind !== 'end') continue;
+      // the end of a floor: a short post at the way in (CROSSROADS, how far from home), the pits carry the rest
+      const sign = forkSignModel([{ title: `HOME ${Math.round((plan.far0 + sg.x) / 5) * 5} M`, dir: -1 }, { title: 'CROSSROADS', dir: 0, hang: 1 }], { row: true });
+      signAt(sg.x, sign);
+    }
+    for (const f of plan.forks) {
+      f.lanes.forEach((l, i) => {
+        if (f.kind === 'end') return;
+        if (l.side === 'upper') {
+          // the high lane: a post on the lid's near end, the board pointing on along the top
+          const sign = forkSignModel([laneBoard(f, l, 1)], { lantern: false });
+          sign.root.position.set(l.x0 + 0.7, l.y0 - 0.06, -0.75); sign.root.rotation.y = 0.05;
+          this.group.add(sign.root); this.props3d.push(sign.root);
+          keep(f, sign, i); board(f, i, sign);
+        } else {
+          // the low lane: a board hung on ropes from the lid's underside, over the cave's mouth
+          const sign = forkSignModel([laneBoard(f, l, 1)], { hang: 2.15 });
+          sign.root.position.set(l.x0 + 2.2, l.y1 + 0.02, -0.65);
+          this.group.add(sign.root); this.props3d.push(sign.root);
+          keep(f, sign, i); board(f, i, sign);
+        }
+      });
     }
     // the bars that close the lanes not taken (down in the sand until a lane is chosen)
     const sandCol = a.pal.sand[2];
@@ -408,11 +425,20 @@ export class LevelBuild {
       if (!ex || !l.area) continue;
       const base = baseOf(l.area), col = placeTint(l.area);
       for (const sx of [ex.x0 - 1.7, ex.x1 + 1.7]) {
-        const post = arenaGateModel(base, 'arena', l.route === 'deep' ? 4.2 : 3.2);
+        const post = arenaGateModel(base, 'arena', l.route === 'deep' ? 5 : 4.6);
         post.root.position.set(sx, sand.heightAt(sx) - 0.3, -0.2);
         post.root.scale.set(0.8, 1, 0.55);
         this.group.add(post.root); this.props3d.push(post.root);
       }
+      // a beam across the doorposts and, hung from it over the pit's mouth, the pit's nameplate (big, low)
+      const bx0 = ex.x0 - 1.7, bx1 = ex.x1 + 1.7, by = ex.top + 4.4;
+      const beam = logBeam(bx1 - bx0 + 0.5);
+      beam.position.set((bx0 + bx1) / 2, by + 0.1, -0.35);
+      this.group.add(beam); this.props3d.push(beam);
+      const plateSign = forkSignModel([laneBoard(end, l, 'down')], { hang: 3.15 });
+      plateSign.root.position.set((ex.x0 + ex.x1) / 2, by, -0.35);
+      this.group.add(plateSign.root); this.props3d.push(plateSign.root);
+      keep(end, plateSign, end.lanes.indexOf(l)); board(end, end.lanes.indexOf(l), plateSign);
       // the light out of the pit: a soft additive column in the destination's colour rising off the lip (the shaft
       // itself is behind its rock lining), brightest at the lip, narrowing and fading as it rises
       const H = 7.5, w0 = ex.x1 - ex.x0 + 0.4, geo = new THREE.PlaneGeometry(w0, H, 2, 8);
@@ -455,9 +481,9 @@ export class LevelBuild {
   choose(forkId: number, lane: number, instant = false) {
     const f = this.plan.forks[forkId];
     if (!f) return;
-    for (const { sign, lane: only } of this.forkSigns.get(forkId) ?? []) {
-      if (only === undefined) f.lanes.forEach((_, i) => (i === lane ? sign.stamp(i, instant) : sign.cross(i, instant)));
-      else if (only === lane) sign.stamp(0, instant); else sign.cross(0, instant);
+    for (const { sign, lane: of } of this.forkSigns.get(forkId) ?? []) {
+      if (of < 0) continue;
+      if (of === lane) sign.stamp(0, instant); else sign.cross(0, instant);
     }
     (this.seals.get(forkId) ?? []).forEach((gs, i) => { if (i !== lane) for (const g of gs) g.raise(instant); });
   }

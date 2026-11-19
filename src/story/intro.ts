@@ -197,6 +197,8 @@ export class IntroScreen implements Screen {
   private engineRate = 0;
   private built = false;
   private armed = false;
+  /** how long the kid has been swimming into scenery without moving (the climb-over assist) */
+  private pushT = 0;
   /** dev / tests: the current lesson's props (gates, current, fish, rings, bottles, shell) */
   dbg: Record<string, unknown> = {};
   /** the kid's last frame of motion (segA -> segB): gates and rings test what it swam through */
@@ -509,7 +511,7 @@ export class IntroScreen implements Screen {
     });
     await this.wait(1.6);
     const title = this.t3d.add('SUNLIT REEF', H + 0.5, fy + 2.4, -2.5, T3D.title, { size: 0.85, stagger: 0.07, enter: 'drop', angle: 0.12 });
-    const sub = this.t3d.add('ONE MORNING, LONG AGO', H + 0.5, fy + 1.45, -2.5, T3D.sub, { size: 0.3, delay: 0.9, stagger: 0.025, angle: 0.12 });
+    const sub = this.t3d.add('ONE MORNING, LONG AGO', H + 0.5, fy + 1.4, -2.5, T3D.sub, { size: 0.38, delay: 0.9, stagger: 0.025, angle: 0.12 });
     audio.play('jin_arrive', { vol: 0.45, dry: true });
     await this.wait(4.4);
     title.hide(); sub.hide();
@@ -872,7 +874,7 @@ export class IntroScreen implements Screen {
     this.boat?.setX(this.home + 200);
     // (the family scene's soft walls end here: the kid is far down the reef now)
     this.bounds = null;
-    this.place(cx - 9, this.floorAt(cx - 9) + 2.6);
+    this.place(cx - 9, this.floorAt(cx - 9) + 4);
     k.setExpr('sad', 99);
     this.letterbox(1, 0.01);
     this.script_(0.55, 0.12);
@@ -1634,6 +1636,13 @@ export class IntroScreen implements Screen {
       if (k.x < b[0]) k.applyForce(Math.min(80, (b[0] - k.x) * 120) - Math.min(0, k.vx) * 12, 0);
       if (k.x > b[1]) k.applyForce(Math.max(-80, (b[1] - k.x) * 120) - Math.max(0, k.vx) * 12, 0);
       if (k.hp < 1) k.hp = 1;
+      // swimming into a rock and getting nowhere: the kid slides up and over it (no scenery can pin the player)
+      if (gate.src) {
+        const ax = g.input.axis();
+        const into = Math.abs(ax.x) > 0.5 && Math.abs(k.vx) < 0.5 && w.terrain.sdf(k.x + Math.sign(ax.x) * (k.r + 0.35), k.y) < 0.25;
+        this.pushT = into ? this.pushT + dt : Math.max(0, this.pushT - dt * 2);
+        if (this.pushT > 0.4) k.applyForce(Math.sign(ax.x) * 4, 26);
+      }
       // the kid hovers while the script holds it (no sinking into the plants mid-conversation), and in the
       // prologue it never settles into the foreground weeds
       if (!k.hooked) {

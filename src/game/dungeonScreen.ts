@@ -82,6 +82,8 @@ import { codexSeen, codexBeaten, codexKnown, codexEntries } from '../ui/codex';
 import { buildFish } from '../fish';
 import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, rollBig, bigChance, type Reward } from '../dungeon/rewards';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
+import type { PixelUI } from '../ui/pixel/ui';
+import { plate, PAL } from '../ui/obj/plates';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 
 // ------------------------------------------------------------------ save / resume
@@ -1062,9 +1064,8 @@ export class DungeonScreen implements Screen {
     for (const [k, ex] of plan.exits.entries()) {
       const ecx = (ex.x0 + ex.x1) / 2;
       if (!lvl.exitOpen || Math.abs(p.x - ecx) > (plan.exits.length > 1 ? 4 : 4.5) || p.y > ex.top + 4 || p.y < ex.bottom) continue;
-      const lane = end?.lanes.find((l) => l.exit === k);
-      // a crossroads pit: where it leads and how (the short tag is the place, the note its route)
-      if (lane?.area) return { key: '', label: `${lane.name}: ${lane.note}${lane.giant ? ' - GIANTS' : ''}`, at: this.anchor(ecx, ex.top + 2.4) };
+      // (a crossroads pit: its nameplate's HUD tag says where it leads; see signTag)
+      if (end?.lanes.some((l) => l.exit === k && l.area)) continue;
       const last = this.floorIdx >= this.planned - 1;
       return { key: '', label: last && plan.ropeX !== null ? 'DIVE DEEPER: INTO THE ENDLESS DEEP' : 'SWIM DOWN THE SHAFT', at: this.anchor(ecx, ex.top + 2.4) };
     }
@@ -1355,6 +1356,58 @@ export class DungeonScreen implements Screen {
     // the current takes you a little way into the lane you chose
     if (b.pull && b.t < 0.9 && this.phase === 'play') this.player.applyForce(b.fx * 16 * (1 - b.t / 0.9), b.fy * 16 * (1 - b.t / 0.9));
     if (b.t > 1.3) this.beat = null;
+  }
+
+  // ---- the route words for a lane's board, in a crisp HUD tag when you swim up to it (the boards stay big + simple)
+  private signTag: { key: string; t: number; a: number; name: string; note: string; danger: number; bx: number; by: number; bh: number } | null = null;
+  private updateSignTag(dt: number, prompt: Prompt | null) {
+    const p = this.player, lvl = this.level;
+    let best: { f: ForkPlan; i: number; b: { x: number; y: number; w: number; h: number }; d: number } | null = null;
+    if (lvl && p.alive && this.phase === 'play' && !this.fight && !this.mail && !this.paused) {
+      for (const b of lvl.laneBoards) {
+        const f = this.plan.forks[b.fork];
+        if (!f || f.chosen >= 0) continue;
+        const dx = Math.max(0, Math.abs(p.x - b.x) - b.w / 2), dy = Math.max(0, Math.abs(p.y - b.y) - b.h / 2);
+        if (dx > 2.6 || dy > 3.2) continue;
+        const d = Math.hypot(dx, dy * 1.3);
+        if (!best || d < best.d) best = { f, i: b.lane, b, d };
+      }
+    }
+    // (a world prompt wins: one tag at a time)
+    if (best && !(prompt && prompt.label && !prompt.at)) {
+      const l = best.f.lanes[best.i], key = `${best.f.id}:${best.i}`;
+      const note = `${l.note}${l.giant && !/GIANT/.test(l.note) ? ' - GIANTS' : ''}`;
+      if (!this.signTag || this.signTag.key !== key) this.signTag = { key, t: 0, a: this.signTag?.a ?? 0, name: l.name, note, danger: l.danger, bx: best.b.x, by: best.b.y, bh: best.b.h };
+      this.signTag.t += dt; this.signTag.a = Math.min(1, this.signTag.a + dt * 5);
+    } else if (this.signTag) {
+      this.signTag.a -= dt * 4;
+      if (this.signTag.a <= 0) this.signTag = null;
+    }
+  }
+  /** the tag: a driftwood plate with the place (big) and its route words, over the board it reads, never under the HUD */
+  private drawSignTag(ui: PixelUI) {
+    const s = this.signTag;
+    if (!s || s.a <= 0.01) return;
+    const at = this.anchor(s.bx, s.by + s.bh / 2 + 0.2), under = this.anchor(s.bx, s.by - s.bh / 2 - 0.2);
+    const tw = Math.max(ui.measure(s.name, 'title'), ui.measure(s.note, 'body'));
+    const w = Math.round(tw + 22), h = Math.round(ui.lh('title') + ui.lh('body') + 12);
+    const pop = 1 - (1 - Math.min(1, s.t * 6)) ** 3, a = s.a;
+    const x = Math.max(6, Math.min(ui.w - w - 6, Math.round(at.on ? at.x - w / 2 : ui.w / 2 - w / 2)));
+    // over the board, or under it when over would sit on the instruments (the vitals + resources top left, the
+    // navigation plate top right) or off the top: the tag never covers the board it reads
+    const hud = (yy: number) => (x < ui.w * 0.36 && yy < ui.h * 0.31) || (x + w > ui.w * 0.66 && yy < ui.h * 0.2) || yy < 6;
+    let y = Math.round((at.on ? at.y : ui.h * 0.45) - h - 8);
+    const flip = hud(y);
+    if (flip) y = Math.round(under.y + 10);
+    y = Math.max(6, Math.min(ui.h - h - 46, y)) + Math.round((1 - pop) * (flip ? -6 : 6));
+    const rim = s.danger >= 2 ? PAL.coral : PAL.brass;
+    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x + 2, y + 2, { alpha: 0.35 * a });
+    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x, y, { alpha: a });
+    ui.text(s.name, x + Math.round((w - ui.measure(s.name, 'title')) / 2), y + 6, { font: 'title', color: PAL.cream, alpha: a });
+    ui.text(s.note, x + Math.round((w - ui.measure(s.note, 'body')) / 2), y + 6 + ui.lh('title'), { font: 'body', color: s.danger >= 2 ? PAL.coral2 : PAL.kelp2, alpha: a });
+    // a little pointer to the board (down from over it, up from under it)
+    const px = Math.round(Math.max(x + 8, Math.min(x + w - 9, at.x)));
+    for (let i = 0; i < 4; i++) ui.fill(px - 3 + i, flip ? y - i : y + h - 1 + i, 7 - i * 2, 1, PAL.ink2, a);
   }
 
   /** an undecided fork whose choice the player is at: the camera frames its lanes */
@@ -1674,7 +1727,8 @@ export class DungeonScreen implements Screen {
     this.run.hp = p.hp;
     // ---- HUD (+ the dialogue bubbles on the same layer)
     this.dlg.update(dt, this.mail ? null : inp);
-    const act = this.hud.draw(dt, this.hudState(prompt), inp, () => this.dlg.draw());
+    this.updateSignTag(dt, prompt);
+    const act = this.hud.draw(dt, this.hudState(prompt), inp, (ui) => { this.dlg.draw(); this.drawSignTag(ui); });
     if (act?.startsWith('mail:')) this.mailAction(act);
     this.bar.visible = false; // replaced by the HUD's hand of skill cards (HudData.skills)
     this.bar.update(dt, p.skillHud());

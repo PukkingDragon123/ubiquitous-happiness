@@ -396,7 +396,7 @@ export function genLevel(o: LevelOpts): LevelPlan {
         const last = plan.exits[plan.exits.length - 1];
         const W = last.x1 + 8;
         // the frame while choosing: every pit with its sign (the big sign is read on the way in)
-        plan.forks.push({ id: fid, kind: 'end', x: cx0 + 0.6, y: level, view: { x0: plan.exits[0].x0 - 6.5, x1: last.x1 + 2.5, y0: level - 7, y1: level + 7 }, lanes, chosen: -1 });
+        plan.forks.push({ id: fid, kind: 'end', x: cx0 + 0.6, y: level, view: { x0: plan.exits[0].x0 - 6.5, x1: last.x1 + 2.5, y0: level - 5.5, y1: level + 8.5 }, lanes, chosen: -1 });
         // the end of the line: a dead end past the last pit
         plan.signs.push({ x: W - 3.2, y: level, kind: 'dead' });
         plan.dead.push({ x0: last.x1 + 2.2, x1: W, y0: level - 1, y1: top + 5, dir: 1, say: 'DEAD END: CHOOSE A PIT, BACK THAT WAY' });

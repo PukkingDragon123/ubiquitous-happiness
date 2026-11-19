@@ -31,6 +31,8 @@ export interface T3DStyle {
   glow?: number;
   /** puffiness: how far the bubble swells out of the glyph (5 = normal) */
   depth?: number;
+  /** opacity of the glass in the middle of a stroke (default 0.42; small words 0.62 so they hold up on bright sand) */
+  clear?: number;
 }
 
 export const T3D = {
@@ -259,6 +261,7 @@ uniform vec3 uEdge;
 uniform float uGlow;
 uniform float uTime;
 uniform float uOpacity;
+uniform float uClear;
 varying vec3 vN;
 varying vec3 vV;
 varying float vRim;
@@ -297,13 +300,13 @@ void main() {
   float edge = 1.0 - smoothstep(0.28, 0.5, vRim);
   col = mix(col, uEdge, edge * 0.9);
   // a hollow bubble: see-through in the middle, dense at the skin
-  float a = mix(0.42, 0.95, max(max(skin * 0.85, fr), hi));
+  float a = mix(uClear, 0.95, max(max(skin * 0.85, fr), hi));
   a = max(max(a, edge * 0.95), glint);
   gl_FragColor = vec4(col, a * uOpacity);
 }`;
 
 const matCache = new Map<string, THREE.ShaderMaterial>();
-function styleKey(st: T3DStyle) { return [st.font, st.top, st.bottom, st.edge, st.glow ?? 0.3].join('|'); }
+function styleKey(st: T3DStyle) { return [st.font, st.top, st.bottom, st.edge, st.glow ?? 0.3, st.clear ?? ''].join('|'); }
 /** the bubble-glass material of a style (shared by every letter in it) */
 function glassMat(st: T3DStyle): THREE.ShaderMaterial {
   const key = styleKey(st);
@@ -315,6 +318,7 @@ function glassMat(st: T3DStyle): THREE.ShaderMaterial {
         uTime: U_TIME, uJiggle: { value: 0.22 },
         uTop: { value: new THREE.Color(st.top) }, uBot: { value: new THREE.Color(st.bottom) }, uEdge: { value: new THREE.Color(st.edge) },
         uGlow: { value: st.glow ?? 0.3 }, uOpacity: { value: 1 },
+        uClear: { value: st.clear ?? (st.font === 'small' || st.font === 'tiny' ? 0.62 : 0.42) },
       },
     });
     matCache.set(key, m);

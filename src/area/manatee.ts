@@ -520,7 +520,7 @@ class Build {
         const uv = (p: V3): V2 => U(R.pad, clamp(0.5 + (p[2] - c[2]) / 0.24, 0, 1), clamp(0.5 + dot(sub(p, c), up) / 0.21, 0, 1));
         triN(s, a, b, cc, uv(a), uv(b), uv(cc), sub(centroid(a, b, cc), c));
       }
-      // stiff pale whiskers fanning out of the pads
+      // stiff dark bristles (vibrissae) fanning out of the pads
       for (let i = 0; i < 7; i++) {
         const e = 0.6 + 0.25 * (i % 3), az = -0.7 + i * 0.26;
         const v = norm(add(add(mul(fw, Math.cos(e)), mul(up, Math.sin(e) * Math.sin(az))), [0, 0, side * Math.sin(e) * Math.cos(az)]));
@@ -597,32 +597,35 @@ class Build {
   /** the peaked postal cap, sat snug on the crown of her head */
   cap() {
     const { s, R } = this;
-    const cx = 1.17, a = 0.19, b = 0.172, n = 16;
-    const y0 = topY(cx, 0), plane = (x: number) => y0 + (x - cx) * 0.1;
+    // the cap sits tipped forward on a plane that follows the slope of her head (flat crown, falling forehead), so
+    // its band is an even height all round with its lower edge sunk into the hide, clear of the collar behind
+    const cx = 1.14, a = 0.165, b = 0.165, n = 16, slope = -0.32;
+    const plane = (x: number) => topY(cx, 0) - 0.03 + (x - cx) * slope;
     // rings counter-clockwise seen from above: start on the +z side, then the front (+x)
     const pt = (al: number, k: number, y: number): V3 => [cx + Math.sin(al) * a * k, y, Math.cos(al) * b * k];
     const lift = (al: number) => 0.04 * Math.max(0, Math.sin(al)) ** 2;
+    const yb = (al: number) => { const b0 = pt(al, 1, 0); return Math.min(topY(b0[0], b0[2]) - 0.03, plane(b0[0]) - 0.01); };
     const rings: V3[][] = [[], [], [], [], []];
     for (let i = 0; i < n; i++) {
-      const al = (i / n) * TAU, base = pt(al, 1, 0);
-      rings[0].push([base[0], topY(base[0], base[2]) - 0.03, base[2]]);
-      rings[1].push(pt(al, 1.03, plane(base[0]) + 0.058));
-      rings[2].push(pt(al, 1.06, plane(base[0]) + 0.076));
-      rings[3].push(pt(al, 1.27, plane(base[0]) + 0.158 + lift(al)));
-      rings[4].push(pt(al, 1.2, plane(base[0]) + 0.18 + lift(al)));
+      const al = (i / n) * TAU, x = cx + Math.sin(al) * a, y = plane(x);
+      rings[0].push([x, yb(al), Math.cos(al) * b]);
+      rings[1].push(pt(al, 1.03, y + 0.052));
+      rings[2].push(pt(al, 1.06, y + 0.07));
+      rings[3].push(pt(al, 1.27, y + 0.152 + lift(al)));
+      rings[4].push(pt(al, 1.2, y + 0.174 + lift(al)));
     }
     const vRow = [15.5 / 16, 11 / 16, 10 / 16, 2 / 16, 0.5 / 16];
     loft(s, rings, (j, k) => U(R.cap, k / n, 1 - vRow[j]));
-    const topC: V3 = [cx + 0.02, plane(cx) + 0.195 + 0.012, 0];
+    const topC: V3 = [cx + 0.02, plane(cx + 0.02) + 0.19, 0];
     fan(s, rings[4], topC, (k) => { const al = (k / n) * TAU; return U(R.capTop, 0.5 + Math.sin(al) * 0.45, 0.5 + Math.cos(al) * 0.45); }, U(R.capTop, 0.5, 0.5));
     // the visor: a stiff black crescent over the brow
     const vn = 8, inner: V3[] = [], outer: V3[] = [];
     for (let i = 0; i <= vn; i++) {
       const al = PI / 2 - 1.15 + (i / vn) * 2.3, q = Math.cos(((i / vn) * 2 - 1) * 1.2);
       const base = pt(al, 1.0, 0);
-      const y = Math.max(topY(base[0], base[2]) - 0.01, plane(base[0]) + 0.004);
+      const y = plane(base[0]) + 0.004;
       inner.push([base[0] - Math.sin(al) * 0.01, y, base[2] - Math.cos(al) * 0.01]);
-      outer.push([base[0] + Math.sin(al) * 0.15 * q, y - 0.035 * q - 0.004, base[2] + Math.cos(al) * 0.12 * q]);
+      outer.push([base[0] + Math.sin(al) * 0.15 * q, y - 0.15 * q * 0.16 - 0.012 * q - 0.003, base[2] + Math.cos(al) * 0.12 * q]);
     }
     const down = (p: V3): V3 => [p[0], p[1] - 0.013, p[2]];
     for (let i = 0; i < vn; i++) {
@@ -640,7 +643,7 @@ class Build {
     triN(s, sub(sub(bc, bz), by), add(add(bc, by), bz), sub(add(bc, by), bz), U(R.badge, 0, 0), U(R.badge, 1, 1), U(R.badge, 0, 1), nf);
     s.glow(0);
     const cord: V3[] = [];
-    for (let i = 0; i <= 8; i++) { const al = PI / 2 - 1.0 + (i / 8) * 2.0; const p = pt(al, 1.07, plane(cx + Math.sin(al) * a) + 0.03); cord.push(p); }
+    for (let i = 0; i <= 8; i++) { const al = PI / 2 - 1.0 + (i / 8) * 2.0; cord.push(pt(al, 1.065, plane(cx + Math.sin(al) * a) + 0.03)); }
     s.tube(cord, () => 0.009, 3, R.fringe);
     for (const al of [PI / 2 - 1.04, PI / 2 + 1.04]) { const p = pt(al, 1.05, plane(cx + Math.sin(al) * a) + 0.03); dome(s, p, norm([Math.sin(al), 0, Math.cos(al)]), 0.016, 0.016, 0.01, 6, R.brass); }
     this.rigid(B.head);
@@ -832,7 +835,8 @@ function built(): Built {
   b.hide(); b.eyes(); b.flipper(); b.cap(); b.jacket(); b.scarf(); b.mailbag();
   const s = b.s;
   // a gentle top light baked in the vertex colours (the undersides a touch darker)
-  s.paintSince(0, (_p, n, c) => { const k = 0.9 + 0.1 * n[1]; return [c[0] * k, c[1] * k, c[2] * k]; });
+  // (the paddle a shade darker: banked toward the camera it catches the full sun)
+  s.paintSince(0, (p, n, c) => { const k = (0.9 + 0.1 * n[1]) * (p[0] < -1.5 ? 0.86 : 1); return [c[0] * k, c[1] * k, c[2] * k]; });
   const geo = s.geometry();
   const sw = geo.getAttribute('aSway') as THREE.BufferAttribute;
   const n = sw.count, si = new Uint16Array(n * 4), wt = new Float32Array(n * 4);
@@ -851,7 +855,7 @@ function built(): Built {
 // ------------------------------------------------------------------ Marge
 type MState = 'away' | 'arriving' | 'waiting' | 'leaving';
 /** model metres -> world */
-const SCALE = 0.82;
+const SCALE = 0.9;
 /** the model x that sits at her root: callers' (x, y) is her chest, and she turns about it */
 const ANCHOR_X = 0.4;
 /** collision circles along her (model x, model y, radius): snout, head, chest, flippers, bag, belly, stock, paddle */
@@ -964,7 +968,8 @@ export class Manatee {
       // a goodbye wave, then off she goes the way she came
       this.leaveT += dt;
       if (this.leaveT > 1.1) { tx = buoyX + this.leaveDir * 44; ty = clamp(-5.5, floor + 1.6, top - 2); spd = 4.6; slow = 0.5; }
-      if (Math.abs(this.x - buoyX) > 32) { this.state = 'away'; this.root.visible = false; return; }
+      // gone once she's well clear of the buoy and of the blobfish (an area's end wall must not hold her on screen)
+      if ((Math.abs(this.x - buoyX) > 22 && Math.abs(this.x - p.x) > 17) || Math.abs(this.x - buoyX) > 40) { this.state = 'away'; this.root.visible = false; return; }
     }
     this.steer(dt, tx, ty, spd, slow);
     this.x += this.vx * dt; this.y += this.vy * dt;
@@ -989,11 +994,19 @@ export class Manatee {
     this.vy = damp(this.vy, (dy / d) * s, k, dt);
   }
 
-  /** keep all of her (snout to paddle, flippers and bag too) out of the rock, the sand and the ceiling */
+  /**
+   * Keep all of her (snout to paddle, flippers and bag too) out of the rock, the sand and the ceiling. Swimming in
+   * from off screen or heading home she only minds the seabed (she comes and goes through an area's end walls).
+   */
   private collide(dt: number, w: World, top: number) {
-    const hx = Math.cos(this.yawG.rotation.y);
+    const hx = Math.cos(this.yawG.rotation.y), walls = this.state === 'waiting';
     for (const [mx, my, r] of HULL) {
       const px = this.x + (mx - ANCHOR_X) * SCALE * hx, py = this.y + my * SCALE, rr = r * SCALE;
+      if (!walls) {
+        const fl = w.terrain.floorAt(px) + rr - py;
+        if (fl > 0) { this.y += Math.min(fl, Math.max(0.05, fl * 0.3)); if (this.vy < 0) this.vy *= 0.5; }
+        continue;
+      }
       const d = w.terrain.sdf(px, py) - rr;
       if (d >= 0) continue;
       const n = w.terrain.normal(px, py);

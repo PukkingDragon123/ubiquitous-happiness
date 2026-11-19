@@ -44,14 +44,14 @@ function hermit(): SpeciesAsset {
   const axis = norm([-0.75, 0.62, 0]), u1 = norm(cross(axis, [0, 0, 1])), u2 = norm(cross(axis, u1));
   const sb: V3 = [-0.02, 0.05, 0];
   const path: V3[] = [];
-  const N = 60, turns = 3.1;
+  const N = 36, turns = 3.1;
   for (let i = 0; i <= N; i++) {
     const f = i / N, phi = f * turns * TAU + 0.6;
     const rho = 0.06 * Math.pow(1 - f, 1.1) + 0.002;
     path.push(add(add(sb, scale(axis, 0.17 * Math.pow(f, 0.8))), add(scale(u1, Math.cos(phi) * rho), scale(u2, Math.sin(phi) * rho))));
   }
   const ft = K.lo.count;
-  K.lo.tube(path, (t) => (0.046 * Math.pow(1 - t, 1.2) + 0.003) * (1 + 0.04 * Math.max(0, Math.sin(t * 120))), 20, pg.reg(shR), K.newG(), { capEnd: true });
+  K.lo.tube(path, (t) => (0.046 * Math.pow(1 - t, 1.2) + 0.003) * (1 + 0.04 * Math.max(0, Math.sin(t * 120))), 12, pg.reg(shR), K.newG(), { capEnd: true });
   K.tag(ft, (i, A) => { A.ao[i] = 1; });
   const rings: { pts: V3[]; v: number }[] = [];
   {
@@ -79,7 +79,7 @@ function hermit(): SpeciesAsset {
     const sm = m.makeMaterial({ map: shellTex.map, normalMap: shellTex.normalMap, roughnessMap: shellTex.roughnessMap, emissiveMap: null });
     const sh = new THREE.Mesh(shell, sm);
     sh.castShadow = true;
-    sh.position.set(-0.03, 0.0, 0);
+    sh.position.set(-0.035, 0.012, 0); sh.scale.setScalar(1.3); // the shell dominates; the body comes out of its mouth
     m.group.add(sh);
     m.parts.shell = sh;
   };

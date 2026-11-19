@@ -129,7 +129,14 @@ function buildRay(d: RayDef): SpeciesAsset {
       const f = k / 3, x = RX + 0.05 - f * 0.11, w = 0.045 * Math.sin(Math.PI * (0.15 + f * 0.85)) + 0.005;
       lob.push({ pts: Kit.ring([x, -0.004, s * (0.03 + w * 0.9)], [0, 0, 1], [0, 1, 0], w, 0.006, 6), v: f });
     }
-    K.loftPart(lob, botR, { end: [RX - 0.065, -0.004, s * 0.035] });
+    // the lobes peek out behind the disc: planar top-view uv into the disc paint (sandy, past the rim)
+    const fl = K.loftPart(lob, topR, { end: [RX - 0.065, -0.004, s * 0.035] });
+    K.tag(fl.from, (i) => {
+      if (i >= fl.to) return;
+      const p = K.lo.pos(i);
+      K.lo.UV[i * 2] = treg.x + clamp((p[0] - XMIN) / (XMAX - XMIN), 0, 1) * treg.w;
+      K.lo.UV[i * 2 + 1] = 1 - (treg.y + clamp((p[2] + ZMAX) / (2 * ZMAX), 0, 1) * treg.h);
+    });
   }
   // ------------------------------------------------------------------------------------------ tail + barb
   paintRect(pg, tailR, (u, v) => { const top = v < 0.5; return [shade(d.tailCol(u, top), top ? 1 : 0.9), 1, 0.5, 0]; });
@@ -189,12 +196,11 @@ export const stingrayHoneycomb = () => buildRay({
     if (s > 1) return C('#a88454');
     // reticulation: a dark brown net of irregular polygons (leopard-like), finer toward the margins, breaking up
     // into separate spots near the edge
-    const size = 0.046 - 0.016 * smoothstep(0.3, 0.95, s);
-    const h = cells(x + 2, z + 2, size, 0.8, 3);
-    const lw = 0.11 + 0.04 * (1 - s);
-    if (s < 0.74) { if (h.seam < lw) c = mix(C('#462a14'), C('#5a3a1c'), pick(h.id, 1) * 0.6); else if (h.d < 0.18 && s < 0.6) c = mix(c, C('#b08a5a'), 0.6); }
-    else if (s < 0.86) { if (h.seam < lw && pick(h.id, 4) < 0.7) c = C('#4e3218'); }
-    else if (h.d < 0.32 && s < 0.97) c = C('#56381c');
+    // (fixed cell sizes per zone: a size that varied with s would slide the lattice and moire into rings)
+    const h = cells(x + 2, z + 2, s < 0.8 ? 0.044 : 0.03, 0.8, s < 0.8 ? 3 : 4);
+    if (s < 0.7) { if (h.seam < 0.12) c = mix(C('#462a14'), C('#5a3a1c'), pick(h.id, 1) * 0.6); else if (h.d < 0.18 && s < 0.55) c = mix(c, C('#b08a5a'), 0.6); }
+    else if (s < 0.8) { if (h.seam < 0.11 && pick(h.id, 4) < 0.75) c = C('#4e3218'); }
+    else if (h.d < 0.3 && s < 0.96) c = C('#56381c');
     // the pale rim
     if (s > 0.96) c = mix(c, C('#d8c09a'), 0.6);
     // a band of pale tubercles down the middle of the back
