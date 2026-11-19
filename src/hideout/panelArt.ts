@@ -489,10 +489,10 @@ export function emptyChestArt(): HTMLCanvasElement {
     coralline(px, B1 - 4, BT + 14, 2, 4, 9, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 });
     stamp(px, SPR.star, 104, 54);
     stamp(px, SPR.scallop, 18, 55);
-    kelpBlade(px, bladePath(26, 54, 0.1, -1, 34, 1.6, 0.8).concat([]), 4, {});
-    kelpBlade(px, bladePath(31, 55, 0.25, -1, 22, 1.2, 2.1), 3, {});
-    holdfast(px, 27, 55, 1);
-    grass(px, 112, 59, 4, 5, 8);
+    kelpBlade(px, bladePath(26, 54, 0.1, -1, 34, 1.6, 0.8), 4, { free: true });
+    kelpBlade(px, bladePath(31, 55, 0.25, -1, 22, 1.2, 2.1), 3, { free: true });
+    holdfast(px, 27, 55, 1, { free: true });
+    grass(px, 112, 59, 4, 5, 8, { free: true });
     return px.done();
   });
 }

@@ -13,21 +13,22 @@
 //                Silence. Fade.
 //   d. MR. CRAB  a gruff weapon dealer in his shop window (the twist sting, a push-in on him). A choice or two; he
 //                hands over the TOOTHPICK (slow-mo push-in on the kid) and a hat (DEFAULT_GEAR from here on).
-//   e. TUTORIAL  six short lessons, one goal at a time on a small objective line, each opened by a quick establishing
+//   e. TUTORIAL  seven short lessons, one goal at a time on a small objective line, each opened by a quick establishing
 //                shot and a bubble-word name card, Mr. Crab scuttling along and commenting:
 //                1 SWIM    a kelp slalom (four gates, low / high), then a warm current to ride (WASD / arrows)
 //                2 DART    catch a skittish minnow (tap SHIFT to dart at it; it tires if you can't)
 //                3 CHARGE  hold SHIFT, aim, let go: one charged dash through three bubble rings (slow-mo wind-up)
 //                4 SLASH   smash three glass bottles (human trash): click / J
 //                5 PARRY   Mr. Crab lobs shells: right click / K as one flashes (they slow down if you struggle)
-//                6 MAIL    ring the buoy for MARGE and mail the glass home
+//                6 HEAL    the shells stung: R (or H) eats a Healing Clam
+//                7 MAIL    ring the buoy for MARGE and mail the glass home
 //                Every lesson has a way out (the minnow tires, rings / parries go lenient, Mr. Crab hands over glass,
 //                waves the mail through): nothing can get stuck.
 //   f. HOME      Mr. Crab leads the kid to a ruined stone house: his brother's place. "We'll fix her up together."
 //                The kid swims in through the door -> onDone -> the home screen (the rebuild begins there).
 //
 //   const intro = new IntroScreen(game); intro.onDone = (skipped) => ...; game.register(intro);
-//   game.go('intro', { beat?: 'morning' | 'bread' | 'alone' | 'crab' | 'tutorial' | 'home', step?: 1..6 })
+//   game.go('intro', { beat?: 'morning' | 'bread' | 'alone' | 'crab' | 'tutorial' | 'home', step?: 1..7 })
 //   (?preview=intro&beat=bread / &beat=tutorial&step=3 jumps straight there; &speed=N runs it N x faster.)
 //
 // The beats are one async script: await this.wait(s) / this.until(fn) / this.talk(lines) resolve from update(), and
@@ -58,6 +59,7 @@ import { glint } from '../combat/telegraph';
 import { PixelUI } from '../ui/pixel/ui';
 import { Text3DLayer, Float3D, T3D } from '../ui/text3d';
 import { Dialogue, type Line } from './dialogue';
+import { HEAL_ITEM, hpOf, hpText, hpDelta } from '../combat/types';
 import { sailorCap, shellNecklace, buildBread, GlassBottle, ShellShot, RuinedHome, TrawlNet, BubbleRing, KelpGate, CurrentStream, Minnow, type BottleKind } from './models';
 import { MrCrab, CrabShop } from './crab';
 
@@ -67,9 +69,9 @@ const ABORT = new Error('intro: aborted');
 const SEED = 4242;
 const KID_SCALE = 0.65;
 const SKIP_HOLD = 1.5;
-/** the lessons, in order (&step=1..6) */
-const L = { swim: 0, dart: 1, charge: 2, slash: 3, parry: 4, mail: 5 } as const;
-const LESSONS = 6;
+/** the lessons, in order (&step=1..7) */
+const L = { swim: 0, dart: 1, charge: 2, slash: 3, parry: 4, heal: 5, mail: 6 } as const;
+const LESSONS = 7;
 const FOV = 36;
 
 /** a camera framing: look at (x, y, 0) from `dist` away, swung `yaw` round, raised `h`; roll = dutch angle, fov = zoom */
@@ -985,7 +987,7 @@ export class IntroScreen implements Screen {
       k.model.weaponVisible = true;
       this.armed = true;
       const cx = this.crabX;
-      const sx = [cx - 1, cx + 25, cx + 22, cx + 17, cx + 22, this.area.mailbox.x - 12][from];
+      const sx = [cx - 1, cx + 25, cx + 22, cx + 17, cx + 22, cx + 22, this.area.mailbox.x - 12][from];
       this.place(sx, this.floorAt(sx) + (from === 1 ? 3.6 : 2.2));
       if (from > 0) this.crab.group.position.set(sx - 3, this.floorAt(sx - 3) - 0.05, -0.45);
       if (from >= L.parry) this.bag.push(materialId('seaGlass'), materialId('seaGlass'));
@@ -997,7 +999,7 @@ export class IntroScreen implements Screen {
     this.followKid(11.5, 0.7);
     if (this.crabMode !== 'follow') this.crabVy = this.crab.group.position.y > this.floorAt(this.crab.group.position.x) + 0.3 ? 3.2 : 0;
     this.crabMode = 'follow';
-    const lessons = [() => this.lessonSwim(), () => this.lessonDart(), () => this.lessonCharge(), () => this.lessonBottles(), () => this.lessonParry(), () => this.lessonMail()];
+    const lessons = [() => this.lessonSwim(), () => this.lessonDart(), () => this.lessonCharge(), () => this.lessonBottles(), () => this.lessonParry(), () => this.lessonHeal(), () => this.lessonMail()];
     for (let i = from; i < lessons.length; i++) {
       this.step = i;
       await lessons[i]();
@@ -1149,13 +1151,14 @@ export class IntroScreen implements Screen {
       // a player who can't get it: after a while the minnow tires
       fish.slow = clamp((this.clock - tLast - 12) / 10, 0, 1);
       if (this.control === 'free') fish.update(this.dt, k.x, k.y, box, 4.8 + caught * 0.3);
+      if (caught >= 2) return !fish.stunned;
       const d = Math.hypot(fish.x - k.x, fish.y - k.y);
       // close but no dart: Mr. Crab reminds you (not too often)
       const isNear = d < 1.9;
       if (isNear && !nearWas) near++;
       nearWas = isNear;
       if (near >= 3 && dartT <= 0 && this.clock - nag > 6) { nag = this.clock; near = 0; this.bark('crab', 'Now! {gold}Tap SHIFT{/gold}! Dart!', 2); }
-      if (!fish.stunned && d < (dartT > 0 ? 1.05 : 0.8)) {
+      if (fish.catchable && d < (dartT > 0 ? 1.05 : 0.8)) {
         caught++;
         tLast = this.clock;
         fish.caught();
@@ -1371,7 +1374,42 @@ export class IntroScreen implements Screen {
     this.followKid(11.5, 0.7);
   }
 
-  /** 6: MAIL: ring the mail buoy, give Marge the glass: it goes home */
+  /** 6: HEAL: the shells left a mark: eat a Healing Clam (R / H) */
+  private async lessonHeal() {
+    const k = this.kid, w = this.world;
+    // the training knocks: down to about half (so the clam shows what it does), and a clam in the pocket
+    k.hp = Math.min(k.hp, Math.max(1, Math.ceil(k.maxHp / 2)));
+    k.combat.flasks = Math.max(1, k.combat.flasks);
+    this.script_();
+    this.twoShot(() => { const g = this.crab.group.position; return { x: g.x, y: g.y + 0.6 }; }, 3, 7);
+    await this.talk([
+      { who: 'crab', text: `Those shells sting, huh? You're down to {red}${hpText(k.hp)}{/red}.` },
+      { who: 'crab', text: `Here: a {gold}${HEAL_ITEM.name}{/gold}. Press {gold}${HEAL_ITEM.key}{/gold} (or H) and eat it. Takes a second, so not with a shark in your face.` },
+    ]);
+    this.free(true, this.tutBounds());
+    this.followKid(10, 0.6);
+    this.lessonCard('HEAL', `${HEAL_ITEM.key}: EAT A CLAM`);
+    this.setGoal({ text: `Eat a ${HEAL_ITEM.name}`, keys: [[HEAL_ITEM.key, 'eat'], ['H', '']] });
+    let ate = false, listen = true;
+    const hp0 = k.hp, t0 = this.clock;
+    w.on('flask', () => { if (listen) ate = true; });
+    await this.until(() => {
+      if (ate) return true;
+      // never stuck: after a while Mr. Crab patches the kid up himself
+      if (this.clock - t0 > 30 && !this.dlg.blocking) { k.hp = k.maxHp; this.bark('crab', '...Or don\'t. I\'ll patch you up. {grey}Lazy.{/grey}', 2.6); return true; }
+      return false;
+    });
+    listen = false;
+    if (ate) {
+      this.t3d.add('YUM!', 0, 0, 0.8, T3D.heal, { size: 0.5, life: 1.3, rise: 0.6, follow: () => ({ x: k.x, y: k.y + 1.2 }) });
+      w.fx.burst('heart', k.x, k.y + 0.4, 5, 1.2, { vy: 1, life: 1.2 });
+      k.setExpr('happy', 1.5);
+      this.bark('crab', `Better? ${hpDelta(Math.max(1, k.hp - hp0))}. Clams are rare out there. Save 'em for when it counts.`, 3);
+    }
+    await this.wait(1.2);
+  }
+
+  /** 7: MAIL: ring the mail buoy, give Marge the glass: it goes home */
   private async lessonMail() {
     const mb = this.area.mailbox, k = this.kid;
     // nothing to send (the glass was left lying about)? Mr. Crab hands some over
@@ -1791,16 +1829,21 @@ export class IntroScreen implements Screen {
     }
   }
 
-  /** health while training: the HP number on a little bar (the run HUD's look, kept tiny) */
+  /** health while training: the HP number on a little bar (HP like the run HUD), and the Healing Clams once they
+   *  have been introduced */
   private hpBar() {
     const ui = this.ui, k = this.kid;
-    const x = 6, y = 6, w = 54;
+    const x = 6, y = 6, w = 56;
     const f = clamp(k.hp / Math.max(1, k.maxHp), 0, 1);
     ui.fill(x - 1, y - 1, w + 2, 9, '#06080e', 0.75);
     ui.fill(x, y, w, 7, '#3a1a24');
     ui.fill(x, y, Math.round(w * f), 7, f > 0.5 ? '#5ae08a' : f > 0.25 ? '#ffd860' : '#ff5a4a');
     ui.fill(x, y, Math.round(w * f), 2, '#ffffff', 0.35);
-    ui.text(`HP ${Math.ceil(k.hp)}/${k.maxHp}`, x + w + 4, y - 1, { font: 'small', color: '#f4f0e6', outline: '#06080e' });
+    ui.text(`${hpOf(k.hp)}/${hpOf(k.maxHp)} HP`, x + w + 4, y - 1, { font: 'small', color: '#f4f0e6', outline: '#06080e' });
+    if (this.step >= L.heal) {
+      const kw = ui.keycap(HEAL_ITEM.key, x, y + 11, true);
+      ui.text(`${HEAL_ITEM.short} x${k.combat.flasks}`, x + kw + 3, y + 13, { font: 'small', color: '#ffe8c8', outline: '#06080e' });
+    }
   }
 
   private bagRow() {

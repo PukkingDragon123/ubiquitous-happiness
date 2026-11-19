@@ -127,7 +127,7 @@ export function grad(cols: (string | RGB)[], steps = 14) {
 
 /** paint a fin membrane into a rect: u runs along the fin base (front -> back), v root -> tip */
 export function paintFin(pg: Page, r: Rect, f: FinPaint) {
-  const memb = ramp(f.col, 10, 0.9);
+  const memb = ramp(f.col, 10, 0);
   const [a0, a1] = f.alpha ?? [0.8, 0.5];
   const rays = Math.max(1, f.rays ?? 10), spines = f.spines ?? 0;
   const rayC = f.rayCol ? C(f.rayCol) : null;
@@ -205,7 +205,7 @@ export interface EyePaint {
   fleck?: string;        // iris flecks colour
 }
 export function paintEye(pg: Page, r: Rect, e: EyePaint) {
-  const iris = ramp(e.iris, 10, 0.8);
+  const iris = ramp(e.iris, 10, 0);
   const pr = e.pupil ?? 0.48, ir = e.irisR ?? 0.92;
   const pc = C(e.pupilCol ?? '#05060a');
   const ringC = e.ring ? C(e.ring) : null, scl = C(e.sclera ?? '#d8e0e4');
@@ -255,8 +255,8 @@ export function paintEye(pg: Page, r: Rect, e: EyePaint) {
 
 /** flat little swatch (teeth, lure, gums...) painted with a vertical ramp: v = 0 tip, v = 1 root */
 export function paintSwatch(pg: Page, r: Rect, cols: string[], rough = 0.4, glow?: string[]) {
-  const rr = ramp(cols, 4, 0.6);
-  const gr = glow ? ramp(glow, 4, 0.6) : null;
+  const rr = ramp(cols, 4, 0);
+  const gr = glow ? ramp(glow, 4, 0) : null;
   for (let j = 0; j < r.h; j++) for (let i = 0; i < r.w; i++) {
     const v = j / Math.max(1, r.h - 1);
     pg.set(r.x + i, r.y + j, rr(v, i, j), 255, rough, 0);

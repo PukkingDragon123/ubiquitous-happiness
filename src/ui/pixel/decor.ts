@@ -277,8 +277,9 @@ export function coralline(px: Px, cx: number, cy: number, rx: number, ry: number
  * a kelp frond ribbon along a centre line (points in px), `w` px wide at its widest: an ink rim, a lit left margin,
  * a darker right margin, a paler midrib, a ruffled edge (the width steps every few pixels), a tapered tip
  */
-export function kelpBlade(px: Px, pts: [number, number][], w: number, o: { inside?: (x: number, y: number) => boolean; K?: C[] } = {}) {
+export function kelpBlade(px: Px, pts: [number, number][], w: number, o: { inside?: (x: number, y: number) => boolean; K?: C[]; free?: boolean } = {}) {
   const K = o.K ?? R.kelp;
+  const on = (x: number, y: number) => (o.free ? px.in(x, y) : px.a(x, y) > 0) && (!o.inside || o.inside(x, y));
   const n = pts.length;
   const cells = new Map<number, number>(); // key -> tone
   const key = (x: number, y: number) => y * 4096 + x;
@@ -297,10 +298,10 @@ export function kelpBlade(px: Px, pts: [number, number][], w: number, o: { insid
   // rim + cast shadow
   for (const kk of cells.keys()) {
     const x = kk % 4096, y = Math.floor(kk / 4096);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!has(x + dx, y + dy) && px.a(x + dx, y + dy) && (!o.inside || o.inside(x + dx, y + dy))) px.set(x + dx, y + dy, K[0]);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!has(x + dx, y + dy) && on(x + dx, y + dy)) px.set(x + dx, y + dy, K[0]);
     if (!has(x + 1, y + 1) && !has(x + 2, y + 1) && px.a(x + 2, y + 1) && (!o.inside || o.inside(x + 2, y + 1))) px.shade(x + 2, y + 1, 0.7);
   }
-  for (const [kk, t] of cells) { const x = kk % 4096, y = Math.floor(kk / 4096); if (px.a(x, y) && (!o.inside || o.inside(x, y))) px.set(x, y, K[t]); }
+  for (const [kk, t] of cells) { const x = kk % 4096, y = Math.floor(kk / 4096); if (on(x, y)) px.set(x, y, K[t]); }
 }
 
 /** points along a wavy kelp blade from (x, y) running (dx, dy) for len px */
@@ -315,7 +316,7 @@ export function bladePath(x: number, y: number, dx: number, dy: number, len: num
 }
 
 /** a kelp holdfast clamped on at (x, y): a knot with branching haptera reaching out (dir -1 / 1 = left / right) */
-export function holdfast(px: Px, x: number, y: number, dir: 1 | -1, o: { inside?: (x: number, y: number) => boolean } = {}) {
+export function holdfast(px: Px, x: number, y: number, dir: 1 | -1, o: { inside?: (x: number, y: number) => boolean; free?: boolean } = {}) {
   const H = R.holdfast;
   const roots: [number, number][][] = [
     [[0, 0], [1, 1], [2, 1], [3, 2], [4, 2]],
@@ -324,7 +325,7 @@ export function holdfast(px: Px, x: number, y: number, dir: 1 | -1, o: { inside?
     [[1, 1], [2, 3], [3, 4]],
     [[0, 0], [2, 0], [3, 0], [4, 1], [5, 1]],
   ];
-  const ok = (X: number, Y: number) => px.a(X, Y) && (!o.inside || o.inside(X, Y));
+  const ok = (X: number, Y: number) => (o.free ? px.in(X, Y) : px.a(X, Y) > 0) && (!o.inside || o.inside(X, Y));
   const pts: [number, number][] = [];
   for (const r of roots) for (const [rx, ry] of r) pts.push([x + rx * dir, y + ry]);
   for (const [X, Y] of pts) if (ok(X + 1, Y + 1) && !pts.some(([a, b]) => a === X + 1 && b === Y + 1)) px.shade(X + 1, Y + 1, 0.6);
@@ -334,9 +335,9 @@ export function holdfast(px: Px, x: number, y: number, dir: 1 | -1, o: { inside?
 }
 
 /** a sea-grass tuft: n blades fanning up from (x, y), lit on their left edges, swaying lean per blade */
-export function grass(px: Px, x: number, y: number, n: number, seed: number, maxH = 8, o: { inside?: (x: number, y: number) => boolean } = {}) {
+export function grass(px: Px, x: number, y: number, n: number, seed: number, maxH = 8, o: { inside?: (x: number, y: number) => boolean; free?: boolean } = {}) {
   const G = R.grass;
-  const ok = (X: number, Y: number) => px.a(X, Y) && (!o.inside || o.inside(X, Y));
+  const ok = (X: number, Y: number) => (o.free ? px.in(X, Y) : px.a(X, Y) > 0) && (!o.inside || o.inside(X, Y));
   for (let b = 0; b < n; b++) {
     const bx = x + b * 2 - n + 1 + (b % 2), h = Math.max(3, Math.round(maxH * (0.55 + hash(seed, b) * 0.45)));
     const lean = (b - (n - 1) / 2) * 0.55 + (hash(seed, b + 9) - 0.5);

@@ -1674,8 +1674,9 @@ export class DungeonScreen implements Screen {
     // ---- death
     if (this.deadT >= 0) {
       this.deadT += dt;
-      POST.uDesat.value = Math.min(1, this.deadT * 0.5);
-      if (this.deadT > 3.2) { this.deadT = -1; this.endLost(); }
+      // (v6: a short beat in the world; the run summary card opens on its own sinking scene)
+      POST.uDesat.value = Math.min(1, this.deadT / 1.3);
+      if (this.deadT > 1.5) { this.deadT = -1; this.endLost(); }
     }
   }
 

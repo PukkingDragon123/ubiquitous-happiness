@@ -616,21 +616,33 @@ export class Minnow {
     this.group.add(this.body);
     this.group.scale.setScalar(1.25);
   }
+  /** after a catch it shakes itself off and zips away; this long before it can be caught again */
+  private grace = 0;
   /** spin round after being caught */
   caught() { this.spin = 1; this.dizzy = 0.9; }
   get stunned() { return this.dizzy > 0; }
+  get catchable() { return this.dizzy <= 0 && this.grace <= 0; }
   /**
    * steer: flee from (kx, ky) inside the patch [x0, x1] x [y0, y1]; `speed` is its bolt speed (m/s)
    */
   update(dt: number, kx: number, ky: number, box: { x0: number; x1: number; y0: number; y1: number }, speed: number) {
     this.t += dt;
+    const wasDizzy = this.dizzy > 0;
     this.dizzy = Math.max(0, this.dizzy - dt);
+    this.grace = Math.max(0, this.grace - dt);
     this.spin = Math.max(0, this.spin - dt * 1.2);
+    if (wasDizzy && this.dizzy <= 0) {
+      // shake it off and zip to the far side of the patch (it's a minnow: it doesn't sulk)
+      const far = this.x - box.x0 > box.x1 - this.x ? -1 : 1;
+      this.vx = far * speed * 1.7; this.vy = (box.y0 + box.y1) / 2 > this.y ? 2 : -2;
+      this.grace = 0.8; this.pauseT = 0; this.nextPause = 2.6;
+    }
     const dx = this.x - kx, dy = this.y - ky, d = Math.hypot(dx, dy) || 1;
     let tx = 0, ty = 0;
     this.pauseT -= dt; this.nextPause -= dt;
     if (this.nextPause <= 0 && d > 1.6) { this.pauseT = 0.65; this.nextPause = 2.4 + Math.random() * 1.8; }
     if (this.dizzy > 0) { tx = 0; ty = 0.3; }
+    else if (this.grace > 0) { tx = this.vx; ty = this.vy; }
     else if (this.pauseT > 0) { tx = -dx / d * 0.3; ty = -dy / d * 0.3; }
     else if (d < 3.4) {
       // bolt away, sliding along the patch edges (and cutting back past the kid when cornered)

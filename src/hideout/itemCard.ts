@@ -13,6 +13,7 @@ import { getItem, ITEMS, RARITY_COLOR, statLines, stackCap, recipesWith, SETS, a
 import { BASE_STATS, type ItemInst, type Stats } from '../game/run';
 import { photo } from '../ui/obj/studio';
 import { itemModel } from '../backpack/models';
+import { windowArt, cellArt } from './panelArt';
 
 /** the v5 palette (DESIGN-UI.md) */
 export const K = {
@@ -30,40 +31,36 @@ export function footprint(id: string) {
   return { w: Math.max(...d.shape.map((c) => c[0])) + 1, h: Math.max(...d.shape.map((c) => c[1])) + 1 };
 }
 
-/** a recessed display window with a brass bezel and a small pedestal disc; the rarity gem sits on the top right */
+/**
+ * the display window (v6, painted 1x: panelArt.windowArt): a riveted, engraved brass bezel round dark water with light
+ * shafts and a sand mound the model stands on; the rarity gem sits on the top rail. The content box is s x s from
+ * (x, y); the bezel's outline sits 1 px outside it.
+ */
 export function modelWindow(ui: PixelUI, x: number, y: number, s: number, rarity?: string, hot = 0) {
   x = Math.round(x); y = Math.round(y);
-  ui.fill(x - 1, y - 1, s + 2, s + 2, K.ink2);
-  ui.fill(x, y, s, s, K.brass0);
-  ui.fill(x, y, s, 1, K.brass2); ui.fill(x, y, 1, s, K.brass1);
-  ui.fill(x + 1, y + 1, s - 2, 1, K.brass1);
-  ui.fill(x + 2, y + 2, s - 4, s - 4, K.brassD);
-  ui.fill(x + 3, y + 3, s - 6, s - 6, K.teal0);
-  // the back wall a step lighter, the inner top shadow
-  ui.fill(x + 3, y + 3, s - 6, Math.round((s - 6) * 0.62), K.ink);
-  ui.fill(x + 3, y + 3, s - 6, 2, K.ink2);
-  // the pedestal: a flat disc (two tones) the model stands on
-  const cx = x + s / 2, py = y + Math.round(s * 0.74), rx = Math.round(s * 0.34), ry = Math.max(3, Math.round(s * 0.09));
-  for (let yy = -ry; yy <= ry; yy++) {
-    const half = Math.round(rx * Math.sqrt(1 - (yy / ry) ** 2));
-    ui.fill(cx - half, py + yy, half * 2, 1, yy < 0 ? K.teal2 : K.teal1);
-  }
-  ui.fill(cx - rx + 2, py - ry, rx * 2 - 4, 1, K.teal3);
-  // the bezel's inner bevel and its four rivets
-  ui.fill(x + 2, y + s - 3, s - 4, 1, K.brass2); ui.fill(x + s - 3, y + 2, 1, s - 4, K.brass2);
-  for (const [rx, ry] of [[x + 1, y + 1], [x + s - 4, y + 1], [x + 1, y + s - 4], [x + s - 4, y + s - 4]]) { ui.fill(rx, ry, 3, 3, K.brassD); ui.fill(rx, ry, 2, 2, K.brass2); ui.fill(rx, ry, 1, 1, K.brassW); }
-  if (hot > 0) ui.fill(x + 3, y + 3, s - 6, s - 6, '#ffe8a0', 0.06 * hot);
+  ui.img(windowArt(s + 2), x - 1, y - 1);
+  if (hot > 0) ui.fill(x + 4, y + 4, s - 8, s - 8, '#ffe8a0', 0.07 * hot);
   if (rarity) {
+    // a faceted sea-glass gem in the rarity colour, set into the top rail
     const col = RARITY_COLOR[rarity as keyof typeof RARITY_COLOR] ?? rarity;
-    const gx = x + s - 8, gy = y + 2;
-    ui.fill(gx - 1, gy - 1, 7, 7, K.ink2); ui.fill(gx, gy, 5, 5, col); ui.fill(gx, gy, 2, 2, '#ffffff', 0.7);
+    const gx = x + s - 13, gy = y - 2;
+    ui.fill(gx + 1, gy, 5, 7, K.ink2); ui.fill(gx, gy + 1, 7, 5, K.ink2);
+    ui.fill(gx + 1, gy + 1, 5, 5, col);
+    ui.fill(gx + 1, gy + 1, 2, 2, '#ffffff', 0.65); ui.fill(gx + 3, gy + 1, 1, 1, '#ffffff', 0.3);
+    ui.fill(gx + 4, gy + 4, 2, 2, '#000000', 0.35); ui.fill(gx + 5, gy + 2, 1, 2, '#000000', 0.2);
+    ui.fill(gx + 7, gy + 2, 1, 5, '#000000', 0.3); ui.fill(gx + 2, gy + 7, 5, 1, '#000000', 0.3);
   }
 }
 
-/** the item's footprint as a tiny cell diagram (k px per cell) */
+/** the item's footprint as a tiny cell diagram (k px per cell): bevelled cells, lit top / left, shaded bottom / right */
 export function shapeGlyph(ui: PixelUI, id: string, x: number, y: number, k = 4, col = K.dim) {
   const d = getItem(id);
-  for (const [cx, cy] of d.shape) { ui.fill(x + cx * (k + 1), y + cy * (k + 1), k, k, col); ui.fill(x + cx * (k + 1), y + cy * (k + 1), k, 1, '#ffffff', 0.25); }
+  for (const [cx, cy] of d.shape) {
+    const X = x + cx * (k + 1), Y = y + cy * (k + 1);
+    ui.fill(X, Y, k, k, col);
+    ui.fill(X, Y, k, 1, '#ffffff', 0.4); ui.fill(X, Y + 1, 1, k - 1, '#ffffff', 0.2);
+    ui.fill(X, Y + k - 1, k, 1, '#000000', 0.35); ui.fill(X + k - 1, Y + 1, 1, k - 2, '#000000', 0.22);
+  }
   const f = footprint(id);
   return { w: f.w * (k + 1) - 1, h: f.h * (k + 1) - 1 };
 }
@@ -129,8 +126,12 @@ export function itemBody(ui: PixelUI, id: string, x: number, y: number, w: numbe
       const cw = 9 + ui.measure(lab, 'small') + 5 + ui.measure(cnt, 'small') + 6;
       if (cx + cw > bx + bw && cx > bx) { yy += ch + 3; [bx, bw] = col(yy); cx = bx; }
       if (draw) {
+        // a little chip: a dark bed, a border in the set's colour (lit top edge, shaded bottom), a gem pip
         ui.fill(cx, yy, cw, ch, K.ink2); ui.rect(cx, yy, cw, ch, s.color);
-        ui.fill(cx + 3, yy + Math.round(ch / 2) - 2, 4, 4, s.color);
+        ui.fill(cx + 1, yy + 1, cw - 2, 1, '#ffffff', 0.18); ui.fill(cx + 1, yy + ch - 2, cw - 2, 1, '#000000', 0.4);
+        ui.fill(cx + 1, yy + 1, cw - 2, ch - 2, s.color, 0.1);
+        const py = yy + Math.round(ch / 2) - 2;
+        ui.fill(cx + 3, py, 4, 4, s.color); ui.fill(cx + 3, py, 2, 1, '#ffffff', 0.6); ui.fill(cx + 3, py + 3, 4, 1, '#000000', 0.35);
         const tx = cx + 10 + ui.text(lab, cx + 10, yy + 2, { font: 'small', color: s.color, shadow: null }) + 4;
         ui.text(cnt, tx, yy + 2, { font: 'small', color: o.loose ? K.brass2 : K.cream, shadow: null });
       }
@@ -149,10 +150,10 @@ export function itemBody(ui: PixelUI, id: string, x: number, y: number, w: numbe
       const other = r.a === id ? r.b : r.a;
       const [fx, fw] = col(yy);
       if (draw) {
-        ui.fill(fx, yy, ic, ic, K.ink2); ui.item(other, fx, yy, ic, ic);
+        ui.img(cellArt(ic), fx, yy); ui.item(other, fx + 1, yy + 1, ic - 2, ic - 2);
         ui.text('+', fx + ic + 3, yy + Math.round((ic - ui.cap('small')) / 2), { font: 'small', color: K.dim, shadow: null });
         const ox = fx + ic + 10;
-        ui.fill(ox, yy, ic, ic, K.ink2); ui.item(r.out, ox, yy, ic, ic);
+        ui.img(cellArt(ic, 'on'), ox, yy); ui.item(r.out, ox + 1, yy + 1, ic - 2, ic - 2);
         let name = '= ' + getItem(r.out).name;
         while (name.length > 4 && ui.measure(name, 'small') > fw - (ox + ic + 4 - fx)) name = name.slice(0, -2) + '…';
         ui.text(name, ox + ic + 4, yy + Math.round((ic - ui.cap('small')) / 2), { font: 'small', color: RARITY_COLOR[getItem(r.out).rarity], shadow: K.ink2 });
@@ -216,18 +217,13 @@ export function setRow(ui: PixelUI, s: SetState, x: number, y: number, w: number
   return h;
 }
 
-/** a brass name plate (riveted), sized to its text, text centred; returns its width */
+/** a brass name plate (the kit's engraved, riveted brass), sized to its text, text centred; returns its width */
 export function brassPlate(ui: PixelUI, text: string, cx: number, y: number, o: { font?: 'title' | 'body' | 'small'; minW?: number; h?: number } = {}) {
   const font = o.font ?? 'title';
   const tw = ui.measure(text, font), w = Math.max(o.minW ?? 0, tw + 26), h = o.h ?? ui.cap(font) + 12;
   const x = Math.round(cx - w / 2);
-  ui.fill(x + 1, y + 2, w, h, '#000000', 0.45);
-  ui.fill(x, y, w, h, K.brassD);
-  ui.fill(x + 1, y + 1, w - 2, h - 2, K.brass1);
-  ui.fill(x + 1, y + 1, w - 2, 1, K.brass2); ui.fill(x + 1, y + 1, 1, h - 2, K.brass2);
-  ui.fill(x + 1, y + h - 2, w - 2, 1, K.brass0); ui.fill(x + w - 2, y + 1, 1, h - 2, K.brass0);
-  ui.fill(x + 4, y + 3, w - 8, h - 6, '#d9a44a');
-  for (const rx of [x + 4, x + w - 7]) { const ry = y + Math.round(h / 2) - 1; ui.fill(rx, ry, 3, 3, K.brass0); ui.fill(rx, ry, 2, 2, K.brassW); }
+  ui.fill(x + 2, y + 2, w, h, '#000000', 0.45);
+  ui.frame('brass', x, y, w, h);
   ui.text(text, x + w / 2, y + Math.round((h - ui.cap(font)) / 2), { font, color: '#3a2008', shadow: '#f8dc90', align: 'center' });
   return w;
 }

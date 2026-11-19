@@ -6,7 +6,7 @@
 //   padlock()               for locked chests
 //   pedestalModel(area)     carved plinth an item floats over
 //   chestModel()            iron-banded chest with a lid pivot
-//   keyModel() bombModel() pearlModel(v) heartModel(half)  pickups
+//   keyModel() bombModel() pearlModel(v) seaGrapeModel(small)  pickups (sea grapes heal)
 //   floorHatch()            the boss room's exit: a round porthole hatch in the floor with a wheel
 //   postBox()               the post office's pillar box
 //
@@ -18,6 +18,7 @@ import { ctex, T, tone, bevel, rivet, rust, type Tones } from '../skills/texkit'
 import { chamferBox, lpCyl, lpCone, lpSphere, facet, boxUV } from '../gfx/lowpoly';
 import { hash2 } from '../core/math';
 import { measure, glyphs } from '../ui/pixel/font';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const TAU = Math.PI * 2;
 const matCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -36,7 +37,7 @@ export function disposeModel(o: THREE.Object3D) {
   o.traverse((c) => {
     const m = c as THREE.Mesh;
     if (!m.isMesh) return;
-    m.geometry.dispose();
+    if (!m.userData.sharedGeo) m.geometry.dispose();
     const mt = m.material as THREE.MeshStandardMaterial;
     if (mt.userData?.shared) return;
     // a texture painted for this one instance (a sign's board face) goes with it
@@ -412,23 +413,83 @@ export function pearlModel(v: number): THREE.Group {
   }
   return g;
 }
-let heartShape: THREE.Shape | null = null;
-export function heartModel(half = false): THREE.Group {
+/**
+ * SEA GRAPES (v6, the healing pickup; Caulerpa lentillifera): a pale runner along the bottom sending up a little
+ * forest of upright stems, each crowded with glossy, see-through green beads on short stalks (densest at the tip,
+ * a crowning bead on top), a few catching the light. One merged vertex-coloured mesh + one highlight mesh.
+ * small = a sprig (the smaller heal), else a full cluster. Same shape every time (placed, not random).
+ */
+const grapeCache = new Map<string, { body: THREE.BufferGeometry; shine: THREE.BufferGeometry }>();
+function seaGrapeGeo(small: boolean) {
+  const key = small ? 's' : 'l';
+  const hit = grapeCache.get(key);
+  if (hit) return hit;
+  const parts: THREE.BufferGeometry[] = [], shine: THREE.BufferGeometry[] = [];
+  const col = new THREE.Color();
+  const paint = (g: THREE.BufferGeometry, c: THREE.Color, top?: THREE.Color, y0 = 0, y1 = 1) => {
+    const p = g.attributes.position as THREE.BufferAttribute, a = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const k = top ? Math.max(0, Math.min(1, (p.getY(i) - y0) / Math.max(1e-3, y1 - y0))) : 0;
+      a[i * 3] = c.r + (top ? (top.r - c.r) * k : 0); a[i * 3 + 1] = c.g + (top ? (top.g - c.g) * k : 0); a[i * 3 + 2] = c.b + (top ? (top.b - c.b) * k : 0);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    return g;
+  };
+  const prep = (g: THREE.BufferGeometry) => { const n = g.index ? g.toNonIndexed() : g; n.deleteAttribute('uv'); n.computeVertexNormals(); return n; };
+  const stemC = new THREE.Color('#9cc878'), stemTop = new THREE.Color('#c8e8a8');
+  // the runner: a gently arched stolon lying along the bottom
+  const runner = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.27, -0.17, 0.02), new THREE.Vector3(-0.1, -0.2, -0.03), new THREE.Vector3(0.08, -0.18, 0.03), new THREE.Vector3(0.26, -0.2, -0.01)]);
+  if (!small) parts.push(paint(prep(new THREE.TubeGeometry(runner, 10, 0.022, 5, false)), stemC));
+  else parts.push(paint(prep(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(runner.getPoints(3).slice(1, 3)), 6, 0.02, 5, false)), stemC));
+  // the uprights: [x along the runner, height, lean, z]
+  const stems: [number, number, number, number][] = small
+    ? [[-0.02, 0.3, 0.05, 0.01], [0.09, 0.22, -0.18, -0.03]]
+    : [[-0.22, 0.22, 0.28, 0.02], [-0.12, 0.33, 0.12, -0.03], [-0.01, 0.4, -0.03, 0.02], [0.1, 0.31, -0.16, -0.02], [0.2, 0.24, -0.3, 0.03], [0.04, 0.2, 0.22, 0.07]];
+  const bead = (r: number) => new THREE.IcosahedronGeometry(r, 1);
+  stems.forEach(([sx, h, lean, sz], si) => {
+    const base = new THREE.Vector3(sx, -0.19, sz);
+    const tip = new THREE.Vector3(sx + Math.sin(lean) * h, -0.19 + Math.cos(lean) * h, sz + (si % 2 ? 0.02 : -0.02));
+    const mid = base.clone().lerp(tip, 0.5).add(new THREE.Vector3(lean * 0.05, 0, 0.01));
+    const curve = new THREE.CatmullRomCurve3([base, mid, tip]);
+    parts.push(paint(prep(new THREE.TubeGeometry(curve, 6, 0.012, 4, false)), stemC, stemTop, -0.19, tip.y));
+    // beads spiral up the stem on short stalks, bigger and denser toward the top
+    const n = Math.round(h * 40);
+    for (let i = 0; i < n; i++) {
+      const t = 0.18 + 0.8 * (i / n);
+      const at = curve.getPoint(t), tan = curve.getTangent(t);
+      const a = i * 2.4 + si * 1.3;
+      const side = new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).projectOnPlane(tan).normalize();
+      const r = 0.022 + 0.014 * t + hash2(si, i, 3) * 0.006;
+      const c = at.clone().addScaledVector(side, r + 0.012);
+      // the beads: glassy green, lighter and yellower at the crown, a little darker low down
+      col.set('#3eb850').lerp(new THREE.Color('#a8f080'), t * 0.75 + hash2(si, i, 5) * 0.15);
+      const g = bead(r); g.translate(c.x, c.y, c.z);
+      parts.push(paint(prep(g), col));
+      if (hash2(si, i, 9) > 0.62) { const sh = new THREE.IcosahedronGeometry(r * 0.32, 0); sh.translate(c.x - r * 0.35, c.y + r * 0.45, c.z + r * 0.55); shine.push(prep(sh)); }
+    }
+    // a crowning bead
+    const cr = 0.042 + h * 0.03, cb = bead(cr); cb.translate(tip.x, tip.y + cr * 0.6, tip.z);
+    parts.push(paint(prep(cb), col.set('#b4f48a')));
+    const sh = new THREE.IcosahedronGeometry(cr * 0.3, 0); sh.translate(tip.x - cr * 0.35, tip.y + cr, tip.z + cr * 0.5); shine.push(prep(sh));
+  });
+  const out = { body: mergeGeometries(parts, false)!, shine: mergeGeometries(shine, false)! };
+  // centred on the cluster
+  out.body.translate(0, -0.03, 0); out.shine.translate(0, -0.03, 0);
+  grapeCache.set(key, out);
+  return out;
+}
+export function seaGrapeModel(small = false): THREE.Group {
   const g = new THREE.Group();
-  if (!heartShape) {
-    const s = new THREE.Shape();
-    s.moveTo(0, -0.22); s.lineTo(-0.22, 0.02); s.lineTo(-0.2, 0.14); s.lineTo(-0.12, 0.2); s.lineTo(-0.03, 0.16); s.lineTo(0, 0.11);
-    s.lineTo(0.03, 0.16); s.lineTo(0.12, 0.2); s.lineTo(0.2, 0.14); s.lineTo(0.22, 0.02); s.lineTo(0, -0.22);
-    heartShape = s;
-  }
-  const geo = new THREE.ExtrudeGeometry(heartShape, { depth: 0.12, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.03, bevelSegments: 1, curveSegments: 1 });
-  geo.translate(0, 0, -0.06);
-  if (half) { const p = geo.attributes.position as THREE.BufferAttribute; for (let i = 0; i < p.count; i++) if (p.getX(i) > 0) p.setX(i, 0); }
-  const m = M('heart', () => null, { color: '#e8304a', rough: 0.45, emissive: '#5a0010', emissiveK: 0.5 });
-  const me = mesh(facet(geo), m); g.add(me);
-  const hl = new THREE.Mesh(lpSphere(0.03, 0), new THREE.MeshBasicMaterial({ color: '#ffd0d8' })); hl.position.set(-0.11, 0.12, 0.11); g.add(hl);
+  const { body, shine } = seaGrapeGeo(small);
+  const m = M('seaGrape', () => null, { vertexColors: true, rough: 0.3, flat: false, emissive: '#0c3a12', emissiveK: 0.45, sss: [0.35, 0.9, 0.3], sssK: 0.5 });
+  const me = new THREE.Mesh(body, m); me.castShadow = true; me.receiveShadow = true; me.userData.sharedGeo = true; g.add(me);
+  const hl = new THREE.Mesh(shine, M('seaGrapeShine', () => null, { color: '#f4fff0', emissive: '#ffffff', emissiveK: 0.9, rough: 0.3 }));
+  hl.userData.sharedGeo = true; g.add(hl);
+  g.name = 'seaGrapes';
   return g;
 }
+/** (v5 name: the healing pickup used to be a heart) */
+export const heartModel = seaGrapeModel;
 
 // ------------------------------------------------------------------ the boss room's exit hatch
 export interface FloorHatch { root: THREE.Group; door: THREE.Group; wheel: THREE.Group; glow: THREE.Mesh }

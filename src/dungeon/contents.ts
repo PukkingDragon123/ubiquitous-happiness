@@ -11,7 +11,7 @@ import { itemObject } from './pickups';
 import { Text3DLayer, T3D, type Text3D } from '../ui/text3d';
 import { MrCrab, CrabShop } from '../story/crab';
 import type { ShopSlot } from './level';
-import { pedestalModel, chestModel, floorHatch, keyModel, bombModel, heartModel, disposeModel, type ChestKind, type FloorHatch } from './models';
+import { pedestalModel, chestModel, floorHatch, keyModel, bombModel, seaGrapeModel, disposeModel, type ChestKind, type FloorHatch } from './models';
 import type { ChestPlan } from './level';
 import type { Entity, Team } from '../game/types';
 import type { LampHandle } from '../gfx/lighting';
@@ -80,7 +80,7 @@ export class ShopStock {
       const x = xs[i] ?? cx + i * 2 - 4, y = floorAt(x);
       const model = new THREE.Group();
       const stand = pedestalModel(area); stand.scale.set(0.8, 0.62, 0.8); model.add(stand);
-      const goods = slot.kind === 'item' ? itemObject(slot.id!, 1) : slot.kind === 'key' ? keyModel() : slot.kind === 'bomb' ? bombModel() : heartModel(false);
+      const goods = slot.kind === 'item' ? itemObject(slot.id!, 1) : slot.kind === 'key' ? keyModel() : slot.kind === 'bomb' ? bombModel() : seaGrapeModel(false);
       goods.position.y = 1.15; goods.scale.setScalar(slot.kind === 'item' ? 1.7 : 2.2);
       goods.name = 'goods';
       model.add(goods);
@@ -101,7 +101,7 @@ export class ShopStock {
   label(st: ShopStand): string {
     switch (st.slot.kind) {
       case 'item': return getItem(st.slot.id!).name;
-      case 'heart': return 'HEART';
+      case 'heart': return 'SEA GRAPES';
       case 'key': return 'KEY';
       default: return 'PUFFER-BOMB';
     }

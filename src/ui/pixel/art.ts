@@ -159,6 +159,8 @@ const ICONS: Record<string, string[]> = {
   minus: ['rrrrrR', 'RRRRRR'],
   bubble: ['..uuu..', '.ucuuu.', 'ucuuuuU', 'uuuuuuU', 'uuuuuUU', '.uuUUU.', '..UUU..'],
   door: ['.wwwww.', 'wwwkwwW', 'wwwkwwW', 'wwwkwbW', 'wwwkwwW', 'wwwkwwW', 'WWWkWWW'],
+  mail: ['ccccccccC', 'ckcccckcC', 'cckcckccC', 'cccrrcccC', 'cccRRcccC', 'CCCCCCCCC'],
+  crown: ['y...y...y', 'yy.yyy.yy', 'yyyyyyyyY', 'yyrybyryY', 'YYYYYYYYY'],
   '?': ['.cccc.', 'cc..cc', '....cc', '...cc.', '..cc..', '......', '..cc..'],
 };
 

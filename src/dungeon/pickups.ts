@@ -17,7 +17,7 @@ import { getItem, RARITY_COLOR } from '../game/items';
 /** every item shown in the world: its detailed 3D model (agent L's src/backpack/models.ts), 0.5 m per cell */
 import { itemModel } from '../backpack/models';
 export function itemObject(id: string, level = 1): THREE.Object3D { void level; return itemModel(id, { cell: 0.5 }); }
-import { keyModel, bombModel, pearlModel, heartModel, disposeModel } from './models';
+import { keyModel, bombModel, pearlModel, seaGrapeModel, disposeModel } from './models';
 
 export type PickKind = 'pearl' | 'heart' | 'key' | 'bomb' | 'item';
 
@@ -72,7 +72,7 @@ export class Pickup implements Entity {
       }
       case 'key': this.model = keyModel(); this.model.scale.setScalar(1.25); this.r = 0.35; break;
       case 'bomb': this.model = bombModel(); this.model.scale.setScalar(1.15); this.r = 0.35; break;
-      case 'heart': this.model = heartModel(this.value < 2); this.model.scale.setScalar(1.25); this.r = 0.35; break;
+      case 'heart': this.model = seaGrapeModel(this.value < 2); this.model.scale.setScalar(1.25); this.r = 0.35; break;
       default: this.model = pearlModel(this.value); this.r = 0.28; break;
     }
     this.obj.add(this.model);
@@ -81,7 +81,7 @@ export class Pickup implements Entity {
     switch (this.pk) {
       case 'item': { const d = getItem(this.id!); return this.n > 1 ? `${d.name} x${this.n}` : d.name; }
       case 'pearl': return this.value > 1 ? `${this.value} PEARLS` : 'PEARL';
-      case 'heart': return this.value > 1 ? 'HEART' : 'HALF HEART';
+      case 'heart': return this.value > 1 ? 'SEA GRAPES' : 'SEA GRAPE';
       case 'key': return 'KEY';
       default: return 'PUFFER-BOMB';
     }
