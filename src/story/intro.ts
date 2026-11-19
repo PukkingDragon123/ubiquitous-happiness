@@ -994,7 +994,7 @@ export class IntroScreen implements Screen {
     const bs: GlassBottle[] = [];
     let broken = 0;
     kinds.forEach((kind, i) => {
-      const x = cx + 11.5 + i * 1.9;
+      const x = cx + 11.5 + i * 2.2;
       const b = new GlassBottle(kind, x, this.floorAt(x));
       b.onBreak = () => {
         broken++;
@@ -1006,10 +1006,10 @@ export class IntroScreen implements Screen {
       w.add(b);
       bs.push(b);
     });
-    const sign = this.t3d.add('SMASH!', cx + 13.4, this.floorAt(cx + 13.4) + 2.6, 0.3, T3D.hint, { size: 0.36, angle: 0.25 });
+    const sign = this.t3d.add('SMASH!', cx + 13.7, this.floorAt(cx + 13.7) + 3.0, 0.3, T3D.hint, { size: 0.36, angle: 0.25 });
     this.setGoal({ text: 'Smash the bottles', n: 0, of: 3, keys: [['LMB', 'slash'], ['J', 'slash']] });
     this.bark('crab', 'Human trash. Glass. Smash it — we\'ll take the pieces.', 3);
-    this.target = { x: cx + 13.4, y: this.floorAt(cx + 13.4) + 1, label: 'BOTTLES' };
+    this.target = { x: cx + 13.7, y: this.floorAt(cx + 13.7) + 1, label: 'BOTTLES' };
     await this.until(() => { if (this.target && this.kid.x > cx + 9) this.target = null; return bs.every((b) => !b.alive); });
     this.target = null;
     sign.hide();

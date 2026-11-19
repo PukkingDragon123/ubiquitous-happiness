@@ -155,9 +155,9 @@ export class HideoutScreen implements Screen {
     }
     // the open doorway works before the door is rebuilt
     T.push({ id: 'doorway', reach: 1.3, obj: () => null, stand: () => new THREE.Vector3(0, 0, IN.z1 - 0.7), face: () => new THREE.Vector3(0, 1, IN.z1 + 1), tag: () => [{ text: 'OUT', font: 'title' }, { text: 'pack and swim out', color: '#3a2810' }], use: () => this.goOut() });
-    T.push({ id: 'board', reach: 1.4, obj: () => this.house.board.group, stand: () => BOARD_AT.clone().add(new THREE.Vector3(0.2, 0, 0.95)), face: () => BOARD_AT.clone().setY(1), tag: () => this.goalTag(), use: () => this.showGoal() });
+    T.push({ id: 'board', reach: 1.4, obj: () => this.house.board.group, stand: () => BOARD_AT.clone().add(new THREE.Vector3(1.25, 0, 0.3)), face: () => BOARD_AT.clone().setY(1), tag: () => this.goalTag(), use: () => this.showGoal() });
     T.push({ id: 'codex', reach: 1.2, obj: () => this.house.codex, stand: () => CODEX_AT.clone().add(new THREE.Vector3(-0.2, 0, -0.85)), face: () => CODEX_AT.clone().setY(1), tag: () => { const c = codexCount(); return [{ text: 'CODEX', font: 'title' }, { text: `field journal · ${c.known}/${c.total} met`, color: '#3a2810' }]; }, use: () => this.openPanel('codex') });
-    T.push({ id: 'crab', reach: 1.5, obj: () => this.crab.group, stand: () => this.crab.group.position.clone().add(new THREE.Vector3(0.9, 0, 0.6)), face: () => this.crab.group.position.clone().setY(0.5), tag: () => [{ text: 'MR. CRAB', font: 'title' }, { text: 'your landlord and builder', color: '#3a2810' }], use: () => this.crabTalk() });
+    T.push({ id: 'crab', reach: 1.5, obj: () => this.crab.group, stand: () => this.crab.group.position.clone().add(new THREE.Vector3(0.9, 0, -0.55)), face: () => this.crab.group.position.clone().setY(0.5), tag: () => [{ text: 'MR. CRAB', font: 'title' }, { text: 'your landlord and builder', color: '#3a2810' }], use: () => this.crabTalk() });
     this.things = T;
   }
   private costTag(id: string): TagLine[] {

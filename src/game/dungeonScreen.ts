@@ -53,7 +53,7 @@ import { AREAS as AREA_LIST, masteryScalars, MAX_MASTERY } from '../hideout/mast
 import { stationsBuilt } from '../hideout/blueprints';
 import { homeStations } from '../hideout/rebuild';
 import { homeGoals, type HomeGoal } from '../dungeon/homeGoals';
-import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, type BossEntity, type EnemyKind, type PlayerCombatHud, type Arena } from '../combat';
+import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, ENEMY_INFO, codexId, type BossEntity, type EnemyKind, type PlayerCombatHud, type Arena } from '../combat';
 import { roomBudget } from '../combat/index';
 import { board } from '../waves/board';
 import { Dialogue } from '../story/dialogue';
@@ -127,15 +127,24 @@ export interface DungeonEnter { cfg?: RunConfig; resume?: boolean | DungeonSave 
 type Phase = 'play' | 'dead' | 'descend' | 'done';
 interface Fight { arena: ArenaPlan; pending: { t: number; kind: EnemyKind; x: number; y: number; elite: boolean }[]; ents: Entity[]; clearT: number; boss: BossEntity | null; bossDone: boolean; bossDeadT: number; t: number }
 
-/** an enemy's codex page id (agent L's src/ui/codex.ts: fish by species, giants by role; bosses by their id) */
-const CODEX_FISH: Record<string, string> = { puffer: 'pufferfish', angler: 'anglerfish' };
+/** a giant's hittable parts (agent K: team 'enemy' helper entities): never counted as enemies */
+const isHelper = (e: Entity) => e.kind === 'hurtbox' || e.kind === 'weakpoint';
+/** an enemy's codex page id (agent K's codexId over agent L's codex: 'puffer' -> 'pufferfish'; giants by kind) */
 function codexIdOf(kind: string): string | null {
-  if (!kind || kind === 'dummy' || kind === 'corpse' || kind === 'blind') return null;
-  const k = kind.replace(/^human:/, '');
-  if (CODEX_FISH[k]) return CODEX_FISH[k];
-  // a giant human: its role's own page if one is registered (K), else the codex's Diver
-  if (/^human:/.test(kind) || ['harpoon', 'spear', 'knife', 'net', 'medic', 'heavy', 'titan'].includes(k)) return codexEntries().some((e) => e.id === k) ? k : 'diver';
-  return k;
+  if (!kind || kind === 'dummy' || kind === 'corpse' || kind === 'blind' || kind === 'hurtbox' || kind === 'weakpoint') return null;
+  return codexId(kind.replace(/^human:/, ''));
+}
+/** a spawn budget filled with kinds (a giant costs 3-4 regular spawns; the last slots go to cheap ones) */
+function pickByBudget(rng: Rng, kinds: EnemyKind[], budget: number): EnemyKind[] {
+  const out: EnemyKind[] = [];
+  const cost = (k: EnemyKind) => ENEMY_INFO[k]?.cost ?? 1;
+  let left = budget;
+  for (let guard = 0; left > 0.5 && guard < 40; guard++) {
+    let k = rng.pick(kinds);
+    if (cost(k) > left + 0.5) { const cheap = kinds.filter((q) => cost(q) <= left + 0.5); if (!cheap.length) break; k = rng.pick(cheap); }
+    out.push(k); left -= cost(k);
+  }
+  return out;
 }
 const AREA_NAME = (id: string) => (isHadal(id) ? biomeDef(id).name : AREA_LIST.find((a) => a.id === id)?.name ?? biomeDef(id).name);
 const FAR = 1e9;
@@ -689,7 +698,8 @@ export class DungeonScreen implements Screen {
       n = 2 + this.scal.extraPerWave;
       this.title3d('CHALLENGE', 'A CHAMPION BLOCKS THE WAY', T3D.danger, 2.6, { x: (a.x0 + a.x1) / 2, y: a.floor + 5 });
     }
-    for (let i = 0; i < n; i++) list.push({ kind: rng.pick(kinds), elite: rng.chance(depthElite(depthOf(this.plan, a.floor))) });
+    // n is a spawn budget: a giant human costs 3-4 of it (agent K's ENEMY_INFO cost)
+    for (const kind of pickByBudget(rng, kinds, n)) list.push({ kind, elite: rng.chance(depthElite(depthOf(this.plan, a.floor))) });
     const p = this.player;
     list.forEach((e, i) => {
       const pos = this.spawnPoint(rng, e.kind, a, p.x);
@@ -713,8 +723,8 @@ export class DungeonScreen implements Screen {
     return { x: (a.x0 + a.x1) / 2 + (px < (a.x0 + a.x1) / 2 ? 5 : -5), y: a.floor + 4 };
   }
 
-  private spawnOne(s: { kind: EnemyKind; x: number; y: number; elite: boolean }, arena: Arena): Entity {
-    const e = spawnEnemy(this.world, s.kind, s.x, s.y, { elite: s.elite, difficulty: this.difficulty(s.y), arena });
+  private spawnOne(s: { kind: EnemyKind; x: number; y: number; elite: boolean }, arena: Arena | null): Entity {
+    const e = spawnEnemy(this.world, s.kind, s.x, s.y, { elite: s.elite, difficulty: this.difficulty(s.y), ...(arena ? { arena } : {}) });
     if (e.hp !== undefined) { e.hp *= this.scal.enemyHp; if (e.maxHp) e.maxHp *= this.scal.enemyHp; }
     this.world.fx.emit('bubbleBig', s.x, s.y, { n: 8, spread: 0.5, speed: 1.6 });
     this.world.sfx('gloop1', s.x, 0.4);
@@ -742,7 +752,7 @@ export class DungeonScreen implements Screen {
     const alive = this.alive(f.ents, f.arena.top, dt, f.arena);
     // safety: a long fight down to its last stragglers (hiding in rock, wandering off) ends with them fleeing
     if (alive > 0 && alive <= 2 && f.t > 100 && !f.pending.length) {
-      for (const e of f.ents) if (e.alive && e.team === 'enemy') { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 14, 2); this.world.emit('escaped', { kind: e.kind, x: e.x, y: e.y }); }
+      for (const e of f.ents) if (e.alive && e.team === 'enemy' && !isHelper(e)) { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 14, 2); this.world.emit('escaped', { kind: e.kind, x: e.x, y: e.y }); }
       this.hud.l.title('THEY FLED', '', '#9fe8ff', 1.6);
     }
     if (alive === 0 && !f.pending.length) { f.clearT += dt; if (f.clearT > 0.7) this.arenaCleared(); } else f.clearT = 0;
@@ -753,7 +763,7 @@ export class DungeonScreen implements Screen {
   private alive(ents: Entity[], top: number, dt: number, a?: ArenaPlan): number {
     let n = 0;
     for (const e of ents) {
-      if (!e.alive || e.team !== 'enemy') continue;
+      if (!e.alive || e.team !== 'enemy' || isHelper(e)) continue;
       // dying (hp gone, death anim playing) counts as dead
       if (e.hp !== undefined && e.hp <= 0) continue;
       // outside the arena's box (pushed through a gate, wedged in rock) for a while: back in the middle
@@ -892,11 +902,12 @@ export class DungeonScreen implements Screen {
     const kinds = ENEMIES_FOR(baseOf(this.floors[this.floorIdx]), this.difficulty(gy));
     const box: Arena = { x0: Math.max(1, g.x - 14), x1: Math.min(this.plan.W - 1, g.x + 14), floor: gy - 9, top: this.plan.top };
     const ents: Entity[] = [];
-    for (let i = 0; i < g.n; i++) {
-      const kind = rng.pick(kinds);
+    // roamers: no arena (K: they patrol round their spawn and leash home); the group's size is a spawn budget
+    for (const kind of pickByBudget(rng, kinds, g.n)) {
       const pos = this.spawnPoint(rng, kind, { x0: g.x - 5, x1: g.x + 8, floor: gy, top: Math.min(this.plan.top, gy + 12) }, this.player.x);
-      ents.push(this.spawnOne({ kind, x: pos.x, y: pos.y, elite: rng.chance(depthElite(depthOf(this.plan, gy)) * 0.5) }, box));
+      ents.push(this.spawnOne({ kind, x: pos.x, y: pos.y, elite: rng.chance(depthElite(depthOf(this.plan, gy)) * 0.5) }, null));
     }
+    void box;
     this.groups.set(g.id, ents);
     void lvl;
   }
@@ -1030,7 +1041,7 @@ export class DungeonScreen implements Screen {
     const cam = this.camera, dist = Math.max(4, cam.position.z);
     const hh = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * dist, hw = hh * cam.aspect;
     for (const e of this.world.entities) {
-      if (!e.alive || e.team !== 'enemy' || this.codexMet.has(e)) continue;
+      if (!e.alive || e.team !== 'enemy' || isHelper(e) || this.codexMet.has(e)) continue;
       if (Math.abs(e.x - cam.position.x) > hw * 0.9 || Math.abs(e.y - cam.position.y) > hh * 0.9) continue;
       this.codexMet.add(e);
       const id = codexIdOf(e.kind);
@@ -1356,7 +1367,7 @@ export class DungeonScreen implements Screen {
     const w = this.world;
     w.on('kill', (d) => {
       const cid = codexIdOf(String(d.kind ?? ''));
-      if (cid) codexBeaten(cid);
+      if (cid) { if (!codexKnown(cid) && this.plan) codexSeen(cid, depthOf(this.plan, Number(d.y) || this.player.y)); codexBeaten(cid); }
       if (d.boss || !this.level) return;
       this.tally.kills++; this.run.kills++;
       if (d.family === 'human' || /^human:/.test(String(d.kind))) this.tally.giants = (this.tally.giants ?? 0) + 1;

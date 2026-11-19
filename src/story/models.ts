@@ -103,9 +103,9 @@ export function buildBread(): { group: THREE.Group; bread: THREE.Group } {
 // ------------------------------------------------------------------ glass bottles (human trash) to smash
 export type BottleKind = 'beer' | 'jar' | 'soda';
 const BOTTLE: Record<BottleKind, { glass: string; tint: string; shard: string; h: number; r: number; lean: number }> = {
-  beer: { glass: '#6a3a14', tint: '#b8742e', shard: '#c88a3a', h: 1.55, r: 0.24, lean: 0.32 },
-  jar: { glass: '#7aa89a', tint: '#d8f0e4', shard: '#c8f0e0', h: 0.95, r: 0.36, lean: -0.08 },
-  soda: { glass: '#5aa89a', tint: '#bff0e0', shard: '#9ae8d8', h: 1.35, r: 0.22, lean: -0.22 },
+  beer: { glass: '#6a3a14', tint: '#b8742e', shard: '#c88a3a', h: 2.1, r: 0.32, lean: 0.3 },
+  jar: { glass: '#7aa89a', tint: '#d8f0e4', shard: '#c8f0e0', h: 1.3, r: 0.48, lean: -0.08 },
+  soda: { glass: '#5aa89a', tint: '#bff0e0', shard: '#9ae8d8', h: 1.85, r: 0.3, lean: -0.2 },
 };
 /** glass: a tinted body with two painted highlight streaks and a darker rim (alpha carries the see-through) */
 const glassTex = (k: BottleKind) => ctex('story.glass.' + k, 32, 32, (p) => {
@@ -145,7 +145,7 @@ export class GlassBottle implements Entity {
   constructor(public type: BottleKind, x: number, floor: number) {
     const g = BOTTLE[type];
     this.x = x; this.y = floor + g.h * 0.45; this.r = g.r + 0.32;
-    const glass = new THREE.MeshStandardMaterial({ map: glassTex(type), transparent: true, roughness: 0.08, metalness: 0.25, emissive: g.tint, emissiveIntensity: 0.06, side: THREE.DoubleSide });
+    const glass = new THREE.MeshStandardMaterial({ map: glassTex(type), transparent: true, roughness: 0.08, metalness: 0.25, emissive: g.tint, emissiveIntensity: 0.12, side: THREE.DoubleSide });
     const H = g.h, R = g.r;
     let prof: [number, number][];
     if (type === 'beer') prof = [[0, 0], [R, 0], [R, H * 0.55], [R * 0.95, H * 0.62], [R * 0.45, H * 0.72], [R * 0.3, H * 0.78], [R * 0.3, H * 0.97], [R * 0.36, H * 0.98], [R * 0.36, H], [0, H]];
@@ -180,7 +180,8 @@ export class GlassBottle implements Entity {
     this.body.add(this.crack);
     this.body.rotation.z = g.lean;
     this.obj.add(this.body);
-    this.obj.position.set(x, floor - 0.12, 0.15);
+    // a little in front of the gameplay plane so the seagrass doesn't swallow them
+    this.obj.position.set(x, floor - 0.12, 0.45);
   }
   update(dt: number) {
     this.wobV += (-this.wob * 160 - this.wobV * 6) * dt;

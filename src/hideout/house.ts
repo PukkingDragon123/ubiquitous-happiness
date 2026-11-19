@@ -32,7 +32,7 @@ export interface Spot {
 }
 
 /** the porch outside the front door, where the packing scene is set */
-export const PORCH = { x0: -3.6, x1: 3.6, z0: IN.z1 + WALL_T, z1: 10.2, set: new THREE.Vector3(0, 0, 7.6), stand: new THREE.Vector3(0, 0, 6.15) };
+export const PORCH = { x0: -3.6, x1: 3.6, z0: IN.z1 + WALL_T, z1: 10.2, set: new THREE.Vector3(0, 0, 7.6), stand: new THREE.Vector3(0.3, 0, 5.85) };
 export const BOARD_AT = new THREE.Vector3(-2.3, 0, 3.35);
 export const CRAB_HOME = new THREE.Vector3(-3.35, 0, 2.55);
 export const CODEX_AT = new THREE.Vector3(2.7, 0, 3.45);
@@ -221,9 +221,11 @@ export class House {
   /** the nearest walkable point to (x, z) (a spiral search), or null */
   nearestWalkable(x: number, z: number): THREE.Vector3 | null {
     if (this.walkable(x, z)) return new THREE.Vector3(x, 0, z);
+    // stay on the same side of the front wall (a spot inside never resolves to the porch, or the hero walks out)
+    const inside = z < IN.z1;
     for (let r = CELL; r < 3; r += CELL) for (let a = 0; a < 16; a++) {
       const px = x + Math.cos((a / 16) * Math.PI * 2) * r, pz = z + Math.sin((a / 16) * Math.PI * 2) * r;
-      if (this.walkable(px, pz)) return new THREE.Vector3(px, 0, pz);
+      if (pz < IN.z1 === inside && this.walkable(px, pz)) return new THREE.Vector3(px, 0, pz);
     }
     return null;
   }
