@@ -1,14 +1,15 @@
-// v3 flow: BOOT -> TITLE (the travelling shot to the underwater signpost, src/title) -> HIDEOUT (the hub you
-// start in, src/hideout) -> RUN (the dungeon floors) -> back to the HIDEOUT with a result card.
+// v4 flow: BOOT -> TITLE (the travelling shot to the underwater signpost, src/title) -> HOME (the ruined house you
+// rebuild with Mr. Crab, src/hideout) -> RUN (the dungeon floors) -> back HOME.
 //
 //   const flow = setupFlow(game); game.go('title', {});
 //
-//   TITLE  NEW GAME  first time: the prologue (src/story/intro.ts) -> afterIntro -> the hideout (+ the welcome reveal)
-//                    later: the run in progress is abandoned, then the hideout
-//          RESUME    the run in progress if there is one, else the hideout (greyed on the sign with no save)
-//   HIDEOUT  the planning table's lever -> the gear-up + swim-out cinematic -> flow.startRun(cfg)
+//   TITLE  NEW GAME  ALWAYS the prologue (src/story/intro.ts) -> afterIntro -> the ruined home (+ the welcome reveal);
+//                    over an existing save the sign asks first (click again), then everything starts over
+//          RESUME    the run in progress if there is one, else home (greyed on the sign with no save)
+//   HOME   out the front door -> the packing scene on the porch -> SWIM OUT -> flow.startRun(cfg)
 //            -> game.go('dungeon', { cfg }) (agent J's screen; until it exists the v2 'run' screen)
-//   RUN      flow.runEnded(result) -> the hideout with the result card; quitting from the pause menu -> hideout
+//   RUN    flow.runEnded(result) -> home: the dungeon already showed its summary card (summaryShown), so home only
+//          reacts (Mr. Crab, the goal board); a result without one gets the old result card. Quitting -> home.
 //
 // Every function here is stable API: the run screens (J) and the story (G) call into it.
 import * as THREE from 'three';
@@ -123,7 +124,7 @@ export function setupFlow(game: Game): Flow {
   let welcome = false;
   const home = (data: Record<string, unknown> = {}) => {
     game.go('hideout', data);
-    if (welcome) { welcome = false; game.openModal('welcome'); }
+    if (welcome) { welcome = false; hideout.hush(); game.openModal('welcome'); }
   };
   const flow: Flow = {
     hideout, run, intro, title: null as unknown as TitleScreen, startRun, resume,

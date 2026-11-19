@@ -262,7 +262,8 @@ export class ShellShot implements Entity {
       const want = this.speed;
       this.vx += ((dx / d) * want - this.vx) * Math.min(1, dt * 3);
       this.vy += ((dy / d) * want - this.vy) * Math.min(1, dt * 3) + Math.sin(this.t * 3) * dt * 0.6;
-      if (!this.flashed && d / want < 0.5) { this.flashed = true; this.cue(w, this); this.onFlash?.(); }
+      // the tell comes ~0.32 s before contact (like the real enemies' glints, a touch more generous for a lesson)
+      if (!this.flashed && (d - (p.r + 0.3)) / want < 0.32) { this.flashed = true; this.cue(w, this); this.onFlash?.(); }
       if (d < p.r + 0.3) this.resolve(w);
     } else if (this.state === 'back') {
       const h = this.home(), dx = h.x - this.x, dy = h.y - this.y, d = Math.hypot(dx, dy) || 1;

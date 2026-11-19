@@ -119,6 +119,8 @@ export interface Shell {
   shafts: THREE.Mesh[];
   /** the window hole edge (hidden once the window is built) */
   windowHole: THREE.Object3D;
+  /** the rafters, roof planks and the kelp hanging off them (hidden for close shots of the back wall) */
+  roof: THREE.Group;
 }
 
 /** wall height profile: x or z along the wall -> top of the stones (a ruin: broken, lower toward the front) */
@@ -134,7 +136,7 @@ function wallTop(side: 'n' | 'w' | 'e' | 's', u: number): number {
 
 export function buildShell(): Shell {
   const G = new THREE.Group();
-  const shell: Shell = { group: G, rubble: [], sway: [], shafts: [], windowHole: new THREE.Group() };
+  const shell: Shell = { group: G, rubble: [], sway: [], shafts: [], windowHole: new THREE.Group(), roof: new THREE.Group() };
   const k = new Kit();
   const stones = [PAGES.stone(), PAGES.stoneB(), PAGES.moss()];
   // the floor: flagstones inside, extending under the walls and out onto the porch
@@ -205,9 +207,11 @@ export function buildShell(): Shell {
   G.add(shell.windowHole);
   // ---- the roof: rafters across the back half resting on the walls, one fallen in, broken plank stubs
   const beam = MAT.wood('drift');
-  for (const z of [-3.9, -2.4]) k.box(beam, IN.x1 - IN.x0 + 1.0, 0.22, 0.26, 0, 3.55 - (z > -3 ? 0.35 : 0), z, { rz: z > -3 ? 0.03 : -0.01 });
-  for (let i = 0; i < 9; i++) { if (i === 2 || i === 6) continue; k.box(MAT.wood('pine'), 0.5, 0.06, 1.3 + H(i, 2, 4) * 0.6, -5.2 + i * 1.3, 3.7, -4.0 + H(i, 3, 4) * 0.2, { rx: 0.18, ry: (H(i, 4, 4) - 0.5) * 0.2 }); }
-  G.add(k.build());
+  const rk = new Kit();
+  for (const z of [-3.9, -2.4]) rk.box(beam, IN.x1 - IN.x0 + 1.0, 0.22, 0.26, 0, 3.55 - (z > -3 ? 0.35 : 0), z, { rz: z > -3 ? 0.03 : -0.01 });
+  for (let i = 0; i < 9; i++) { if (i === 2 || i === 6) continue; rk.box(MAT.wood('pine'), 0.5, 0.06, 1.3 + H(i, 2, 4) * 0.6, -5.2 + i * 1.3, 3.7, -4.0 + H(i, 3, 4) * 0.2, { rx: 0.18, ry: (H(i, 4, 4) - 0.5) * 0.2 }); }
+  shell.roof.add(rk.build());
+  G.add(k.build(), shell.roof);
   // the fallen beam: one end on the floor in the front-left corner, the other on the west wall (cleared by the door)
   const fb = new Kit();
   fb.box(beam, 0.26, 0.24, 3.6, 0, 0, 0, { chamfer: 0.03 });
@@ -243,7 +247,7 @@ export function buildShell(): Shell {
   for (let i = 0; i < 7; i++) {
     const L = 0.8 + H(i, 1, 8) * 1.2, g = new THREE.PlaneGeometry(0.2, L); g.translate(0, -L / 2, 0);
     const m = new THREE.Mesh(g, strand); m.position.set(-4.6 + i * 1.55, 3.45, i % 2 ? -3.9 : -2.4); m.rotation.y = H(i, 2, 8) * 3;
-    G.add(m); shell.sway.push({ o: m, amp: 0.12, f: 0.6 + H(i, 3, 8) * 0.4, ph: i });
+    shell.roof.add(m); shell.sway.push({ o: m, amp: 0.12, f: 0.6 + H(i, 3, 8) * 0.4, ph: i });
   }
   // shafts of cold light through the broken roof
   for (let i = 0; i < 4; i++) {
@@ -453,7 +457,9 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
   if (!box.isEmpty()) {
     const sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz.x, sz.y, sz.z)), EDGE);
-    e.position.copy(c); e.userData.edge = true;
+    // (lines never take clicks: a raycaster's default line threshold is a whole metre, which steals clicks from
+    // whatever stands in front of the blueprint)
+    e.position.copy(c); e.userData.edge = true; e.raycast = () => {};
     g.add(e);
   }
   return g;
@@ -462,7 +468,7 @@ export function setGhostHot(g: THREE.Object3D, hot: boolean) {
   g.traverse((o) => {
     const m = o as THREE.Mesh;
     if ((o as THREE.LineSegments).isLineSegments && o.userData.edge) (o as THREE.LineSegments).material = hot ? EDGE_HOT : EDGE;
-    else if (m.isMesh) m.material = hot ? GHOST_HOT : GHOST;
+    else if (m.isMesh && !m.userData.hit) m.material = hot ? GHOST_HOT : GHOST;
   });
 }
 /** a dashed blueprint outline on the floor (w x d, centred) */
@@ -475,7 +481,29 @@ export function floorOutline(w: number, d: number): THREE.LineSegments {
   };
   edge(-w / 2, -d / 2, w / 2, -d / 2); edge(w / 2, -d / 2, w / 2, d / 2); edge(w / 2, d / 2, -w / 2, d / 2); edge(-w / 2, d / 2, -w / 2, -d / 2);
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.85, toneMapped: false }));
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.85, toneMapped: false }));
+  l.raycast = () => {};
+  return l;
+}
+
+// ------------------------------------------------------------------ click proxies
+const HIT = new THREE.MeshBasicMaterial({ visible: false });
+/** an invisible box around an object (in its own space) so thin things (a lamp pole, a door leaf) are easy to click */
+export function hitboxFor(obj: THREE.Object3D, pad = 0.08): THREE.Mesh {
+  obj.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const box = new THREE.Box3();
+  obj.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || !(m.material as THREE.Material).visible) return;
+    m.geometry.computeBoundingBox();
+    box.union(m.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().copy(inv).multiply(m.matrixWorld)));
+  });
+  const sz = box.isEmpty() ? new THREE.Vector3(0.5, 0.5, 0.5) : box.getSize(new THREE.Vector3());
+  const c = box.isEmpty() ? new THREE.Vector3(0, 0.25, 0) : box.getCenter(new THREE.Vector3());
+  const h = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.4, sz.x + pad * 2), Math.max(0.4, sz.y + pad), Math.max(0.4, sz.z + pad * 2)), HIT);
+  h.position.copy(c); h.userData.hit = true; h.castShadow = false; h.receiveShadow = false;
+  return h;
 }
 
 // ------------------------------------------------------------------ hover outlines
@@ -491,7 +519,7 @@ export function outlineOf(obj: THREE.Object3D): THREE.Group {
   const pre = back.clone().multiply(sc).multiply(toC);
   obj.traverse((o) => {
     const m = o as THREE.Mesh;
-    if (!m.isMesh || (m.material as THREE.Material).transparent) return;
+    if (!m.isMesh || (m.material as THREE.Material).transparent || !(m.material as THREE.Material).visible) return;
     const cm = new THREE.Mesh(m.geometry, OUTLINE);
     cm.matrixAutoUpdate = false;
     cm.matrix.copy(pre).multiply(m.matrixWorld);

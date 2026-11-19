@@ -43,18 +43,32 @@ export class BuildScene {
     const s = this.house.spots.get(id); if (!s) return;
     this.id = id; this.active = true; this.phase = 'gather'; this.t = 0; this.pt = 0; this.nextFly = 0; this.nextHit = 0;
     this.house.setGrow(id, 0);
-    // the camera pushes in on the spot
-    const c = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 0.7, s.piece.z);
-    this.rig.shot = { target: c.clone().lerp(s.stand, 0.35), yaw: s.piece.x > 3 ? -0.35 : s.piece.x < -3 ? 0.35 : 0, pitch: 0.82, dist: 7.2, fov: 30 };
+    // where the blobfish watches from: a step back from the piece, and never between it and the camera (the camera
+    // looks from the south, so a piece facing the camera gets watched from its left side)
+    const p = s.piece, side = new THREE.Vector3(s.stand.x - p.x, 0, s.stand.z - p.z).normalize();
+    const watch = side.z > 0.5
+      ? new THREE.Vector3(p.x - p.w / 2 - 0.95, 0, p.z + p.d / 2 + 0.45)
+      : new THREE.Vector3(p.x, 0, p.z).addScaledVector(side, p.d / 2 + 1.05);
+    const at = this.house.nearestWalkable(watch.x, watch.z) ?? s.stand.clone();
+    // the camera pushes in on the piece and the watcher, side by side
+    const c = new THREE.Vector3(p.x, (p.wall ?? 0) + 0.7, p.z);
+    // pieces on the back wall are shot from lower down, under the roof beams (the window sits high on the wall)
+    const back = side.z > 0.5, high = (p.wall ?? 0) > 1;
+    // the low shot would look through the roof beams: lift the roof off while we film
+    this.house.shell.roof.visible = !back;
+    this.rig.shot = { target: c.clone().lerp(at, high ? 0.15 : 0.4), yaw: 0, pitch: high ? 0.22 : back ? 0.45 : 0.82, dist: back ? 6.6 : 7.2, fov: 30 };
     this.rig.k = 2.4;
-    // the blobfish and the crab walk up (the crab to the far side of the stand point)
-    const path = this.house.path(this.player.hero.root.position.clone(), s.stand);
-    if (path.length) this.player.goTo(path); else this.player.hero.root.position.copy(s.stand);
+    // the blobfish and the crab walk up (the crab to the piece's other side)
+    const path = this.house.path(this.player.hero.root.position.clone(), at);
+    if (path.length) this.player.goTo(path); else this.player.hero.root.position.copy(at);
     this.crabFrom.copy(this.crab.group.position);
-    const side = new THREE.Vector3(s.stand.x - s.piece.x, 0, s.stand.z - s.piece.z).normalize();
     const perp = new THREE.Vector3(-side.z, 0, side.x);
-    this.crabTo.copy(s.stand).addScaledVector(perp, 1.05).addScaledVector(side, -0.15);
-    if (!this.house.walkable(this.crabTo.x, this.crabTo.z)) this.crabTo.copy(s.stand).addScaledVector(perp, -1.05);
+    const crabAt = (k: number) => new THREE.Vector3(p.x, 0, p.z).addScaledVector(side, p.d / 2 + 0.45).addScaledVector(perp, k * (p.w / 2 + 0.55));
+    // the crab takes the side away from the blobfish
+    const a = crabAt(1), b = crabAt(-1);
+    const [first, second] = a.distanceTo(at) > b.distanceTo(at) ? [a, b] : [b, a];
+    const ok = (v: THREE.Vector3) => this.house.walkable(v.x, v.z, 0.2);
+    this.crabTo.copy(ok(first) ? first : ok(second) ? second : this.house.nearestWalkable(first.x, first.z) ?? s.stand);
     audio.play('k_confirm1', { vol: 0.4, dry: true }); audio.play('crab_click1', { vol: 0.4 });
     this.card.hide();
   }
@@ -132,7 +146,8 @@ export class BuildScene {
       const at = new THREE.Vector3(s.piece.x, (s.piece.wall ?? 0) + 1.6, s.piece.z);
       this.card.place(this.cam, at, this.internalH(), [0, -6], dt);
       if (this.pt > 0.9) { this.rig.shot = null; this.rig.k = 2.2; }
-      if (this.pt > 2.4) { this.active = false; this.card.hide(); this.crab.move = 0; this.onDone?.(); }
+      if (this.pt > 1.6) this.house.shell.roof.visible = true;
+      if (this.pt > 2.4) { this.active = false; this.card.hide(); this.crab.move = 0; this.house.shell.roof.visible = true; this.onDone?.(); }
     }
   }
 }

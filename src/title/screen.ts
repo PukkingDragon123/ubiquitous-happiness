@@ -213,7 +213,8 @@ export class TitleScreen implements Screen {
     this.confirmT -= dt;
     if (this.confirmT > 0 && !this.leaving) {
       this.confirmTag.show([{ text: 'START OVER?', font: 'title', color: '#8a1a14' }, { text: 'Your home and stash are lost.', color: '#3a2810' }, { text: 'click NEW GAME again', color: '#1a4a7a', gap: 2 }]);
-      this.confirmTag.place(this.camera, this.set.sign.tipWorld('new'), this.game.post.h, [0, -12], dt);
+      // under the NEW GAME arrow (clear of the title board and of RESUME)
+      this.confirmTag.place(this.camera, this.set.sign.tipWorld('new'), this.game.post.h, [0, this.confirmTag.h + 16], dt);
     } else this.confirmTag.hide();
     const lp = this.set.sign.lanternWorld();
     if (this.set.lamp) { this.set.lamp.set(lp.x, lp.y, lp.z); this.set.lamp.light.intensity = 3.2 * this.set.sign.lanternK; }

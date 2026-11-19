@@ -135,6 +135,8 @@ export class IntroScreen implements Screen {
   private stall!: CrabShop;
   private ruin!: RuinedHome;
   private crabVy = 0;
+  /** where the kid hovers while the script holds it */
+  private holdY: number | null = null;
   /** Mr. Crab: 'follow' the kid, scuttle to an x, or stay put */
   private crabMode: 'stay' | 'follow' | 'goto' = 'stay';
   private crabGoal = 0;
@@ -249,7 +251,7 @@ export class IntroScreen implements Screen {
   private build() {
     this.teardown();
     this.time = 0; this.clock = 0; this.real = 0;
-    this.bag = []; this.step = -1; this.prompt = null; this.target = null; this.crabMode = 'stay'; this.tears = 0;
+    this.bag = []; this.step = -1; this.prompt = null; this.target = null; this.crabMode = 'stay'; this.tears = 0; this.holdY = null; this.bounds = null;
     this.run = new Run(SEED);
     installItemSystem(this.run);
     // extra point-light slots: the shop's lantern, glow jar and rim light
@@ -282,15 +284,24 @@ export class IntroScreen implements Screen {
     k.onDeath = () => { /* the tutorial never kills */ };
     // layout: home near the arrival, Mr. Crab between the wreck and the mail buoy, the ruin past the buoy
     this.home = a.spawns.player.x + 3;
-    const flattest = (x0: number, x1: number, want: number) => {
+    // a flat patch of sand near `want`, clear of the scenery rocks that stand in front of / inside a building at z ~ -2.4
+    const rocks = a.mailbox.scen.rockTops.filter((r) => r.z > -5.5 && r.z < 2);
+    const flattest = (x0: number, x1: number, want: number, clear = 0, span = 1.5) => {
       let best = want, bs = 1e9;
-      for (let x = x0; x <= x1; x += 0.5) { const sc = Math.abs(this.floorAt(x + 1.5) - this.floorAt(x - 1.5)) + Math.abs(x - want) * 0.05; if (sc < bs) { bs = sc; best = x; } }
+      for (let x = x0; x <= x1; x += 0.5) {
+        const f0 = this.floorAt(x);
+        let sc = Math.abs(this.floorAt(x + span) - this.floorAt(x - span)) + Math.abs(x - want) * 0.05;
+        // no dunes in front of it (they hide the doorway from a low camera)
+        if (span > 1.5) for (let d = -span; d <= span; d += 0.75) sc += Math.max(0, this.floorAt(x + d) - f0 - 0.15) * 2;
+        if (clear) for (const r of rocks) if (Math.abs(r.x - x) < clear + r.r) sc += 2 + Math.max(0, r.y - this.floorAt(r.x));
+        if (sc < bs) { bs = sc; best = x; }
+      }
       return best;
     };
     const wx = a.shipwreck.x;
     this.crabX = flattest(wx + 15, wx + 22, wx + 18);
     const bx = a.mailbox.x;
-    this.ruinX = flattest(bx + 7, Math.min(bx + 12, a.bounds.x1 - 8), bx + 9);
+    this.ruinX = flattest(bx + 6, Math.min(bx + 14, a.bounds.x1 - 6), bx + 9, 3, 3.5);
     // Mom and Dad
     const mk = (tint: string, scale: number, x: number, ph: number): Swimmer => {
       const p = new BlobPuppet({ hat: 'none', weapon: 'toothpick' }, 'swim');
@@ -841,10 +852,12 @@ export class IntroScreen implements Screen {
     const k = this.kid, cx = this.crabX;
     this.mom.p.root.visible = false; this.dad.p.root.visible = false;
     this.boat?.setX(this.home + 200);
+    // (the family scene's soft walls end here: the kid is far down the reef now)
+    this.bounds = null;
     this.place(cx - 9, this.floorAt(cx - 9) + 2.6);
     k.setExpr('sad', 99);
     this.letterbox(1, 0.01);
-    this.script_(0.55, 0);
+    this.script_(0.55, 0.12);
     POST.uDesat.value = Math.max(POST.uDesat.value, 0.5);
     this.desatT = 0.5;
     this.shot(() => ({ x: lerp(k.x, cx, 0.4), y: this.floorAt(cx) + 2.3, dist: 10, yaw: 0.22, h: 0.5, fov: 36 }), 2);
@@ -1027,6 +1040,12 @@ export class IntroScreen implements Screen {
     this.setGoal({ text: 'Parry the shell as it flashes', n: 0, of: 2, keys: [['K', 'tap'], ['RMB', 'tap']] });
     await this.talk([{ who: 'crab', text: 'Now the important bit. When something flies at you, {gold}tap K or right-click{/gold} right as it {shake}flashes{/shake}. That\'s a parry. Face me.' }]);
     this.free(true, null);
+    // frame the two of them: the throw, the flight and the parry all in shot
+    this.shot(() => {
+      const g = this.crab.group.position, mx = (k.x + g.x) / 2, my = (k.y + g.y + 0.6) / 2;
+      const span = Math.max(Math.abs(k.x - g.x), Math.abs(k.y - g.y - 0.6) * 1.8);
+      return { x: mx, y: Math.max(my, this.floorAt(mx) + 1.6), dist: clamp(6.5 + span, 8, 13), yaw: 0.1, h: 0.45 };
+    }, 2.5);
     let parries = 0, inFlight: ShellShot | null = null, nextT = 0.4;
     const claw = () => { const g = this.crab.group.position; return { x: g.x - side * 0.55, y: g.y + 0.75 }; };
     await this.until(() => {
@@ -1068,6 +1087,7 @@ export class IntroScreen implements Screen {
     });
     k.hp = k.maxHp;
     this.crabMode = 'follow';
+    this.followKid(11.5, 0.7);
   }
 
   /** 4: ring the mail buoy, give Marge the glass: it goes home */
@@ -1080,9 +1100,9 @@ export class IntroScreen implements Screen {
     let greeted = false, sent = false;
     this.world.on('extract', () => { sent = true; });
     await this.until(() => {
-      const nearBuoy = Math.abs(k.x - mb.x) < 6;
+      const nearBuoy = Math.abs(k.x - mb.x) < 6, canRing = Math.abs(k.x - mb.x) < 4.5 && k.y > -8;
       if (nearBuoy) this.target = null;
-      if (mb.manatee.state === 'away') this.setGoal({ text: nearBuoy ? 'Ring the bell' : 'Swim to the mail buoy', keys: nearBuoy ? [['E', 'ring']] : undefined });
+      if (mb.manatee.state === 'away') this.setGoal(canRing ? { text: 'Ring the bell', keys: [['E', 'ring']] } : { text: nearBuoy ? 'Swim up to the bell' : 'Swim to the mail buoy', keys: [['WASD', 'swim']] });
       else if (!mb.present) this.setGoal({ text: 'Marge is on her way...' });
       else this.setGoal({ text: 'Give Marge your loot', keys: [['E', 'send home']] });
       if (!greeted && mb.present && this.near(k, mb.manatee, 5)) { greeted = true; this.greet().catch(() => {}); }
@@ -1091,19 +1111,35 @@ export class IntroScreen implements Screen {
     sign.hide();
     this.target = null;
     this.setGoal(null);
+    this.margeShot();
     await this.wait(1.4);
     this.bark('marge', 'It\'ll be waiting for you, hon. I always find the way.', 3);
-    await this.wait(1.6);
+    await this.wait(2.6);
+    this.followKid(11.5, 0.7);
+  }
+  /** the kid and Marge in one frame */
+  private margeShot() {
+    const m = this.area.mailbox.manatee, k = this.kid;
+    this.shot(() => ({ x: (k.x + m.x) / 2, y: Math.min(-2.2, (k.y + m.y) / 2), dist: clamp(6.5 + Math.hypot(k.x - m.x, k.y - m.y), 8, 12), yaw: 0.08, h: 0.3 }), 2.5);
   }
   private async greet() {
     if (this.dlg.blocking) return;
     this.script_();
+    // a two-shot; the kid drifts up beside her (close enough to hand the parcel over afterwards)
+    const m = this.area.mailbox.manatee, k = this.kid;
+    this.ticker(() => {
+      if (this.control !== 'script') return true;
+      const dx = m.x + (k.x < m.x ? -1.9 : 1.9) - k.x, dy = m.y - 0.4 - k.y;
+      this.gate.ax = { x: clamp(dx * 0.6, -0.5, 0.5), y: clamp(dy * 0.6, -0.5, 0.5) };
+    });
+    this.margeShot();
     await this.talk([
       { who: 'marge', text: 'Mornin\', hon! Parcel for... {p=0.2}home? Where\'s home?' },
       { who: 'kid', text: '...I don\'t have one anymore.' },
       { who: 'marge', text: 'Oh, sweetie. {p=0.3}Then I\'ll hold it for you \'til you do.' },
     ]);
     this.free(true, null);
+    this.followKid(11.5, 0.7);
   }
 
   // ---------------------------------------------------------------- f. home
@@ -1134,7 +1170,7 @@ export class IntroScreen implements Screen {
     const door = r.group.localToWorld(r.door.clone());
     this.ticker(() => { if (this.control !== 'script') return true; const dx = door.x + 1.4 - k.x, dy = door.y + 0.6 - k.y; this.gate.ax = { x: clamp(dx * 0.6, -0.5, 0.5), y: clamp(dy * 0.6, -0.5, 0.5) }; });
     this.crab.lookX = k.x;
-    this.shot(this.push({ x: hx, y: door.y + 4.5, dist: 14, yaw: 0.3, h: 2.2, fov: 38 }, { x: hx - 0.4, y: door.y + 1.1, dist: 7.6, yaw: 0.16, h: 0.4, fov: 32 }, 4.5), 4);
+    this.shot(this.push({ x: hx, y: door.y + 4.5, dist: 14, yaw: 0.3, h: 2.2, fov: 38 }, { x: hx - 0.4, y: door.y + 1.1, dist: 7.6, yaw: 0.16, h: 1.2, fov: 32 }, 4.5), 4);
     this.snapCam();
     await this.wait(2.5, true);
     const p = await this.talk([
@@ -1145,7 +1181,7 @@ export class IntroScreen implements Screen {
     await this.talk(p[0] === 0
       ? [{ who: 'crab', text: 'It\'s a ruin with a {gold}door{/gold}. Mostly.' }]
       : [{ who: 'crab', text: 'If you don\'t mind the draught.' }]);
-    this.shot(this.push(() => ({ x: lerp(k.x, this.crab.group.position.x, 0.5), y: door.y + 0.9, dist: 6, yaw: 0.12, h: 0.3, fov: 32 }), () => ({ x: lerp(k.x, this.crab.group.position.x, 0.5), y: door.y + 0.85, dist: 4.4, yaw: 0.1, h: 0.25, roll: 0.02, fov: 28 }), 5), 3);
+    this.shot(this.push(() => ({ x: lerp(k.x, this.crab.group.position.x, 0.5), y: door.y + 0.9, dist: 7.6, yaw: 0.12, h: 0.9, fov: 34 }), () => ({ x: lerp(k.x, this.crab.group.position.x, 0.5), y: door.y + 0.85, dist: 6.2, yaw: 0.1, h: 0.75, roll: 0.02, fov: 30 }), 5), 3);
     await this.talk([
       { who: 'crab', text: 'Bones are good, though. You bring me driftwood and shells — I\'ll bring the hammer.' },
       { who: 'crab', text: '{gold}We\'ll fix her up together, kid.{/gold} Starting tonight.' },
@@ -1252,13 +1288,18 @@ export class IntroScreen implements Screen {
     try {
       // soft walls (the family scene) + the area's
       const b = this.bounds ?? [a.bounds.x0, a.bounds.x1];
-      if (k.x < b[0]) k.applyForce((b[0] - k.x) * 120 - Math.min(0, k.vx) * 12, 0);
-      if (k.x > b[1]) k.applyForce((b[1] - k.x) * 120 - Math.max(0, k.vx) * 12, 0);
+      // (capped: a stale or far-off wall must nudge, never fling)
+      if (k.x < b[0]) k.applyForce(Math.min(80, (b[0] - k.x) * 120) - Math.min(0, k.vx) * 12, 0);
+      if (k.x > b[1]) k.applyForce(Math.max(-80, (b[1] - k.x) * 120) - Math.max(0, k.vx) * 12, 0);
       if (k.hp < 1) k.hp = 1;
       // the kid hovers while the script holds it (no sinking into the plants mid-conversation), and in the
       // prologue it never settles into the foreground weeds
       if (!k.hooked) {
-        if (!gate.src && !this.sinking) k.applyForce(0, 0.55);
+        // (a soft spring to where the gate closed; scripted steering moves the anchor along with the kid)
+        if (!gate.src && !this.sinking) {
+          if (this.holdY === null || Math.hypot(gate.ax.x, gate.ax.y) > 0.05) this.holdY = k.y;
+          k.applyForce(0, clamp(0.35 + (this.holdY - k.y) * 5 - k.vy * 2, -3, 3));
+        } else this.holdY = null;
         const fl = this.floorAt(k.x) + (this.step < 0 ? 1.1 : 0.5);
         if (k.y < fl) k.applyForce(0, (fl - k.y) * 8);
       }
@@ -1387,7 +1428,16 @@ export class IntroScreen implements Screen {
     }
     if (Math.abs(k.x - mb.x) < 4.5 && k.y > -8 && mb.manatee.state === 'away') {
       this.prompt = { key: 'E', label: 'RING THE BELL' };
-      if (E) { mb.ring(); mb.eta = Math.min(mb.eta, 2.5); this.t3d.add('DING DING!', mb.x, mb.y + 1.4, 0, T3D.gold, { size: 0.36, life: 1.3, rise: 0.5 }); }
+      if (E) {
+        mb.ring();
+        // the tutorial doesn't make you wait: she's already close by, coming in from the far side of the buoy
+        const side = k.x > mb.x ? -1 : 1;
+        mb.manatee.arrive(mb.x + side * 13, mb.x);
+        mb.waitLeft = mb.window;
+        this.world.sfx('honk1', mb.x + side * 8, 0.5);
+        this.world.emit('manatee', { state: 'arriving', x: mb.x });
+        this.t3d.add('DING DING!', mb.x, mb.y + 1.4, 0, T3D.gold, { size: 0.36, life: 1.3, rise: 0.5 });
+      }
     }
   }
 

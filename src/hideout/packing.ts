@@ -132,9 +132,12 @@ export class Packing {
     S.position.copy(PORCH.set);
     house.group.add(S);
     const k = new Kit();
-    // two flat stones the chest and the pack sit on, sand around
-    k.cyl(MAT.rock(), 1.25, 1.35, 0.1, CHEST.x, 0.05, CHEST.z, { seg: 9 });
-    k.cyl(MAT.rock(), 1.1, 1.2, 0.1, BAG.x, 0.05, BAG.z, { seg: 9 });
+    // a weathered driftwood deck the chest and the pack sit on: planks across two sleepers, a few warped or short
+    for (const sz of [-0.55, 0.55]) k.box(MAT.wood('drift'), 4.5, 0.05, 0.16, 0, 0.025, sz, { chamfer: 0.01 });
+    for (let i = 0; i < 10; i++) {
+      const j = Math.sin(i * 12.9898) * 43758.5453, r = j - Math.floor(j), r2 = (j * 7.3) - Math.floor(j * 7.3);
+      k.box(MAT.wood(i % 3 === 1 ? 'pine' : 'drift'), 0.43, 0.05, 1.6 - (i === 3 || i === 8 ? 0.35 : r * 0.12), -2.07 + i * 0.46, 0.075 + r2 * 0.008, (i === 3 ? 0.17 : i === 8 ? -0.17 : 0) + (r - 0.5) * 0.06, { ry: (r - 0.5) * 0.05, rz: (r2 - 0.5) * 0.02, chamfer: 0.012 });
+    }
     // ---- the open sea chest: a hollow box (walls, a dark lining), the domed lid thrown back, iron bands
     const wood = MAT.wood('red'), iron = MAT.metal('grey'), lining = MAT.plain('#3a1810/0.95');
     const { x, z, w, d } = CHEST;
@@ -451,7 +454,7 @@ export class Packing {
         c.c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / 22 : 0, my: hov ? (ui.my - y) / 32 : 0, ready: true });
       });
     } else this.stage.detach();
-    // the note: sets + stats + the mastery level, pinned at the top left
+    // the note: sets + stats + the mastery level, pinned at the bottom left
     const lines: TagLine[] = [{ text: 'YOUR BUILD', font: 'title' }];
     for (const s of setBonuses(this.pack.filter((p) => p.gx >= 0)).slice(0, 4)) lines.push({ text: `${s.name} ${s.count}${s.next ? '/' + s.next : ''}${s.tier ? ' · active' : ''}`, color: s.tier ? '#1a5a1a' : '#5a4a3a' });
     const B = BASE_STATS, st = stats;
@@ -464,10 +467,9 @@ export class Packing {
     for (const mod of masteryMods(this.mastery).slice(-2)) lines.push({ text: '· ' + mod, color: '#5a4a3a' });
     if (this.diving) { this.note.hide(); return; }
     this.note.show(lines);
-    // pinned top left of the shot (the anchor is a point projected there)
-    const th = Math.tan((cam.fov * Math.PI) / 360), W = internalH * cam.aspect;
-    const ndc = new THREE.Vector3(-1 + 8 / (W / 2), 1 - 8 / (internalH / 2), 0.5).unproject(cam);
-    void th;
+    // pinned bottom left of the shot, on the open sand (clear of the HOME sign and the skill cards)
+    const W = internalH * cam.aspect;
+    const ndc = new THREE.Vector3(-1 + 8 / (W / 2), (-internalH / 2 + 8 + this.note.h / 2) / (internalH / 2), 0.5).unproject(cam);
     this.note.place(cam, ndc, internalH, [0, 0], dt, 'left');
   }
 

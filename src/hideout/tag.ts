@@ -68,7 +68,8 @@ export class Tag {
   mesh: THREE.Mesh;
   private mat: THREE.MeshBasicMaterial;
   private key = '';
-  private w = 1; private h = 1;
+  /** size in rendered pixels (after show) */
+  w = 1; h = 1;
   private pop = 0;
   constructor(private style: TagStyle = 'paper', private maxW = 150) {
     this.mat = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false });

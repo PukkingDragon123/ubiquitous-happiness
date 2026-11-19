@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { buildProp } from './models';
 import { PIECES, isBuilt, homeProgress, type Piece } from './rebuild';
-import { buildShell, pieceModel, ghostOf, floorOutline, rubbleHeap, lectern, GoalBoard, IN, WALL_T, DOOR_W, type Shell } from './pieces';
+import { buildShell, pieceModel, ghostOf, floorOutline, rubbleHeap, lectern, hitboxFor, GoalBoard, IN, WALL_T, DOOR_W, type Shell } from './pieces';
 import { damp } from '../core/math';
 import { TEX } from './tex';
 
@@ -34,7 +34,7 @@ export interface Spot {
 /** the porch outside the front door, where the packing scene is set */
 export const PORCH = { x0: -3.6, x1: 3.6, z0: IN.z1 + WALL_T, z1: 10.2, set: new THREE.Vector3(0, 0, 7.6), stand: new THREE.Vector3(0.3, 0, 5.85) };
 export const BOARD_AT = new THREE.Vector3(-2.3, 0, 3.35);
-export const CRAB_HOME = new THREE.Vector3(-3.35, 0, 2.55);
+export const CRAB_HOME = new THREE.Vector3(-3.6, 0, 1.55);
 export const CODEX_AT = new THREE.Vector3(2.7, 0, 3.45);
 
 const CELL = 0.25, GX0 = IN.x0 - 0.5, GZ0 = IN.z0 - 0.5, GW = Math.ceil((IN.x1 - IN.x0 + 1) / CELL), GD = Math.ceil((PORCH.z1 - IN.z0 + 0.5) / CELL);
@@ -114,13 +114,15 @@ export class House {
     const m = this.model(p);
     const ghost = new THREE.Group();
     const gh = ghostOf(m.group);
-    ghost.add(gh);
+    ghost.add(gh, hitboxFor(m.group));
     if (!p.wall) { const ol = floorOutline(p.w + 0.2, p.d + 0.2); ghost.add(ol); }
     this.place(ghost, p);
     ghost.userData.spot = p.id;
     this.group.add(ghost);
     const rubble = rubbleHeap(p.wall ? 4 : 6, p.x * 7 + p.z * 3);
-    rubble.position.set(p.x + (p.wall !== undefined && p.id !== 'door' ? 0 : 0.2), 0, p.wall !== undefined ? p.z + (p.z < 0 ? 0.55 : -0.55) : p.z + 0.1);
+    // (the front door's heap lies beside the doorway, not in it: the way out is always clear)
+    if (p.id === 'door') rubble.position.set(1.45, 0, IN.z1 - 0.55);
+    else rubble.position.set(p.x + (p.wall !== undefined ? 0 : 0.2), 0, p.wall !== undefined ? p.z + (p.z < 0 ? 0.55 : -0.55) : p.z + 0.1);
     rubble.scale.setScalar(p.wall ? 0.7 : 0.85);
     this.group.add(rubble);
     // where to stand: in front of the piece (its +z front turned by yaw), 0.75 m out; wall pieces from the room side
@@ -139,9 +141,10 @@ export class House {
     if (s.built) return;
     const m = this.model(s.piece);
     const g = new THREE.Group(); g.add(m.group);
+    g.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true; } });
+    g.add(hitboxFor(m.group));
     this.place(g, s.piece);
     g.userData.spot = s.piece.id;
-    g.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true; } });
     this.group.add(g);
     s.built = g; s.door = m.door; s.seat = m.seat;
     for (const L of m.lights) {
@@ -173,6 +176,7 @@ export class House {
     const e = k < 1 ? Math.min(1, k * 1.15) : 1, over = Math.sin(Math.min(1, k) * Math.PI) * 0.12;
     b.scale.set(e + over, Math.max(0.02, e), e + over);
     s.ghost.visible = k < 0.3;
+    if (s.rubble.visible !== k < 0.15) this.gridDirty = true;
     s.rubble.visible = k < 0.15;
     if (k >= 1) { b.scale.set(1, 1, 1); this.gridDirty = true; }
   }
@@ -204,6 +208,8 @@ export class House {
       if (p.wall !== undefined && p.id !== 'trophy') continue;
       if (isBuilt(p.id) || s.grow > 0.5) box(p.x, p.z, p.w, p.d, p.yaw);
     }
+    // the heaps of rubble on unbuilt spots (no wading through them)
+    for (const s of this.spots.values()) if (s.rubble.visible && s.piece.wall === undefined) box(s.rubble.position.x, s.rubble.position.z, 0.7, 0.7, 0, 0.08);
     box(BOARD_AT.x, BOARD_AT.z, 1.3, 0.5, 0.18);
     box(CODEX_AT.x, CODEX_AT.z, 0.5, 0.45, 0);
     // the fallen beam and the corner heaps while the house is a ruin
@@ -230,7 +236,20 @@ export class House {
     return null;
   }
   /** A* over the walk grid (8-way, no corner cutting), string-pulled; [] when unreachable */
-  path(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
+  path(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] & { escape?: boolean } {
+    const direct = this.astar(a, b);
+    if (direct.length) return direct;
+    // never trapped: from a spot that is boxed in (a piece just built around the hero, a pocket between furniture),
+    // step out to the nearest point that does reach the goal; the first leg ignores collisions (player.ts)
+    for (let r = CELL; r < 2.6; r += CELL) for (let k = 0; k < 16; k++) {
+      const x = a.x + Math.cos((k / 16) * Math.PI * 2) * r, z = a.z + Math.sin((k / 16) * Math.PI * 2) * r;
+      if ((z < IN.z1) !== (a.z < IN.z1) || !this.walkable(x, z)) continue;
+      const rest = this.astar(new THREE.Vector3(x, 0, z), b);
+      if (rest.length) { const out: THREE.Vector3[] & { escape?: boolean } = [a.clone().setY(0), ...rest]; out.escape = true; return out; }
+    }
+    return [];
+  }
+  private astar(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
     if (this.gridDirty) this.rebuildGrid();
     const s = this.cellOf(a.x, a.z), e = this.cellOf(b.x, b.z);
     const ok = (i: number, j: number) => this.free(i, j) && this.walkable(GX0 + (i + 0.5) * CELL, GZ0 + (j + 0.5) * CELL);
@@ -285,7 +304,9 @@ export class House {
     this.warm.intensity = k * 6 * (0.95 + 0.05 * Math.sin(t * 7) * Math.sin(t * 3.1));
     for (const s of this.shell.shafts) (s.material as THREE.MeshBasicMaterial).opacity = (0.16 - k * 0.07) * (0.7 + 0.3 * Math.sin(t * 0.4 + s.position.x));
     for (const s of this.shell.sway) s.o.rotation.z = Math.sin(t * s.f + s.ph) * s.amp;
-    for (const r of this.shell.rubble) r.visible = k < 0.55;
+    const heaps = k < 0.55;
+    if (this.shell.rubble[0] && this.shell.rubble[0].visible !== heaps) this.gridDirty = true;
+    for (const r of this.shell.rubble) r.visible = heaps;
     const win = isBuilt('window');
     this.windowShaft.visible = win;
     (this.windowShaft.material as THREE.MeshBasicMaterial).opacity = 0.14 + 0.04 * Math.sin(t * 0.5);

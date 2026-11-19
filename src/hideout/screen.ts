@@ -53,7 +53,7 @@ type Panel = 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'pause' | 'settings'
 /** a clickable thing in the house */
 interface Thing { id: string; obj: () => THREE.Object3D | null; stand: () => THREE.Vector3; face: () => THREE.Vector3; tag: () => TagLine[]; use: () => void; reach?: number }
 
-const FOLLOW = { yaw: 0, pitch: 1.0, dist: 16, fov: 30 };
+const FOLLOW = { yaw: 0, pitch: 1.0, dist: 17.5, fov: 30 };
 const MAT_NAME = (id: string) => (ITEMS[id] ? getItem(id).name : id);
 
 export class HideoutScreen implements Screen {
@@ -92,7 +92,7 @@ export class HideoutScreen implements Screen {
   private crabLine: TagLine[] = [];
   private t = 0;
   private modeT = 0;
-  private ray = new THREE.Raycaster();
+  private ray = (() => { const r = new THREE.Raycaster(); r.params.Line = { threshold: 0.02 }; r.params.Points = { threshold: 0.02 }; return r; })();
   private fadeIn = 0;
   private sleepT = 0;
   private arriveT = -1;
@@ -116,7 +116,7 @@ export class HideoutScreen implements Screen {
     // hero + its controller, Mr. Crab
     this.hero = (opts.hero ?? defaultHero)();
     this.scene.add(this.hero.root, ...(this.hero.extras ?? []));
-    this.player = new HubPlayer(this.hero, (x, z) => this.house.walkable(x, z));
+    this.player = new HubPlayer(this.hero, (x, z, r) => this.house.walkable(x, z, r));
     this.crab.group.scale.setScalar(0.55);
     this.crab.group.position.copy(CRAB_HOME);
     this.crab.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
@@ -229,9 +229,11 @@ export class HideoutScreen implements Screen {
     const s = this.house.spots.get(g.id)!;
     this.rig.shot = { target: new THREE.Vector3(s.piece.x, 0.6, s.piece.z).lerp(this.hero.root.position, 0.3), yaw: 0, pitch: 0.95, dist: 11, fov: 30 };
     this.rig.k = 2.2;
-    setTimeout(() => { if (this.mode === 'free' && !this.build.active) this.rig.shot = null; }, 1700);
+    this.goalShotT = 1.7;
     this.sayGoal();
   }
+  /** Mr. Crab stops talking (a modal with its own dialogue is opening over the home) */
+  hush() { this.crabT = 0; this.crab.talk = 0; }
   /** back from a run (its summary card already shown): Mr. Crab reacts to what the haul lets you build next */
   private homecoming() {
     const g = nextGoal();
@@ -326,7 +328,7 @@ export class HideoutScreen implements Screen {
     ui.panel('wood', r.x, r.y, r.w, r.h);
     let close = ui.iconButton('pz:x', 'close', r.x + r.w - 20, r.y + 4, { style: 'red', size: 13 });
     let yy = r.y + 22;
-    if (ui.button('pz:back', 'BACK HOME', r.x + 12, yy, r.w - 24, 18, { style: 'wood' })) close = true;
+    if (ui.button('pz:back', 'CONTINUE', r.x + 12, yy, r.w - 24, 18, { style: 'wood' })) close = true;
     yy += 24;
     if (ui.button('pz:set', 'SETTINGS', r.x + 12, yy, r.w - 24, 18, { style: 'wood' })) { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
     yy += 24;
@@ -412,7 +414,7 @@ export class HideoutScreen implements Screen {
     ensureHome();
     this.house.sync(); this.makeThings();
     this.mode = 'free'; this.panel = null; this.modeT = 0;
-    this.build.active = false;
+    this.build.active = false; this.house.shell.roof.visible = true;
     this.packing.close();
     POST.uLetterbox.value = 0; POST.uFade.value = 1;
     this.fadeIn = 1;
@@ -453,7 +455,8 @@ export class HideoutScreen implements Screen {
   }
   private followTarget() {
     const p = this.hero.root.position;
-    return new THREE.Vector3(Math.max(-3.2, Math.min(3.2, p.x * 0.5)), 0.3, Math.max(-1.5, Math.min(3.6, p.z * 0.45 + 0.55)));
+    // only a gentle follow: the whole room stays on screen (things on the far side are never off the edge)
+    return new THREE.Vector3(Math.max(-1.5, Math.min(1.5, p.x * 0.25)), 0.3, Math.max(-0.8, Math.min(1.8, p.z * 0.25 + 0.35)));
   }
 
   // ---------------------------------------------------------------- test hooks
@@ -480,6 +483,8 @@ export class HideoutScreen implements Screen {
 
   // ---------------------------------------------------------------- frame
   update(dt: number) {
+    // the game loop's first frame after a screen change can report a tiny negative dt (rAF time < performance.now())
+    dt = Math.max(0, dt);
     this.t += dt; this.modeT += dt;
     const input = this.game.input, ui = this.ui;
     const live = !this.game.modal;
@@ -505,7 +510,12 @@ export class HideoutScreen implements Screen {
       case 'build':
         this.build.update(dt);
         if (live && this.modeT > 0.3 && (input.keyHit('Escape') || input.keyHit('Space') || ui.pressed)) this.build.skip();
-        if (!this.build.active && this.mode === 'build') { this.mode = 'free'; this.house.sync(); this.makeThings(); }
+        if (!this.build.active && this.mode === 'build') {
+          this.mode = 'free'; this.house.sync(); this.makeThings();
+          // the new piece may stand where the blobfish watched from: shuffle out of it
+          const p = this.hero.root.position;
+          if (!this.house.walkable(p.x, p.z)) { const d = this.house.nearestWalkable(p.x, p.z); if (d) { const out: THREE.Vector3[] & { escape?: boolean } = [p.clone(), d]; out.escape = true; this.player.goTo(out); } }
+        }
         break;
       case 'packing': this.packing.update(dt, ui, input, this.camera, this.ray, this.game.post.h, live && this.modeT > 0.4); break;
       case 'swim': this.swimUpdate(dt); break;
@@ -516,6 +526,7 @@ export class HideoutScreen implements Screen {
       ut.x = damp(ut.x, goal.x, 4, dt); ut.y = goal.y; ut.z = damp(ut.z, goal.z, 4, dt);
       if (live && this.mode === 'free' && !ui.mouseOnUI && input.mouse.wheel) this.rig.user.dist = Math.max(this.rig.zoom[0], Math.min(this.rig.zoom[1], this.rig.user.dist * (1 + input.mouse.wheel * 0.1)));
     }
+    if (this.goalShotT > 0) { this.goalShotT -= dt; if (this.goalShotT <= 0 && this.mode === 'free' && !this.build.active) this.rig.shot = null; }
     this.rig.update(dt);
     // ---- hero + Mr. Crab
     if (this.mode !== 'swim' && this.mode !== 'sit' && this.mode !== 'sleep') {
@@ -624,10 +635,12 @@ export class HideoutScreen implements Screen {
   /** walking out of the doorway onto the porch starts the packing scene */
   /** walking back in from the porch: no packing scene until the hero has been inside again */
   private returning = false;
+  /** the goal board's look-at-the-next-piece shot (seconds left) */
+  private goalShotT = 0;
   private checkOutside() {
     const z = this.hero.root.position.z;
     if (z < IN.z1 - 0.3) this.returning = false;
-    if (this.mode === 'free' && this.arriveT < 0 && !this.returning && z > IN.z1 + 0.65) this.enterPacking();
+    if (this.mode === 'free' && this.arriveT === -1 && !this.returning && z > IN.z1 + 0.65) this.enterPacking();
   }
   private floorHit(): THREE.Vector3 | null {
     const o = this.ray.ray.origin, d = this.ray.ray.direction;
@@ -706,7 +719,8 @@ export class HideoutScreen implements Screen {
     const parts = costLines(g.id);
     const have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
     let y = 8;
-    y += ui.objective(`Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y, w: 190, id: 'objective', pulse: canAfford(g.id) }) + 2;
+    const head = canAfford(g.id) ? `Ready! Build the ${g.name.toLowerCase()}` : `Build the ${g.name.toLowerCase()}`;
+    y += ui.objective(head, [have, need], { x: 8, y, w: Math.max(190, ui.measure(head, 'body') + 64), id: 'objective', pulse: canAfford(g.id), done: false }) + 2;
     for (const [m, h, n] of parts) y += ui.objective(MAT_NAME(m), [h, n], { x: 14, y, w: 150, icon: m, small: true }) + 2;
   }
 }

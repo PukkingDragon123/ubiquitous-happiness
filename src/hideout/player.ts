@@ -3,7 +3,7 @@
 // (walls, built pieces, the goal board, Mr. Crab); it slides along whatever it bumps into. A path that gets stuck
 // (something moved into the way) gives up after a moment, and still calls `then` if the goal is close.
 //
-//   const p = new HubPlayer(hero, (x, z) => house.walkable(x, z)); each frame: p.update(dt, input, camYaw, enabled)
+//   const p = new HubPlayer(hero, (x, z, r) => house.walkable(x, z, r)); each frame: p.update(dt, input, camYaw, enabled)
 //   p.goTo(path, then?)   walk a waypoint path, then call `then` (any move key cancels it)
 import * as THREE from 'three';
 import type { Input } from '../core/input';
@@ -16,12 +16,14 @@ export class HubPlayer {
   vel = new THREE.Vector2();
   /** 0..1 how fast it is moving (drives the waddle) */
   move = 0;
-  private auto: { path: THREE.Vector3[]; i: number; then?: () => void; stuck: number; t: number } | null = null;
-  constructor(public hero: HideoutHero, private walkable: (x: number, z: number) => boolean) {}
+  private auto: { path: THREE.Vector3[]; i: number; then?: () => void; stuck: number; t: number; escape: boolean } | null = null;
+  constructor(public hero: HideoutHero, private walkable: (x: number, z: number, r?: number) => boolean) {}
+  /** how deep into something a point is (0 = clear): moving out of a spot that is boxed in may only go shallower */
+  private blocked(x: number, z: number) { return (this.walkable(x, z) ? 0 : 1) + (this.walkable(x, z, 0.13) ? 0 : 1) + (this.walkable(x, z, 0.01) ? 0 : 1); }
 
-  goTo(path: THREE.Vector3[], then?: () => void) {
+  goTo(path: THREE.Vector3[] & { escape?: boolean }, then?: () => void) {
     if (path.length < 2) { this.auto = null; then?.(); return; }
-    this.auto = { path, i: 1, then, stuck: 0, t: 0 };
+    this.auto = { path, i: 1, then, stuck: 0, t: 0, escape: !!path.escape };
   }
   stop() { this.auto = null; }
   get walking() { return !!this.auto; }
@@ -57,7 +59,9 @@ export class HubPlayer {
     if (sp > 0.02) {
       const p = r.position, before = p.clone();
       const nx = p.x + this.vel.x * dt, nz = p.z + this.vel.y * dt;
-      if (this.walkable(nx, nz)) { p.x = nx; p.z = nz; }
+      // stepping out of a boxed-in spot (an escape path's first leg, or standing where something now is): no collision
+      const stuckIn = !this.walkable(p.x, p.z) && this.blocked(nx, nz) <= this.blocked(p.x, p.z);
+      if ((this.auto?.escape && this.auto.i === 1) || stuckIn || this.walkable(nx, nz)) { p.x = nx; p.z = nz; }
       else if (this.walkable(nx, p.z)) { p.x = nx; this.vel.y *= 0.5; }
       else if (this.walkable(p.x, nz)) { p.z = nz; this.vel.x *= 0.5; }
       else this.vel.multiplyScalar(0.3);
