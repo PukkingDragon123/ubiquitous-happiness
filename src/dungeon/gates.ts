@@ -22,13 +22,18 @@ export class ArenaGate {
   body: Body;
   private t = 0;
   private rumble = 0;
-  constructor(public w: World, terrain: LevelTerrain, public x: number, public floorY: number, public topY: number, public area: string, public kind: GateKind, public sandColor: string, bodyTop = topY + 3) {
+  /**
+   * o.bodyBottom: where the solid body stops below the bars (a seal standing on a cave lid must not reach into the
+   * cave under it); o.glow false: no warning glow (a fork's seal is a closed way, not a fight)
+   */
+  constructor(public w: World, terrain: LevelTerrain, public x: number, public floorY: number, public topY: number, public area: string, public kind: GateKind, public sandColor: string, bodyTop = topY + 3, o: { bodyBottom?: number; glow?: boolean } = {}) {
     const h = topY - floorY + 1.2;
     this.model = arenaGateModel(area, kind, h);
     this.model.root.position.set(x, floorY - 0.4, 0);
     this.group.add(this.model.root);
     // the lock reaches all the way up (beat-'em-up walls): you can't swim over the bars
-    this.body = terrain.addBody({ x0: x - 0.7, x1: x + 0.7, y0: floorY - 3, y1: Math.max(topY + 3, bodyTop), r: 0.3, on: () => this.up > 0.45, tag: 'gate' });
+    this.body = terrain.addBody({ x0: x - 0.7, x1: x + 0.7, y0: o.bodyBottom ?? floorY - 3, y1: Math.max(o.bodyBottom !== undefined ? topY : topY + 3, bodyTop), r: 0.3, on: () => this.up > 0.45, tag: 'gate' });
+    this.noGlow = o.glow === false;
     // a warning glow behind the bars while it's shut: the lock reads at a glance, even in a kelp forest
     const gh = topY - floorY;
     const geo = new THREE.PlaneGeometry(2.6, gh, 1, 4);
@@ -42,6 +47,7 @@ export class ArenaGate {
     this.pose();
   }
   private glow: THREE.Mesh;
+  private noGlow = false;
   get shut() { return this.up > 0.98; }
   raise(instant = false) {
     if (this.target === 1) return;
@@ -84,7 +90,7 @@ export class ArenaGate {
       c.visible = u > 0.002;
     });
     for (const g of m.glow) { const k = 0.7 + Math.sin(this.t * 3) * 0.3; (g.material as THREE.MeshBasicMaterial).color.setRGB(2.2 * k, 0.25 * k, 0.15 * k); }
-    if (this.glow) { const gm = this.glow.material as THREE.MeshBasicMaterial; gm.opacity = Math.max(0, this.up - 0.3) * (0.75 + Math.sin(this.t * 4) * 0.2); this.glow.visible = gm.opacity > 0.01; }
+    if (this.glow) { const gm = this.glow.material as THREE.MeshBasicMaterial; gm.opacity = this.noGlow ? 0 : Math.max(0, this.up - 0.3) * (0.75 + Math.sin(this.t * 4) * 0.2); this.glow.visible = gm.opacity > 0.01; }
   }
   dispose() { this.group.removeFromParent(); disposeModel(this.group); }
 }

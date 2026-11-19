@@ -12,6 +12,14 @@
 //   patrol between arenas. Every item pickup goes into the backpack grid (src/dungeon/pack.ts); pearls, keys,
 //   bombs and hearts are counters. Death loses the pack (mailed items are safe); the last boss brings it home.
 //
+//   CROSSROADS (v6, no map): the journey forks. Mid-floor detours split around a rock lid (the champion's den vs the
+//   high road, open water vs a quiet grotto): swimming into a lane commits to it (a camera beat, its board stamps,
+//   the current pulls you on) and bars rise across the other. Past each boss the seabed splits into two or three
+//   exit pits, each signposted (the next biome, its route: deeper / safer / supplies, skulls, a giant, the reward)
+//   and dressed in the look of where it leads: the pit you swim down picks the next floor (src/dungeon/routes.ts).
+//   You find the way by the signposts (distance from home), the currents (bubble streams and chevrons pointing on),
+//   dead ends that say turn back, the area card and the depth gauge; the HUD has no strip map any more.
+//
 //   DEPTH is the spine: every floor descends ~30-40 m in terraces and ends in an exit shaft past the boss; you swim
 //   down it (a down-current, then a dark stretch) straight into the next biome's entry shaft, the counter ticking all
 //   the way (real metres = plan.depth0 - y, continuous across floors; UW.uWaterY = depth0 so every shader's light
@@ -25,8 +33,8 @@
 //   game.go('dungeon', { cfg })            a new run from a RunConfig (loadout uids come out of the stash)
 //   game.go('dungeon', { resume: true })   continue the saved run (loadDungeonSave())
 //   game.go('dungeon')                     dev, from the URL: ?preview=dungeon&floor=reef&at=boss|shop|treasure|post|
-//                                          secret|challenge|arena&god=1&mastery=0&floorIdx=0&seed=N&rich=1&reveal=1
-//                                          &keys=N&bombs=N&pearls=N
+//                                          secret|challenge|arena|cross|fork|den|grotto&god=1&mastery=0&floorIdx=0
+//                                          &seed=N&rich=1&keys=N&bombs=N&pearls=N&route=deep|safe|trade
 //   The run's end goes to (window).flow.runEnded(result) when flow has it, else hideout + the result card.
 //
 // World events (besides K's and the v2 ones): 'arenaLock' {kind}, 'roomCleared' {type}, 'floorCleared' {n},
@@ -57,7 +65,8 @@ import { spawnEnemy, ENEMIES_FOR, spawnBoss, setArena, ENEMY_INFO, codexId, type
 import { roomBudget } from '../combat/index';
 import { board } from '../waves/board';
 import { Dialogue } from '../story/dialogue';
-import { genLevel, explore, floorAreas, floorsForMastery, shelfAt, depthOf, depthSpan, AREA_ORDER, ENTRY_TOP, type LevelPlan, type ArenaPlan, type PoiPlan, type GroupPlan } from '../dungeon/level';
+import { genLevel, normalizePlan, floorAreas, floorsForMastery, shelfAt, depthOf, depthSpan, AREA_ORDER, ENTRY_TOP, type LevelPlan, type ArenaPlan, type PoiPlan, type GroupPlan, type ForkPlan, type ChestPlan, type RouteKind } from '../dungeon/level';
+import { crossroads, routeOf } from '../dungeon/routes';
 import { biomeDef, baseOf, hadalFor, isHadal } from '../dungeon/biomes';
 import { depthLook, zoneOf, ZONE_NAME, depthDifficulty, depthElite, depthLuck, depthPearls, playerLight, type Zone } from '../dungeon/depth';
 import { UW } from '../gfx/shaders/underwater';
@@ -72,7 +81,6 @@ import { RunSummaryCard, type RunSummary } from '../ui/runSummary';
 import { codexSeen, codexBeaten, codexKnown, codexEntries } from '../ui/codex';
 import { buildFish } from '../fish';
 import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, rollBig, bigChance, type Reward } from '../dungeon/rewards';
-import { journeyStrip, legOf, type JourneyLeg } from '../dungeon/minimap';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 
@@ -90,8 +98,12 @@ export interface DungeonSave {
   areas: string[]; areaIdx: number;
   /** floors planned at the start (past them: the endless deep); the run's deepest metre */
   planned: number; maxDepth: number;
-  /** the floors already travelled (the strip map's journey) */
-  journey?: JourneyLeg[];
+  /** v6: the route each floor was reached by (parallel to floors; older saves: all 'main') */
+  routes?: RouteKind[];
+  /** v6: where a QUIT left the blobfish (height too, so RESUME never puts it on the wrong side of a cave lid) */
+  checkY?: number | null;
+  /** (v4-v5 saves: the strip map's journey; no longer read) */
+  journey?: unknown[];
 }
 /** the run in progress lives in META.activeRun (v 4) like the v2 run's did, so flow's RESUME finds it */
 export function loadDungeonSave(): DungeonSave | null {
@@ -205,8 +217,16 @@ export class DungeonScreen implements Screen {
   private lamp: LampHandle | null = null;
   private desc: { stage: 'sink' | 'dark' | 'arrive' | 'surface'; t: number; from: number; to: number } | null = null;
   private recordBefore = 0;
-  /** the journey so far: every floor left behind (metres from home, seabed, landmarks) */
-  journey: JourneyLeg[] = [];
+  /** the route each floor was reached by (parallel to floors) */
+  routes: RouteKind[] = [];
+  /** where a quit left the blobfish (null: stand it on the floor at checkX) */
+  checkY: number | null = null;
+  /** the exit pit being swum down, and the metres of the dark drop to the next floor (its route) */
+  private exitK = 0;
+  private descDrop = 22;
+  /** the moment a fork is chosen: the camera leans in on the lane, the current pulls you along it */
+  private beat: { t: number; x: number; y: number; fx: number; fy: number; pull: number } | null = null;
+  private forkK = 0;
   /** metres from home right now (floor 1 starts at the front door) */
   farNow() { return this.plan ? this.plan.far0 + this.player.x : 0; }
   private vistaK = 0;
@@ -318,11 +338,17 @@ export class DungeonScreen implements Screen {
     this.world.rng = new Rng(this.seed ^ 0xd00d);
     this.packFromConfig(cfg as RunConfig & { pack?: ItemInst[]; mats?: Record<string, number> }, !!dev);
     this.scal = masteryScalars(this.cfg.mastery);
-    this.floors = floorAreas(this.cfg.startArea, floorsForMastery(this.cfg.mastery, this.scal as { floors?: number }));
-    this.planned = this.floors.length;
+    // the stages planned (the rope hangs after the last); which biomes they are is chosen at each crossroads
+    const chain = floorAreas(this.cfg.startArea, floorsForMastery(this.cfg.mastery, this.scal as { floors?: number }));
+    this.planned = chain.length;
     this.maxDepth = 0;
     this.recordBefore = (META as unknown as { records?: { maxDepth?: number } }).records?.maxDepth ?? 0;
-    this.floorIdx = dev ? clamp(Number(dev.get('floorIdx') || 0), 0, this.floors.length - 1) : 0;
+    this.floorIdx = dev ? clamp(Number(dev.get('floorIdx') || 0), 0, chain.length - 1) : 0;
+    this.floors = chain.slice(0, this.floorIdx + 1);
+    this.routes = this.floors.map(() => 'main' as RouteKind);
+    const devRoute = dev?.get('route');
+    if (devRoute && ['deep', 'safe', 'trade'].includes(devRoute)) this.routes[this.floorIdx] = devRoute as RouteKind;
+    this.checkY = null;
     this.keys = dev?.get('keys') ? Number(dev.get('keys')) : 1;
     this.bombs = dev?.get('bombs') ? Number(dev.get('bombs')) : 1;
     this.run.coins = dev?.get('pearls') ? Number(dev.get('pearls')) : 0;
@@ -332,7 +358,6 @@ export class DungeonScreen implements Screen {
     this.run.hp = this.run.stats().maxHp;
     if (dev?.get('rich') === '1') for (const id of ['copperOre', 'driftwood', 'coralShard', 'kelp', 'scrap', 'seashell', 'ironOre', 'pearl']) for (let k = 0; k < 4; k++) packAdd(this.run, id);
     if (!dev) { META.runs++; saveMeta(); }
-    this.journey = [];
     this.startFloor(this.floorIdx, null, this.floorIdx === 0 ? 0 : 70 + this.floorIdx * 78, this.floorIdx * 360);
   }
 
@@ -396,7 +421,8 @@ export class DungeonScreen implements Screen {
     this.scal = masteryScalars(this.cfg.mastery);
     this.installStats();
     this.run.hp = s.hp;
-    this.journey = (s.journey ?? []).map((l) => ({ ...l, seabed: [...l.seabed], marks: [...l.marks] }));
+    this.routes = s.floors.map((_, k) => (s.routes?.[k] ?? 'main'));
+    this.checkY = typeof s.checkY === 'number' ? s.checkY : null;
     this.startFloor(s.floorIdx, s, s.plan.depth0, s.plan.far0 ?? 0);
     this.player.hp = Math.max(1, Math.min(this.player.maxHp, s.hp));
   }
@@ -450,10 +476,12 @@ export class DungeonScreen implements Screen {
     const seed = (this.seed ^ Math.imul(i + 1, 0x2c1b3c6d)) >>> 0;
     // a rope to the surface hangs past the boss on the last planned floor, then every second floor of the deep
     const rope = i === this.planned - 1 || (i >= this.planned && (i - this.planned) % 2 === 1);
-    this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, depth0, rope, far0 });
-    this.plan.far0 ??= far0; this.plan.chests ??= []; this.plan.signs ??= []; this.plan.vistas ??= [];
-    const plan = this.plan;
-    if (this.dev?.get('reveal') === '1') plan.explored.fill(1);
+    // the ways on from this floor's end (the crossroads): judged from the depth of its first shelf
+    const shelf0 = depth0 + (i === 0 && depth0 <= 0 ? 11 : 14);
+    const branches = crossroads(area, i, this.seed, shelf0, this.cfg.mastery);
+    this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, depth0, rope, far0, route: this.routes[i] ?? 'main', branches });
+    this.plan.far0 ??= far0;
+    const plan = normalizePlan(this.plan);
     const lvl = this.level = new LevelBuild(this.world, plan, { light: this.game.lowQuality && this.dev?.get('full') !== '1' });
     console.info(`[dungeon] floor ${i + 1} (${area}) ${plan.W.toFixed(0)} m, ${depthSpan(plan).map((v) => v.toFixed(0)).join('-')} m deep, built in ${lvl.buildMs.toFixed(0)} ms`);
     lvl.bind(this.world);
@@ -472,15 +500,21 @@ export class DungeonScreen implements Screen {
     this.ambience?.stop(); this.ambience = audio.loop(lvl.a.ambience, 0.35);
     for (const a of plan.arenas) if (a.cleared) for (const g of lvl.gates.get(a.id) ?? []) g.drop(true);
     if (plan.arenas.find((q) => q.kind === 'boss')?.cleared) lvl.openExit();
+    // dev: ?at=cross starts at the end-of-floor crossroads with the boss already beaten
+    if (!save && this.tally.floors === 0 && this.dev?.get('at') === 'cross') { const b = plan.arenas.find((q) => q.kind === 'boss'); if (b) b.cleared = true; lvl.openExit(); }
     this.buildPois();
     this.spawnChests();
     // the blobfish arrives: dives in from the surface / drops down the entry shaft (or back at the checkpoint)
     let x = save ? save.checkX : plan.startX;
-    const at = this.dev?.get('at');
+    // (dev: ?at= places the first floor only)
+    const at = this.tally.floors === 0 ? this.dev?.get('at') : null;
     if (at && !save) x = this.devJump(at);
     this.checkX = x;
     const p = this.player;
-    const y = save || at ? lvl.terrain.floorUnder(x, plan.top) + 2.5 : plan.top - 1.2;
+    let y = save || at ? lvl.terrain.floorUnder(x, plan.top) + 2.5 : plan.top - 1.2;
+    // RESUME after a quit: where it was (a cave under a lid stays the cave), if that's open water
+    if (save && this.checkY !== null && this.checkY < plan.top - 0.6 && lvl.terrain.sdf(x, this.checkY) > 0.6) y = this.checkY;
+    this.checkY = null;
     p.sb.place(x, y); p.x = x; p.y = y;
     if (!save && !at) { p.sb.accel(open ? 2 / 0.016 : 0, -6 / 0.016, 0.016); this.world.fx.emit('bubbleBig', x, y + 1, { n: 24, spread: 1, speed: 2.5 }); }
     if (p.obj.parent !== this.scene) this.scene.add(p.obj);
@@ -489,7 +523,6 @@ export class DungeonScreen implements Screen {
       if (it.kind === 'item') { if (it.id && ITEMS[it.id]) this.world.spawnPickup('item', it.x, it.y, { id: it.id, level: it.level, n: it.n, vx: 0, vy: 0 }); }
       else this.world.spawnPickup(it.kind, it.x, it.y, { value: it.n, vx: 0, vy: 0 });
     }
-    explore(plan, x, 20);
     this.floorMax = depthOf(plan, y);
     this.camLook.copy(this.camTarget(1));
     this.updateDepth(0, true);
@@ -506,7 +539,8 @@ export class DungeonScreen implements Screen {
       const deeper = i >= this.planned;
       const farM = Math.round(plan.far0 / 10) * 10;
       const stage = deeper ? 'THE DEEP' : `STAGE ${i + 1} OF ${this.planned}`;
-      const sub = i === 0 && farM === 0 ? `${stage} - OUTSIDE YOUR FRONT DOOR` : `${stage} - ${farM} M FROM HOME - ${ZONE_NAME[zoneOf(dTop)]}`;
+      const R = routeOf(plan.route);
+      const sub = i === 0 && farM === 0 ? `${stage} - OUTSIDE YOUR FRONT DOOR` : plan.route !== 'main' ? `${stage} - ${R.note} - ${farM} M FROM HOME` : `${stage} - ${farM} M FROM HOME - ${ZONE_NAME[zoneOf(dTop)]}`;
       this.hud.l.areaCard(AREA_NAME(area).toUpperCase(), sub, deeper ? '#ff9a84' : '#f3e7c9');
       this.game.addShake(0.15);
     });
@@ -518,6 +552,9 @@ export class DungeonScreen implements Screen {
     const plan = this.plan;
     if (at === 'arena') { const a = plan.arenas.find((q) => q.kind === 'arena'); return a ? a.x0 - 6 : plan.startX; }
     if (at === 'boss') return plan.bossX0 - 6;
+    // the crossroads: the end of the floor (?at=cross) and the mid-floor forks (?at=fork | den | grotto)
+    if (at === 'cross') { const f = plan.forks.find((q) => q.kind === 'end'); return f ? f.x - 4 : plan.exit.x0 - 6; }
+    if (at === 'fork' || at === 'den' || at === 'grotto') { const f = plan.forks.find((q) => q.kind !== 'end' && (at === 'fork' || q.kind === at)); return f ? f.x - 5 : plan.startX; }
     const p = plan.pois.find((q) => q.kind === at);
     if (!p) return plan.startX;
     if (at === 'challenge') { const a = plan.arenas.find((q) => q.kind === 'challenge'); return a ? a.x0 - 9 : p.x; }
@@ -578,8 +615,19 @@ export class DungeonScreen implements Screen {
     for (const c of plan.chests) {
       if (c.opened) continue;
       if (c.kind === 'big' && c.arena !== undefined && !plan.arenas[c.arena]?.cleared) continue;
+      if (c.cache && !c.items) c.items = this.cacheItems(c);
       this.addChest(c, T.floorUnder(c.x, c.y + 0.6));
     }
+  }
+  /** a supply cache: what the house still needs (the current goal's missing materials first), else this water's own */
+  private cacheItems(c: ChestPlan): string[] {
+    const rng = new Rng((this.plan.seed ^ Math.imul(c.id + 5, 0x2545f491)) >>> 0);
+    const need: string[] = [];
+    for (const g of homeGoals({}, 4)) for (const l of g.lines) if (l.have < l.need && ITEMS[l.id]) need.push(l.id);
+    const out: string[] = [];
+    const n = rng.int(4, 6);
+    for (let k = 0; k < n; k++) out.push(need.length && rng.chance(0.8) ? need[Math.min(need.length - 1, Math.floor(rng.next() * Math.min(need.length, 3)))] : rollMaterial(rng, baseOf(this.plan.area)));
+    return out;
   }
   private addChest(c: { id: number; kind: Chest['ck'] } & Partial<import('../dungeon/level').ChestPlan>, y: number, fallFrom?: number): Chest {
     const ent = new Chest(c.kind, c.x ?? this.player.x, y, { plan: c.x !== undefined && c.opened !== undefined ? (c as import('../dungeon/level').ChestPlan) : undefined, fallFrom });
@@ -820,7 +868,7 @@ export class DungeonScreen implements Screen {
       if (this.world.rng.chance(0.4 + depthOf(this.plan, a.floor) / 500)) rewards.push({ kind: 'pearl', value: pv });
       this.spawnRewards(rewards, cx, cy);
     }
-    this.checkX = a.x1 + 2;
+    this.checkX = a.x1 + 2; this.checkY = null;
     this.save();
   }
 
@@ -868,7 +916,7 @@ export class DungeonScreen implements Screen {
     const bigB = this.plan.chests.find((c) => c.arena === a.id && c.kind === 'big' && !c.opened);
     const lvlB = this.level!;
     if (bigB) this.after(1.4, () => { if (this.level === lvlB) this.dropChest('big', bigB.x, lvlB.terrain.floorUnder(bigB.x, a.top) + 0.5, bigB); });
-    this.checkX = (a.x0 + a.x1) / 2;
+    this.checkX = (a.x0 + a.x1) / 2; this.checkY = null;
     this.save();
   }
 
@@ -885,6 +933,13 @@ export class DungeonScreen implements Screen {
     const p = this.player;
     for (const g of this.plan.groups) {
       if (g.cleared) continue;
+      // a patrol in a lane not taken swims off
+      const fk = g.fork !== undefined ? this.plan.forks[g.fork] : null;
+      if (fk && fk.chosen >= 0 && fk.chosen !== g.lane) {
+        for (const e of this.groups.get(g.id) ?? []) if (e.alive) { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 10, 1.6); }
+        g.cleared = true;
+        continue;
+      }
       if (!g.spawned) {
         if (Math.abs(p.x - g.x) > 17 || this.fight) continue;
         this.spawnGroup(g);
@@ -995,9 +1050,14 @@ export class DungeonScreen implements Screen {
       if (E) this.surface();
       return { key: 'E', label: 'CLIMB THE ROPE: SURFACE WITH YOUR PACK', at: this.anchor(plan.ropeX, p.y + 1.2) };
     }
-    const ex = plan.exit, ecx = (ex.x0 + ex.x1) / 2;
-    if (lvl.exitOpen && Math.abs(p.x - ecx) < 4.5 && p.y < ex.top + 4 && p.y > ex.bottom) {
-      const last = this.floorIdx >= this.floors.length - 1;
+    const end = plan.forks.find((f) => f.kind === 'end');
+    for (const [k, ex] of plan.exits.entries()) {
+      const ecx = (ex.x0 + ex.x1) / 2;
+      if (!lvl.exitOpen || Math.abs(p.x - ecx) > (plan.exits.length > 1 ? 4 : 4.5) || p.y > ex.top + 4 || p.y < ex.bottom) continue;
+      const lane = end?.lanes.find((l) => l.exit === k);
+      // a crossroads pit: where it leads and how (the short tag is the place, the note its route)
+      if (lane?.area) return { key: '', label: `${lane.name}: ${lane.note}${lane.giant ? ' - GIANTS' : ''}`, at: this.anchor(ecx, ex.top + 2.4) };
+      const last = this.floorIdx >= this.planned - 1;
       return { key: '', label: last && plan.ropeX !== null ? 'DIVE DEEPER: INTO THE ENDLESS DEEP' : 'SWIM DOWN THE SHAFT', at: this.anchor(ecx, ex.top + 2.4) };
     }
     // a refused pickup nearby
@@ -1167,23 +1227,37 @@ export class DungeonScreen implements Screen {
   }
 
   // ================================================================ the way down
-  /** the boss is down and the blobfish swims into the open pit: the physical descent to the next floor */
-  private beginDescent() {
+  /**
+   * the boss is down and the blobfish swims into open pit k: the physical descent to the next floor. At a crossroads
+   * that's the choice: the pit's branch decides the next floor's biome and route (its sign stamps, the camera leans in)
+   */
+  private beginDescent(k = 0) {
     if (this.phase !== 'play' || this.desc) return;
     this.phase = 'descend';
     this.world.god = true;
     this.mail = null;
-    const n = this.floorIdx;
+    this.exitK = k;
+    const n = this.floorIdx, plan = this.plan;
     this.world.emit('floorCleared', { n, area: this.floors[n], depth: Math.round(this.depthNow()) });
     this.tally.floors++;
-    // past the last planned floor: the run turns into the endless deep
-    if (n >= this.floors.length - 1) {
-      const last = this.floors[this.floors.length - 1];
+    const end = plan.forks.find((f) => f.kind === 'end');
+    const li = end ? end.lanes.findIndex((l) => l.exit === k) : -1;
+    const lane = end && li >= 0 ? end.lanes[li] : null;
+    if (end && lane?.area) {
+      end.chosen = li;
+      this.floors.length = n + 1; this.routes.length = n + 1;
+      this.floors.push(lane.area); this.routes.push(lane.route ?? 'main');
+      this.commitBeat(end, li);
+      this.world.emit('routeChosen', { n, area: lane.area, route: lane.route ?? 'main' });
+    } else if (this.floors[n + 1] === undefined) {
+      // no crossroads on this floor (an older save's plan): on down the progression, then the endless deep
+      const last = this.floors[n];
       const i = AREA_ORDER.indexOf(baseOf(last));
       const next = !isHadal(last) && i >= 0 && i < AREA_ORDER.length - 1 ? AREA_ORDER[i + 1] : hadalFor(this.floors.filter(isHadal).length, this.seed);
-      this.floors.push(next);
-      if (n === this.planned - 1) this.world.emit('endlessDeep', { depth: Math.round(this.depthNow()) });
+      this.floors.push(next); this.routes.length = n + 1; this.routes.push('main');
     }
+    if (n === this.planned - 1) this.world.emit('endlessDeep', { depth: Math.round(this.depthNow()) });
+    this.descDrop = 22 + routeOf(this.routes[n + 1]).drop;
     const from = this.depthNow();
     this.desc = { stage: 'sink', t: 0, from, to: from };
     audio.play('flood_rush1', { vol: 0.7 }); audio.play('uw_rumble1', { vol: 0.5 });
@@ -1194,13 +1268,13 @@ export class DungeonScreen implements Screen {
     d.t += dt;
     if (d.stage === 'sink') {
       // the down-current: pulled into the middle of the shaft and down, bubbles streaming up past
-      const ex = plan.exit, cx = (ex.x0 + ex.x1) / 2;
+      const ex = plan.exits[this.exitK] ?? plan.exit, cx = (ex.x0 + ex.x1) / 2;
       p.applyForce((cx - p.x) * 18 - p.vx * 4, -26 - p.vy * 2);
       if (Math.random() < dt * 40) this.world.fx.emit('bubble', p.x + (Math.random() - 0.5) * 3, p.y - 2 - Math.random() * 3, { n: 1, vy: 3.5, life: 1.4, size: 0.06 });
       if (p.y < ex.bottom + 4 || d.t > 4) {
         d.stage = 'dark'; d.t = 0;
         d.from = this.depthNow();
-        d.to = d.from + 22;                                   // the rest of the way down is in the dark
+        d.to = d.from + this.descDrop;                        // the rest of the way down is in the dark (deeper routes: longer)
         this.vdepth = d.from;
         this.game.post.fadeTo?.(1, 0.7, '#000000');
       }
@@ -1211,7 +1285,6 @@ export class DungeonScreen implements Screen {
         this.mailUsed = 0; this.shopGreeted = false;
         // the next floor's entry shaft (world y = ENTRY_TOP - 1) sits at the depth we reach in the dark
         const entryY = ENTRY_TOP - 1;
-        this.journey.push(legOf(this.plan));
         this.startFloor(this.floorIdx + 1, null, d.to + entryY, this.plan.far0 + this.plan.W);
         this.vdepth = d.from + (d.to - d.from) * Math.min(1, d.t / 1.6);
       }
@@ -1235,6 +1308,81 @@ export class DungeonScreen implements Screen {
     }
   }
   private levelSwapped = false;
+
+  // ================================================================ crossroads
+  /** swimming into a lane of an undecided mid-floor fork commits to it */
+  private checkForks() {
+    const p = this.player;
+    for (const f of this.plan.forks) {
+      if (f.chosen >= 0 || f.kind === 'end') continue;
+      const i = f.lanes.findIndex((l) => p.x > l.x0 && p.x < l.x1 && p.y > l.y0 && p.y < l.y1);
+      if (i < 0) continue;
+      f.chosen = i;
+      this.commitBeat(f, i);
+      const l = f.lanes[i], other = f.lanes.find((_, j) => j !== i);
+      this.hud.l.title(l.name, other ? `${other.name} IS SEALED BEHIND YOU` : l.note, l.danger >= 2 ? '#ffb09a' : '#bfefff', 2.6);
+      this.world.emit('forkChosen', { fork: f.id, kind: f.kind, lane: l.side, x: p.x });
+      this.save();
+      return;
+    }
+  }
+
+  /** the moment of choosing: the board stamps, bars rise across the other ways, the camera leans in, the current pulls */
+  private commitBeat(f: ForkPlan, i: number) {
+    const l = f.lanes[i], p = this.player;
+    this.level?.choose(f.id, i);
+    const dir = l.side === 'upper' ? { x: 1, y: 0.25 } : l.side === 'lower' ? { x: 0.55, y: -0.8 } : { x: 0, y: -1 };
+    this.beat = { t: 0, x: p.x + dir.x * 3, y: p.y + dir.y * 3, fx: dir.x, fy: dir.y, pull: l.side === 'pit' ? 0 : 1 };
+    this.game.timeScale = 0.55;
+    this.after(0.3, () => { this.game.timeScale = 1; });
+    this.game.addShake(0.2);
+    audio.play('k_bong', { vol: 0.45 }); audio.play('thud_heavy1', { vol: 0.35 }); audio.play('flood_rush1', { vol: 0.3 });
+    this.world.fx.burst('bubble', p.x, p.y, 14, 2.2);
+    if (l.side === 'pit') this.hud.l.title(l.name, l.note, '#bfefff', 2.4);
+  }
+  private updateBeat(dt: number) {
+    const b = this.beat;
+    if (!b) return;
+    b.t += dt;
+    // the current takes you a little way into the lane you chose
+    if (b.pull && b.t < 0.9 && this.phase === 'play') this.player.applyForce(b.fx * 16 * (1 - b.t / 0.9), b.fy * 16 * (1 - b.t / 0.9));
+    if (b.t > 1.3) this.beat = null;
+  }
+
+  /** an undecided fork whose choice the player is at: the camera frames its lanes */
+  private forkView(): ForkPlan['view'] | null {
+    const p = this.player;
+    for (const f of this.plan.forks) {
+      if (f.chosen >= 0 || (f.kind === 'end' && !this.level?.exitOpen && p.x < f.x - 2)) continue;
+      const v = f.view;
+      if (p.x > v.x0 && p.x < v.x1 && p.y > v.y0 - 4 && p.y < v.y1 + 6) return v;
+    }
+    return null;
+  }
+
+  /**
+   * no map, so the water tells you: a dead end (the far end past the pits), a lane sealed behind you, the grates
+   * still shut before the boss, a way that only goes home
+   */
+  private wayPrompt(): Prompt | null {
+    const p = this.player, plan = this.plan, lvl = this.level!;
+    if (!p.alive || this.phase !== 'play' || this.fight) return null;
+    const toward = (dir: number) => p.vx * dir > 0.4 || (Math.abs(p.vx) < 0.4 && p.facing === dir);
+    for (const d of plan.dead) if (p.x > d.x0 && p.x < d.x1 && p.y > d.y0 && p.y < d.y1 && toward(d.dir)) return { key: '', label: d.say, at: this.anchor(Math.min(d.x1 - 3.2, p.x + d.dir * 2), p.y + 1.4), bad: true };
+    for (const f of plan.forks) {
+      if (f.chosen < 0) continue;
+      for (const [i, l] of f.lanes.entries()) {
+        if (i === f.chosen) continue;
+        for (const sl of l.seals) {
+          const dir = Math.sign(sl.x - p.x) || 1;
+          if (Math.abs(p.x - sl.x) < 2.6 && p.y > sl.floor - 1 && p.y < Math.min(sl.bodyTop, sl.top + 2) && toward(dir)) return { key: '', label: `SEALED: YOU TOOK ${f.lanes[f.chosen].name}`, at: this.anchor(sl.x, Math.min(p.y + 1.6, sl.top - 0.5)), bad: true };
+        }
+      }
+    }
+    if (!lvl.exitOpen) for (const ex of plan.exits) if (Math.abs(p.x - (ex.x0 + ex.x1) / 2) < 3.4 && p.y < ex.top + 3) return { key: '', label: 'GRATE SHUT: BEAT THE BOSS FIRST', at: this.anchor((ex.x0 + ex.x1) / 2, ex.top + 1.6), bad: true };
+    if (this.floorIdx === 0 && p.x < 4.5 && toward(-1)) return { key: '', label: 'HOME IS BEHIND YOU: THE DEEP IS THAT WAY', at: this.anchor(6, p.y + 1.4) };
+    return null;
+  }
 
   /** climb the rope: surface with the pack (a victory) */
   private surface() {
@@ -1266,7 +1414,7 @@ export class DungeonScreen implements Screen {
     return {
       outcome: won ? 'victory' : 'dead', areaName: AREA_NAME(area), areaIdx: this.floorIdx, wave: this.tally.rooms, mastery: this.cfg.mastery,
       items, killer: won ? null : this.killer, tally: { ...this.tally },
-      won, floor: this.floorIdx + 1, floors: this.floors.length, kills: this.tally.kills,
+      won, floor: this.floorIdx + 1, floors: Math.max(this.planned, this.floorIdx + 1), kills: this.tally.kills,
       maxDepth: Math.round(this.maxDepth), record: Math.round(this.maxDepth) > this.recordBefore,
       packLost: won ? [] : items, mailed: [...this.mailed], broughtHome: won ? items : [],
       far: Math.round(this.farNow()), home: [], summaryShown: false,
@@ -1341,8 +1489,8 @@ export class DungeonScreen implements Screen {
 
   private quit() {
     // RESUME puts you back where you left (not at the last checkpoint) when you quit out of a fight
-    const p = this.player, ex = this.plan.exit;
-    if (!this.fight && this.phase === 'play' && p.alive && !(p.x > ex.x0 - 2 && p.x < ex.x1 + 2)) this.checkX = clamp(p.x, 2, this.plan.W - 2);
+    const p = this.player;
+    if (!this.fight && this.phase === 'play' && p.alive && !this.plan.exits.some((ex) => p.x > ex.x0 - 2 && p.x < ex.x1 + 2)) { this.checkX = clamp(p.x, 2, this.plan.W - 2); this.checkY = p.y; }
     this.save();
     this.paused = false;
     this.ended = true;
@@ -1361,7 +1509,8 @@ export class DungeonScreen implements Screen {
       v: 4, cfg: this.cfg, seed: this.seed, floors: [...this.floors], floorIdx: this.floorIdx, plan: this.plan, checkX: this.checkX,
       hp: this.player?.hp ?? this.run.hp, items: this.run.items.map((i) => ({ ...i })), nextUid: this.run.nextUid,
       pearls: this.run.coins, keys: this.keys, bombs: this.bombs, tally: { ...this.tally }, mailed: [...this.mailed], loot,
-      areas: [...this.floors], areaIdx: this.floorIdx, planned: this.planned, maxDepth: Math.round(this.maxDepth), journey: this.journey,
+      areas: [...this.floors], areaIdx: this.floorIdx, planned: this.planned, maxDepth: Math.round(this.maxDepth),
+      routes: [...this.routes], checkY: this.checkY,
     };
     META.activeRun = s as unknown as typeof META.activeRun;
     saveMeta();
@@ -1444,6 +1593,7 @@ export class DungeonScreen implements Screen {
       return;
     }
     w.time += dt; this.run.time += dt; this.tally.time += dt;
+    this.frameDt = dt;
     this.fullPopT -= dt;
     for (const s of this.seq) s.t -= dt;
     const due = this.seq.filter((s) => s.t <= 0);
@@ -1469,15 +1619,21 @@ export class DungeonScreen implements Screen {
     for (const pr of this.props) pr.update(dt);
     w.emit('tick', { dt });
     if (this.phase === 'play') {
-      explore(this.plan, p.x);
       this.checkArenas();
+      this.checkForks();
       if (!this.fight) this.setTravelArenaThrottled(dt);
-      // the open exit pit pulls: a down-current sucks the blobfish in when it swims over it
-      const ex = this.plan.exit, ecx = (ex.x0 + ex.x1) / 2;
-      if (L.exitOpen && Math.abs(p.x - ecx) < 3.6 && p.y < ex.top + 3.5) p.applyForce((ecx - p.x) * 10, -12);
-      if (L.exitOpen && p.x > ex.x0 - 0.3 && p.x < ex.x1 + 0.3 && p.y < ex.top - 1.6) this.beginDescent();
-      if (L.exitOpen && Math.random() < dt * 14) this.world.fx.emit('bubble', ex.x0 + Math.random() * (ex.x1 - ex.x0), ex.top + Math.random() * 3, { n: 1, vy: -2.4, life: 1.1, size: 0.05 });
+      // the open exit pits pull: a down-current sucks the blobfish in when it swims over one (at a crossroads only
+      // right over the mouth, so you can swim across one pit to reach the next)
+      const multi = this.plan.exits.length > 1;
+      for (const [k, ex] of this.plan.exits.entries()) {
+        if (!L.exitOpen) break;
+        const ecx = (ex.x0 + ex.x1) / 2;
+        if (Math.abs(p.x - ecx) < (multi ? (ex.x1 - ex.x0) / 2 + 0.5 : 3.6) && p.y < ex.top + (multi ? 1.4 : 3.5)) p.applyForce((ecx - p.x) * 10, -12);
+        if (p.x > ex.x0 - 0.3 && p.x < ex.x1 + 0.3 && p.y < ex.top - 1.6) { this.beginDescent(k); break; }
+        if (Math.random() < dt * 14) this.world.fx.emit('bubble', ex.x0 + Math.random() * (ex.x1 - ex.x0), ex.top + Math.random() * 3, { n: 1, vy: -2.4, life: 1.1, size: 0.05 });
+      }
     }
+    this.updateBeat(dt);
     if (this.desc) this.updateDescent(dt);
     this.updateDepth(dt);
     if (this.fight) this.updateFight(dt);
@@ -1490,7 +1646,7 @@ export class DungeonScreen implements Screen {
       if (inp.hit('bag')) this.openBag();
     }
     const chestPrompt = this.mail ? null : this.updateChests();
-    let prompt = this.mail ? null : this.interact() ?? chestPrompt;
+    let prompt = this.mail ? null : this.interact() ?? chestPrompt ?? this.wayPrompt();
     this.hintT -= dt;
     if (!prompt && this.hintT > 0) prompt = { key: this.hintKey, label: this.hintText };
     // ---- camera, water, fx
@@ -1579,23 +1735,47 @@ export class DungeonScreen implements Screen {
     return { m, floorTop: top, floorBottom: bottom, floorMax: this.floorMax, runMax: this.maxDepth, record: Math.max(rec, this.recordBefore), zone: zoneOf(m), deeper: this.floorIdx >= this.planned, descending: !!this.desc && this.desc.stage !== 'arrive' };
   }
 
+  private lastFit = 16.5;
+  private frameDt = 1 / 60;
+  private lastView: ForkPlan['view'] | null = null;
   private camTarget(snap = 0): THREE.Vector3 {
     const p = this.player, plan = this.plan, f = this.fight;
     const fov = (this.camera.fov * Math.PI) / 360;
     // at a vista (a big drop-off) the camera eases back and looks down over the edge
     const nearVista = !f && plan.vistas.some((vx) => Math.abs(p.x - vx) < 7 && p.y > shelfAt(plan, vx + 6) + 1);
     this.vistaK = damp(this.vistaK, nearVista ? 1 : 0, 1.2, 1 / 60);
-    const dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5 + this.vistaK * 4.5;
+    // at an undecided fork the camera eases back to show every lane (the choice is something you can SEE)
+    const fv = !f && !this.desc ? this.forkView() : null;
+    this.forkK = snap ? (fv ? 1 : 0) : damp(this.forkK, fv ? 1 : 0, 1.4, this.frameDt);
+    let fit = 0;
+    if (fv) fit = clamp(Math.max((fv.x1 - fv.x0) / 2 / (Math.tan(fov) * this.camera.aspect), (fv.y1 - fv.y0) / 2 / Math.tan(fov)), 16.5, 24);
+    // the moment of choosing: a quick lean in toward the lane
+    const bt = this.beat ? Math.sin(Math.PI * Math.min(1, this.beat.t / 1.1)) : 0;
+    let dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5 + this.vistaK * 4.5;
+    if (fv || this.forkK > 0.01) dist = Math.max(dist, 16.5 + (Math.max(fit, this.lastFit) - 16.5) * this.forkK);
+    if (fv) this.lastFit = fit;
+    dist -= bt * 2.6;
     this.camDist = snap ? dist : damp(this.camDist, dist, 2, 1 / 60);
     const halfV = this.camDist * Math.tan(fov), halfW = halfV * this.camera.aspect;
     let tx = p.x + this.lookAhead + this.vistaK * 3, ty = p.y + clamp(p.vy * 0.2, -1.2, 1.2) - this.vistaK * 2.5;
+    if (fv) { this.lastView = fv; }
+    if (this.forkK > 0.01 && this.lastView) {
+      const v = this.lastView, k = this.forkK * 0.85;
+      tx = tx + ((v.x0 + v.x1) / 2 - tx) * k; ty = ty + ((v.y0 + v.y1) / 2 - ty) * k;
+      // ...but the blobfish never leaves the frame
+      tx = clamp(tx, p.x - halfW + 3, p.x + halfW - 3); ty = clamp(ty, p.y - halfV + 2, p.y + halfV - 2);
+    }
+    if (this.beat) { tx += (this.beat.x - tx) * bt * 0.3; ty += (this.beat.y - ty) * bt * 0.3; }
     // deeper floors keep the camera under the dark ceiling; descending, it follows the blobfish down the shaft
-    let x0 = 0, x1 = plan.W, y0 = plan.exit.bottom - 4, y1 = plan.top > -2.9 ? plan.top + 1.8 : plan.top - 0.3;
+    let x0 = 0, x1 = plan.W, y0 = Math.min(...plan.exits.map((e) => e.bottom)) - 4, y1 = plan.top > -2.9 ? plan.top + 1.8 : plan.top - 0.3;
     if (f) { x0 = f.arena.x0 - 1.5; x1 = f.arena.x1 + 1.5; y0 = f.arena.floor - 1.5; y1 = f.arena.top + 1.8; }
     tx = x1 - x0 > halfW * 2 ? clamp(tx, x0 + halfW, x1 - halfW) : (x0 + x1) / 2;
     // keep the seabed under the frame and don't show much sky
     const floorHere = this.level!.terrain.floorAt(clamp(tx, 0, plan.W));
-    const lo = Math.max(y0, Math.min(floorHere, p.y - 2)) + halfV - 2.8, hi = y1 - halfV + 0.6;
+    let lo = Math.max(y0, Math.min(floorHere, p.y - 2)) + halfV - 2.8;
+    const hi = y1 - halfV + 0.6;
+    // framing a fork: let the frame drop to show the lower lane too (a cave under a lid, the pits' mouths)
+    if (this.forkK > 0.01 && this.lastView) lo += (Math.max(y0, this.lastView.y0) + halfV - 0.6 - lo) * this.forkK;
     if (this.desc && this.desc.stage !== 'surface') return new THREE.Vector3(clamp(tx, x0 + halfW, x1 - halfW), p.y - 1.5, 0);
     ty = lo < hi ? clamp(ty, lo, hi) : (lo + hi) / 2;
     return new THREE.Vector3(tx, ty, 0);
@@ -1629,23 +1809,24 @@ export class DungeonScreen implements Screen {
     const combat = (p as unknown as { combat?: { hud?: () => PlayerCombatHud } }).combat?.hud?.() ?? null;
     const cells = packCells(this.run);
     const boss = this.fight?.boss && !this.fight.bossDone ? this.fight.boss.bar() : null;
-    // metres from home: agent L shows it next to the depth gauge (data.far; also strip.far)
+    // metres from home: shown next to the depth gauge (data.far). v6: no strip map; the nav plate gets the place
+    // (data.place: the area, the stage and the route; set loosely so it works whether HudData declares it or not)
     const journey = { far: Math.round(this.farNow()) };
     this.tally.far = Math.max(this.tally.far ?? 0, journey.far);
-    return {
-      data: {
+    const data: DungeonHudState['data'] = {
         ...journey,
         hp: p.hp, maxHp: p.maxHp, combat, mana: p.mana, maxMana: p.maxMana,
         pearls: this.run.coins, keys: this.keys, bombs: this.bombs,
         pack: { used: cells.used, total: cells.total, full: cells.free <= 0 },
-        strip: journeyStrip(this.journey, this.plan, p.x, p.y, { floors: this.floors.length, revealAll: this.dev?.get('reveal') === '1' }),
-
         boss, hidden: this.phase === 'done' || this.desc?.stage === 'surface',
         // the skills are a hand of 3D cards in L's HUD (the old 2D SkillBar overlay stays hidden)
         skills: p.skillHud(),
-      },
+    };
+    Object.assign(data, { place: { name: AREA_NAME(this.floors[this.floorIdx]), floor: this.floorIdx + 1, floors: this.planned, route: this.plan.route !== 'main' ? routeOf(this.plan.route).note : '' } });
+    return {
+      data,
       prompt, paused: this.paused, mail: this.mail, depth: this.depthHud(),
-      where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()} · ${Math.round(this.farNow())} M FROM HOME · -${Math.round(this.depthNow())} M`,
+      where: `${AREA_NAME(this.floors[this.floorIdx]).toUpperCase()}${this.plan.route !== 'main' ? ` (${routeOf(this.plan.route).note})` : ''} · ${Math.round(this.farNow())} M FROM HOME · -${Math.round(this.depthNow())} M`,
     };
   }
 }

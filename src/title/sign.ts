@@ -1,7 +1,7 @@
 // The underwater signpost the title's travelling shot arrives at: an old waterlogged post planted in a rock
 // cairn, barnacled, wrapped in a kelp strand and rope, with
-//   - the TITLE PLANK on top: BLOBFISH in chunky weathered voxel letters (real 3D, painted cream / gold over a
-//     dark outline) and REEL REBELLION V-carved into the wood below (a real height-field normal map + paint),
+//   - the TITLE PLANK on top: BLOBFISH in glassy bubble letters (src/ui/text3d.ts bubbleWord: real 3D, jiggling)
+//     and REEL REBELLION V-carved into the wood below (a real height-field normal map + paint),
 //   - two carved ARROW BOARDS on iron pegs: NEW GAME (pointing on, to the right) and RESUME (pointing back home,
 //     to the left; greyed, dusty and silted over when there is no save),
 //   - a carved wooden GEAR nailed to the post (settings),
@@ -16,7 +16,7 @@ import { Px, hex, mix, type RGB } from '../gfx/px';
 import { psxMat, facet } from '../player/psx';
 import { Kit } from '../hideout/kit';
 import { glyphs, type FontName } from '../ui/pixel/font';
-import { Voxels } from '../gfx/voxel';
+import { bubbleWord, T3D } from '../ui/text3d';
 import { boulder, rockPage, KELP, BRASS, GLOWP } from './art';
 import { fbm, hash2, damp, clamp01, TAU } from '../core/math';
 
@@ -246,34 +246,10 @@ export class Signpost {
     const plankPoly: [number, number][] = [[-hw, -hh], [hw * 0.35, -hh], [hw * 0.42, -hh + 0.05], [hw * 0.5, -hh], [hw, -hh], [hw, hh - 0.18], [hw - 0.13, hh - 0.05], [hw - 0.3, hh], [-hw, hh]];
     const pm = new THREE.Mesh(slabGeo(plankPoly, PLANK.d), [plankM, plankSide]);
     pm.castShadow = true; pm.receiveShadow = true; plank.add(pm);
-    // the voxel letters
-    const big = textMask('BLOBFISH', 'big', 0);
-    const OUT = 1, VW = big.w + OUT * 2, VH = big.h + OUT * 2, VD = 4;
-    const V = new Voxels(VW, VH, VD);
-    const fillTop = hex('#fff2c8'), fillBot = hex('#f0a040'), outC = hex('#4a140a'), chipC = hex('#7a5a34');
-    for (let y = 0; y < VH; y++) for (let x = 0; x < VW; x++) {
-      const fx = x - OUT, fy = y - OUT;
-      const ink = on(big, fx, fy);
-      const edge = !ink && [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].some(([dx, dy]) => on(big, fx + dx, fy + dy));
-      if (!ink && !edge) continue;
-      const vy = VH - 1 - y;
-      if (edge) { for (let z = 0; z < 2; z++) V.set(x, vy, z, (outC[0] << 16) | (outC[1] << 8) | outC[2]); continue; }
-      const t = fy / Math.max(1, big.h - 1);
-      let c = mix(fillTop, fillBot, Math.min(1, t * 1.15));
-      const band = Math.floor(t * 4);
-      if (band === 0 && fx % 7 === 3) c = mix(c, hex('#ffffff'), 0.4);
-      const chip = hash2(fx >> 1, fy >> 1, 31) < 0.05;
-      if (chip) c = mix(c, chipC, 0.45);
-      if (hash2(fx, fy, 37) < 0.05) c = mix(c, hex('#4a6a2c'), 0.6); // algae specks
-      const n = (c[0] << 16) | (c[1] << 8) | c[2];
-      const depth = chip ? VD - 1 : VD;
-      for (let z = 0; z < depth; z++) V.set(x, vy, z, z < 2 ? (outC[0] << 16) | (outC[1] << 8) | outC[2] : n);
-    }
-    const vs = PLANK.w * 0.84 / VW;
-    const vg = V.mesh(vs);
-    const letters = new THREE.Mesh(vg, psxMat(null, { vertexColors: true, rough: 0.7 }));
-    letters.position.set(-0.02, hh * 0.02, PLANK.d / 2 - 0.005 + (VD * vs) / 2);
-    letters.castShadow = true;
+    // the title: BLOBFISH in glassy bubble letters (src/ui/text3d.ts), puffed up proud of the upper board
+    const letters = bubbleWord('BLOBFISH', T3D.logo, 0.5);
+    letters.scale.setScalar((PLANK.w * 0.84) / Math.max(0.01, letters.userData.width as number));
+    letters.position.set(-0.02, hh * 0.47, PLANK.d / 2 + 0.06);
     plank.add(letters);
     // barnacles on the plank corners
     const bk = new Kit();

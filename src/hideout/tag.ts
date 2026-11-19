@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { drawText, measure, lineH, wrap, type FontName } from '../ui/pixel/font';
 import { PixelUI, drawCard, cardLayout } from '../ui/pixel/ui';
-import { KIT, type SkinKind } from '../ui/pixel/skins';
+import { KIT, skin, type SkinKind } from '../ui/pixel/skins';
 import { easeOutBack } from '../core/math';
 
 export interface TagLine { text: string; font?: FontName; color?: string; gap?: number; key?: string }
@@ -37,8 +37,8 @@ export function drawTag(ui: PixelUI, lines: TagLine[], style: TagStyle, maxW: nu
 }
 
 /**
- * paint lines onto a fresh canvas (classic fonts, for 3D surfaces: TableCard): a flat cream card with an ink outline
- * and a card edge (or a dark card for wood / slate). No texture noise.
+ * paint lines onto a fresh canvas (classic fonts, for 3D surfaces: TableCard): the kit's 1x seaweed-paper card (fibres,
+ * a card edge, a pressed sprig) or its rope-trimmed dark-water card for wood / slate, with the text set on it.
  */
 export function paintTag(lines: TagLine[], style: TagStyle, maxW = 150, pad = 6): HTMLCanvasElement {
   const dark = style === 'wood' || style === 'slate';
@@ -54,10 +54,8 @@ export function paintTag(lines: TagLine[], style: TagStyle, maxW = 150, pad = 6)
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d')!;
   const fill = (x: number, yy: number, ww: number, hh: number, col: string) => { c.fillStyle = col; c.fillRect(x, yy, ww, hh); };
-  fill(1, 0, W - 2, H, KIT.ink); fill(0, 1, W, H - 2, KIT.ink);
-  fill(1, 1, W - 2, H - 2, dark ? KIT.oil[1] : KIT.cream[2]);
-  fill(1, 1, W - 2, 1, dark ? KIT.teal[3] : KIT.cream[3]);
-  fill(1, H - 3, W - 2, 2, dark ? KIT.oil[0] : KIT.cream[0]);
+  c.imageSmoothingEnabled = false;
+  c.drawImage(skin(dark ? 'dark' : 'paper', W, H), 0, 0);
   for (const r of rows) {
     let x = pad;
     if (r.key) {

@@ -56,7 +56,7 @@ export class SettingsPanel {
     hx += ui.hint('LMB', 'attack', hx, yy);
     ui.hint('RMB', 'skill', hx, yy);
     yy += 16; hx = x + 14;
-    hx += ui.hint('SPC', 'dash', hx, yy);
+    hx += ui.hint('SHIFT', 'dash', hx, yy);
     hx += ui.hint('E', 'use', hx, yy);
     ui.hint('TAB', 'bag', hx, yy);
     if (ui.button('set:reset', 'RESET SAVE', x + 12, y + h - 32, 96, 22, { style: 'red' })) { this.confirm = true; this.arm = 0; }

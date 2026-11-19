@@ -15,7 +15,8 @@ import { attackPlayer } from './resolve';
 import { callout } from './feel';
 void callout;
 import { kitMat } from '../humans/diveGear';
-import { band, nz } from '../humans/fabric';
+import { band } from '../humans/fabric';
+import { buildMantisModel } from '../fish/mantis';
 import { clamp, damp, segDist } from '../core/math';
 
 const R = (a: number, b: number) => a + Math.random() * (b - a);
@@ -201,53 +202,10 @@ const M_PUNCH: MoveDef = { id: 'punch', windup: 0.5, active: 0.08, recover: 0.55
 const M_PUNCH2: MoveDef = { id: 'punch2', windup: 0.28, active: 0.08, recover: 0.7, dmg: 1.5, kind: 'crush', knock: 10, guardDmg: 35 };
 const M_CAVITY: MoveDef = { id: 'cavity', windup: 0.75, active: 0.12, recover: 0.9, dmg: 2, unblockable: true, kind: 'explosion', knock: 8, tellAt: 0.38 };
 
-const shellPaint = () => kitMat('mantisShell', 32, 32, (x, y) => {
-  const seg = (x >> 3) & 1;
-  let c: [number, number, number] = y < 10 ? [40, 170, 120] : y < 22 ? [70, 200, 90] : [230, 120, 40];
-  if (seg && y < 22) c = [30, 140, 150];
-  if (x % 8 === 0) c = [20, 60, 50];
-  if (y > 26) c = [240, 70, 60];
-  return band(c, 0.9 + (nz(x, y, 6, 4) - 0.5) * 0.15 + (y < 3 ? 0.2 : 0), x, y, 0.06);
-}, { rough: 0.35 });
-const clubPaint = () => kitMat('mantisClub', 16, 16, (x, y) => band(x > 10 ? [250, 110, 160] : [240, 150, 40], 0.9 + (y < 4 ? 0.2 : 0), x, y, 0.08), { rough: 0.3 });
-const eyePaint = () => kitMat('mantisEye', 16, 16, (x, y) => (y === 7 || y === 8 ? [20, 20, 24] : y < 7 ? [80, 200, 255] : [255, 210, 90]), { rough: 0.15, emissive: 0.3 });
-
-/** the mantis shrimp mesh (nose +x): a jewel-bright segmented body, eye stalks, antennae and two folded clubs */
+/** the mantis shrimp mesh (nose +x): a jewel-bright segmented body, eye stalks, antennae and two folded clubs
+ *  (built in src/fish/mantis.ts: a peacock mantis shrimp on one painted page) */
 export function buildMantis(): { body: THREE.Group; clubs: THREE.Group[]; mats: THREE.MeshStandardMaterial[] } {
-  const body = new THREE.Group(), clubs: THREE.Group[] = [], mats: THREE.MeshStandardMaterial[] = [];
-  const self = { body, clubs, mats };
-  // per-instance clones of the painted materials so the hit / tell flash is this shrimp's alone
-  const S = (shellPaint() as THREE.MeshStandardMaterial).clone(), C = (clubPaint() as THREE.MeshStandardMaterial).clone(), E = eyePaint();
-  S.emissive = new THREE.Color(0, 0, 0); C.emissive = new THREE.Color(0, 0, 0);
-  mats.push(S, C);
-  const mk = (g: THREE.BufferGeometry, m: THREE.Material, p: [number, number, number], s: [number, number, number], r: [number, number, number] = [0, 0, 0]) => { const me = new THREE.Mesh(g, m); me.position.set(...p); me.scale.set(...s); me.rotation.set(...r); me.castShadow = true; return me; };
-  const seg = new THREE.OctahedronGeometry(1, 1);
-  // six tapering segments, nose at +x, slightly arched; a tail fan
-  for (let i = 0; i < 6; i++) {
-    const t = i / 5;
-    body.add(mk(seg, S, [0.42 - t * 0.85, 0.06 - Math.pow(t - 0.4, 2) * 0.25, 0], [0.12, 0.13 - t * 0.03, 0.15 - t * 0.04], [0, 0, -0.15 + t * 0.3]));
-  }
-  for (const s of [1, -1]) body.add(mk(new THREE.ConeGeometry(0.13, 0.28, 4), C, [-0.5, -0.05, s * 0.06], [1, 1, 0.3], [0, 0, Math.PI / 2 + s * 0.25]));
-  // eyes on stalks
-  for (const z of [0.05, -0.05]) {
-    body.add(mk(new THREE.CylinderGeometry(0.015, 0.02, 0.14, 4), S, [0.52, 0.17, z], [1, 1, 1], [0, 0, -0.4]));
-    body.add(mk(new THREE.IcosahedronGeometry(0.05, 1), E, [0.56, 0.25, z], [1, 1.3, 1]));
-  }
-  // antennae
-  for (const z of [0.04, -0.04]) body.add(mk(new THREE.CylinderGeometry(0.006, 0.01, 0.5, 3), C, [0.72, 0.22, z], [1, 1, 1], [0, 0, -1.0]));
-  // the raptorial clubs, folded under the head (animated)
-  for (const z of [0.09, -0.09]) {
-    const g = new THREE.Group(); g.position.set(0.42, -0.08, z);
-    g.add(mk(new THREE.BoxGeometry(0.22, 0.05, 0.05), S, [0.1, 0, 0], [1, 1, 1]));
-    const fore = new THREE.Group(); fore.position.set(0.2, 0, 0);
-    fore.add(mk(new THREE.IcosahedronGeometry(0.06, 0), C, [0.1, 0, 0], [1.6, 1, 1]));
-    g.add(fore);
-    body.add(g); clubs.push(g);
-  }
-  // little walking legs
-  for (let i = 0; i < 3; i++) for (const z of [0.07, -0.07]) body.add(mk(new THREE.CylinderGeometry(0.01, 0.012, 0.16, 3), C, [0.05 - i * 0.12, -0.15, z], [1, 1, 1], [z > 0 ? 0.3 : -0.3, 0, 0.2]));
-  body.scale.setScalar(1.45);
-  return self;
+  return buildMantisModel();
 }
 
 export class CombatMantis extends Foe {

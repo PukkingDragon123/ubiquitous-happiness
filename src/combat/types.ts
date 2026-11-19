@@ -3,6 +3,40 @@
 // levels (agent J: continuous side-scrolling floors with arena-lock encounters and roaming groups).
 import type { Entity, World, DamageKind } from '../game/types';
 
+// ------------------------------------------------------------------ health as HP (v6)
+/**
+ * Health is shown as HIT POINTS everywhere the player reads it (the HUD, heal pops, item stat text, the shop, the run
+ * summary). Internally the player's hp / maxHp stay in their old small units (one unit = the old half heart; a new
+ * blobfish has 6), so balance code is untouched: every displayed number is units x HP_PER.
+ *   hpOf(6) -> 60      hpText(2) -> '20 HP'      hpDelta(-1) -> '-10 HP'
+ */
+export const HP_PER = 10;
+/** internal health units -> displayed HP */
+export function hpOf(units: number): number { return Math.round(units * HP_PER); }
+/** '60 HP' */
+export function hpText(units: number): string { return `${hpOf(units)} HP`; }
+/** '+20 HP' / '-10 HP' */
+export function hpDelta(units: number): string { const v = hpOf(units); return `${v > 0 ? '+' : ''}${v} HP`; }
+
+/**
+ * rewrite old heart wording in a stat / help line as HP: '+1 Heart' -> '+20 Max HP' (a heart was 2 units),
+ * 'heal half a heart' -> 'heal 10 HP', '2 half-hearts' -> '20 HP'. For text built elsewhere that still says hearts.
+ */
+export function hpify(s: string): string {
+  return s
+    .replace(/\bhalf an? heart\b/gi, `${hpOf(1)} HP`)
+    .replace(/([+-]?)(\d+(?:\.\d+)?) half[- ]hearts?\b/gi, (_m, sg: string, n: string) => `${sg}${hpOf(Number(n))} HP`)
+    .replace(/([+-])(\d+(?:\.\d+)?) (?:max )?hearts?\b/gi, (_m, sg: string, n: string) => `${sg}${hpOf(Number(n) * 2)} Max HP`)
+    .replace(/(\d+(?:\.\d+)?) hearts?\b/gi, (_m, n: string) => `${hpOf(Number(n) * 2)} HP`);
+}
+
+/**
+ * The heal item (v6): HEALING CLAMS. A pink clam with a glowing heal-jelly inside: press the HEAL key to crack one
+ * open and slurp it. Charges refill every floor. (Old names: "kelp tea" flasks / "elixir"; the fields on
+ * PlayerCombatHud keep their `flasks` names for API compatibility.)
+ */
+export const HEAL_ITEM = { name: 'Healing Clam', plural: 'Healing Clams', short: 'CLAM', verb: 'HEAL', key: 'R', empty: 'NO CLAMS LEFT' } as const;
+
 /** an arena-lock box (side view): walls at x0 / x1, the seabed at `floor`, the ceiling (or water top) at `top` */
 export interface Arena { x0: number; x1: number; floor: number; top: number }
 
@@ -104,9 +138,9 @@ export interface PlayerCombatHud {
   stamina: number; staminaMax: number;
   /** seconds until stamina regenerates (0 = regenerating) */
   staminaDelay: number;
-  /** flask charges left / max ("kelp tea") */
+  /** HEALING CLAM charges left / max (HEAL_ITEM; the field keeps its old "flask" name) */
   flasks: number; flasksMax: number;
-  /** 0..1 progress of the current drink (0 = not drinking) */
+  /** 0..1 progress of eating the current clam (0 = not healing) */
   drinking: number;
   /** 'idle' | 'parry' (window open) | 'block' | 'riposte' (next attack crits) | 'guardBroken' */
   guard: 'idle' | 'parry' | 'block' | 'riposte' | 'guardBroken';

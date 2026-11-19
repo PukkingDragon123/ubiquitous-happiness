@@ -33,7 +33,16 @@ function mesh(g: THREE.BufferGeometry, m: THREE.Material, cast = true) {
 }
 /** dispose an instance's geometries (materials are shared) */
 export function disposeModel(o: THREE.Object3D) {
-  o.traverse((c) => { const m = c as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); const mt = m.material as THREE.Material; if (!mt.userData?.shared) mt.dispose(); } });
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.geometry.dispose();
+    const mt = m.material as THREE.MeshStandardMaterial;
+    if (mt.userData?.shared) return;
+    // a texture painted for this one instance (a sign's board face) goes with it
+    for (const t of [mt.map, mt.emissiveMap]) if (t?.userData?.own) t.dispose();
+    mt.dispose();
+  });
 }
 
 // ------------------------------------------------------------------ pages
@@ -571,4 +580,248 @@ export function signpostModel(boards: { text: string; dir: -1 | 0 | 1 }[], lante
     for (const dy of [0.13, -0.13]) { const cap = mesh(lpCyl(0.09, 0.05, 6), brass); cap.position.set(0.36, H - 0.25 + dy, 0); g.add(cap); }
   }
   return g;
+}
+
+// ------------------------------------------------------------------ v6 crossroads signs
+/** which way a crossroads board points: left / right, up-right, down-right, straight down */
+export type SignDir = -1 | 0 | 1 | 'ur' | 'dr' | 'down';
+export type SignIconKind = 'chest' | 'bigchest' | 'locked' | 'pearls' | 'mats' | 'post' | 'shop' | 'key';
+/** one board of a crossroads sign: the place, its route in two words, the danger (skulls / a giant) and the reward */
+export interface SignBoardSpec { title: string; note?: string; danger?: number; giant?: boolean; icons?: SignIconKind[]; dir: SignDir; tint?: string; hang?: -1 | 1 }
+
+// little painted icons for the boards (one char = one sign pixel; ' ' clear). An outline is added round each.
+const ICONS: Record<string, { rows: string[]; pal: Record<string, string> }> = {
+  skull: { rows: [' BBBBB ', 'BBBBBBB', 'BkkBkkB', 'BkkBkkB', 'BBBkBBB', ' BbBbB ', ' BBBBB '], pal: { B: '#f2ead4', b: '#a89c80', k: '#1a0c06' } },
+  giant: { rows: ['  GGG  ', ' GwwwG ', ' GwwwG ', '  GGG  ', ' GGGGG ', 'GGGGGGG', 'G GGG G', 'G GGG G', '  G G  ', ' GG GG '], pal: { G: '#7a1c14', w: '#9fd0e0' } },
+  chest: { rows: [' OOOOOO ', 'OooooooO', 'OYYYYYYO', 'OooYYooO', 'OooooooO', 'OOOOOOOO'], pal: { O: '#4a2410', o: '#b0682c', Y: '#e8b440' } },
+  bigchest: { rows: [' s  s  s ', ' YYYYYYY ', 'YyyyyyyyY', 'YWWWWWWWY', 'YyyyRyyyY', 'YyyyyyyyY', 'YYYYYYYYY'], pal: { Y: '#8a5a10', y: '#f0b828', W: '#fff4b0', R: '#d82a3a', s: '#fff8c0' } },
+  locked: { rows: [' OOOOOO   ', 'OooooooO  ', 'OYYYYYYO  ', 'OooooooO g', 'OooooooOggg', 'OOOOOOOOgkg', '        ggg'], pal: { O: '#4a2410', o: '#b0682c', Y: '#e8b440', g: '#9a9aa8', k: '#1a1a20' } },
+  pearls: { rows: [' hW   hW   hW ', 'hWWW hWWW hWWW', 'WWWs WWWs WWWs', ' Ws   Ws   Ws '], pal: { h: '#ffffff', W: '#efe6da', s: '#a8987e' } },
+  mats: { rows: ['   RR   ', '  RRRR  ', ' RRRRRR ', 'RRRRRRRR', ' wwwwww ', ' wdwwkw ', ' wwwwkw ', ' wwwwkw '], pal: { R: '#c8402a', w: '#ecdcb4', d: '#5ab0e0', k: '#5a3214' } },
+  post: { rows: ['CCCCCCCCC', 'CcCCCCCcC', 'CCcCCCcCC', 'CCCcRcCCC', 'CCCCRCCCC', 'CCCCCCCCC'], pal: { C: '#f4ead0', c: '#a8906a', R: '#c8302a' } },
+  shop: { rows: ['  kkk  ', ' k   k ', 'bbbbbbb', 'bYbbbYb', 'bbbYbbb', 'bYbbbYb', 'bbbbbbb'], pal: { k: '#5a3214', b: '#8a5a2a', Y: '#f2d060' } },
+  key: { rows: [' YY     ', 'YyYYYYYY', ' YY  Y Y'], pal: { Y: '#e8b440', y: '#4a2a08' } },
+};
+// chunky carved arrows (the dark cut; the lit lip is offset)
+const ARROWS: Record<string, string[]> = {
+  right: ['    X    ', '    XX   ', 'XXXXXXX  ', 'XXXXXXXX ', 'XXXXXXX  ', '    XX   ', '    X    '],
+  left: ['    X    ', '   XX    ', '  XXXXXXX', ' XXXXXXXX', '  XXXXXXX', '   XX    ', '    X    '],
+  ur: ['  XXXXXX', '   XXXXX', '    XXXX', '   XXXXX', '  XXX XX', ' XXX   X', 'XXX     ', 'XX      '],
+  dr: ['XX      ', 'XXX     ', ' XXX   X', '  XXX XX', '   XXXXX', '    XXXX', '   XXXXX', '  XXXXXX'],
+  down: ['  XXX  ', '  XXX  ', '  XXX  ', '  XXX  ', 'XXXXXXX', ' XXXXX ', '  XXX  ', '   X   '],
+};
+// art pixels are drawn at a whole number of canvas px: icons 3 (1.5 sign px), arrows 4 (2 sign px), so they stay crisp
+const ICON_PX = 3, ARROW_PX = 4;
+const iconCols = (k: string) => Math.max(...(ICONS[k]?.rows ?? ['']).map((r) => r.length));
+/** an icon's footprint in sign px */
+const iconW = (k: string) => Math.ceil(((iconCols(k) + 2) * ICON_PX) / 2);
+const iconH = (k: string) => Math.ceil((((ICONS[k]?.rows.length ?? 0) + 2) * ICON_PX) / 2);
+function paintIcon(x: CanvasRenderingContext2D, k: string, lx: number, ly: number, S: number) {
+  const ic = ICONS[k]; if (!ic) return;
+  const P = ICON_PX, X0 = lx * S + P, Y0 = ly * S + P;
+  const on = (cx: number, cy: number) => cy >= 0 && cy < ic.rows.length && cx >= 0 && cx < ic.rows[cy].length && ic.rows[cy][cx] !== ' ';
+  // the outline first (a dark cut round the shape), then the pixels
+  x.fillStyle = '#2a140a';
+  for (let cy = -1; cy <= ic.rows.length; cy++) for (let cx = -1; cx <= iconCols(k); cx++) {
+    if (on(cx, cy)) continue;
+    if (on(cx - 1, cy) || on(cx + 1, cy) || on(cx, cy - 1) || on(cx, cy + 1)) x.fillRect(X0 + cx * P, Y0 + cy * P, P, P);
+  }
+  ic.rows.forEach((row, cy) => { for (let cx = 0; cx < row.length; cx++) { const ch = row[cx]; if (ch === ' ') continue; x.fillStyle = ic.pal[ch] ?? '#ff00ff'; x.fillRect(X0 + cx * P, Y0 + cy * P, P, P); } });
+}
+const arrowW = (k: string) => (ARROWS[k]?.[0].length ?? 0) * ARROW_PX / 2;
+const arrowH = (k: string) => (ARROWS[k]?.length ?? 0) * ARROW_PX / 2;
+function paintArrow(x: CanvasRenderingContext2D, k: string, lx: number, ly: number, S: number) {
+  const rows = ARROWS[k]; if (!rows) return;
+  const P = ARROW_PX;
+  for (const [dx, dy, col] of [[2, 2, '#e8c898'], [0, 0, '#2a140a']] as const) {
+    x.fillStyle = col;
+    rows.forEach((row, cy) => { for (let cx = 0; cx < row.length; cx++) if (row[cx] === 'X') x.fillRect(lx * S + cx * P + dx, ly * S + cy * P + dy, P, P); });
+  }
+}
+const arrowKey = (d: SignDir) => (d === -1 ? 'left' : d === 1 ? 'right' : d === 0 ? '' : d);
+
+/** a weathered plank face (the same hand-placed grain as the distance boards), painted at S canvas px per sign px */
+function plankCanvas(cw: number, ch: number, S: number, i: number, tint?: string): { cv: HTMLCanvasElement; x: CanvasRenderingContext2D } {
+  const W2 = cw * S, H2 = ch * S;
+  const cv = document.createElement('canvas'); cv.width = W2; cv.height = H2;
+  const x = cv.getContext('2d')!;
+  const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+  f(0, 0, W2, H2, '#3e2814');
+  f(2, 2, W2 - 4, H2 - 4, '#c49a68');
+  f(2, 2, W2 - 4, 3, '#dcb684'); f(2, H2 - 7, W2 - 4, 5, '#a87c4c');
+  for (let xx = 4; xx < W2 - 4; xx++) {
+    const g1 = Math.round(11 + Math.sin(xx * 0.07 + i) * 2), g2 = Math.round(H2 - 13 + Math.sin(xx * 0.05 + 2 + i) * 2), g3 = Math.round(H2 * 0.5 + Math.sin(xx * 0.04 + 5 + i) * 3);
+    if ((xx + i * 7) % 23 < 17) f(xx, g1, 1, 1, '#a87c4c');
+    if ((xx + i * 5) % 29 < 21) f(xx, g2, 1, 1, '#b08452');
+    if ((xx + i * 3) % 31 < 9) f(xx, g3, 1, 1, '#b48a58');
+  }
+  const kx = Math.round(W2 * (i % 2 ? 0.86 : 0.14)), ky = H2 - 10;
+  f(kx - 3, ky - 1, 7, 3, '#8a6038'); f(kx - 2, ky, 5, 1, '#5a3a1c'); f(kx - 4, ky - 2, 9, 1, '#b08452');
+  f(2, 2, 3, H2 - 4, '#d4ac78'); f(W2 - 5, 2, 3, H2 - 4, '#a87c4c');
+  for (const nx of [7, W2 - 9]) for (const ny of [8, H2 - 11]) { f(nx, ny, 3, 3, '#3a3a40'); f(nx, ny, 1, 1, '#d8d8e0'); f(nx + 2, ny + 2, 1, 1, '#1a1a20'); }
+  // where it leads, at a glance: a painted band in the destination's colour along the top edge
+  if (tint) { f(5, 5, W2 - 10, 2 * S, tint); f(5, 5 + 2 * S, W2 - 10, 1, '#2a140a'); }
+  return { cv, x };
+}
+function carve(x: CanvasRenderingContext2D, text: string, font: 'body' | 'small' | 'title', lx: number, ly: number, S: number, cut = '#2a140a', lipC = '#e8c898') {
+  const lip = glyphs(text, { font, color: lipC, shadow: null });
+  const c = glyphs(text, { font, color: cut, shadow: null });
+  x.imageSmoothingEnabled = false;
+  x.drawImage(lip.cv, lx * S + 1, ly * S + 1, lip.w * S, lip.h * S);
+  x.drawImage(c.cv, lx * S, ly * S, c.w * S, c.h * S);
+}
+function planeTex(cv: HTMLCanvasElement) {
+  // (no mipmaps: seen from a pulled-back camera the boards are only slightly minified, and mips blur the letters)
+  const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.SRGBColorSpace;
+  tex.userData.own = true;
+  return tex;
+}
+
+/** the wax seal stamped on the chosen board: a red disc with a raised rim and a tick */
+function stampTex(): THREE.Texture {
+  return ctex('dg.stamp', 24, 24, (p) => {
+    for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+      const d = Math.hypot(x - 11.5, y - 11.5) + (hash2(x, y, 7) > 0.85 ? 0.6 : 0);
+      if (d > 11.2) continue;
+      p.set(x, y, d > 9.8 ? '#7a1010' : d > 8.4 ? '#e0483a' : d > 7.6 ? '#9a1a16' : '#c8302a');
+    }
+    const tick = [[6, 12], [7, 13], [8, 14], [9, 15], [10, 14], [11, 13], [12, 12], [13, 11], [14, 10], [15, 9], [16, 8], [17, 7]];
+    for (const [x, y] of tick) { for (const [dx, dy] of [[0, 0], [0, -1], [1, 0]]) p.set(x + dx, y + dy, '#fff0d8'); p.set(x + 1, y + 1, '#5a0808'); }
+  });
+}
+
+export interface ForkSign {
+  root: THREE.Group;
+  /** the board pivots (stamp / board up) */
+  boards: THREE.Group[];
+  lamp: THREE.Mesh | null;
+  /** the chosen board: a wax seal stamps onto it */
+  stamp(i: number, instant?: boolean): void;
+  /** a way not taken: a plank nailed across the board */
+  cross(i: number, instant?: boolean): void;
+  update(dt: number): void;
+}
+
+/**
+ * A crossroads signpost: a thick post with one big board per way (the place in carved letters, a painted arrow,
+ * the danger as skulls and a giant's silhouette, the reward as icons, the route in small letters, a band in the
+ * destination's colour), an optional header plaque ("CROSSROADS") and a lantern. Boards are ~1/32 m per sign pixel,
+ * so they read from across the shelf.
+ */
+export function forkSignModel(specs: SignBoardSpec[], o: { header?: string; lantern?: boolean } = {}): ForkSign {
+  const root = new THREE.Group();
+  const wood = M('wood', woodPage, { rough: 0.9 });
+  const S = 2, PX = 1 / 36;
+  // measure each board: title line, then the danger / reward icon row, then the note
+  const lay = specs.map((b) => {
+    const arrow = arrowKey(b.dir);
+    const aw = arrow ? arrowW(arrow) + 5 : 0;
+    const tw = measure(b.title, 'body');
+    const nw = b.note ? measure(b.note, 'small') : 0;
+    const dz = Math.max(0, Math.min(3, b.danger ?? 0));
+    const iconsL = [...Array(dz).fill('skull'), ...(b.giant ? ['giant'] : [])] as string[];
+    const iconsR = (b.icons ?? []) as string[];
+    const rowW = iconsL.reduce((s, k) => s + iconW(k), 0) + (dz === 0 && !b.giant ? measure('SAFE', 'small') + 4 : 0) + 8 + iconsR.reduce((s, k) => s + iconW(k), 0);
+    const cw = Math.max(aw + Math.max(tw, nw, rowW) + 14, 60);
+    const rowH = Math.max(9, ...[...iconsL, ...iconsR].map((k) => iconH(k)));
+    const ch = Math.max(6 + 11 + 3 + rowH + (b.note ? 2 + 7 : 0) + 5, arrow ? arrowH(arrow) + 10 : 0);
+    return { b, arrow, aw, iconsL, iconsR, cw, ch, dz, rowH };
+  });
+  const H = 0.9 + lay.reduce((s, l) => s + l.ch * PX + 0.12, 0) + (o.header ? 0.62 : 0);
+  const pole = mesh(lpCyl(0.13, H, 6, 0.11), wood); pole.position.y = H / 2; root.add(pole);
+  const shell = M('barnacle', () => null, { color: '#d8ccb0', rough: 0.9 });
+  for (let k = 0; k < 7; k++) { const b = mesh(lpCone(0.06, 0.07, 5), shell); const a = k * 1.1; b.position.set(Math.cos(a) * 0.13, 0.1 + k * 0.07, Math.sin(a) * 0.13); b.rotation.set(Math.sin(a) * 1.4, 0, -Math.cos(a) * 1.4); root.add(b); }
+  // a rock at its foot (the post is planted, not floating)
+  const rock = mesh(lpSphere(0.32, 0), M('frame.reef', () => stonePage(AREA_STONE.reef, 'reef'), { rough: 0.95 })); rock.scale.set(1.3, 0.55, 1); rock.position.y = 0.05; root.add(rock);
+  let y = H - 0.12;
+  if (o.header) {
+    const tw = measure(o.header, 'body'), cw = tw + 18, ch = 19;
+    const { cv, x } = plankCanvas(cw, ch, S, 9);
+    carve(x, o.header, 'body', 9, 4, S, '#3a1c0a', '#f0d8a8');
+    const bw = cw * PX, bh = ch * PX;
+    const plank = mesh(chamferBox(bw, bh, 0.08, 0.02), wood); plank.position.set(0, y - bh / 2, 0.03); root.add(plank);
+    const htex = planeTex(cv);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.04, bh - 0.04), psxMat(htex, { rough: 0.9, emissive: '#ffe8c0', emissiveK: 0.5, emissiveMap: htex }));
+    face.position.set(0, y - bh / 2, 0.072); root.add(face);
+    y -= bh + 0.12;
+  }
+  const boards: THREE.Group[] = [];
+  const stamps: { m: THREE.Mesh; t: number; on: boolean }[] = [];
+  const crosses: { m: THREE.Mesh; t: number; on: boolean; board: THREE.Group; face: THREE.Mesh }[] = [];
+  const stampMat = new THREE.MeshBasicMaterial({ map: stampTex(), transparent: true, alphaTest: 0.5, color: new THREE.Color(1.15, 1.15, 1.15) });
+  lay.forEach((L, i) => {
+    const { cv, x } = plankCanvas(L.cw, L.ch, S, i, L.b.tint);
+    let cx = 6;
+    if (L.arrow) { paintArrow(x, L.arrow, cx, Math.round((L.ch - arrowH(L.arrow)) / 2), S); cx += L.aw; }
+    carve(x, L.b.title, 'body', cx, 6, S);
+    // the danger, left; the reward, right
+    let ix = cx - 1;
+    const iy = 6 + 11 + 3, rh = L.rowH;
+    if (!L.dz && !L.b.giant) { carve(x, 'SAFE', 'small', ix + 1, iy + Math.round((rh - 7) / 2), S, '#1e4a1a', '#cfe8a8'); ix += measure('SAFE', 'small') + 4; }
+    for (const k of L.iconsL) { paintIcon(x, k, ix, iy + Math.round((rh - iconH(k)) / 2), S); ix += iconW(k); }
+    let rx = L.cw - 6;
+    for (const k of [...L.iconsR].reverse()) { rx -= iconW(k); paintIcon(x, k, rx, iy + Math.round((rh - iconH(k)) / 2), S); }
+    if (L.b.note) carve(x, L.b.note, 'small', cx, iy + rh + 2, S, '#3a1c0a', '#ecd0a0');
+    const bw = L.cw * PX, bh = L.ch * PX;
+    const pivot = new THREE.Group();
+    // boards hang to the side they point (left boards left of the post, the rest to the right)
+    const side = L.b.hang ?? (L.b.dir === -1 ? -1 : L.b.dir === 0 ? 0 : 1);
+    const off = side * (bw / 2 - 0.2);
+    pivot.position.set(off, y - bh / 2, 0.02);
+    const plank = mesh(chamferBox(bw, bh, 0.08, 0.025), wood); pivot.add(plank);
+    const tex = planeTex(cv);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.04, bh - 0.04), psxMat(tex, { rough: 0.9, emissive: '#ffe8c0', emissiveK: 0.5, emissiveMap: tex }));
+    face.position.z = 0.042; pivot.add(face);
+    if (L.b.dir === 1 || L.b.dir === -1) {
+      const tip = new THREE.Shape(); tip.moveTo(0, -bh / 2); tip.lineTo(0.34, 0); tip.lineTo(0, bh / 2); tip.lineTo(0, -bh / 2);
+      const tg = new THREE.ExtrudeGeometry(tip, { depth: 0.08, bevelEnabled: false }); tg.translate(0, 0, -0.04);
+      const t = mesh(tg, wood); t.position.set(L.b.dir * bw / 2, 0, 0); if (L.b.dir < 0) t.rotation.y = Math.PI; pivot.add(t);
+    }
+    root.add(pivot); boards.push(pivot);
+    // the wax seal (hidden until stamped) and the plank nailed across (hidden until crossed)
+    const st = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), stampMat);
+    st.position.set(bw / 2 - 0.36, 0.02, 0.06); st.visible = false; pivot.add(st);
+    stamps.push({ m: st, t: 0, on: false });
+    const xb = mesh(chamferBox(bw * 0.95, 0.12, 0.05, 0.015), M('woodDark', woodPage, { rough: 0.95, color: '#6a5040' }));
+    xb.rotation.z = -Math.atan2(bh * 0.8, bw); xb.position.set(0, 0, 0.08); xb.visible = false; pivot.add(xb);
+    crosses.push({ m: xb, t: 0, on: false, board: pivot, face });
+    y -= bh + 0.12;
+  });
+  let lamp: THREE.Mesh | null = null;
+  if (o.lantern !== false) {
+    const brass = M('brass', brassPage, { rough: 0.35, metal: 0.35, emissive: '#2a1800', emissiveK: 0.3 });
+    const arm = mesh(new THREE.BoxGeometry(0.5, 0.06, 0.06), wood); arm.position.set(-0.25, H - 0.05, 0); root.add(arm);
+    lamp = new THREE.Mesh(lpSphere(0.13, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd890').multiplyScalar(2.2) }));
+    lamp.position.set(-0.45, H - 0.3, 0); lamp.name = 'lamp'; root.add(lamp);
+    for (const dy of [0.16, -0.16]) { const cap = mesh(lpCyl(0.11, 0.06, 6), brass); cap.position.set(-0.45, H - 0.3 + dy, 0); root.add(cap); }
+  }
+  const easeBack = (t: number) => { const c = 2.2; t = Math.min(1, t) - 1; return 1 + (c + 1) * t * t * t + c * t * t; };
+  return {
+    root, boards, lamp,
+    stamp(i, instant = false) { const s = stamps[i]; if (!s || s.on) return; s.on = true; s.t = instant ? 9 : 0; s.m.visible = true; },
+    cross(i, instant = false) { const c = crosses[i]; if (!c || c.on) return; c.on = true; c.t = instant ? 9 : 0; c.m.visible = true; },
+    update(dt) {
+      for (const [i, s] of stamps.entries()) {
+        if (!s.on) continue;
+        s.t += dt;
+        // it slams down from big to flat, the board kicks
+        const k = Math.min(1, s.t / 0.28);
+        s.m.scale.setScalar(3 - 2 * easeBack(k));
+        (s.m.material as THREE.MeshBasicMaterial).opacity = 1;
+        const b = boards[i];
+        b.rotation.z = s.t < 0.6 ? Math.sin(s.t * 30) * 0.06 * (1 - s.t / 0.6) : 0;
+        b.scale.setScalar(s.t < 0.5 ? 1 + 0.12 * Math.sin(Math.min(1, s.t / 0.5) * Math.PI) : 1);
+      }
+      for (const c of crosses) {
+        if (!c.on) continue;
+        c.t += dt;
+        const k = Math.min(1, c.t / 0.35);
+        c.m.position.y = (1 - k) * 0.5; c.m.scale.x = 0.4 + 0.6 * k;
+        // the board it closes droops on its nails and dims
+        c.board.rotation.z = -0.09 * Math.min(1, c.t / 0.6);
+        const fm = c.face.material as THREE.MeshStandardMaterial;
+        if (fm.emissiveIntensity !== undefined) fm.emissiveIntensity = 0.5 * (1 - 0.7 * Math.min(1, c.t / 0.6));
+      }
+    },
+  };
 }

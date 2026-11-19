@@ -72,10 +72,10 @@ export function bigText(ui: PixelUI, str: string, x: number, y: number, o: BigOp
 // Every plate is painted per pixel at its exact size in a few flat tones. The DETAIL is structured and placed on
 // purpose, never noise: engraved grooves (a dark line over a light one), milgrain beads, slotted screws, worn edges
 // where hands would rub, verdigris only in recesses, a fixed set of scratches, glass streaks, stitched hems.
-export type PlateKind = 'lacquer' | 'brass' | 'well' | 'cream' | 'ribbon' | 'glass' | 'disc' | 'nameplate' | 'logbook' | 'iron' | 'board' | 'sign';
+export type PlateKind = 'lacquer' | 'brass' | 'well' | 'cream' | 'ribbon' | 'glass' | 'disc' | 'nameplate' | 'logbook' | 'iron' | 'board' | 'sign' | 'drum' | 'alcove';
 type RGB = [number, number, number];
 const hx = (s: string): RGB => { const v = parseInt(s.replace('#', '').slice(0, 6), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
-class Px {
+export class Px {
   d: Uint8ClampedArray; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D; img: ImageData;
   constructor(public w: number, public h: number) {
     this.cv = document.createElement('canvas'); this.cv.width = Math.max(1, w); this.cv.height = Math.max(1, h);
@@ -109,8 +109,8 @@ class Px {
   done() { this.ctx.putImageData(this.img, 0, 0); return this.cv; }
 }
 /** deterministic 0..1 from integers (where a scratch / chip / stain goes: placed by rule, the same every time) */
-const hash = (a: number, b: number) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; };
-const VERDI = ['#2f5a4e', '#4a8a76', '#78b49a'];
+export const hash = (a: number, b: number) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; };
+export const VERDI = ['#2f5a4e', '#4a8a76', '#78b49a'];
 
 export interface PlateOpts {
   /** rim base colour (a 6-tone ramp is built from it); default brass */
@@ -129,12 +129,14 @@ export interface PlateOpts {
   barnacles?: boolean;
   /** board: plank height in px (default 13) */
   plank?: number;
+  /** board: algae and moss growing along the bottom edge and up the seams (default on when big enough) */
+  algae?: boolean;
 }
 const plateCache = new Map<string, HTMLCanvasElement>();
 /** a painted plate canvas of exactly w x h UI px (cached) */
 export function plate(w: number, h: number, kind: PlateKind = 'lacquer', o: PlateOpts = {}): HTMLCanvasElement {
   w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
-  const key = `${kind}|${w}|${h}|${o.rim ?? ''}|${o.face ?? ''}|${o.corners ?? ''}|${o.rimW ?? ''}|${o.alpha ?? ''}|${o.rope?.join(',') ?? ''}|${o.barnacles ?? ''}`;
+  const key = `${kind}|${w}|${h}|${o.rim ?? ''}|${o.face ?? ''}|${o.corners ?? ''}|${o.rimW ?? ''}|${o.alpha ?? ''}|${o.rope?.join(',') ?? ''}|${o.barnacles ?? ''}|${o.plank ?? ''}|${o.algae ?? ''}`;
   const hit = plateCache.get(key);
   if (hit) return hit;
   const p = new Px(w, h);
@@ -144,6 +146,7 @@ export function plate(w: number, h: number, kind: PlateKind = 'lacquer', o: Plat
     well: () => paintWell(p, o), cream: () => paintCream(p), disc: () => paintDisc(p, o), ribbon: () => paintRibbon(p, o),
     nameplate: () => paintNameplate(p, o), logbook: () => paintSign(p, o), sign: () => paintSign(p, o),
     iron: () => paintBoard(p, { ...o, face: o.face ?? '#9a3a30', wood: '#6a4a32' } as PlateOpts),
+    drum: () => paintDrum(p, o), alcove: () => paintAlcove(p, o),
   };
   PAINT[kind]();
   const cv = p.done();
@@ -163,7 +166,7 @@ function edgeD(x: number, y: number, w: number, h: number, r = 2) {
 // ------------------------------------------------------------------ driftwood, rope, nails, barnacles, shells
 const WOOD = '#9a7a58';
 /** a barnacle seen from above: a cream cone with ridges, a dark mouth (7 px big / 5 px small) */
-function barnacle(p: Px, cx: number, cy: number, big = true) {
+export function barnacle(p: Px, cx: number, cy: number, big = true) {
   const rows = big
     ? ['..kkk..', '.kwwlk.', 'kwlrlsk', 'kwrddsk', 'klldssk', '.kssak.', '..kkk..']
     : ['.kkk.', 'kwlsk', 'kldsk', 'klssk', '.kkk.'];
@@ -172,18 +175,18 @@ function barnacle(p: Px, cx: number, cy: number, big = true) {
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - o + x, cy - o + y, c); } });
 }
 /** a scallop shell: a fan with ribs, pink-cream, an ink edge (9x8) */
-function shell(p: Px, cx: number, cy: number) {
+export function shell(p: Px, cx: number, cy: number) {
   const rows = ['...kkk...', '..kwpwk..', '.kwpwpwk.', 'kpwpwpwpk', 'kwpwpwpwk', '.kpwpwpk.', '..kkkkk..', '..kpkpk..'];
   const pal: Record<string, string> = { k: '#5a2a24', w: '#ffe8d8', p: '#e8a89a' };
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const c = pal[r[x]]; if (c) p.set(cx - 4 + x, cy - 4 + y, c); } });
 }
 /** an iron nail head with a rust streak running down from it */
-function nail(p: Px, cx: number, cy: number, streak = 3) {
+export function nail(p: Px, cx: number, cy: number, streak = 3) {
   p.set(cx, cy, '#5a5a62'); p.set(cx + 1, cy, '#3a3a42'); p.set(cx, cy + 1, '#3a3a42'); p.set(cx + 1, cy + 1, '#1a1a20'); p.set(cx, cy, '#9a9aa6');
   for (let k = 0; k < streak; k++) p.over(cx + (k > 1 ? 1 : 0), cy + 2 + k, k === streak - 1 ? '#8a5a3a' : '#7a3a1a');
 }
 /** a vertical rope lashing at column x: twisted strands (diagonal two-tone stripes) inside an ink outline */
-function ropeV(p: Px, x: number, y0: number, y1: number, wd = 5) {
+export function ropeV(p: Px, x: number, y0: number, y1: number, wd = 5) {
   for (let y = y0; y <= y1; y++) for (let k = 0; k < wd; k++) {
     if (k === 0 || k === wd - 1) { p.set(x + k, y, '#2a1a0c'); continue; }
     const ph = (y + k) % 4;
@@ -191,7 +194,7 @@ function ropeV(p: Px, x: number, y0: number, y1: number, wd = 5) {
   }
 }
 /** a horizontal rope along row y */
-function ropeH(p: Px, x0: number, x1: number, y: number, ht = 4) {
+export function ropeH(p: Px, x0: number, x1: number, y: number, ht = 4) {
   for (let x = x0; x <= x1; x++) for (let k = 0; k < ht; k++) {
     if (k === 0 || k === ht - 1) { p.set(x, y + k, '#2a1a0c'); continue; }
     const ph = (x + k) % 4;
@@ -251,11 +254,113 @@ function paintBoard(p: Px, o: PlateOpts & { wood?: string }) {
   if (w >= 40) for (let i = 0; i < n; i++) { const ny = Math.round(2 + i * ph + ph / 2) - 1; nail(p, 6, ny, Math.min(3, Math.floor(ph / 3))); nail(p, w - 8, ny, Math.min(3, Math.floor(ph / 3))); }
   // rope lashings
   for (const rx of o.rope ?? []) ropeV(p, Math.round(rx), 1, h - 2);
+  // algae: a fringe of moss and weed along the bottom edge, thickest at the corners, creeping up the seams
+  if ((o.algae ?? true) && w >= 60 && h >= 24) algaeEdge(p, 3, w - 4, h - 4, ph);
   // barnacles on two corners
   if ((o.barnacles ?? true) && w >= 48 && h >= 22) {
     barnacle(p, w - 7, h - 7); barnacle(p, w - 13, h - 5, false); barnacle(p, w - 5, h - 13, false);
     barnacle(p, 6, 6, false);
   }
+}
+
+/** sea-green algae ramp (dark to light), a slimy olive and a red weed accent */
+export const ALGAE = ['#173a1a', '#25562a', '#3a7a34', '#5fa040', '#9ad060', '#d0f090'];
+/**
+ * algae grown along a bottom edge (rows above y): a mossy crust whose height swells and thins along the edge (two
+ * sines: placed, never random), weed blades poking up out of it, a few red weed fronds, and moss creeping up into the
+ * plank seams near both ends. Painted only over pixels that already exist (it never spills off the board).
+ */
+export function algaeEdge(p: Px, x0: number, x1: number, y: number, seamEvery = 0) {
+  const A = ALGAE;
+  const span = x1 - x0;
+  for (let x = x0; x <= x1; x++) {
+    const u = (x - x0) / Math.max(1, span);
+    const corner = Math.max(0, 1 - Math.min(u, 1 - u) * 5);           // thick at the ends
+    const hgt = Math.max(0, Math.round(1.2 + corner * 4 + Math.sin(x * 0.31) * 1.4 + Math.sin(x * 0.083 + 1.3) * 1.6));
+    for (let k = 0; k < hgt; k++) {
+      const c = k === hgt - 1 ? A[4] : k === hgt - 2 ? A[3] : k === 0 ? A[1] : A[2];
+      p.over(x, y - k, c);
+    }
+    if (hgt > 0) p.over(x, y - hgt, A[0]);                               // the crust's dark top edge
+    // weed blades: every so often a blade of two or three tones leans up out of the crust
+    if ((x * 7 + 3) % 23 === 0 && hgt > 1) for (let k = 0; k < 4 + (x % 3); k++) { p.over(x + (k > 2 ? 1 : 0), y - hgt - k, k < 2 ? A[3] : A[4]); p.over(x + 1 + (k > 2 ? 1 : 0), y - hgt - k, A[1]); }
+    if ((x * 5 + 11) % 41 === 0 && hgt > 0) for (let k = 0; k < 3; k++) { p.over(x, y - hgt - k, k === 2 ? '#e88a7a' : '#b8443a'); p.over(x + 1, y - hgt - k + 1, '#6a1e1a'); }
+  }
+  // moss creeping up the seams near the ends
+  if (seamEvery > 4) for (const sx of [x0 + 2, x1 - 9]) for (let yy = y - 6; yy > y - seamEvery * 2.2 && yy > 4; yy--) {
+    const k = y - yy;
+    if (k % 5 === 0) for (let j = 0; j < 7 - Math.floor(k / 6); j++) p.over(sx + j, yy, j % 3 === 0 ? A[3] : A[2]);
+  }
+}
+
+/**
+ * an odometer drum cell (w x h): a cream number wheel seen through a slot: cylinder shading top to bottom in five
+ * tones, ink jambs left and right, brass bezel lips above and below, a glass glint. The digit is drawn on top.
+ */
+function paintDrum(p: Px, o: PlateOpts) {
+  const { w, h } = p;
+  const C = ramp(o.face ?? '#e8d8b0'), B = ramp(o.rim ?? PAL.brass);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const fy = (y - 1) / Math.max(1, h - 3);
+    let c = fy < 0.12 ? C[1] : fy < 0.26 ? C[2] : fy < 0.42 ? C[4] : fy < 0.7 ? C[3] : fy < 0.86 ? C[2] : C[1];
+    if (y === 0) c = B[5]; else if (y === h - 1) c = B[1];
+    if (x === 0 || x === w - 1) c = PAL.ink2;
+    else if (x === 1) c = y === 0 || y === h - 1 ? c : C[2];
+    else if (x === w - 2) c = y === 0 || y === h - 1 ? c : C[1];
+    p.set(x, y, c);
+  }
+  // the glass glint: a short bright diagonal at the top left of the slot
+  if (w >= 6 && h >= 8) { p.set(2, 2, '#ffffff', 200); p.set(3, 2, '#ffffff', 140); p.set(2, 3, '#ffffff', 120); }
+}
+
+/**
+ * a recessed alcove in the driftwood (the heal clam's nook): a dark wet hollow with a lit lower lip, a carved arch at
+ * the top, pale sand in the bottom, a pebble and a curl of weed. Lets a 3D prop sit IN the board.
+ */
+function paintAlcove(p: Px, o: PlateOpts) {
+  const { w, h } = p;
+  const F = ramp(o.face ?? '#1d4f55'), W = ramp(WOOD), A = ALGAE;
+  const arch = Math.min(6, Math.floor(w / 5));
+  const inside = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return false;
+    const dx = Math.min(x, w - 1 - x);
+    return y >= Math.max(0, arch - Math.round(Math.sqrt(Math.max(0, arch * arch - (arch - Math.min(arch, dx)) ** 2))));
+  };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!inside(x, y)) continue;
+    const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || y === h - 1;
+    if (edge) { p.set(x, y, '#1a0e06'); continue; }
+    const e2 = !inside(x - 2, y) || !inside(x, y - 2) || !inside(x + 2, y);
+    const fy = y / h;
+    let c = fy < 0.3 ? F[0] : fy < 0.62 ? F[1] : F[2];
+    if (e2) c = x < w / 2 || !inside(x, y - 2) ? '#05090c' : W[4];          // deep shade on the top/left lip, lit right lip
+    if (y >= h - 5) c = y === h - 5 ? '#e2c898' : y === h - 2 ? '#a88a5a' : '#c8aa7a'; // sand
+    p.set(x, y, c);
+  }
+  // a pebble and shell grit on the sand, a curl of weed growing from the corner
+  const sy = h - 4;
+  for (const [dx, c] of [[3, '#7a7a8a'], [4, '#9a9aaa'], [5, '#5a5a6a']] as [number, string][]) p.over(dx, sy, c);
+  p.over(w - 6, sy, '#f6eedc'); p.over(w - 5, sy, '#d8cdb0');
+  for (let k = 0; k < Math.min(10, h - 8); k++) { const xx = w - 3 - Math.round(Math.sin(k * 0.5) * 1.5); p.over(xx, sy - 1 - k, k > 6 ? A[4] : A[3]); p.over(xx - 1, sy - 1 - k, A[1]); }
+}
+
+/**
+ * a faceted gem pip on a PixelUI (centre x, y, radius r in UI px): an ink outline, four facets lit from the top
+ * left (light / base / shadow / deep), a table highlight and a white glint. `on` false: a dark empty socket.
+ */
+export function gem(ui: PixelUI, x: number, y: number, r: number, col: string, on = true, alpha = 1) {
+  const R = Math.max(2, Math.round(r)), cx = Math.round(x), cy = Math.round(y);
+  const G = on ? ramp(col) : ['#05090c', '#0d1a20', '#13262e', '#1a3038', '#22404a', '#2c5058'];
+  for (let i = -R - 1; i <= R + 1; i++) { const wd = R + 1 - Math.abs(i); ui.fill(cx - wd, cy + i, wd * 2 + 1, 1, PAL.ink2, alpha); }
+  for (let i = -R; i <= R; i++) {
+    const wd = R - Math.abs(i);
+    for (let j = -wd; j <= wd; j++) {
+      const c = i < 0 && j <= 0 ? G[4] : i < 0 ? G[3] : j <= 0 ? G[2] : G[1];
+      ui.fill(cx + j, cy + i, 1, 1, c, alpha);
+    }
+  }
+  if (R >= 3) { ui.fill(cx - 1, cy - 1, 2, 1, G[5], alpha); ui.fill(cx, cy, 1, 1, G[3], alpha); }
+  if (on) ui.fill(cx - Math.max(1, R - 2), cy - 1, 1, 1, '#ffffff', alpha);
 }
 
 /**
@@ -670,6 +775,10 @@ export interface TubeOpts {
   t?: number;
   /** a faceted crystal vial (mana) instead of round glass with brass collars */
   crystal?: boolean;
+  /** a heal pouring in: a glowing segment from v up to `gain` (0..1), in `gainCol` */
+  gain?: number; gainCol?: string;
+  /** a bright band travelling along the liquid (a heartbeat), 0..1 strength */
+  pulse?: number;
 }
 /**
  * a GLASS TUBE gauge (UI px): brass collars with a screw at both ends (or cut-crystal caps), the glass with its
@@ -688,6 +797,12 @@ export function tube(ui: PixelUI, x: number, y: number, w: number, h: number, v:
   const iy = y + 1, ih = h - 2;
   const fv = Math.round(gw * Math.max(0, Math.min(1, v)));
   if (o.chip !== undefined && o.chip > v) { const cw = Math.round(gw * Math.min(1, o.chip)); ui.fill(gx + fv, iy + 1, cw - fv, ih - 1, PAL.cream, 0.85); }
+  if (o.gain !== undefined && o.gain > v) {
+    // the heal pouring in: a glowing segment with sparkling pixels drifting along it
+    const G = ramp(o.gainCol ?? '#ff8ac0'), gw2 = Math.round(gw * Math.min(1, o.gain));
+    ui.fill(gx + fv, iy, gw2 - fv, ih, G[3], 0.9); ui.fill(gx + fv, iy, gw2 - fv, 1, G[5], 0.9); ui.fill(gx + fv, iy + ih - 1, gw2 - fv, 1, G[1], 0.9);
+    for (let i = 0; i < 4; i++) { const sx = gx + fv + Math.round((((t * 1.7 + i * 0.27) % 1)) * Math.max(1, gw2 - fv - 1)); ui.fill(sx, iy + 1 + (i % Math.max(1, ih - 2)), 1, 1, '#ffffff', 0.9); }
+  }
   if (fv > 0) {
     // the liquid: a bright surface row, a light band, the base, a shaded bottom
     ui.fill(gx, iy, fv, ih, L[3]);
@@ -712,6 +827,8 @@ export function tube(ui: PixelUI, x: number, y: number, w: number, h: number, v:
       if (i % 2 === 0 && ih >= 7) { ui.fill(bx + 1, by, 1, 1, L[4]); ui.fill(bx, by + 1, 1, 1, L[4]); }
     }
   }
+  // a heartbeat: a bright band sweeping along the liquid
+  if (o.pulse && o.pulse > 0.01 && fv > 4) { const px = gx + Math.round(((t * 0.9) % 1) * fv); for (let k = -2; k <= 2; k++) if (px + k >= gx && px + k < gx + fv) ui.fill(px + k, iy, 1, ih, k === 0 ? L[5] : L[4], o.pulse * (1 - Math.abs(k) * 0.3)); }
   // engraved marks on the glass, a long highlight streak (broken once) and a short one
   if (o.ticks) for (let k = o.ticks; k < 0.999; k += o.ticks) { const tx = gx + Math.round(gw * k); ui.fill(tx, iy + ih - 2, 1, 2, PAL.ink2, 0.7); ui.fill(tx, iy, 1, 1, '#ffffff', 0.25); }
   if (ih >= 4) { ui.fill(gx + 2, iy + 1, Math.round(gw * 0.55), 1, '#ffffff', 0.35); ui.fill(gx + Math.round(gw * 0.6), iy + 1, Math.round(gw * 0.12), 1, '#ffffff', 0.35); }
@@ -770,17 +887,93 @@ export function pixGlyph(name: string, rows: string[], pal: Record<string, strin
   c = p.done(); glyphCache.set(name, c);
   return c;
 }
+/**
+ * SEA GRAPES (the shop's / the seabed's instant heal, v6): a sprig of glassy green bead-weed (Caulerpa) on a curling
+ * runner, 18 x 18. Every bead is a little lit sphere: an ink rim, a shadowed lower-right, a light upper-left, a white
+ * glint; a few beads at the back a step darker.
+ */
+let grapeCv: HTMLCanvasElement | null = null;
+export function seaGrapeIcon(): HTMLCanvasElement {
+  if (grapeCv) return grapeCv;
+  const p = new Px(18, 18);
+  const G = ['#0e2a12', '#1d4a1e', '#2f7a2c', '#4fa83a', '#86d05a', '#c8f09a'];
+  // the runner: a curling stem from the bottom left, and two side sprigs
+  const stem: [number, number][] = [[3, 17], [4, 16], [5, 15], [6, 14], [7, 13], [8, 12], [8, 11], [9, 10], [9, 9], [9, 8], [10, 7], [10, 6], [10, 5]];
+  for (const [x, y] of stem) { p.set(x, y, G[1]); p.set(x + 1, y, G[0]); }
+  for (const [x, y] of [[8, 12], [7, 11], [6, 10], [5, 10]] as [number, number][]) p.set(x - 1, y, G[1]);
+  for (const [x, y] of [[10, 9], [11, 9], [12, 8], [13, 8]] as [number, number][]) p.set(x, y, G[1]);
+  const bead = (cx: number, cy: number, back = false) => {
+    const o = back ? 1 : 0;
+    const rows = ['.kkk.', 'kLHmk', 'kLmdk', 'kmddk', '.kkk.'];
+    const pal: Record<string, string> = { k: G[0], H: back ? G[4] : '#ffffff', L: G[4 - o], m: G[3 - o], d: G[2 - o] };
+    rows.forEach((r, y) => { for (let x = 0; x < 5; x++) { const c = pal[r[x]]; if (c) p.set(cx - 2 + x, cy - 2 + y, c); } });
+  };
+  for (const [x, y] of [[12, 3], [7, 3], [14, 6], [5, 7], [15, 10]] as [number, number][]) bead(x, y, true);
+  for (const [x, y] of [[10, 2], [8, 6], [12, 6], [3, 9], [7, 9], [13, 11], [10, 12], [16, 13]] as [number, number][]) bead(x, y);
+  grapeCv = p.done();
+  return grapeCv;
+}
+
+/** v6: every small glyph is a little hand-shaded sprite: an ink outline, 4-5 hue-shifted tones lit from the top left */
+const GI = '#140a06';
 export const GLYPH = {
-  house: () => pixGlyph('house', ['....k....', '...kbk...', '..kbbbk..', '.kbbbbbk.', 'kkbbbbbkk', '.kbkkkbk.', '.kbkwkbk.', '.kbkwkbk.', '.kkkkkkk.'], { k: PAL.ink2, b: PAL.cream, w: PAL.brass2 }),
-  down: () => pixGlyph('down', ['kkkkkkk', 'kbbbbbk', '.kbbbk.', '..kbk..', '...k...'], { k: PAL.ink2, b: PAL.sea2 }),
-  skull: () => pixGlyph('skull', ['.kkkkk.', 'kwwwwwk', 'kwkwkwk', 'kwwwwwk', '.kwkwk.', '..kkk..'], { k: PAL.ink2, w: PAL.cream }),
-  clock: () => pixGlyph('clock', ['..kkk..', '.kwwwk.', 'kwwkwwk', 'kwwkkwk', 'kwwwwwk', '.kwwwk.', '..kkk..'], { k: PAL.ink2, w: PAL.cream }),
-  fish: () => pixGlyph('fish', ['...kkk...k', '.kkwwwk.kk', 'kwkwwwwkwk', 'kwwwwwwwwk', '.kkwwwk.kk', '...kkk...k'], { k: PAL.ink2, w: PAL.sea2 }),
-  star: () => pixGlyph('star', ['...k...', '..kwk..', 'kkwwwkk', '.kwwwk.', '.kwkwk.', 'kk...kk'], { k: PAL.ink2, w: PAL.brass2 }),
-  check: () => pixGlyph('check', ['......kk', '.....kgk', 'kk..kgk.', 'kgkkgk..', '.kggk...', '..kk....'], { k: PAL.ink2, g: PAL.kelp2 }),
-  bubble: () => pixGlyph('bubble', ['.kkk.', 'kw..k', 'k...k', 'k...k', '.kkk.'], { k: '#cfeef0', w: '#ffffff' }),
-  bubbleS: () => pixGlyph('bubbleS', ['.k.', 'kwk', '.k.'], { k: '#cfeef0', w: '#ffffff' }),
-  book: () => pixGlyph('book', ['.kkkk.kkkk.', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kwbbwkwbbwk', 'kwwwwkwwwwk', 'kkkkkkkkkkk', '.rr.....rr.'], { k: '#3a2410', w: PAL.cream, b: '#a08a64', r: PAL.coral }),
-  parcel: () => pixGlyph('parcel', ['kkkkkkkkk', 'kbbbrbbbk', 'kbbbrbbbk', 'krrrrrrrk', 'kbbbrbbbk', 'kbbbrbbbk', 'kkkkkkkkk'], { k: PAL.ink2, b: '#c8a070', r: PAL.coral }),
-  parcelOff: () => pixGlyph('parcelOff', ['k.k.k.k.k', '.........', 'k.......k', '.........', 'k.......k', '.........', 'k.k.k.k.k'], { k: '#6fb8b0' }),
+  // a stilt hut on the reef: a thatched roof in three tones, plank walls, a lit window, a dark door
+  house: () => pixGlyph('house6', [
+    '.....kk.....',
+    '....kTTk....',
+    '...kTTRrk...',
+    '..kTRRRrrk..',
+    '.kTRRRRRrrk.',
+    'kkkkkkkkkkkk',
+    '.kWWwwWwdkk.',
+    '.kWyywWodkk.',
+    '.kWyhwWodkk.',
+    '.kwwwwwodkk.',
+    '.kkkkkkkkk..',
+    '..k.....k...',
+  ], { k: GI, T: '#f0c070', R: '#c07a34', r: '#7a4420', W: '#f0d49a', w: '#c8a070', d: '#8a6a40', y: '#ffe890', h: '#fff8d0', o: '#3a2010' }),
+  // the depth arrow: a sea-glass chevron in four blues with a lit edge
+  down: () => pixGlyph('down6', [
+    'kkkkkkkkk',
+    'kHHLLLLmk',
+    '.kHLLLmdk',
+    '..kLLmdk.',
+    '...kmdk..',
+    '....kk...',
+  ], { k: GI, H: '#e8f8ff', L: '#8ac8ff', m: '#3d8fd6', d: '#1d5a96' }),
+  skull: () => pixGlyph('skull6', ['.kkkkk.', 'kWwwwwk', 'kwkwkdk', 'kwwwwdk', '.kwkdk.', '..kkk..'], { k: GI, W: '#ffffff', w: PAL.cream, d: PAL.cream2 }),
+  // a brass pocket watch: a domed rim in four tones, a cream face, the hands at ten past
+  clock: () => pixGlyph('clock6', [
+    '...kkk...',
+    '..kBBbk..',
+    '.kBccccdk',
+    'kBcckccdk',
+    'kBcckkcdk',
+    'kbcccccdk',
+    '.kbdcccdk',
+    '..kkdddk.',
+    '...kkkk..',
+  ], { k: GI, B: '#f2c66d', b: '#c8913a', c: '#fff4dc', d: '#b8a074' }),
+  // a little reef fish: a lit back, a striped flank, a pale belly, an eye with a glint, a forked tail
+  fish: () => pixGlyph('fish6', [
+    '....kkkk...kk',
+    '..kkHHHLk.kLk',
+    '.kHLsLLmmkLmk',
+    'kwkLsLmmmmmdk',
+    'kLLLsmmmddkmk',
+    '.kbbbbbddk.kk',
+    '..kkkkkkk....',
+  ], { k: GI, H: '#d8f0ff', L: '#8ac8ff', m: '#3d8fd6', d: '#1d5a96', s: '#f2c66d', b: '#c8e8f0', w: '#ffffff' }),
+  star: () => pixGlyph('star6', ['....k....', '...kHk...', 'kkkkHLkkk', 'kHHLLLmmk', '.kLLLLmk.', '.kLmkmmk.', 'kLmk.kmdk', 'kkk...kkk'], { k: GI, H: '#fff4c8', L: '#f2c66d', m: '#c8913a', d: '#8a5a24' }),
+  check: () => pixGlyph('check6', ['.......kk', '......kHk', 'kk...kLmk', 'kHk.kLmk.', '.kLkLmk..', '..kLmk...', '...kk....'], { k: GI, H: '#d8f8a0', L: PAL.kelp2, m: PAL.kelp }),
+  // a glassy bubble: a two-tone rim (lit top left, teal-shadowed bottom right), a highlight, a hint of reflection
+  bubble: () => pixGlyph('bubble6', ['.kkk.', 'kw.lk', 'k...d', 'l..rd', '.ddd.'], { k: '#e6faff', l: '#b8e4ec', d: '#6ab0bc', w: '#ffffff', r: '#9ad4dc' }),
+  bubbleS: () => pixGlyph('bubbleS6', ['.k.', 'kwd', '.d.'], { k: '#e6faff', w: '#ffffff', d: '#6ab0bc' }),
+  book: () => pixGlyph('book6', ['.kkkk.kkkk.', 'kWwwwkwwwdk', 'kwbbwkwbbdk', 'kwwwwkwwwdk', 'kwbbwkwbbdk', 'kwwwddwwddk', 'kkkkkkkkkkk', '.rR.....rR.'], { k: '#3a2410', W: PAL.paper, w: PAL.cream, d: PAL.cream1, b: '#a08a64', r: PAL.coral, R: PAL.coral1 }),
+  // a parcel in kraft paper: lit top face, shaded side, a red string tied over it, a stamp in the corner
+  parcel: () => pixGlyph('parcel6', ['.kkkkkkkk.', 'kHHHrHHHLk', 'kLLLrLLsSk', 'krrrRrrrrk', 'kLLLrLLLdk', 'kddLrLddDk', '.kkkkkkkk.'], { k: GI, H: '#f0d0a0', L: '#c8a070', d: '#9a7448', D: '#6a4a2a', r: '#e0564a', R: '#9a2a24', s: '#3d8fd6', S: '#8ac8ff' }),
+  parcelOff: () => pixGlyph('parcelOff6', ['.k.k.k.k.', 'k........', '........k', 'k........', '........k', 'k........', '.k.k.k.k.'], { k: '#6fb8b0' }),
+  // a scallop shell pip for the heal clam's charges (full / spent)
+  clamPip: () => pixGlyph('clamPip', ['..kkkkk..', '.kHLsLLk.', 'kHLsLsLmk', 'kLsLsLsmk', '.kmsmsmk.', '..kVVVk..', '...kkk...'], { k: GI, H: '#ffd8cc', L: '#f0a090', s: '#c0443e', m: '#b86a6a', V: '#9a5a86' }),
+  clamPipOff: () => pixGlyph('clamPipOff', ['..kkkkk..', '.kddddek.', 'kdeedeedk', 'kdedededk', '.kededek.', '..keeek..', '...kkk...'], { k: '#0a141a', d: '#2a3a40', e: '#1a282e' }),
 };

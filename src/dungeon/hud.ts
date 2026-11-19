@@ -1,5 +1,6 @@
-// The dungeon run's HUD layer: the instrument HUD (src/ui/hud3.ts: porthole + hearts, bars, flasks, the resource
-// strip, the navigation instrument, the boss, title cards, pickup cards) drawn into one PixelUI together with the
+// The dungeon run's HUD layer: the instrument HUD (src/ui/hud3.ts: the porthole + HP readout, the stamina / mana tubes,
+// the healing clam, the resource strip, the navigation instrument, the boss, title cards, pickup cards) drawn into one
+// PixelUI together with the
 // run's own interactive bits, all in the v5 "diver's kit":
 //   PROMPTS     a lacquered tag over the thing you can use: [E] + one verb, a cream note with the long text for a
 //               moment; at Mr. Crab's stands a SHOP CARD (the item, its rarity, two stat lines, the price, BUY)
@@ -21,7 +22,8 @@ import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
 import { skin, PAD } from '../ui/pixel/skins';
 import { closeArt } from '../ui/pixel/skins';
-import { PAL, plate, bigText, bar, GLYPH, solid, caustics } from '../ui/obj/plates';
+import { PAL, plate, bigText, bar, GLYPH, solid, caustics, seaGrapeIcon } from '../ui/obj/plates';
+import { hpText, hpify } from '../combat/types';
 import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
@@ -29,7 +31,8 @@ import type { ItemInst } from '../game/run';
 export interface HudAnchor { x: number; y: number; on: boolean }
 export interface Prompt {
   key: string; label: string; at?: HudAnchor; bad?: boolean;
-  /** a shop stand: the goods (an item id, or 'heart' | 'key' | 'bomb') and the price in pearls; `bad` = can't afford */
+  /** a shop stand: the goods (an item id, or 'heart' (sold as SEA GRAPES: +20 HP) | 'key' | 'bomb') and the price in
+   *  pearls; `bad` = can't afford */
   shop?: { id: string; name: string; price: number };
 }
 /** the post office: what's in the pack, what's picked, how many parcels her bag still takes, and what it builds */
@@ -148,9 +151,10 @@ export class DungeonHud {
     const ui = this.ui, sh = p.shop!;
     const d = ITEMS[sh.id];
     const col = d ? RARITY_COLOR[d.rarity] : PAL.cream;
-    const name = d ? d.name : sh.name;
-    const kind = d ? `${d.rarity} ${d.kind}`.toUpperCase() : sh.id === 'heart' ? 'HEALS ONE HEART' : sh.id === 'key' ? 'OPENS A LOCKED CHEST' : 'BLASTS CRACKED ROCK';
-    const lines = d ? statLines(sh.id, 1).slice(0, 2).map((l) => l.text) : [];
+    // (v6: no hearts: the health goods are SEA GRAPES that restore HP)
+    const name = d ? d.name : sh.id === 'heart' ? 'Sea Grapes' : sh.name;
+    const kind = d ? `${d.rarity} ${d.kind}`.toUpperCase() : sh.id === 'heart' ? `RESTORES ${hpText(2)}` : sh.id === 'key' ? 'OPENS A LOCKED CHEST' : 'BLASTS CRACKED ROCK';
+    const lines = d ? statLines(sh.id, 1).slice(0, 2).map((l) => hpify(l.text)) : [];
     if (d && !lines.length) lines.push(...wrap(d.desc, 'small', 150, ui.hd).slice(0, 2));
     const a = this.promptA, pop = 1 - (1 - a) ** 3;
     const tw = Math.max(ui.measure(name, 'title'), ui.measure(kind, 'small'), ...lines.map((l) => ui.measure(l, 'small')));
@@ -169,7 +173,7 @@ export class DungeonHud {
     const ix = x + 11, iy = y + 11;
     ui.frame('slot', ix, iy, 38, 38, a);
     if (d) ui.item(sh.id, ix + 3, iy + 3, 32, 32, 1, a);
-    else { const g = hudArt(sh.id === 'heart' ? 'heart' : sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
+    else { const g = sh.id === 'heart' ? seaGrapeIcon() : hudArt(sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
     const tx = ix + 46;
     ui.text(name, tx, iy - 1, { font: 'title', color: ramp(col)[4], alpha: a });
     let ly = iy - 1 + ui.lh('title');
@@ -211,7 +215,7 @@ export class DungeonHud {
     planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
     ui.block(0, 0, ui.w, ui.h);
     planes.draw(skin('wood', W, H, ui.hd), x, y, { w: W, h: H, alpha: a, shadow: 3 });
-    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 64, ox: this.t * 0.02, oy: this.t * 0.012, alpha: 0.16 * a });
+    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 128, ox: this.t * 0.012, oy: this.t * 0.008, alpha: 0.06 * a });
     // the header: the title on a brass plaque over the top edge, one line of what this is, the close X
     const title = 'POST OFFICE';
     const tw = ui.measure(title, 'title');
@@ -239,6 +243,11 @@ export class DungeonHud {
     const gy = rowY + 22;
     planes.draw(skin('inset', gridW + 8, gridH + 8, ui.hd), gx - 4, gy - 4, { w: gridW + 8, h: gridH + 8, alpha: a });
     const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
+    // every slot of the grid, the empty ones too (a dim recess with a grain of sand), so the pack reads as a pack
+    for (let i = n; i < cols * rows; i++) {
+      const ix = gx + (i % cols) * (cell + gap), iy = gy + Math.floor(i / cols) * (cell + gap);
+      planes.draw(skin('slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a * 0.45 });
+    }
     const kk = st.ui.scale.x || 1;
     m.items.forEach((it, i) => {
       if (i >= cols * rows) { const mo0 = this.mailModels.get(it.uid); if (mo0) mo0.visible = false; return; }

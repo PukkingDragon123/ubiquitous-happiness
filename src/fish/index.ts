@@ -52,7 +52,7 @@ export function speciesAsset(species: string): SpeciesAsset {
     if (SPECS[species]) a = assetFromSpec(SPECS[species]);
     else if (SPECIALS[species]) a = SPECIALS[species]();
     else throw new Error('unknown fish species ' + species);
-    cleanTexture(a.map);
+    cleanTexture(a.map, a.palette ?? 14);
     cache.set(species, a);
   }
   return a;

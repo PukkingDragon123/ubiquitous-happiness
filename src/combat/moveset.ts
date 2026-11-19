@@ -10,7 +10,8 @@
 //   DODGE   Space (tap)                a quick dart, ~0.26 s of i-frames (no direction: a backstep)
 //   DASH    Space (hold)               after the dart, keep holding to charge (a glow builds, rising hum);
 //                                      release: a long piercing dash that cuts and staggers everything on its path
-//   FLASK   R / H                      "kelp tea": a slow gulp, heals half your hearts, interrupted by hits
+//   HEAL    R / H                      a HEALING CLAM (HEAL_ITEM): crack it open and slurp the heal-jelly; heals half
+//                                      your max HP; a hit before the slurp knocks it out of your fins
 //   SKILLS  1-4                        unchanged (mana)
 // Stamina regenerates after a short delay. hud() exposes everything the HUD needs.
 import * as THREE from 'three';
@@ -24,6 +25,7 @@ import { strike } from '../skills/combat';
 import { manaBoltShot } from '../skills/projectiles';
 import { withBlow, coreOf } from './core';
 import { parryFlash, clang, impact, callout } from './feel';
+import { HEAL_ITEM, hpDelta } from './types';
 
 type MoveId = 'light1' | 'light2' | 'light3' | 'heavy' | 'charge' | 'riposte' | 'dodge' | 'dashCharge' | 'dash' | 'parry' | 'drink' | 'hitstun' | 'guardBroken' | 'whirl';
 type Act = 'light' | 'heavy' | 'dodge' | 'parry' | 'drink';
@@ -232,9 +234,11 @@ export class PlayerCombat implements Defender {
       case 'dodge': this.startDodge(w); break;
       case 'parry': this.startParry(w); break;
       case 'drink': {
-        if (this.flasks <= 0) { callout(w, 'NO TEA', p.x, p.y + 0.9, 'hint', 0.3); w.sfx('k_err1', p.x, 0.4); break; }
+        if (this.flasks <= 0) { callout(w, HEAL_ITEM.empty, p.x, p.y + 0.9, 'hint', 0.3); w.sfx('k_err1', p.x, 0.4); break; }
         this.begin('drink'); this.gulped = false;
-        w.sfx('cloth', p.x, 0.5, 1.2); w.sfx('bubble', p.x, 0.4, 0.8);
+        // the clam cracks open: a shelly click and a little burst of bubbles from the lips
+        w.sfx('cloth', p.x, 0.5, 1.2); w.sfx('bubble', p.x, 0.4, 0.8); w.sfx('k_click1', p.x, 0.35, 0.7);
+        w.fx.emit('bubble', p.x + p.facing * 0.3, p.y + 0.1, { n: 4, spread: 0.12, speed: 0.6 });
         p.setExpr('focus', DRINK.dur);
         break;
       }
@@ -444,9 +448,13 @@ export class PlayerCombat implements Defender {
         if (!this.gulped && this.t >= DRINK.gulp) {
           this.gulped = true;
           this.flasks--;
+          const before = p.hp;
           p.heal(Math.max(1, Math.ceil(p.maxHp * this.flaskHeal)), w);
-          w.fx.emit('heartP', p.x, p.y + 0.5, { n: 3, spread: 0.3, vy: 1 });
-          w.fx.emit('bubble', p.x, p.y + 0.3, { n: 10, spread: 0.2, speed: 0.8, color: '#9ae07a' });
+          // the slurp: pink heal-jelly sparkles swirl up round the blobfish, a soft ring, and the HP it gave
+          w.fx.emit('sparkle', p.x, p.y + 0.3, { n: 10, spread: 0.45, vy: 1.1, color: '#ff9ac8' });
+          w.fx.emit('ring', p.x, p.y, { size: 0.4, size1: 1.8, life: 0.4, color: '#ffb8e0', spread: 0, add: true, z: 0.5 });
+          w.fx.emit('bubble', p.x, p.y + 0.3, { n: 10, spread: 0.2, speed: 0.8, color: '#ffc8e8' });
+          if (p.hp > before) callout(w, hpDelta(p.hp - before), p.x, p.y + 1.1, 'gold', 0.4);
           w.sfx('gulp', p.x, 0.8); w.sfx('shimmer', p.x, 0.5, 1.2);
           p.setExpr('happy', 0.8);
           w.emit('flask', { left: this.flasks });
@@ -534,7 +542,7 @@ export class PlayerCombat implements Defender {
 
   /** a blow landed on the player (from Blobfish.damage): interrupt whatever was going on */
   onHurt(w: World) {
-    if (this.move === 'drink' && !this.gulped) { callout(w, 'SPILLED!', this.p.x, this.p.y + 1, 'danger', 0.34); w.sfx('splash_s', this.p.x, 0.4); }
+    if (this.move === 'drink' && !this.gulped) { callout(w, 'DROPPED THE CLAM!', this.p.x, this.p.y + 1, 'danger', 0.34); w.sfx('splash_s', this.p.x, 0.4); }
     if (this.move === 'riposte' && this.slowK < 1) { this.slowK = 1; w.game.timeScale = 1; }
     if (this.move === 'dash') return; // the dash ploughs on (it has i-frames; only unblockables reach here)
     if (this.move !== 'guardBroken') this.begin('hitstun');

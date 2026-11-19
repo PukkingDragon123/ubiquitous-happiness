@@ -11,6 +11,7 @@ import { UiStage } from '../ui/obj/stage';
 import { SkillCard3D } from '../ui/obj/cards';
 import { CodexBook, codexSeen } from '../ui/codex';
 import { RunSummaryCard } from '../ui/runSummary';
+import { itemModel } from '../backpack/models';
 
 function backdrop(): THREE.Texture {
   // a stand-in for a lit reef room: bands of sand, rock and kelp-green with bright speckles (busy on purpose)
@@ -55,29 +56,38 @@ export default function make(game: Game): Screen {
   const demo = q.get('demo') || '';
   const book = new CodexBook();
   if (demo === 'codex') { for (const id of ['barracuda', 'pufferfish', 'moray', 'lionfish', 'sardine', 'fisherman', 'diver']) codexSeen(id, 40); book.open(); }
-  let summary: RunSummaryCard | null = demo === 'summary' ? new RunSummaryCard({ result: 'extracted', depth: 182, distance: 940, time: 412, floors: 3, kills: { fish: 31, giants: 2 }, loot: ['amethyst', 'giantClam', 'pearl', 'harpoonGun', 'rustyHook', 'copperOre', 'kelp', 'shipWheel'], pearls: 37, record: true, cause: 'Sent home with the manatee' }) : null;
+  let summary: RunSummaryCard | null = demo === 'summary' ? new RunSummaryCard({ result: (q.get('result') as 'extracted' | 'surfaced' | 'lost' | null) ?? 'extracted', depth: 182, distance: 940, time: 412, floors: 3, kills: { fish: 31, giants: 2 }, loot: q.get('loot') === '0' ? [] : ['amethyst', 'giantClam', 'pearl', 'harpoonGun', 'rustyHook', 'copperOre', 'kelp', 'shipWheel'], pearls: 37, record: true, cause: q.get('result') === 'lost' ? 'Taken by The Harpoon King' : q.get('result') === 'surfaced' ? undefined : 'Sent home with the manatee' }) : null;
   if (summary) summary.t = Number(q.get('st') || 0);
   const combat: PlayerCombatHud = { stamina: 100, staminaMax: 100, staminaDelay: 0, flasks: 2, flasksMax: 3, drinking: 0, guard: 'idle', parryWindow: 0, lastParry: null, lastParryAge: 9, charge: 0, move: null, iframes: false };
-  const s: HudData = { hp: 6, maxHp: 10, soul: 2, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: STRIP, boss: null,
+  const s: HudData = { hp: 6, maxHp: 10, soul: q.get('soul') === '1' ? 2 : 0, area: 'Sunlit Reef', stage: { floor: 1, floors: 3 }, far: 0, combat, mana: 40, maxMana: 60, pearls: 7, keys: 1, bombs: 2, pack: { used: 14, total: 25 }, strip: q.get('strip') === '1' ? STRIP : null, boss: null,
     skills: { sel: 1, mana: 40, maxMana: 60, slots: [{ id: 'manaBolt', name: 'Mana Volley', cd: 0, cdMax: 4, mana: 10, color: '#6a9aff' }, { id: 'frostNova', name: 'Frost Nova', cd: 2, cdMax: 6, mana: 20, color: '#8ae8ff' }, null, { id: 'chainZap', name: 'Chain', cd: 0, cdMax: 5, mana: 80, color: '#ffe04a' }] } };
   return {
     name: 'hudpreview', scene, camera, underwater: false,
     overlays: [hud.layer, sheetUi.layer],
-    enter() { hud.title('SUNLIT REEF', 'FLOOR 1'); },
+    enter() {
+      hud.title('SUNLIT REEF', 'FLOOR 1');
+      // &demo=banners: the floor's area card, a danger banner, a codex note (v6 look check)
+      if (demo === 'banners') { hud.areaCard('Sunlit Reef', 'Stage 1 of 3 - outside your front door'); hud.codex('Pufferfish', itemModel('giantClam')); }
+      if (demo === 'banner') hud.banner('The Harpoon King', 'Terror of the reef', 'danger', 99);
+      if (demo === 'gold') hud.banner('Cleared!', 'The way down is open', 'gold', 99);
+    },
     exit() {},
     resize(w, h) { const pr = game.renderer.getPixelRatio(); hud.resize(w, h, pr); sheetUi.resize(w, h, pr); },
     update(dt) {
       t += dt;
       // scripted beats
-      const ph = t % 12;
-      s.hp = ph < 3 ? 6 : ph < 5 ? 5 : ph < 7 ? 2 : 8;
+      // (v6) health: full -> a bite -> bruised -> critical (deflating) -> a healing clam (open, slurp, +HP) -> a new
+      // floor refills the clams. &hp=<units> pins it.
+      const ph = t % 14;
+      s.hp = q.get('hp') ? Number(q.get('hp')) : ph < 2.5 ? 10 : ph < 4.5 ? 8 : ph < 6.5 ? 5 : ph < 9 ? 2 : ph < 9.72 ? 2 : 7;
       combat.stamina = Math.max(0, 100 - ((t * 37) % 140));
       combat.staminaDelay = combat.stamina < 40 ? 0.5 : 0;
-      combat.flasks = Math.floor(t / 4) % 4;
-      combat.drinking = (t % 4) / 4;
+      combat.drinking = ph >= 9 && ph < 10.2 ? (ph - 9) / 1.2 : 0;
+      combat.flasks = q.get('clams') ? Number(q.get('clams')) : ph < 9.72 ? 2 : ph < 13 ? 1 : 3;
       combat.guard = Math.floor(t / 3) % 4 === 1 ? 'riposte' : 'idle';
       s.mana = 30 + Math.sin(t) * 25;
-      s.depth = { m: 40 + ((t * 9) % 220), record: 230, floorMax: 300 };
+      s.depth = { m: 40 + ((t * 9) % 220), record: 230, floorMax: 300, zone: 'twilight' };
+      s.far = Math.round(120 + t * 7);
       if (s.skills?.slots[1]) s.skills.slots[1].cd = Math.max(0, 6 - (t % 8));
       s.pearls = 7 + (Math.floor(t / 2) % 30);
       s.keys = 1 + (Math.floor(t / 5) % 2);

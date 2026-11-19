@@ -5,6 +5,11 @@
 // motes), marine snow, and the mail buoy + manatee for the post office. On top: the plan's rock bodies (mid-water
 // ledges, cave lids, mounds) as boulders with collision, the arena gates and the secret pits' cracked lids.
 //
+// v6 crossroads: the forks' signposts (one board per lane: the place, the danger, the reward), the bars that seal
+// a lane not taken (raised on choose()), every exit pit with its own grate and, at an end-of-floor crossroads, the
+// look of where it leads (the destination's bars as doorposts, a coloured glow rising out of it, drifting motes),
+// the CURRENTS pointing the way on (src/dungeon/currents.ts) and the dead-end signs.
+//
 // Static meshes are merged per 30 m chunk (Scenery), so frustum culling keeps the visible triangles to the few
 // chunks around the camera.
 //
@@ -12,7 +17,7 @@
 import * as THREE from 'three';
 import type { World, Entity } from '../game/types';
 import type { AreaDef } from '../area/defs';
-import { biomeDef } from './biomes';
+import { biomeDef, baseOf, isHadal } from './biomes';
 import type { Shape } from '../area/shape';
 import { SEAM_Z } from '../area/shape';
 import { Scenery } from '../area/scenery';
@@ -31,8 +36,47 @@ import { fbm, smooth, damp } from '../core/math';
 import type { LampHandle } from '../gfx/lighting';
 import { LevelTerrain } from './terrain';
 import { ArenaGate, CrackedLid } from './gates';
-import { bedAt, sandAt, shelfAt, depthOf, type LevelPlan } from './level';
-import { grateModel, ropeModel, postBox, signpostModel, disposeModel } from './models';
+import { bedAt, sandAt, shelfAt, depthOf, type LevelPlan, type ForkPlan, type ForkLane, type CurrentPlan } from './level';
+import { grateModel, ropeModel, postBox, signpostModel, disposeModel, forkSignModel, arenaGateModel, type ForkSign, type SignBoardSpec, type SignDir, type SignIconKind } from './models';
+import { Currents } from './currents';
+import { additiveMaterial } from '../world/mats';
+
+/** the colour a destination is painted / lit in at a crossroads (a band on its board, the glow out of its pit) */
+export function placeTint(area: string): string {
+  if (isHadal(area)) return biomeDef(area).pal.rockTop;
+  return ({ reef: '#ff8a5a', kelp: '#9ad84a', graveyard: '#d8a050', arctic: '#a8e4ff', abyss: '#4ae8ff' } as Record<string, string>)[baseOf(area)] ?? '#f0d8a8';
+}
+/** the dark wash inside a cave under a lid: solid in the middle, fading at both mouths, a touch lighter at the floor */
+let shadeTex: THREE.Texture | null = null;
+function caveShadeTex(): THREE.Texture {
+  if (shadeTex) return shadeTex;
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 32;
+  const x = cv.getContext('2d')!, img = x.createImageData(64, 32);
+  for (let j = 0; j < 32; j++) for (let i = 0; i < 64; i++) {
+    const ex = Math.min(1, Math.min(i, 63 - i) / 7), v = j / 31;
+    const a = ex * ex * (0.6 + 0.28 * (1 - v)) * (j > 29 ? (31 - j) / 2 : 1);
+    const k = (j * 64 + i) * 4; img.data[k] = 4; img.data[k + 1] = 9; img.data[k + 2] = 14; img.data[k + 3] = Math.round(a * 255);
+  }
+  x.putImageData(img, 0, 0);
+  shadeTex = new THREE.CanvasTexture(cv); shadeTex.colorSpace = THREE.SRGBColorSpace;
+  return shadeTex;
+}
+/** a soft round glow (additive) */
+let discTex: THREE.Texture | null = null;
+function glowDiscTex(): THREE.Texture {
+  if (discTex) return discTex;
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const x = cv.getContext('2d')!, g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  discTex = new THREE.CanvasTexture(cv);
+  return discTex;
+}
+/** a fork lane's board */
+function laneBoard(f: ForkPlan, l: ForkLane, dir: SignDir): SignBoardSpec {
+  const tint = l.area ? placeTint(l.area) : l.side === 'upper' ? '#9fe8ff' : f.kind === 'den' ? '#ff6a4a' : '#9ad84a';
+  return { title: l.name, note: l.note, danger: l.danger, giant: l.giant, icons: l.reward as SignIconKind[], dir, tint };
+}
 
 type Rig = { lamp(x: number, y: number, z: number, color: string, intensity?: number, distance?: number): LampHandle | null } | null;
 
@@ -118,7 +162,8 @@ export class LevelBuild {
     }
     for (const b of plan.solids) scen.reserved.push({ x: (b.x0 + b.x1) / 2, r: (b.x1 - b.x0) / 2 + 1.5, z0: -1.8, z1: 1.8 });
     for (const st of plan.steps) scen.reserved.push({ x: (st.x0 + st.x1) / 2, r: (st.x1 - st.x0) / 2 + 1.2, z0: -0.5, z1: 0.4 });
-    scen.reserved.push({ x: (plan.exit.x0 + plan.exit.x1) / 2, r: 4, z0: -2, z1: 2 });
+    for (const ex of plan.exits) scen.reserved.push({ x: (ex.x0 + ex.x1) / 2, r: 4.6, z0: -2.4, z1: 2.4 });
+    for (const sg of plan.signs) if (sg.kind === 'fork' || sg.kind === 'lane' || sg.kind === 'dead') scen.reserved.push({ x: sg.x, r: 1.8, z0: -2.2, z1: 1.6 });
     for (const d of plan.dips) if (d.depth > 4) scen.reserved.push({ x: (d.x0 + d.x1) / 2, r: (d.x1 - d.x0) / 2, z0: -1.2, z1: 1.2 });
     scen.build();
     if (!o.light) buildLandmarks(scen, this.group, world);
@@ -127,7 +172,7 @@ export class LevelBuild {
     const deep = plan.top < -2.9;
     terrain.ceiling = deep ? () => plan.top : a.ice ? terrain.ceiling : null;
     this.buildBodies(r);
-    this.dressExit(r);
+    for (const ex of plan.exits) this.dressExit(r, ex);
     // the post office: the manatee paints into the scenery's prop atlas, so she's built before finish()
     const post = plan.pois.find((p) => p.kind === 'post');
     if (post) {
@@ -146,13 +191,16 @@ export class LevelBuild {
       const box = postBox(); box.position.set(this.postX - 3.4, this.postY - 0.05, -0.9); box.scale.setScalar(1.35);
       this.group.add(box); this.props3d.push(box);
     }
-    // the exit pit's grate and, on a floor that ends the planned run, the rope up to the surface
-    const ex = plan.exit;
-    void ex;
-    this.grate = grateModel(ex.x1 - ex.x0 + 0.8);
-    this.grate.root.position.set((ex.x0 + ex.x1) / 2, ex.top - 0.2, 0);
-    this.group.add(this.grate.root);
-    terrain.addBody({ x0: ex.x0 - 0.8, x1: ex.x1 + 0.8, y0: ex.top - 0.7, y1: ex.top + 0.25, r: 0.1, on: () => !this.exitOpen, tag: 'grate' });
+    // the exit pits' grates and, on a floor that ends the planned run, the rope up to the surface
+    for (const ex of plan.exits) {
+      const gr = grateModel(ex.x1 - ex.x0 + 0.8);
+      gr.root.position.set((ex.x0 + ex.x1) / 2, ex.top - 0.2, 0);
+      this.group.add(gr.root);
+      this.grates.push(gr);
+      terrain.addBody({ x0: ex.x0 - 0.8, x1: ex.x1 + 0.8, y0: ex.top - 0.7, y1: ex.top + 0.25, r: 0.1, on: () => !this.exitOpen, tag: 'grate' });
+    }
+    this.grate = this.grates[0] ?? null;
+    this.buildCrossroads(r);
     if (plan.ropeX !== null) {
       const fl = sand.heightAt(plan.ropeX), h = plan.top + 6 - fl;
       this.rope = ropeModel(h);
@@ -161,6 +209,7 @@ export class LevelBuild {
     }
     // signposts: how far from home, which way is onward (distances burnt into the boards)
     for (const sg of plan.signs) {
+      if (sg.kind === 'fork' || sg.kind === 'lane' || sg.kind === 'dead') continue;
       const far = Math.round((plan.far0 + sg.x) / 5) * 5;
       const d = Math.round(depthOf(plan, sg.y));
       const boards: { text: string; dir: -1 | 0 | 1 }[] = sg.kind === 'home'
@@ -174,7 +223,8 @@ export class LevelBuild {
       this.signLamps.push(sp.getObjectByName('lamp') as THREE.Mesh);
     }
     // god-ray sheets (landmark shafts): remembered so the depth can dim them
-    this.group.traverse((o) => { const m = o as THREE.Mesh; const mt = m.material as THREE.MeshBasicMaterial; if (m.isMesh && mt.blending === THREE.AdditiveBlending && mt.isMeshBasicMaterial && !mt.userData.shared) this.shafts.push(m); });
+    // (not the crossroads' own glows and current chevrons: those keep their colour, userData.keep)
+    this.group.traverse((o) => { const m = o as THREE.Mesh; const mt = m.material as THREE.MeshBasicMaterial; if (m.isMesh && mt.blending === THREE.AdditiveBlending && mt.isMeshBasicMaterial && !mt.userData.shared && !mt.userData.keep) this.shafts.push(m); });
     // gates + lids
     const sandCol = a.pal.sand[2];
     for (const ar of plan.arenas) {
@@ -279,8 +329,136 @@ export class LevelBuild {
 
   private props3d: THREE.Object3D[] = [];
   private signLamps: THREE.Mesh[] = [];
-  /** the boss is down: the grate swings open over the pit */
+  /** every exit pit's grate (grate = the first, for older callers) */
+  grates: { root: THREE.Group; leaves: THREE.Group[] }[] = [];
+  /** per fork: its signposts (the crossroads sign and each lane's), the seal bars per lane */
+  forkSigns = new Map<number, { sign: ForkSign; lane?: number }[]>();
+  seals = new Map<number, ArenaGate[][]>();
+  currents: Currents | null = null;
+  /** the glow rising out of each crossroads pit (lit by the pooled lamps when near) */
+  private pitGlows: { x: number; y: number; z: number; col: string; k: number; mesh: THREE.Mesh; area: string; exit: number }[] = [];
+  /** the boss is down: the grates swing open over the pits */
   openExit() { this.exitOpen = true; }
+
+  /** the forks: signposts, the bars that close a lane not taken, the pits' looks; the currents and the dead ends */
+  private buildCrossroads(r: Rng) {
+    const plan = this.plan, sand = this.sand, a = this.a, world = this.world;
+    const signAt = (x: number, sign: ForkSign, z = -0.95) => {
+      sign.root.position.set(x, sand.heightAt(x) - 0.12, z);
+      sign.root.rotation.y = 0.06;
+      this.group.add(sign.root); this.props3d.push(sign.root);
+      if (sign.lamp) this.signLamps.push(sign.lamp);
+    };
+    for (const sg of plan.signs) {
+      if (sg.kind === 'dead') { const sign = forkSignModel([{ title: 'DEAD END', note: 'TURN BACK', dir: -1, danger: 0, icons: [] }], { lantern: false }); signAt(sg.x, sign, -0.8); continue; }
+      if ((sg.kind !== 'fork' && sg.kind !== 'lane') || sg.fork === undefined) continue;
+      const f = plan.forks[sg.fork];
+      if (!f) continue;
+      const list = this.forkSigns.get(f.id) ?? [];
+      if (sg.kind === 'fork') {
+        const boards = f.lanes.map((l) => laneBoard(f, l, f.kind === 'end' ? 1 : l.side === 'upper' ? 'ur' : 'dr'));
+        const sign = forkSignModel(boards, { header: f.kind === 'end' ? 'CROSSROADS' : 'THE WAY SPLITS' });
+        signAt(sg.x, sign);
+        list.push({ sign });
+      } else if (sg.lane !== undefined && f.lanes[sg.lane]) {
+        // a pit's own sign stands back from its lip, the board hung on the near side pointing down into it
+        const sign = forkSignModel([{ ...laneBoard(f, f.lanes[sg.lane], 'dr'), hang: -1 }], { lantern: false });
+        signAt(sg.x, sign, -0.7);
+        list.push({ sign, lane: sg.lane });
+      }
+      this.forkSigns.set(f.id, list);
+    }
+    // the bars that close the lanes not taken (down in the sand until a lane is chosen)
+    const sandCol = a.pal.sand[2];
+    for (const f of plan.forks) {
+      const per: ArenaGate[][] = f.lanes.map((l) => l.seals.map((sl) => {
+        // on a lid (the upper lane) the bars stand on its top; in a cave they come up out of the sand
+        const sandY = this.sand.heightAt(sl.x), fl = sl.floor > sandY + 1 ? sl.floor : sandY;
+        const g = new ArenaGate(world, this.terrain, sl.x, fl, sl.top, a.id, 'arena', sandCol, sl.bodyTop, { bodyBottom: sl.bodyBottom ?? fl - 3, glow: false });
+        this.group.add(g.group);
+        return g;
+      }));
+      this.seals.set(f.id, per);
+      if (f.chosen >= 0) this.choose(f.id, f.chosen, true);
+    }
+    // a mid-floor fork's lower lane reads as a hollow you can see into: a dark wash under the lid (the back wall stays
+    // in the gloom) and, deep inside, the light of what's there (a champion's ember red / the grotto's kelp green)
+    for (const f of plan.forks) {
+      if (f.kind === 'end') continue;
+      const lo = f.lanes.find((l) => l.side === 'lower');
+      if (!lo) continue;
+      const lid0 = lo.x0 - 1, lid1 = lo.x1 + 1, cave = lo.y0 + 4, ly0 = lo.y1;
+      const w = lid1 - lid0 + 1.2, h = ly0 - cave + 1.6;
+      const shade = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: caveShadeTex(), transparent: true, depthWrite: false, fog: false, color: '#ffffff' }));
+      shade.position.set((lid0 + lid1) / 2, cave - 1 + h / 2, -0.8);
+      shade.renderOrder = 2;
+      this.group.add(shade); this.props3d.push(shade);
+      const inner = new THREE.Mesh(new THREE.PlaneGeometry(9, 5.5), new THREE.MeshBasicMaterial({ map: glowDiscTex(), transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, color: f.kind === 'den' ? '#ff5a30' : '#a8e060' }));
+      inner.position.set((lid0 + lid1) / 2, cave + 2.2, -1.0);
+      (inner.material as THREE.Material).userData.keep = true;
+      inner.renderOrder = 3;
+      this.group.add(inner); this.props3d.push(inner);
+    }
+    // an end-of-floor crossroads: each pit dressed in the look of where it leads
+    const end = plan.forks.find((f) => f.kind === 'end' && f.lanes.length > 1);
+    if (end) for (const l of end.lanes) {
+      const ex = l.exit !== undefined ? plan.exits[l.exit] : null;
+      if (!ex || !l.area) continue;
+      const base = baseOf(l.area), col = placeTint(l.area);
+      for (const sx of [ex.x0 - 1.7, ex.x1 + 1.7]) {
+        const post = arenaGateModel(base, 'arena', l.route === 'deep' ? 4.2 : 3.2);
+        post.root.position.set(sx, sand.heightAt(sx) - 0.3, -0.2);
+        post.root.scale.set(0.8, 1, 0.55);
+        this.group.add(post.root); this.props3d.push(post.root);
+      }
+      // the light out of the pit: a soft additive column in the destination's colour rising off the lip (the shaft
+      // itself is behind its rock lining), brightest at the lip, narrowing and fading as it rises
+      const H = 7.5, w0 = ex.x1 - ex.x0 + 0.4, geo = new THREE.PlaneGeometry(w0, H, 2, 8);
+      const pos = geo.attributes.position as THREE.BufferAttribute, vc = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const v = (pos.getY(i) + H / 2) / H, edge = Math.abs(pos.getX(i)) / (w0 / 2);
+        pos.setX(i, pos.getX(i) * (1 - 0.35 * v));
+        const k = (v < 0.12 ? 0.6 + 0.4 * (v / 0.12) : Math.max(0, 1 - (v - 0.12) / 0.88) ** 1.7) * (edge > 0.99 ? 0.25 : 1);
+        vc[i * 3] = k; vc[i * 3 + 1] = k; vc[i * 3 + 2] = k;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(vc, 3));
+      const glow = new THREE.Mesh(geo, additiveMaterial(col, { opacity: 0.5 }));
+      glow.material.userData.keep = true;
+      glow.position.set((ex.x0 + ex.x1) / 2, ex.top - 0.9 + H / 2, -0.9);
+      glow.renderOrder = 3;
+      this.group.add(glow);
+      this.pitGlows.push({ x: (ex.x0 + ex.x1) / 2, y: ex.top + 0.6, z: 0.8, col, k: l.route === 'deep' ? 0.55 : 0.85, mesh: glow, area: l.area, exit: l.exit! });
+    }
+    // the currents pointing the way on
+    const cur = this.currents = new Currents(plan.currents, plan.depth0 > 150 ? '#9fe8ff' : '#dff8ff');
+    this.group.add(cur.group);
+    void r;
+  }
+
+  /** is a current flowing now (an exit's only once the grates are open; a lane's until another lane is taken) */
+  private flowing = (c: CurrentPlan) => {
+    if (c.exit !== undefined) {
+      if (!this.exitOpen) return false;
+      const end = this.plan.forks.find((f) => f.kind === 'end');
+      return !end || end.chosen < 0 || end.lanes[end.chosen]?.exit === c.exit;
+    }
+    if (c.fork !== undefined) { const f = this.plan.forks[c.fork]; return !f || f.chosen < 0 || f.chosen === c.lane; }
+    return true;
+  };
+
+  /**
+   * a lane is taken: its board is stamped, the other boards are boarded up and the bars rise across the other lanes
+   * (instant: rebuilding a fork already decided, e.g. on RESUME)
+   */
+  choose(forkId: number, lane: number, instant = false) {
+    const f = this.plan.forks[forkId];
+    if (!f) return;
+    for (const { sign, lane: only } of this.forkSigns.get(forkId) ?? []) {
+      if (only === undefined) f.lanes.forEach((_, i) => (i === lane ? sign.stamp(i, instant) : sign.cross(i, instant)));
+      else if (only === lane) sign.stamp(0, instant); else sign.cross(0, instant);
+    }
+    (this.seals.get(forkId) ?? []).forEach((gs, i) => { if (i !== lane) for (const g of gs) g.raise(instant); });
+  }
   private roof = new Soup();
   /** a stalactite hanging from y = top (a flipped spire), into the level's own soup */
   private hang(r: Rng, x: number, top: number, z: number, rad: number, L: number) {
@@ -300,8 +478,8 @@ export class LevelBuild {
   private roofGeo: THREE.BufferGeometry | null = null;
 
   /** rock lining the exit shaft (behind and in front of the play plane) so it reads as a shaft, not a cut */
-  private dressExit(r: Rng) {
-    const ex = this.plan.exit, scen = this.scen;
+  private dressExit(r: Rng, ex = this.plan.exit) {
+    const scen = this.scen;
     for (const side of [-1, 1]) {
       const wx = side < 0 ? ex.x0 - 1.2 : ex.x1 + 1.2;
       for (let y = ex.bottom - 2; y < ex.top - 0.5; y += r.range(1.6, 2.4)) {
@@ -328,7 +506,7 @@ export class LevelBuild {
     for (const l of this.glowLamps) l.release();
     this.glowLamps.length = 0;
     const deep = depthOf(this.plan, this.plan.base) > 150;
-    const n = this.a.glow || deep ? 3 : this.scen.glowPts.length ? 1 : 0;
+    const n = Math.max(this.a.glow || deep ? 3 : this.scen.glowPts.length ? 1 : 0, this.pitGlows.length ? 2 : 0);
     if (rig) for (let i = 0; i < n; i++) { const l = rig.lamp(0, -999, 0, '#5af0ff', 0, 7); if (l) this.glowLamps.push(l); }
   }
 
@@ -361,15 +539,31 @@ export class LevelBuild {
     this.detail.update(dt, camX);
     this.snow.update(camX, p.y, t);
     for (const gs of this.gates.values()) for (const g of gs) g.update(dt);
+    for (const per of this.seals.values()) for (const gs of per) for (const g of gs) g.update(dt);
+    for (const list of this.forkSigns.values()) for (const s of list) s.sign.update(dt);
+    this.currents?.update(dt, camX, t, w.fx, this.flowing);
+    // the crossroads pits breathe their colour (brighter once the grates open) and shed the motes of where they lead
+    for (const g of this.pitGlows) {
+      const open = this.exitOpen ? 1 : 0.35, end = this.plan.forks.find((f) => f.kind === 'end');
+      const taken = !end || end.chosen < 0 || end.lanes[end.chosen]?.exit === g.exit ? 1 : 0.25;
+      const m = g.mesh.material as THREE.MeshBasicMaterial;
+      m.opacity = (g.k * 0.55) * open * taken * (0.85 + Math.sin(t * 1.3 + g.x) * 0.15);
+      if (Math.abs(g.x - camX) < 14 && Math.random() < dt * 6 * open * taken) {
+        const b = baseOf(g.area), x = g.x + (Math.random() - 0.5) * 4.6, y = g.y - 2 - Math.random() * 3;
+        if (b === 'kelp') w.fx.emit('leaf', x, y, { vy: 0.9, vx: (Math.random() - 0.5) * 0.4, life: 3, drag: 0.4, z: -0.6, color: '#7ab83a' });
+        else if (b === 'graveyard') w.fx.emit('dust', x, y, { vy: 0.5, life: 2.4, size: 0.4, color: '#8a6a3a', z: -0.6 });
+        else if (b === 'arctic') w.fx.emit('snow', x, y + 4, { vy: -0.4, vx: (Math.random() - 0.5) * 0.3, life: 4, size: 0.09, color: '#e8f8ff', z: -0.6 });
+        else w.fx.emit('mote', x, y, { vy: 0.7, life: 3, color: g.col, z: -0.6, drift: 0.3 });
+      }
+    }
     // the manatee keeps office hours by her post box (well clear of the ceiling)
     const m = this.manatee;
     if (m) {
       m.update(dt, w, this.postX + 1.6, this.postY + 6.8);
     }
-    if (this.grate) {
+    if (this.grates.length) {
       this.grateA += ((this.exitOpen ? 1 : 0) - this.grateA) * (1 - Math.exp(-dt * 2.2));
-      const [l, r] = this.grate.leaves;
-      l.rotation.z = -this.grateA * 1.7; r.rotation.z = this.grateA * 1.7;
+      for (const gr of this.grates) { const [l, r] = gr.leaves; l.rotation.z = -this.grateA * 1.7; r.rotation.z = this.grateA * 1.7; }
     }
     for (const [i, l] of this.signLamps.entries()) if (l) { const k = 0.8 + Math.sin(t * 2.3 + i) * 0.15 + Math.sin(t * 7.1 + i * 3) * 0.05; (l.material as THREE.MeshBasicMaterial).color.setRGB(2.2 * k, 1.8 * k, 1.1 * k); }
     if (this.rope) { this.rope.root.rotation.z = Math.sin(t * 0.7) * 0.02; const k = 0.75 + Math.sin(t * 3) * 0.25; (this.rope.lamp.material as THREE.MeshBasicMaterial).color.setRGB(2.4 * k, 2.0 * k, 1.3 * k); }
@@ -379,6 +573,7 @@ export class LevelBuild {
       const put = (g: { x: number; y: number; z: number; col: string }, kk: number, d: number) => { const o = near[nn] ?? (near[nn] = { x: 0, y: 0, z: 0, col: '', k: 0, d: 0 }); o.x = g.x; o.y = g.y; o.z = g.z; o.col = g.col; o.k = kk; o.d = d; nn++; };
       for (const g of this.scen.glowPts) if (Math.abs(g.x - camX) < 12) put(g, 1, Math.abs(g.x - camX));
       for (const g of this.scen.glowDyn) put(g, g.k, Math.abs(g.x - camX) + 1.5);
+      for (const g of this.pitGlows) if (Math.abs(g.x - camX) < 16) put(g, g.k * (this.exitOpen ? 1 : 0.4), Math.abs(g.x - camX) + 0.5);
       near.length = nn;
       near.sort((a, b) => a.d - b.d);
       this.glowLamps.forEach((l, i) => {
@@ -400,7 +595,10 @@ export class LevelBuild {
     for (const e of this.owned) e.alive = false;
     this.manatee?.dispose();
     for (const o of this.props3d) disposeModel(o);
-    if (this.grate) disposeModel(this.grate.root);
+    for (const gr of this.grates) disposeModel(gr.root);
+    for (const per of this.seals.values()) for (const gs of per) for (const g of gs) g.dispose();
+    this.currents?.dispose();
+    for (const g of this.pitGlows) { g.mesh.geometry.dispose(); (g.mesh.material as THREE.Material).dispose(); }
     if (this.rope) disposeModel(this.rope.root);
     this.roofGeo?.dispose();
     this.detail.dispose();

@@ -9,18 +9,15 @@
 //   wobble(t)                            the pop-in offset of a panel (a damped bob, px)
 //   const fx = new SeaFx(); fx.burst(x, y); fx.draw(ui, dt)   a splash of bubbles (hover, press, drops)
 import type { PixelUI } from '../ui/pixel/ui';
+import { bubbleArt } from '../ui/pixel/skins';
+import { Px, R, SPR, stamp } from '../ui/pixel/decor';
 
 const h1 = (n: number) => { let x = (n * 374761393) | 0; x = (x ^ (x >>> 13)) * 1274126177; return ((x ^ (x >>> 16)) >>> 0) / 4294967295; };
 
-/** a bubble ring: r 1 (a dot with a glint), 2 or 3 */
+/** a bubble (the kit's hand-drawn bubble sprite: a lit rim, a shaded rim, a glint), r 1..3, on whole UI pixels */
 export function bubble(ui: PixelUI, x: number, y: number, r: number, a = 1) {
-  x = Math.round(x); y = Math.round(y);
-  const rim = '#bfe8f0', hi = '#ffffff';
-  if (r <= 1) { ui.fill(x, y, 2, 2, rim, 0.75 * a); ui.fill(x, y, 1, 1, hi, 0.9 * a); return; }
-  if (r === 2) { ui.fill(x + 1, y, 2, 1, rim, 0.8 * a); ui.fill(x + 1, y + 3, 2, 1, rim, 0.8 * a); ui.fill(x, y + 1, 1, 2, rim, 0.8 * a); ui.fill(x + 3, y + 1, 1, 2, rim, 0.8 * a); ui.fill(x + 1, y + 1, 1, 1, hi, 0.9 * a); return; }
-  ui.fill(x + 2, y, 2, 1, rim, 0.8 * a); ui.fill(x + 2, y + 5, 2, 1, rim, 0.8 * a); ui.fill(x, y + 2, 1, 2, rim, 0.8 * a); ui.fill(x + 5, y + 2, 1, 2, rim, 0.8 * a);
-  ui.fill(x + 1, y + 1, 1, 1, rim, 0.8 * a); ui.fill(x + 4, y + 1, 1, 1, rim, 0.8 * a); ui.fill(x + 1, y + 4, 1, 1, rim, 0.8 * a); ui.fill(x + 4, y + 4, 1, 1, rim, 0.8 * a);
-  ui.fill(x + 1, y + 2, 1, 1, hi, 0.9 * a); ui.fill(x + 2, y + 1, 1, 1, hi, 0.9 * a);
+  const b = bubbleArt(Math.max(1, Math.min(3, Math.round(r))));
+  ui.img(b, Math.round(x), Math.round(y), { alpha: a, w: b.width, h: b.height });
 }
 
 /** a few bubbles rising off an edge: each starts at its own spot along it, rises `rise` px wobbling, then pops */
@@ -36,21 +33,34 @@ export function bubbles(ui: PixelUI, x: number, y: number, w: number, t: number,
   }
 }
 
-/** a kelp blade hanging from (x, y): `len` px of segments that sway, darker on one edge, a bladder near the tip */
+const KELP = ['#0c200e', '#183a14', '#28561c', '#3c7426', '#559234', '#78b04a', '#a8d06c'];
+/**
+ * a kelp frond hanging from (x, y): `len` px of ruffled ribbon (an ink-green rim, a lit margin on the light side, a
+ * paler midrib, a shaded margin), swaying more toward its tip on whole UI pixels, a cast shadow, a gas bladder at the
+ * stipe (dir 1 drifts right, -1 left)
+ */
 export function kelp(ui: PixelUI, x: number, y: number, len: number, t: number, seed = 1, dir: 1 | -1 = 1) {
-  const C = ['#1e4a1c', '#3a7a28', '#5fae3f', '#8ccc5a'];
-  let px = x;
+  const K = KELP;
+  const rows: [number, number, number][] = [];
   for (let i = 0; i < len; i++) {
     const k = i / len;
-    const sway = Math.sin(t * 1.3 + seed + k * 3) * k * k * 5 * dir;
-    px = x + Math.round(sway + dir * Math.sin(k * 2.2) * 3);
-    const wdt = i < 2 ? 2 : k > 0.85 ? 2 : 3;
-    ui.fill(px, y + i, wdt, 1, i % 4 === 0 ? C[2] : C[1]);
-    ui.fill(px + (dir > 0 ? wdt : -1), y + i, 1, 1, C[0]);
-    if (i % 5 === 2) ui.fill(px + 1, y + i, 1, 1, C[3]);
+    const sway = Math.sin(t * 1.3 + seed + k * 3) * k * k * 4.5 * dir + Math.sin(t * 0.6 + seed) * k;
+    const cx = x + sway + dir * Math.sin(k * 2.2) * 3;
+    const w = i < 2 ? 2 : k > 0.88 ? 1 : k > 0.74 ? 2 : 3 + ((i >> 2) % 2);
+    rows.push([Math.round(cx - w / 2 + 1), y + i, w]);
   }
-  // a gas bladder near the end
-  ui.fill(px - 1, y + len, 4, 3, C[0]); ui.fill(px, y + len, 2, 2, '#b8a040'); ui.fill(px, y + len, 1, 1, '#f0e080');
+  for (const [rx, ry, w] of rows) ui.fill(rx + 1, ry + 1, w, 1, '#000000', 0.25);
+  for (const [rx, ry, w] of rows) ui.fill(rx - 1, ry - 1, w + 2, 3, K[0]);
+  rows.forEach(([rx, ry, w], i) => {
+    if (w === 1) { ui.fill(rx, ry, 1, 1, K[4]); return; }
+    ui.fill(rx, ry, w, 1, K[3]);
+    ui.fill(rx, ry, 1, 1, K[5]); ui.fill(rx + w - 1, ry, 1, 1, K[2]);
+    if (w >= 3) ui.fill(rx + Math.floor(w / 2), ry, 1, 1, (i >> 1) % 3 === 0 ? K[6] : K[4]);
+  });
+  // a gas bladder at the stipe
+  const [bx, by] = rows[Math.min(rows.length - 1, 2)];
+  ui.fill(bx - 2, by - 1, 4, 4, K[0]);
+  ui.fill(bx - 1, by, 2, 2, '#a08a2c'); ui.fill(bx - 1, by, 1, 1, '#ecd878'); ui.fill(bx, by + 1, 1, 1, '#6e5c1c');
 }
 
 /** slow caustic light: a few wavy bright lines drifting across a rect (low alpha; clipped) */
@@ -67,28 +77,31 @@ export function caustics(ui: PixelUI, x: number, y: number, w: number, h: number
   ui.unclip();
 }
 
-/** a barnacle cluster with a tiny scallop shell (about 12 x 8 px), for a frame corner */
+const clusterCache = new Map<number, HTMLCanvasElement>();
+/** a barnacle cluster with a limpet and a tiny scallop (about 16 x 9 px), for a frame corner: the kit's sprites */
 export function barnacles(ui: PixelUI, x: number, y: number, seed = 1) {
-  const B = ['#3a3630', '#7a7266', '#b8aea0', '#e8e0d4'];
-  const cone = (cx: number, cy: number, r: number) => { ui.fill(cx - r, cy, r * 2 + 1, r, B[0]); ui.fill(cx - r + 1, cy, r * 2 - 1, r - 1, B[2]); ui.fill(cx - r + 1, cy, r, 1, B[3]); ui.fill(cx - 1, cy, 3, 1, B[0]); };
-  cone(x + 3, y + 3, 3); cone(x + 8 + Math.round(h1(seed) * 2), y + 4, 2); cone(x + 5, y + 6, 2);
-  // the scallop
-  const sx = x + 10, sy = y + 5;
-  ui.fill(sx, sy + 1, 5, 3, '#6e3e3a'); ui.fill(sx + 1, sy, 3, 1, '#6e3e3a'); ui.fill(sx + 1, sy + 1, 3, 2, '#f0b8a0'); ui.fill(sx + 2, sy + 1, 1, 2, '#c08070');
+  const k = seed % 4;
+  let c = clusterCache.get(k);
+  if (!c) {
+    const px = new Px(18, 10);
+    stamp(px, SPR.barnacleL, 1, 2); stamp(px, SPR.barnacleM, 5 + (k % 2), 4); stamp(px, SPR.barnacleS, 0, 6);
+    stamp(px, SPR.scallop, 10, 2);
+    c = px.done(); clusterCache.set(k, c);
+  }
+  ui.img(c, Math.round(x), Math.round(y), { w: c.width, h: c.height });
 }
 
-/** a twisted rope segment (3 px thick), horizontal or vertical */
+/** a twisted rope segment (4 px thick: ink rims, a lit strand side, a shaded strand side, splits every 3 px) */
 export function rope(ui: PixelUI, x: number, y: number, len: number, vertical = false) {
-  const C = ['#3a2a14', '#8a6a3a', '#c8a464', '#ecd29a'];
+  const C = R.rope.map((c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''));
   for (let i = 0; i < len; i++) {
-    const k = i % 4;
-    const a = k === 0 ? C[3] : k === 1 ? C[2] : k === 2 ? C[1] : C[0];
-    const b = k === 1 ? C[3] : k === 2 ? C[2] : k === 3 ? C[1] : C[0];
+    const k = i % 3;
+    const a = k === 0 ? C[6] : k === 1 ? C[5] : C[3];
+    const b = k === 0 ? C[3] : k === 1 ? C[2] : C[1];
     if (vertical) { ui.fill(x, y + i, 1, 1, C[0]); ui.fill(x + 1, y + i, 1, 1, a); ui.fill(x + 2, y + i, 1, 1, b); ui.fill(x + 3, y + i, 1, 1, C[0]); }
     else { ui.fill(x + i, y, 1, 1, C[0]); ui.fill(x + i, y + 1, 1, 1, a); ui.fill(x + i, y + 2, 1, 1, b); ui.fill(x + i, y + 3, 1, 1, C[0]); }
   }
 }
-
 /** a panel's pop-in: rises with a damped water bob (px; 0 once settled). t = seconds since it opened */
 export function wobble(t: number) { return t > 1.2 ? 0 : Math.round(Math.exp(-t * 5) * Math.cos(t * 16) * 14); }
 

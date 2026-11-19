@@ -95,10 +95,14 @@ void fishDeform() {
     { float a = atan(slope + bslope); fishRotY(fishN, -a); }
   #endif
 #elif FISH_MODE == 1
-  // jelly: bell pulse (aSwim.x = bell weight), tentacles (aSwim.z = distance along, aSwim.y = phase)
-  float pulse = pow(max(0.0, sin(fSw.x)), 2.0);
-  float k = 1.0 - pulse * 0.2 * aSwim.x;
-  fishP.xz *= k; fishP.y += pulse * 0.06 * L * aSwim.x;
+  // jelly: a quick contraction and a slow relaxation (aSwim.x = bell radius weight): the margin squeezes in and
+  // draws down while the apex barely moves; tentacles (aSwim.z = distance along, aSwim.y = phase) trail
+  float cyc = fract(fSw.x / 6.2831853);
+  float pulse = cyc < 0.3 ? sin(cyc / 0.3 * 1.5707963) : cos((cyc - 0.3) / 0.7 * 1.5707963);
+  pulse *= pulse;
+  float bw = aSwim.x * aSwim.x;
+  float k = 1.0 - pulse * 0.24 * bw;
+  fishP.xz *= k; fishP.y += pulse * 0.05 * L * aSwim.x - pulse * 0.07 * L * bw * bw;
   float tw = aSwim.z;
   fishP.x += tw * tw * L * 0.18 * sin(fSw.x * 0.5 - tw * 5.0 + aSwim.y) + fSw.z * tw * tw * L * 0.3;
   fishP.z += tw * tw * L * 0.18 * cos(fSw.x * 0.45 - tw * 4.0 + aSwim.y * 1.3);

@@ -1,13 +1,16 @@
 // Story props for the prologue, PS2-style: blocky flat-shaded low-poly with small clean painted pages (flat tones,
 // deliberate shapes, no noise): Dad's sailor cap, Mom's shell necklace, the bread on its hook, giant glass bottles
-// (human trash) to smash, Mr. Crab's training shell (the parry lesson), the dash ring, the trawl net that takes Mom
-// and Dad, and the ruined home the tutorial ends at. (Mr. Crab and his shop: src/story/crab.ts.)
+// (human trash) to smash, Mr. Crab's training shell (the parry lesson), the tutorial's bubble rings, kelp gates,
+// current and minnow, the trawl net that takes Mom and Dad, and the ruined home the tutorial ends at.
+// (Mr. Crab and his shop: src/story/crab.ts.)
 import * as THREE from 'three';
 import { psxMat, mesh, facet } from '../player/psx';
 import { ctex, T, rect, planks } from '../skills/texkit';
 import { bodyPoint } from '../player/blobShape';
 import { buildHook } from '../fishing/bait';
-import { TAU } from '../core/math';
+import { TAU, segDist } from '../core/math';
+import { bubbleCluster } from '../ui/text3d';
+import { kelpGeo, kelpMat, KELP_T } from '../title/art';
 import type { Entity, World, Team } from '../game/types';
 import { attackPlayer } from '../combat/resolve';
 
@@ -380,40 +383,282 @@ export class RuinedHome {
   }
 }
 
-// ------------------------------------------------------------------ dash hoops
-/** a ring of shells and kelp to dash through */
-export class Hoop {
+// ------------------------------------------------------------------ bubble rings (the tutorial's gates and targets)
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p3 = new THREE.Vector3(), _s3 = new THREE.Vector3();
+/**
+ * a ring of glassy bubbles (the same glass as the bubble text) round a faint glowing hoop: swim or dash through it.
+ * highlight(k) makes it shimmer when it is the next one; burst() pops it (the bubbles fly apart and vanish).
+ */
+export class BubbleRing {
   group = new THREE.Group();
   passed = false;
-  private ring: THREE.Mesh;
+  private bubbles: THREE.InstancedMesh;
   private glow: THREE.Mesh;
+  private gmat: THREE.MeshBasicMaterial;
+  private n: number;
   private t = Math.random() * 6;
   private pop = 0;
-  constructor(public x: number, public y: number, public r = 0.9) {
-    this.ring = M(new THREE.TorusGeometry(r, 0.09, 5, 14), flat('#f0a0b8', { rough: 0.5, emissive: '#ff6a9a', emissiveK: 0.25 }));
-    this.glow = new THREE.Mesh(new THREE.TorusGeometry(r, 0.03, 4, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0a0').multiplyScalar(1.6) }));
-    this.group.add(this.ring, this.glow);
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * TAU;
-      const s = M(new THREE.ConeGeometry(0.08, 0.1, 5), flat(i % 2 ? '#fff0dc' : '#ffc890', { rough: 0.4 }), false);
-      s.position.set(Math.cos(a) * r, Math.sin(a) * r, 0.06); s.rotation.set(Math.PI / 2, 0, a);
-      this.group.add(s);
-    }
+  private lit = 0;
+  constructor(public x: number, public y: number, public r = 0.9, tint = '#bff4ff') {
+    this.n = Math.round(12 + r * 9);
+    this.bubbles = bubbleCluster(this.n, tint);
+    this.gmat = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.glow = new THREE.Mesh(new THREE.TorusGeometry(r, 0.035, 4, 28), this.gmat);
+    this.group.add(this.bubbles, this.glow);
     this.group.position.set(x, y, 0);
-    this.group.rotation.y = 0.5;
+    this.group.rotation.y = 0.35;
+    this.update(0);
   }
-  /** pass check: did a point move through the ring's disc this frame */
-  check(px: number, py: number) { return Math.hypot(px - this.x, py - this.y) < this.r * 0.85; }
-  celebrate() { this.passed = true; this.pop = 1; }
+  /** did a swimmer moving from a to b this frame go through the ring's disc */
+  crossed(ax: number, ay: number, bx: number, by: number, k = 0.92) { return !this.passed && segDist(this.x, this.y, ax, ay, bx, by).d < this.r * k; }
+  /** 0..1: shimmer as the next target */
+  highlight(k: number) { this.lit = k; }
+  burst() { if (!this.passed) { this.passed = true; this.pop = 1; } }
+  get gone() { return this.passed && this.pop <= 0; }
   update(dt: number) {
     this.t += dt;
-    this.pop = Math.max(0, this.pop - dt * 2);
-    this.group.position.y = this.y + Math.sin(this.t * 1.5) * 0.08;
-    this.group.rotation.z = this.t * 0.4;
-    const s = 1 + this.pop * 0.4;
-    this.group.scale.setScalar(this.passed ? Math.max(0.001, s * (1 - Math.max(0, 0.5 - this.pop) * 2)) : 1 + Math.sin(this.t * 4) * 0.03);
-    (this.glow.material as THREE.MeshBasicMaterial).color.setScalar(this.passed ? 0.4 : 1.2 + Math.sin(this.t * 6) * 0.4).multiply(new THREE.Color('#fff0a0'));
+    if (this.passed) this.pop = Math.max(0, this.pop - dt * 2.2);
+    const t = this.t, n = this.n;
+    this.group.position.y = this.y + Math.sin(t * 1.4) * 0.07;
+    const blow = this.passed ? 1 - this.pop : 0;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + t * 0.45 + Math.sin(t * 0.7 + i) * 0.05;
+      const rr = this.r * (1 + Math.sin(t * 3 + i * 1.9) * 0.04 + blow * blow * 1.6);
+      const big = i % 3 === 0 ? 1.35 : i % 3 === 1 ? 0.8 : 1;
+      const sz = this.r * 0.105 * big * (1 + Math.sin(t * 4.2 + i * 1.7) * 0.12 + this.lit * 0.18) * (this.passed ? Math.max(0, this.pop * 1.4 - 0.1) : 1);
+      _p3.set(Math.cos(a) * rr, Math.sin(a) * rr, Math.sin(t * 2 + i) * 0.04);
+      _m4.compose(_p3, _q, _s3.setScalar(Math.max(1e-4, sz)));
+      this.bubbles.setMatrixAt(i, _m4);
+    }
+    this.bubbles.instanceMatrix.needsUpdate = true;
+    this.gmat.opacity = this.passed ? this.pop * 0.6 : 0.28 + this.lit * (0.35 + Math.sin(t * 7) * 0.15);
+    this.glow.scale.setScalar(1 + blow * 0.6);
+    this.group.visible = !this.gone;
   }
+  dispose() { this.group.removeFromParent(); this.bubbles.geometry.dispose(); this.glow.geometry.dispose(); this.gmat.dispose(); }
+}
+
+// ------------------------------------------------------------------ kelp gates (the swim slalom)
+/**
+ * a slalom gate: a clump of kelp up from the seabed and a mat of kelp hanging from the surface, with a gap between
+ * them (a bubble ring marks it). The kelp is soft: push() nudges a swimmer that brushes it toward the gap, so the
+ * gate guides more than it blocks.
+ */
+export class KelpGate {
+  group = new THREE.Group();
+  ring: BubbleRing;
+  passed = false;
+  private stalks: { m: THREE.Mesh; ph: number; base: number }[] = [];
+  private wob = 0; private wobV = 0;
+  constructor(public x: number, floorY: number, public gapY: number, public gapH = 2.8, top = -0.25, seed = 1) {
+    const km = kelpMat();
+    const lo = gapY - gapH / 2, hi = gapY + gapH / 2;
+    const add = (h: number, px: number, py: number, pz: number, down: boolean, sd: number) => {
+      if (h < 0.5) return;
+      const m = new THREE.Mesh(kelpGeo(h, sd), km);
+      m.position.set(px, py, pz);
+      if (down) m.rotation.z = Math.PI;
+      m.rotation.y = sd * 1.3;
+      m.castShadow = false;
+      this.group.add(m);
+      this.stalks.push({ m, ph: sd, base: m.rotation.z });
+    };
+    // up from the sand (three stalks, a little apart in depth), down from the surface mat
+    add(lo - floorY + 0.15, -0.18, floorY - 0.1, -0.5, false, seed);
+    add(lo - floorY - 0.25, 0.22, floorY - 0.1, -0.95, false, seed + 1.3);
+    add(lo - floorY - 0.6, 0.05, floorY - 0.1, 0.15, false, seed + 2.1);
+    add(top - hi + 0.15, 0.15, top, -0.55, true, seed + 3.7);
+    add(top - hi - 0.3, -0.25, top, -1.0, true, seed + 4.4);
+    add(top - hi - 0.7, 0.0, top, 0.1, true, seed + 5.9);
+    // a floating mat of weed at the surface the hanging kelp drifts from
+    const mat = M(new THREE.CylinderGeometry(0.9, 1.1, 0.18, 7), flat('#6a7a2a', { rough: 0.9 }), false);
+    mat.position.set(0, top + 0.05, -0.4); mat.scale.z = 0.6;
+    this.group.add(mat);
+    this.group.position.x = x;
+    this.ring = new BubbleRing(x, gapY, Math.min(1.05, gapH * 0.34), '#c8ffe8');
+  }
+  /** soft kelp: a nudge toward the gap for a swimmer at (px, py) brushing a stalk (and a sway on the kelp) */
+  push(px: number, py: number): { x: number; y: number } {
+    const dx = px - this.x;
+    if (Math.abs(dx) > 0.75) return { x: 0, y: 0 };
+    const lo = this.gapY - this.gapH / 2 + 0.25, hi = this.gapY + this.gapH / 2 - 0.25;
+    const k = 1 - Math.abs(dx) / 0.75;
+    if (py < lo) { this.wobV += 0.6; return { x: 0, y: (lo - py + 0.3) * 18 * k }; }
+    if (py > hi) { this.wobV -= 0.6; return { x: 0, y: -(py - hi + 0.3) * 18 * k }; }
+    return { x: 0, y: 0 };
+  }
+  update(dt: number, time: number) {
+    KELP_T.value = time;
+    this.wobV += (-this.wob * 30 - this.wobV * 3) * dt; this.wob += this.wobV * dt;
+    for (const s of this.stalks) s.m.rotation.z = s.base + Math.sin(time * 0.8 + s.ph) * 0.04 + this.wob * 0.1;
+    this.ring.update(dt);
+  }
+  addTo(scene: THREE.Object3D) { scene.add(this.group, this.ring.group); }
+  dispose() { this.group.removeFromParent(); this.ring.dispose(); }
+}
+
+// ------------------------------------------------------------------ a current to ride
+/**
+ * a warm current: a band of fast water along a smooth path, drawn as streaks of light rushing along it (and bubbles).
+ * flow(x, y) is the push a swimmer inside it gets (strongest on the centre line, fading to the band's edge).
+ */
+export class CurrentStream {
+  group = new THREE.Group();
+  pts: THREE.Vector2[] = [];
+  private tan: THREE.Vector2[] = [];
+  private streaks: THREE.InstancedMesh;
+  private sk: { s: number; o: number; v: number; l: number }[] = [];
+  private on = 0;
+  private want = 0;
+  private len = 0;
+  constructor(ctrl: [number, number][], public hw = 1.5, public force = 30) {
+    const curve = new THREE.SplineCurve(ctrl.map(([x, y]) => new THREE.Vector2(x, y)));
+    this.pts = curve.getSpacedPoints(48);
+    for (let i = 0; i < this.pts.length; i++) {
+      const a = this.pts[Math.max(0, i - 1)], b = this.pts[Math.min(this.pts.length - 1, i + 1)];
+      this.tan.push(b.clone().sub(a).normalize());
+    }
+    this.len = curve.getLength();
+    const N = 70;
+    const g = new THREE.PlaneGeometry(1, 1);
+    const m = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    this.streaks = new THREE.InstancedMesh(g, m, N);
+    this.streaks.frustumCulled = false;
+    const c = new THREE.Color();
+    for (let i = 0; i < N; i++) {
+      this.sk.push({ s: Math.random(), o: (Math.random() * 2 - 1) * 0.85, v: 0.75 + Math.random() * 0.5, l: 0.35 + Math.random() * 0.6 });
+      this.streaks.setColorAt(i, c.set(i % 3 ? '#9ff0ff' : '#fff4c8'));
+    }
+    this.group.add(this.streaks);
+  }
+  get start() { return this.pts[0]; }
+  get end() { return this.pts[this.pts.length - 1]; }
+  /** nearest sample to a point: its index and distance */
+  private nearest(px: number, py: number) {
+    let bi = 0, bd = 1e9;
+    for (let i = 0; i < this.pts.length; i++) { const d = Math.hypot(this.pts[i].x - px, this.pts[i].y - py); if (d < bd) { bd = d; bi = i; } }
+    return { i: bi, d: bd };
+  }
+  /** 0..1 how far along the path the point is (nearest sample) */
+  along(px: number, py: number) { return this.nearest(px, py).i / (this.pts.length - 1); }
+  /** the push at a point (0 outside the band or before it is switched on) */
+  flow(px: number, py: number): { x: number; y: number; k: number } {
+    const { i, d } = this.nearest(px, py);
+    if (d > this.hw || this.on < 0.5 || i >= this.pts.length - 1) return { x: 0, y: 0, k: 0 };
+    const k = (1 - (d / this.hw) ** 2) * this.on;
+    const t = this.tan[i], c = this.pts[i];
+    // along the flow, plus a gentle pull back toward the centre line
+    return { x: t.x * this.force * k + (c.x - px) * 6 * k, y: t.y * this.force * k + (c.y - py) * 6 * k, k };
+  }
+  setOn(v: boolean) { this.want = v ? 1 : 0; }
+  update(dt: number, fx?: { emit: (kind: 'bubbleS', x: number, y: number, o: { n: number; spread: number; speed: number; vx?: number; vy?: number }) => void }) {
+    this.on += (this.want - this.on) * (1 - Math.exp(-dt * 3));
+    const n = this.pts.length - 1;
+    for (let i = 0; i < this.sk.length; i++) {
+      const s = this.sk[i];
+      s.s += (dt * s.v * 9) / Math.max(1, this.len);
+      if (s.s > 1) { s.s -= 1; s.o = (Math.random() * 2 - 1) * 0.85; }
+      const f = s.s * n, i0 = Math.min(n - 1, Math.floor(f)), k = f - i0;
+      const p = this.pts[i0], q = this.pts[i0 + 1], t = this.tan[i0];
+      const x = p.x + (q.x - p.x) * k - t.y * s.o * this.hw * 0.8, y = p.y + (q.y - p.y) * k + t.x * s.o * this.hw * 0.8;
+      // streaks fade in at the start, out at the end, and with the current's strength
+      const fade = Math.min(1, s.s * 6, (1 - s.s) * 6) * this.on;
+      _p3.set(x, y, 0.2 + s.o * 0.4);
+      _q.setFromAxisAngle(_z, Math.atan2(t.y, t.x));
+      _m4.compose(_p3, _q, _s3.set(s.l * (0.5 + fade * 0.9), 0.06 * fade + 1e-4, 1));
+      this.streaks.setMatrixAt(i, _m4);
+    }
+    this.streaks.instanceMatrix.needsUpdate = true;
+    if (fx && this.on > 0.3 && Math.random() < dt * 14) {
+      const p = this.pts[Math.floor(Math.random() * n)], t = this.tan[Math.floor(Math.random() * n)];
+      fx.emit('bubbleS', p.x + (Math.random() - 0.5) * this.hw, p.y + (Math.random() - 0.5) * this.hw, { n: 1, spread: 0.1, speed: 0.4, vx: t.x * 3, vy: t.y * 3 });
+    }
+  }
+  dispose() { this.group.removeFromParent(); this.streaks.geometry.dispose(); (this.streaks.material as THREE.Material).dispose(); }
+}
+const _z = new THREE.Vector3(0, 0, 1);
+
+// ------------------------------------------------------------------ the minnow (the dart lesson)
+/**
+ * a little golden minnow, quick and skittish: it wanders, bolts away when the kid gets close, flips direction at the
+ * edges of its patch, and now and then stops to look back (the moment to DART at it). tired() slows it down for
+ * players who need it; caught() spins it round, then it zips off to the far side.
+ */
+export class Minnow {
+  group = new THREE.Group();
+  x: number; y: number; vx = 0; vy = 0;
+  face = 1;
+  private body = new THREE.Group();
+  private tail: THREE.Mesh;
+  private t = Math.random() * 5;
+  private pauseT = 0; private nextPause = 2.2;
+  private spin = 0;
+  private dizzy = 0;
+  slow = 0;
+  constructor(x: number, y: number) {
+    this.x = x; this.y = y;
+    const gold = flat('#ffc83a', { rough: 0.4, emissive: '#ff9a1a', emissiveK: 0.25 }), belly = flat('#fff4d0', { rough: 0.5 }), blue = flat('#2a7ad8', { rough: 0.5 }), dark = flat('#1a1a24', { rough: 0.3 });
+    const b = M(new THREE.OctahedronGeometry(1, 1), gold);
+    b.scale.set(0.26, 0.11, 0.075);
+    const bl = M(new THREE.OctahedronGeometry(1, 1), belly);
+    bl.scale.set(0.2, 0.06, 0.07); bl.position.set(0.02, -0.04, 0);
+    const stripe = M(new THREE.BoxGeometry(0.3, 0.02, 0.155), blue);
+    stripe.position.set(-0.01, 0.015, 0);
+    const fin = M(new THREE.ConeGeometry(0.06, 0.12, 3), gold);
+    fin.position.set(-0.02, 0.11, 0); fin.rotation.z = 0.5; fin.scale.z = 0.3;
+    this.tail = M(new THREE.ConeGeometry(0.09, 0.16, 3), gold);
+    this.tail.position.set(-0.3, 0, 0); this.tail.rotation.z = Math.PI / 2; this.tail.scale.z = 0.25;
+    const eye = M(new THREE.SphereGeometry(0.028, 6, 4), dark, false);
+    eye.position.set(0.16, 0.025, 0.06);
+    const glintM = new THREE.Mesh(new THREE.SphereGeometry(0.01, 4, 3), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+    glintM.position.set(0.17, 0.035, 0.085);
+    this.body.add(b, bl, stripe, fin, this.tail, eye, glintM);
+    this.group.add(this.body);
+    this.group.scale.setScalar(1.25);
+  }
+  /** spin round after being caught */
+  caught() { this.spin = 1; this.dizzy = 0.9; }
+  get stunned() { return this.dizzy > 0; }
+  /**
+   * steer: flee from (kx, ky) inside the patch [x0, x1] x [y0, y1]; `speed` is its bolt speed (m/s)
+   */
+  update(dt: number, kx: number, ky: number, box: { x0: number; x1: number; y0: number; y1: number }, speed: number) {
+    this.t += dt;
+    this.dizzy = Math.max(0, this.dizzy - dt);
+    this.spin = Math.max(0, this.spin - dt * 1.2);
+    const dx = this.x - kx, dy = this.y - ky, d = Math.hypot(dx, dy) || 1;
+    let tx = 0, ty = 0;
+    this.pauseT -= dt; this.nextPause -= dt;
+    if (this.nextPause <= 0 && d > 1.6) { this.pauseT = 0.65; this.nextPause = 2.4 + Math.random() * 1.8; }
+    if (this.dizzy > 0) { tx = 0; ty = 0.3; }
+    else if (this.pauseT > 0) { tx = -dx / d * 0.3; ty = -dy / d * 0.3; }
+    else if (d < 3.4) {
+      // bolt away, sliding along the patch edges (and cutting back past the kid when cornered)
+      const sp = speed * (1 - this.slow * 0.5);
+      tx = (dx / d) * sp; ty = (dy / d) * sp * 0.85;
+      const m = 1.4;
+      if (this.x < box.x0 + m && tx < 0) { tx = Math.abs(tx) * 0.3; ty += (ty >= 0 ? 1 : -1) * sp * 0.9; }
+      if (this.x > box.x1 - m && tx > 0) { tx = -Math.abs(tx) * 0.3; ty += (ty >= 0 ? 1 : -1) * sp * 0.9; }
+      if (this.y < box.y0 + m * 0.7 && ty < 0) ty = Math.abs(ty) * 0.6;
+      if (this.y > box.y1 - m * 0.7 && ty > 0) ty = -Math.abs(ty) * 0.6;
+    } else {
+      tx = Math.sin(this.t * 0.7) * 1.4; ty = Math.sin(this.t * 1.1 + 1) * 0.7;
+    }
+    // stay in the patch
+    if (this.x < box.x0) tx += (box.x0 - this.x) * 6; if (this.x > box.x1) tx -= (this.x - box.x1) * 6;
+    if (this.y < box.y0) ty += (box.y0 - this.y) * 6; if (this.y > box.y1) ty -= (this.y - box.y1) * 6;
+    const k = 1 - Math.exp(-dt * (this.pauseT > 0 ? 6 : 4.5));
+    this.vx += (tx - this.vx) * k; this.vy += (ty - this.vy) * k;
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    if (Math.abs(this.vx) > 0.3) this.face = Math.sign(this.vx);
+    else if (this.pauseT > 0) this.face = Math.sign(kx - this.x) || this.face;
+    // look: a quick tail beat (faster when bolting), pitch with the climb, a flip turn, a spin when caught
+    const spd = Math.hypot(this.vx, this.vy);
+    this.tail.rotation.y = Math.sin(this.t * (8 + spd * 5)) * 0.6;
+    this.group.position.set(this.x, this.y + Math.sin(this.t * 2.3) * 0.04, 0.15);
+    this.body.rotation.set(this.spin * this.t * 25, this.face > 0 ? 0 : Math.PI, Math.max(-0.6, Math.min(0.6, Math.atan2(this.vy, Math.abs(this.vx) + 0.5))));
+  }
+  dispose() { this.group.removeFromParent(); }
 }
 
 // ------------------------------------------------------------------ the trawl net

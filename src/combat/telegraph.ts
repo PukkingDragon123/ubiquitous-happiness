@@ -141,6 +141,10 @@ const GLYPH: Record<string, string[]> = {
   A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
   C: ['01111', '10000', '10000', '10000', '10000', '10000', '01111'],
   E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  I: ['01110', '00100', '00100', '00100', '00100', '00100', '01110'],
+  F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
   '/': ['00001', '00010', '00010', '00100', '01000', '01000', '10000'],
 };
 function keycapTex(kind: 'parry' | 'dodge') {
@@ -162,7 +166,7 @@ function keycapTex(kind: 'parry' | 'dodge') {
       for (let y = 1; y < 8; y++) p.set(mx + 6, y, '#1a2028');
       for (let x = mx; x < mx + 13; x++) p.set(x, 8, '#1a2028');
       p.outline('#1a2028');
-    } else key(3, 58, 'SPACE');
+    } else key(3, 58, 'SHIFT');
   });
 }
 const hintCount: Record<string, number> = {};
@@ -172,7 +176,7 @@ function hintSeen(kind: string): number {
 }
 /**
  * the first few parryable / unblockable tells also pop the key to press over the blobfish (K / right mouse:
- * PARRY, SPACE: DODGE), so the defence is learnt by seeing it. `force` shows it regardless (tutorials).
+ * PARRY, SHIFT: DODGE), so the defence is learnt by seeing it. `force` shows it regardless (tutorials).
  */
 export function keyHint(w: World, kind: 'parry' | 'dodge', force = false) {
   const n = hintSeen(kind), max = kind === 'parry' ? 6 : 4;

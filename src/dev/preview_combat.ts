@@ -8,7 +8,7 @@
 //   &dummy=still  a dummy that doesn't attack (combo / heavy practice)   &d=<camera distance>   &look=<area>
 //   &auto=parry:<ms>|block|dodge:<ms>  auto-defend the first enemy's attacks (timing tests)   &pauseOn=<event> freeze
 //   the sim on an event (screenshots of the parry flash: &pauseOn=parry)
-// Keys: J / LMB light (hold: heavy), K / RMB parry (hold: block), Space dodge, R / H flask, 1-4 skills,
+// Keys: J / LMB light (hold: heavy), K / RMB parry (hold: block), Shift dodge, R / H flask, 1-4 skills,
 //       [ respawn the URL's enemies, ] refill hp / flasks / stamina, \ toggle the dummy's attacks.
 // window.combatPreview: { world, blob, spawn(kind, x, y), dummy, log() } for console-driven tests.
 import * as THREE from 'three';
@@ -168,7 +168,7 @@ class CombatPreview extends MockScreen {
     const left = c.move!.windup / c.speed - c.t;
     if (left > lead) return;
     this.autoMove = Math.round((this.world.time - c.t) * 100);
-    const key = mode === 'dodge' ? 'Space' : mode === 'parry' || mode === 'block' ? 'KeyK' : null;
+    const key = mode === 'dodge' ? 'ShiftLeft' : mode === 'parry' || mode === 'block' ? 'KeyK' : null;
     if (!key) return;
     inp.pressed.add(key); inp.down.add(key);
     this.autoKey = key; this.autoT = mode === 'block' ? 1.2 : 0.08;

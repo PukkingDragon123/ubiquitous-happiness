@@ -31,6 +31,8 @@ export interface SpeciesAsset {
   castShadow?: boolean;
   /** wet clearcoat layer (0 = none) */
   clearcoat?: number; clearcoatRough?: number;
+  /** colours kept by the clean-pixel texture pass (default 14) */
+  palette?: number;
 }
 
 export class FishModel {

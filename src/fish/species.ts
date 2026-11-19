@@ -6,6 +6,8 @@ import type { FishSpec, PaintCtx } from './builder';
 import { C, mix, shade, hash2, smoothstep, noise2 } from './builder';
 import type { RGB } from '../gfx/px';
 import { grad, dmix, paintSwatch } from './page';
+import { cv } from './curve';
+import { cells } from './kitutil';
 import { worley } from '../gfx/px';
 import { norm, sub, add, scale, cross } from '../gfx/loft';
 
@@ -440,45 +442,65 @@ const pufferfish: FishSpec = {
 };
 
 // ------------------------------------------------------------------------------------------- moray eel
-// Honeycomb moray: long, muscular, laterally flattened toward the tail; one continuous fin from the nape
-// round the tail to the belly; gaping jaws lined with fangs; tube nostrils; brown spots in a pale net.
+// Honeycomb moray (Gymnothorax favagineus): long, muscular, laterally flattened toward the tail; a deep head that
+// humps up behind the eyes over the jaw muscles; a long gape lined with fangs that never quite closes; tube
+// nostrils at the snout tip; a small round gill pore; one continuous skin-covered fin from the nape round the
+// tail to the vent. Black-brown polygon spots in a pale yellow net, small and crowded on the head, larger on
+// the body, the same net running out over the fins.
+const MORAY_TOP: [number, number][] = [[0, 0.0], [0.005, 0.01], [0.015, 0.02], [0.03, 0.032], [0.05, 0.046], [0.08, 0.06], [0.11, 0.066], [0.15, 0.062], [0.22, 0.055], [0.4, 0.051], [0.6, 0.045], [0.82, 0.035], [0.95, 0.019], [1, 0.008]];
+const MORAY_BOT: [number, number][] = [[0, 0.0], [0.005, 0.008], [0.02, 0.019], [0.05, 0.033], [0.08, 0.044], [0.12, 0.049], [0.3, 0.046], [0.6, 0.041], [0.85, 0.03], [1, 0.008]];
+const MORAY_WID: [number, number][] = [[0, 0.0], [0.01, 0.012], [0.04, 0.026], [0.09, 0.035], [0.15, 0.037], [0.4, 0.032], [0.7, 0.021], [0.9, 0.011], [1, 0.004]];
+const mTop = cv(MORAY_TOP), mBot = cv(MORAY_BOT), mWid = cv(MORAY_WID);
+/** honeycomb: dark polygon spots in a pale net (spot size grows from the head back) */
+function honeycomb(x: number, y: number, size: number): number {
+  const q = cells(x, y, size, 0.75, 17);
+  return q.seam;
+}
 const moray: FishSpec = {
-  name: 'moray', L: 2.0, body: 0.985, rings: 120, seg: 24, page: [512, 256], bodyH: 100,
-  top: [[0, 0.0], [0.006, 0.011], [0.02, 0.026], [0.04, 0.04], [0.07, 0.052], [0.1, 0.057], [0.16, 0.054], [0.35, 0.05], [0.6, 0.045], [0.82, 0.035], [0.95, 0.02], [1, 0.008]],
-  bot: [[0, 0.0], [0.006, 0.008], [0.02, 0.02], [0.05, 0.034], [0.1, 0.046], [0.2, 0.047], [0.6, 0.042], [0.85, 0.031], [1, 0.008]],
-  wid: [[0, 0.0], [0.01, 0.012], [0.04, 0.028], [0.1, 0.038], [0.4, 0.034], [0.7, 0.025], [0.9, 0.013], [1, 0.004]],
-  cy: [[0, -0.004], [0.06, 0], [1, 0]],
-  mouth: { t: 0.06, th: [[0, 0.5], [0.06, 0.54]], open: 0.55, idle: 0.3, interior: '#7a3a3a', crease: '#1a1408', lip: 0.04, lipCol: '#c8b880',
-    teeth: { upper: 8, lower: 8, size: 0.0085, style: 'fang', inset: 0.86, t0: 0.006, t1: 0.05, rake: 0.35 } },
-  eye: { t: 0.034, y: 0.6, r: 0.0105, fwd: 0.3, up: 0.25, lid: 'angry', lidCol: '#7a6a3a', lidLine: '#1a1408', lidTilt: 0.5, lidLevel: 0.25, bulge: 0.7,
-    paint: { iris: ['#2a2a08', '#8a8a20', '#e0e050', '#ffffa0'], pupil: 0.5, ring: '#ffffd0', sclera: '#e8e0b0', irisR: 0.86 } },
-  rough: 0.32, sheen: 0.3,
+  name: 'moray', L: 2.0, body: 0.985, rings: 150, seg: 36, page: [1024, 256], bodyH: 112,
+  top: MORAY_TOP, bot: MORAY_BOT, wid: MORAY_WID,
+  cy: [[0, -0.003], [0.06, 0], [1, 0]],
+  mouth: { t: 0.072, th: [[0, 0.5], [0.04, 0.53], [0.072, 0.57]], open: 0.6, idle: 0.35, interior: '#d8a8a0', crease: '#1a1408', lip: 0.035, lipCol: '#c8b880',
+    teeth: { upper: 9, lower: 9, size: 0.0095, style: 'fang', inset: 0.84, t0: 0.006, t1: 0.06, rake: 0.3, col: ['#ffffff', '#f4f0e4', '#d8d0bc', '#8a8070'] } },
+  eye: { t: 0.034, y: 0.58, r: 0.0095, fwd: 0.35, up: 0.25, lid: 'angry', lidCol: '#8a7a3a', lidLine: '#1a1408', lidTilt: 0.45, lidLevel: 0.3, bulge: 0.72,
+    paint: { iris: ['#2a2a08', '#7a7a20', '#d8d048', '#fff8a0'], pupil: 0.48, ring: '#fffff0', sclera: '#e8e0b0', irisR: 0.86 } },
+  rough: 0.4, sheen: 0,
   paint: (c) => {
-    const cell = 8 + c.t * 5;
-    const [f1, f2] = worley(c.px * 1.0, c.py * 1.3, cell, 31);
-    let col = grad(['#e8d890', '#d8c470', '#c8b060'])(0.5 - c.yn * 0.4, c.px, c.py);
-    const spot = f2 - f1;
-    if (spot > 2.2) col = grad(['#2a1e0c', '#3e2c12', '#5a4018'])(Math.min(1, (spot - 2.2) / 6), c.px, c.py);
-    else if (spot > 1.3) col = mix(col, C('#7a6028'), 0.6);
-    if (c.yn < -0.6) col = mix(col, C('#f0e4b0'), 0.4);
+    // the wrap's around-coordinate in metres (perimeter of the local section) so the spots stay round
+    const L = c.L, P = Math.PI * ((mTop(c.t) + mBot(c.t)) * 0.5 + mWid(c.t)) * L;
+    const x = c.t * L * 0.985, y = (c.py / 111) * P;
+    const size = 0.02 + 0.02 * smoothstep(0.04, 0.3, c.t) - 0.01 * smoothstep(0.7, 1, c.t);
+    const seam = honeycomb(x, y, size);
+    const ground = grad(['#f2eac0', '#e4d494', '#cfbb72'])(0.45 - c.yn * 0.4, 0, 0);
+    let col = ground;
+    const net = 0.13 + 0.05 * smoothstep(0.5, -1, c.yn);
+    if (seam > net) col = seam > net + 0.04 ? C('#24180c') : C('#4a3418');
+    // the throat and belly: the net widens, the spots shrink and pale
+    if (c.yn < -0.55 && seam > net) col = mix(col, ground, 0.35);
+    // gill pore: a small dark hole with a pale rim, low on the side behind the jaw
+    const gp = Math.hypot((c.t - 0.13) * L, (c.yn + 0.15) * mBot(0.13) * L * 1.2);
+    if (Math.abs(c.side) > 0.5) { if (gp < 0.006) col = C('#0e0a06'); else if (gp < 0.009) col = C('#f4ecc8'); }
     return col;
   },
   fins: [
-    { type: 'dorsal', t0: 0.09, t1: 0.995, h: [[0, 0.004], [0.05, 0.018], [0.5, 0.02], [0.92, 0.022], [1, 0.02]], sweep: 0.2, cols: 60, rows: 3, col: ['#c8b060', '#a08840', '#5a4018'], rays: 60, rayCol: '#5a4018', edge: '#2a1e0c', edgeW: 0.2, alpha: [1, 0.95], opaque: true, ripple: 0.6, px: [400, 16],
-      over: (u, v, c, i) => (((i >> 2) % 3 === 0) ? shade(c, 0.6) : null) },
-    { type: 'anal', t0: 0.45, t1: 0.995, h: [[0, 0.004], [0.08, 0.015], [1, 0.02]], sweep: 0.2, cols: 40, rows: 3, col: ['#c8b060', '#a08840', '#5a4018'], rays: 40, rayCol: '#5a4018', edge: '#2a1e0c', edgeW: 0.2, alpha: [1, 0.95], opaque: true, ripple: 0.6, px: [220, 16] },
+    { type: 'dorsal', t0: 0.085, t1: 0.995, h: [[0, 0.004], [0.05, 0.016], [0.5, 0.02], [0.92, 0.022], [1, 0.02]], sweep: 0.2, cols: 70, rows: 3, col: ['#e4d494', '#d8c47c'], rays: 0, edge: '#f4ecc8', edgeW: 0.16, alpha: [1, 1], opaque: true, ripple: 0.6, px: [880, 16],
+      over: (u, v) => { const sq = honeycomb(u * 1.8, v * 0.04, 0.034); return sq > 0.15 && v < 0.8 ? C(sq > 0.2 ? '#24180c' : '#4a3418') : null; } },
+    { type: 'anal', t0: 0.47, t1: 0.995, h: [[0, 0.004], [0.08, 0.014], [1, 0.02]], sweep: 0.2, cols: 44, rows: 3, col: ['#e4d494', '#d8c47c'], rays: 0, edge: '#f4ecc8', edgeW: 0.16, alpha: [1, 1], opaque: true, ripple: 0.6, px: [480, 16],
+      over: (u, v) => { const sq = honeycomb(u * 1.05 + 3, v * 0.04, 0.034); return sq > 0.15 && v < 0.8 ? C(sq > 0.2 ? '#24180c' : '#4a3418') : null; } },
   ],
   extras: (b) => {
-    // tube nostrils at the snout tip
+    // tube nostrils at the snout tip, a second pair above the eyes
     const rect = b.pg.alloc(6, 8);
-    paintSwatch(b.pg, rect, ['#e8d890', '#c8b060', '#7a6028'], 0.4);
+    paintSwatch(b.pg, rect, ['#f2eac0', '#d8c47c', '#4a3418'], 0.4);
     for (const side of [1, -1]) {
-      const p = b.surf(0.012, Math.PI * 0.3); p[2] *= side;
-      b.cone(p, [0.6, 0.8, 0.35 * side], 0.012 * b.L, 0.0028 * b.L, rect, 5, { flutter: 0.0 });
+      const p = b.surf(0.01, Math.PI * 0.28); p[2] *= side;
+      b.cone(p, [0.7, 0.7, 0.3 * side], 0.013 * b.L, 0.003 * b.L, rect, 4, { flutter: 0.0 });
+      const q = b.surf(0.03, Math.PI * 0.14); q[2] *= side;
+      b.cone(q, [0.3, 1, 0.2 * side], 0.006 * b.L, 0.0025 * b.L, rect, 3, { flutter: 0.0 });
     }
   },
-  swim: { k: 1.45, a0: 0.12, pow: 1.15, amp: 0.06, freq: 0.9, freqK: 0.9, ripple: 0.006 },
-  clearcoat: 0.75, clearcoatRough: 0.25,
+  swim: { k: 1.45, a0: 0.12, pow: 1.15, amp: 0.07, freq: 0.9, freqK: 0.9, ripple: 0.006 },
+  clearcoat: 0.45, clearcoatRough: 0.35,
 };
 
 // ------------------------------------------------------------------------------------------- anglerfish
@@ -855,8 +877,12 @@ const spermWhale: FishSpec = {
 };
 
 // ------------------------------------------------------------------------------------------- lionfish
-// Red lionfish: a compact body in bold red / cream vertical bands, a crown of long venomous dorsal spines (each
-// banded), huge feathery pectoral fans, fleshy tentacles over the eyes. v4 combat: a spine-fan bruiser.
+// Red lionfish (Pterois volitans): a compact body in narrow maroon / cream vertical bands edged with fine dark
+// lines (the bands radiate across the face), thirteen long separate venom spines, each banded red and white with
+// only a scrap of membrane at the base; enormous feathery pectoral fans whose banded rays run free beyond the
+// membrane; clear soft fins dotted in rows of dark spots; fleshy banded tentacles over the eyes.
+const LION_RED = C('#9a2416'), LION_DK = C('#4a0e0a'), LION_CREAM = C('#f6e8d2');
+const lionBand = (v: number) => (((v * 9) % 1) < 0.5 ? LION_RED : LION_CREAM);
 const lionfish: FishSpec = {
   name: 'lionfish', L: 0.4, body: 0.82,
   top: [[0, 0.0], [0.02, 0.028], [0.1, 0.07], [0.22, 0.11], [0.36, 0.13], [0.5, 0.125], [0.66, 0.1], [0.82, 0.065], [1, 0.05]],
@@ -867,26 +893,45 @@ const lionfish: FishSpec = {
   eye: { t: 0.16, y: 0.5, r: 0.032, fwd: 0.15, up: 0.2, lid: 'none', bulge: 0.8,
     paint: { iris: ['#3a0a08', '#8a1810', '#d84020', '#ffb070'], pupil: 0.5, ring: '#ffe0c0', sclera: '#e8d8c8', irisR: 0.86 } },
   gill: { t: 0.27, col: '#5a1410', curve: 0.03, k: 0.4 },
-  scales: { w: 6, h: 4, k: 0.5, rim: 0.08, hi: 0.03 },
-  rough: 0.5, sheen: 0.15,
+  scales: { w: 6, h: 4, k: 0.4, rim: 0.06, hi: 0.03 },
+  rough: 0.5, sheen: 0,
   paint: (c) => {
-    const RED = C('#b8281c'), DARK = C('#6a1008'), CREAM = C('#f4e4cc');
-    // bold vertical bands, leaning back, thinner bands between the wide ones
-    const b = ((c.t * 14 + c.yl * 3.2) % 1 + 1) % 1;
-    let col = b < 0.42 ? CREAM : b < 0.5 ? mix(RED, CREAM, 0.3) : RED;
-    if (b > 0.62 && b < 0.68) col = DARK;
-    if (c.yn < -0.55) col = mix(col, CREAM, 0.55);
-    if (c.t < 0.1) col = dmix(col, C('#d89080'), 0.4, c.px, c.py);
+    // narrow bands leaning back; on the head they fan out round the eye; a fine dark line edges every red band
+    const eyeT = 0.16, rad = c.t < 0.26 ? Math.atan2(c.yl * 4, c.t - eyeT) / Math.PI * 2.2 : 0;
+    const b = (((c.t < 0.26 ? rad + c.t * 3 : c.t * 15 + c.yl * 3.4) % 1) + 1) % 1;
+    let col = b < 0.44 ? LION_CREAM : b < 0.49 ? LION_DK : b < 0.95 ? LION_RED : LION_DK;
+    // every other red band is a broad maroon one with a pale centre line
+    if (b > 0.6 && b < 0.68 && Math.floor(c.t * 15) % 2 === 0) col = mix(LION_RED, LION_CREAM, 0.45);
+    if (c.yn < -0.6) col = mix(col, LION_CREAM, 0.6);
     return col;
   },
   fins: [
-    { type: 'dorsal', t0: 0.2, t1: 0.62, h: [[0, 0.32], [0.3, 0.38], [0.6, 0.3], [1, 0.12]], sweep: 0.55, col: ['#f0e0d0', '#e8c8b8'], spines: 13, rays: 0, notch: 0.85, spineCol: '#c02818', alpha: [0.95, 0.15], px: [160, 96] },
-    { type: 'dorsal', t0: 0.64, t1: 0.86, h: [[0, 0.1], [0.5, 0.12], [1, 0.05]], sweep: 0.3, col: ['#f0d8c8', '#d8a898'], rays: 10, rayCol: '#a83020', spots: '#7a1810', spotK: 0.1, alpha: [0.7, 0.4], ripple: 0.4, px: [64, 40] },
-    { type: 'anal', t0: 0.64, t1: 0.84, h: [[0, 0.09], [0.5, 0.11], [1, 0.05]], sweep: 0.3, col: ['#f0d8c8', '#d8a898'], spines: 3, rays: 7, spineCol: '#b02818', spots: '#7a1810', spotK: 0.1, alpha: [0.7, 0.4], px: [48, 40] },
-    { type: 'caudal', shape: 'round', len: 0.18, span: 0.13, col: ['#f0e0d0', '#e0c8b8'], rays: 12, rayCol: '#a83020', spots: '#7a1810', spotK: 0.12, alpha: [0.75, 0.4], px: [64, 64] },
-    { type: 'pectoral', t: 0.28, y: -0.1, len: 0.34, angle: 35, shape: 'round', col: ['#e8d0c0', '#c87060', '#a83828'], rays: 16, rayCol: '#8a1a10', spots: '#6a1008', spotK: 0.1, alpha: [0.85, 0.35], flutter: 0.15, out: 0.9, px: [96, 72] },
-    { type: 'pelvic', t: 0.3, len: 0.12, angle: 50, col: ['#c84030', '#e8d8c8'], rays: 5, alpha: [0.9, 0.5], flutter: 0.05 },
+    // spiny dorsal: separate banded spines, a scrap of clear membrane at the base only
+    { type: 'dorsal', t0: 0.2, t1: 0.62, h: [[0, 0.3], [0.25, 0.4], [0.6, 0.32], [1, 0.12]], sweep: 0.5, col: ['#f2e2d4', '#e8d0c0'], spines: 13, rays: 0, notch: 0.97, spineCol: '#9a2416', alpha: [0.75, 0.0], px: [208, 112],
+      over: (u, v, c) => (c[1] < 90 ? lionBand(v) : null) },
+    { type: 'dorsal', t0: 0.64, t1: 0.86, h: [[0, 0.1], [0.5, 0.12], [1, 0.05]], sweep: 0.3, col: ['#f2e6dc', '#e8d8cc'], rays: 10, rayCol: '#c89080', alpha: [0.5, 0.3], ripple: 0.4, px: [64, 40],
+      over: (u, v, c, i, j) => ((i % 6 < 2) && (j % 6 < 2) ? LION_DK : null) },
+    { type: 'anal', t0: 0.64, t1: 0.84, h: [[0, 0.09], [0.5, 0.11], [1, 0.05]], sweep: 0.3, col: ['#f2e6dc', '#e8d8cc'], spines: 3, rays: 7, spineCol: '#b02818', rayCol: '#c89080', alpha: [0.5, 0.3], px: [48, 40],
+      over: (u, v, c, i, j) => ((i % 6 < 2) && (j % 6 < 2) ? LION_DK : null) },
+    { type: 'caudal', shape: 'round', len: 0.18, span: 0.13, col: ['#f2e6dc', '#e8d8cc'], rays: 12, rayCol: '#c89080', alpha: [0.55, 0.3], px: [64, 64],
+      over: (u, v, c, i, j) => ((i % 7 < 2) && (j % 7 < 2) ? LION_DK : null) },
+    // the great pectoral fans: banded rays running free past a translucent membrane
+    { type: 'pectoral', t: 0.28, y: -0.15, len: 0.48, baseLen: 0.08, span: 1.25, angle: 32, shape: 'round', col: ['#f0dcd0', '#e0b8a8', '#d09888'], rays: 15, rayCol: '#8a1a10', alpha: [0.75, 0.25], flutter: 0.12, out: 0.95, px: [112, 80],
+      cut: (u) => 0.82 + 0.18 * Math.abs(Math.sin(u * 15 * Math.PI)),
+      over: (u, v) => (Math.abs(((u * 15) % 1) - 0.5) < 0.16 ? lionBand(v * 1.3) : null) },
+    { type: 'pelvic', t: 0.3, len: 0.14, angle: 50, col: ['#9a2416', '#f2e2d4'], rays: 5, alpha: [0.9, 0.5], flutter: 0.05 },
   ],
+  extras: (b) => {
+    // banded supraocular tentacles and the fleshy tabs under the jaw
+    const rect = b.pg.alloc(6, 16);
+    for (let j = 0; j < 16; j++) for (let i = 0; i < 6; i++) b.pg.set(rect.x + i, rect.y + j, ((j >> 2) & 1) ? [154, 36, 22] : [246, 232, 210], 255, 0.5, 0);
+    for (const side of [1, -1]) {
+      const p = b.surf(0.15, Math.PI * 0.12); p[2] *= side;
+      b.cone(p, [0.1, 1, 0.25 * side], 0.09 * b.L, 0.006 * b.L, rect, 4, { flutter: 0.3, phase: side });
+      const q = b.surf(0.05, Math.PI * 0.7); q[2] *= side;
+      b.cone(q, [0.2, -1, 0.3 * side], 0.03 * b.L, 0.005 * b.L, rect, 3, { flutter: 0.4 });
+    }
+  },
   swim: { k: 0.5, a0: 0.02, pow: 3, amp: 0.03, freq: 0.6, freqK: 0.5, flutter: [3, 0.04], ripple: 0.02 },
 };
 

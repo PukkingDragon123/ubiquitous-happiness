@@ -29,6 +29,7 @@ const PREVIEWS: Record<string, () => Promise<{ default: (g: Game) => Screen }>> 
   combat: () => import('./dev/preview_combat'),
   dungeon: () => import('./dev/preview_dungeon'),
   uikit: () => import('./dev/preview_uikit'),
+  manatee: () => import('./dev/preview_manatee'),
 };
 
 async function boot() {

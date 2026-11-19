@@ -1,16 +1,18 @@
 // The UI kit style guide (?preview=uikit): every PixelUI widget in every state, on the v5 "diver's kit" look, so
-// screen owners can check the kit at a glance. Pages (tabs, keys 1-6, &page=N): PANELS, DETAIL (close-up crops of
-// the hand-placed texture: grain, brass, stitching, fibres), BUTTONS, CONTROLS, CARDS, TYPE. &bg=light puts everything over a bright sand backdrop (readability check). &uipop=0 switches the pop-ins off.
+// screen owners can check the kit at a glance. Pages (tabs, keys 1-7, &page=N): PANELS, DETAIL (close-up crops of
+// the hand-placed 1x detail: grain, knots, sea life, seaweed paper), BUTTONS, CONTROLS, CARDS, TYPE, MENU (the live
+// settings card). &bg=light puts everything over a bright sand backdrop (readability check). &uipop=0 switches the pop-ins off.
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { PixelUI } from '../ui/pixel/ui';
 import { ICON_NAMES, cursorTex, type CursorName } from '../ui/pixel/art';
 import { KIT, skin, btnSkin, closeArt, keycapBody, type BtnStyle, type BtnState, type SkinKind } from '../ui/pixel/skins';
+import { spriteSheet } from '../ui/pixel/decor';
 import { Dialogue } from '../story/dialogue';
 import { Toasts } from '../achievements/toast';
 import { ACH } from '../achievements';
 import { drawTag } from '../hideout/tag';
-import { SettingsPanel } from '../title/pages';
+import { SettingsPanel, SETTINGS_W, SETTINGS_H } from '../title/pages';
 
 function backdrop(light: boolean): THREE.Texture {
   // a calm stand-in for the game behind the UI: deep water fading to a sandy floor, a few rocks and kelp blades
@@ -28,7 +30,7 @@ function backdrop(light: boolean): THREE.Texture {
   return t;
 }
 
-const PAGES = ['PANELS', 'DETAIL', 'BUTTONS', 'CONTROLS', 'CARDS', 'TYPE'];
+const PAGES = ['PANELS', 'DETAIL', 'BUTTONS', 'CONTROLS', 'CARDS', 'TYPE', 'MENU'];
 
 export default function make(game: Game): Screen {
   const q = new URLSearchParams(location.search);
@@ -38,6 +40,8 @@ export default function make(game: Game): Screen {
   camera.position.set(0, 0, 5);
   const ui = new PixelUI();
   ui.drawCursor = true;
+  // tests: window.uikit.at('live1') -> the CSS-pixel centre of a widget drawn last frame
+  (window as unknown as { uikit: unknown }).uikit = { ui, at: (id: string) => { const r = ui.rects.get(id); if (!r) return null; const k = ui.scale / game.renderer.getPixelRatio(); return [Math.round((r[0] + r[2] / 2) * k), Math.round((r[1] + r[3] / 2) * k)]; } };
   let page = Math.max(0, Math.min(PAGES.length - 1, Number(q.get('page') || 0)));
   // controls state
   let vol = 0.7, mus = 0.35, blur = 0.5, lq = false, sub = true, tab = 0, step = 2, hp = 0.8, pearls = 37, t = 0, picked = -1, bump = 0;
@@ -67,7 +71,7 @@ export default function make(game: Game): Screen {
       ui.text('UI KIT', 10, 7, { font: 'title', color: KIT.brass[3], outline: KIT.ink });
       const nt = ui.tabs('pg', PAGES, page, 84, 6, { h: 20 });
       if (nt !== page) page = nt;
-      ui.text(`${W}x${H} UI px  ·  scale ${ui.scale}  ·  hd ${ui.hd}`, W - 8, 9, { font: 'small', color: KIT.textDim, align: 'right' });
+      ui.text(`${W}x${H} UI px  ·  scale ${ui.scale}  ·  text hd ${ui.hd}  ·  art 1x`, W - 8, H - 12, { font: 'small', color: KIT.textDim, align: 'right' });
       ui.fill(0, 26, W, 1, KIT.brass[1]);
       const X = 10, Y = 34;
       if (page === 0) panels(X, Y, W, H);
@@ -76,6 +80,7 @@ export default function make(game: Game): Screen {
       if (page === 3) controls(X, Y, dt);
       if (page === 4) cards(X, Y, dt);
       if (page === 5) type(X, Y);
+      if (page === 6) { const sx = Math.round((W - SETTINGS_W) / 2), sy = Math.round((H - SETTINGS_H) / 2) + 10; settings.draw(ui, sx, sy, dt); }
       ui.end();
       toastLayer = toasts.frame(dt);
       screen.overlays = toastLayer ? [ui.layer, toastLayer] : [ui.layer];
@@ -129,7 +134,7 @@ export default function make(game: Game): Screen {
 
   /** a magnified crop of a painted canvas (texels at the UI's density) into a framed box */
   function zoom(cv: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, x: number, y: number, z: number, cap: string) {
-    const d = ui.hd;
+    const d = 1;
     const dw = Math.round((sw / d) * z), dh = Math.round((sh / d) * z);
     ui.fill(x - 1, y - 1, dw + 2, dh + 2, KIT.ink);
     ui.ctx.drawImage(cv, sx, sy, sw, sh, x, y, dw, dh);
@@ -137,9 +142,9 @@ export default function make(game: Game): Screen {
   }
 
   function detail(X: number, Y: number) {
-    const d = ui.hd;
-    const Z = 4;
-    // the real-size pieces on the left (live: kelp, rope, bubbles, caustics), their close-ups on the right
+    // v6: the kit paints 1 texel per UI px, so a crop is in UI px. The real-size pieces on the left (live: kelp,
+    // rope, bubbles, caustics), close-ups of their hand-placed detail on the right
+    const d = 1;
     const pw = 200, ph = 120;
     ui.panel('wood', X, Y + 8, pw, ph, 'PLANKS', { id: 'det1', pop: false });
     ui.panel('cream', X, Y + 140, pw, 76, undefined, { id: 'det2', pop: false });
@@ -148,18 +153,20 @@ export default function make(game: Game): Screen {
     ui.button('det:b1', 'PLANK', X + 118, Y + 226, 82, 24, { style: 'wood', sfx: '' });
     const wood = skin('wood', pw, ph, d), cream = skin('cream', 200, 76, d), plq = skin('plaque', 110, 24, d);
     const zx = X + 212;
-    zoom(wood, 0, 0, 26 * d, 22 * d, zx, Y, Z, 'ROPE LASHING, BARNACLES');
-    zoom(wood, 66 * d, 0, 40 * d, 22 * d, zx + 26 * Z + 10, Y, Z, 'GRAIN, WORM HOLES, NAILS');
-    const y2 = Y + 22 * Z + 16;
-    zoom(wood, 30 * d, 92 * d, 34 * d, 28 * d, zx, y2, 3, 'SAND, SCALLOP');
-    zoom(wood, (pw - 34) * d, 0, 34 * d, 28 * d, zx + 34 * 3 + 10, y2, 3, 'SEA GLASS');
-    zoom(cream, 0, 0, 34 * d, 28 * d, zx + 68 * 3 + 20, y2, 3, 'SAILCLOTH');
-    const y3 = y2 + 28 * 3 + 16;
-    zoom(plq, 0, 0, 26 * d, 24 * d, zx, y3, 2, 'SIGN');
-    zoom(btnSkin('wood', 'normal', 82, 24, d), 0, 0, 30 * d, 24 * d, zx + 26 * 2 + 10, y3, 2, 'PLANK');
-    zoom(btnSkin('green', 'normal', 60, 24, d), 0, 0, 30 * d, 24 * d, zx + 56 * 2 + 20, y3, 2, 'PAINT');
-    zoom(btnSkin('red', 'normal', 60, 24, d), 30 * d, 0, 30 * d, 24 * d, zx + 86 * 2 + 30, y3, 2, 'CHIPS');
-    zoom(closeArt(20, 'normal', d), 0, 0, 20 * d, 23 * d, zx + 116 * 2 + 40, y3, 2, 'CLOSE');
+    zoom(wood, 0, 0, 34, 20, zx, Y, 4, 'LASHING, BARNACLES, GRAIN');
+    zoom(wood, 0, ph - 44, 22, 44, zx + 34 * 4 + 8, Y, 2, 'HOLDFAST');
+    zoom(wood, pw - 66, ph - 20, 66, 20, zx + 34 * 4 + 22 * 2 + 16, Y, 2, 'SNAIL, LIMPET');
+    const y2 = Y + 20 * 4 + 16;
+    zoom(wood, 30, ph - 16, 64, 16, zx, y2, 3, 'SCALLOP, GRASS, ALGAE FILM');
+    zoom(cream, 200 - 64, 76 - 30, 64, 30, zx + 64 * 3 + 10, y2, 3, 'SEAWEED PAPER');
+    const y3 = y2 + 30 * 3 + 16;
+    zoom(plq, 0, 0, 30, 24, zx, y3, 2, 'SIGN');
+    zoom(btnSkin('wood', 'normal', 82, 24, d), 0, 0, 30, 24, zx + 30 * 2 + 10, y3, 2, 'PLANK');
+    zoom(btnSkin('green', 'normal', 82, 24, d), 0, 0, 30, 24, zx + 60 * 2 + 20, y3, 2, 'PAINT');
+    zoom(btnSkin('red', 'normal', 82, 24, d), 52, 0, 30, 24, zx + 90 * 2 + 30, y3, 2, 'CHIPS');
+    zoom(closeArt(20, 'normal', d), 0, 0, 20, 23, zx + 120 * 2 + 40, y3, 2, 'CLOSE');
+    const sh = spriteSheet();
+    zoom(sh, 0, 0, Math.min(sh.width, 100), sh.height, X, Y + 262, 4, 'SEA LIFE DECALS');
     void keycapBody;
   }
 
@@ -220,7 +227,7 @@ export default function make(game: Game): Screen {
     ui.text('stepper', ix + 140, y + 4, { font: 'small', color: KIT.textDim });
     y += 26;
     let hx = ix;
-    hx += ui.hint('WASD', 'swim', hx, y); hx += ui.hint('SPC', 'dash', hx, y); ui.hint('E', 'use', hx, y);
+    hx += ui.hint('WASD', 'swim', hx, y); hx += ui.hint('SHIFT', 'dash', hx, y); ui.hint('E', 'use', hx, y);
 
     // bars + count-up
     const bx = X + 312;
@@ -296,8 +303,6 @@ export default function make(game: Game): Screen {
     ui.text('Small ink label', X + 324, y, { font: 'small', color: KIT.textInkDim, shadow: null }); y += 14;
     ui.text('have 3/3', X + 324, y, { font: 'body', color: '#2a6a1a', shadow: null }); ui.text('need 0/5', X + 400, y, { font: 'body', color: '#a8241c', shadow: null }); y += 18;
     ui.textBox('Line heights are fixed per role: small 11, body 14, title 20, big 26 UI px.', X + 324, y, 276, { font: 'body', color: KIT.textInk, shadow: null });
-    // the settings card from the title / pause menu
-    void settings;
   }
 
   return screen;

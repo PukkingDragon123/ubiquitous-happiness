@@ -3,7 +3,7 @@
 //
 //   a. MORNING   the kid (the player's blobfish at 0.65 scale, no hat, no sword) plays with MOM (rosy, a shell
 //                necklace) and DAD (greyer, bigger, a sailor cap). Warm dialogue; the player takes over early
-//                ("SWIM ← →" painted in 3D) and tags Dad, then Mom.
+//                ("SWIM" in bubble letters) and tags Dad, then Mom.
 //   b. BREAD     a boat idles overhead; a slice of bread drifts down on a line (whip-pan + snap zoom, an angelic
 //                shimmer). "BREAD!!" / "Wait, sweetie—". The player grabs it (slide-whistle sting, freeze-frame):
 //                it's a hook (dun dun DUNNN, dutch angle, slow-mo push-in). Mom and Dad bite through the line, the
@@ -13,14 +13,21 @@
 //                Silence. Fade.
 //   d. MR. CRAB  a gruff weapon dealer in his shop window (the twist sting, a push-in on him). A choice or two; he
 //                hands over the TOOTHPICK (slow-mo push-in on the kid) and a hat (DEFAULT_GEAR from here on).
-//   e. TUTORIAL  one goal at a time on a small objective line, Mr. Crab scuttling along and commenting:
-//                1 charge-dash through a ring (hold SPACE, let go)   2 smash three glass bottles (human trash)
-//                3 parry Mr. Crab's shell as it flashes (K / right click)   4 ring for MARGE and mail the glass home
+//   e. TUTORIAL  six short lessons, one goal at a time on a small objective line, each opened by a quick establishing
+//                shot and a bubble-word name card, Mr. Crab scuttling along and commenting:
+//                1 SWIM    a kelp slalom (four gates, low / high), then a warm current to ride (WASD / arrows)
+//                2 DART    catch a skittish minnow (tap SHIFT to dart at it; it tires if you can't)
+//                3 CHARGE  hold SHIFT, aim, let go: one charged dash through three bubble rings (slow-mo wind-up)
+//                4 SLASH   smash three glass bottles (human trash): click / J
+//                5 PARRY   Mr. Crab lobs shells: right click / K as one flashes (they slow down if you struggle)
+//                6 MAIL    ring the buoy for MARGE and mail the glass home
+//                Every lesson has a way out (the minnow tires, rings / parries go lenient, Mr. Crab hands over glass,
+//                waves the mail through): nothing can get stuck.
 //   f. HOME      Mr. Crab leads the kid to a ruined stone house: his brother's place. "We'll fix her up together."
 //                The kid swims in through the door -> onDone -> the home screen (the rebuild begins there).
 //
 //   const intro = new IntroScreen(game); intro.onDone = (skipped) => ...; game.register(intro);
-//   game.go('intro', { beat?: 'morning' | 'bread' | 'alone' | 'crab' | 'tutorial' | 'home', step?: 1..4 })
+//   game.go('intro', { beat?: 'morning' | 'bread' | 'alone' | 'crab' | 'tutorial' | 'home', step?: 1..6 })
 //   (?preview=intro&beat=bread / &beat=tutorial&step=3 jumps straight there; &speed=N runs it N x faster.)
 //
 // The beats are one async script: await this.wait(s) / this.until(fn) / this.talk(lines) resolve from update(), and
@@ -50,9 +57,8 @@ import { addMaterials, stashItem, returnToStash } from '../meta/meta';
 import { glint } from '../combat/telegraph';
 import { PixelUI } from '../ui/pixel/ui';
 import { Text3DLayer, Float3D, T3D } from '../ui/text3d';
-import { HUD_ART } from '../game/runHud';
 import { Dialogue, type Line } from './dialogue';
-import { sailorCap, shellNecklace, buildBread, GlassBottle, ShellShot, RuinedHome, Hoop, TrawlNet, type BottleKind } from './models';
+import { sailorCap, shellNecklace, buildBread, GlassBottle, ShellShot, RuinedHome, TrawlNet, BubbleRing, KelpGate, CurrentStream, Minnow, type BottleKind } from './models';
 import { MrCrab, CrabShop } from './crab';
 
 export type IntroBeat = 'morning' | 'bread' | 'alone' | 'crab' | 'tutorial' | 'home';
@@ -61,7 +67,9 @@ const ABORT = new Error('intro: aborted');
 const SEED = 4242;
 const KID_SCALE = 0.65;
 const SKIP_HOLD = 1.5;
-const LESSONS = 4;
+/** the lessons, in order (&step=1..6) */
+const L = { swim: 0, dart: 1, charge: 2, slash: 3, parry: 4, mail: 5 } as const;
+const LESSONS = 6;
 const FOV = 36;
 
 /** a camera framing: look at (x, y, 0) from `dist` away, swung `yaw` round, raised `h`; roll = dutch angle, fov = zoom */
@@ -185,7 +193,11 @@ export class IntroScreen implements Screen {
   private engineRate = 0;
   private built = false;
   private armed = false;
-  private kidPrev = new THREE.Vector2();
+  /** dev / tests: the current lesson's props (gates, current, fish, rings, bottles, shell) */
+  dbg: Record<string, unknown> = {};
+  /** the kid's last frame of motion (segA -> segB): gates and rings test what it swam through */
+  private segA = new THREE.Vector2();
+  private segB = new THREE.Vector2();
 
   constructor(public game: Game) {
     this.gate = new Gate();
@@ -384,7 +396,7 @@ export class IntroScreen implements Screen {
   private swimHead(s: Swimmer) { return new THREE.Vector3(s.x, s.y + 0.55 * s.scale + 0.1, s.z); }
   /** a parent's face (close-ups) */
   private face(s: Swimmer) { return { x: s.x + s.face * 0.15 * s.scale, y: s.y + 0.05 }; }
-  private place(x: number, y: number) { const k = this.kid; k.sb.place(x, y); k.x = x; k.y = y; k.vx = k.vy = 0; this.kidPrev.set(x, y); }
+  private place(x: number, y: number) { const k = this.kid; k.sb.place(x, y); k.x = x; k.y = y; k.vx = k.vy = 0; this.segA.set(x, y); this.segB.set(x, y); }
   private near(a: { x: number; y: number }, b: { x: number; y: number }, r: number) { return Math.hypot(a.x - b.x, a.y - b.y) < r; }
 
   private setMuffle(k: number, now = false) { this.muffleT = k; if (now) this.muffle = k; }
@@ -518,9 +530,9 @@ export class IntroScreen implements Screen {
     this.followKid(9.5, 0.6);
     this.dad.tx = H + 4.2; this.dad.ty = fy + 0.4;
     this.mom.tx = H - 1.2; this.mom.ty = fy + 0.3;
-    const swim = this.t3d.add('SWIM ← →', this.kid.x + 0.4, this.kid.y + 1.5, 0.6, T3D.hint, { size: 0.42, stagger: 0.06, angle: 0.3 });
-    const wasd = this.t3d.add('W A S D', this.kid.x + 0.4, this.kid.y + 0.95, 0.6, T3D.sub, { size: 0.22, delay: 0.5, angle: 0.3 });
-    this.setGoal({ text: 'Swim to Dad', keys: [['WASD', 'swim']] });
+    const swim = this.t3d.add('SWIM', this.kid.x + 0.6, this.kid.y + 1.55, 0.6, T3D.hint, { size: 0.42, stagger: 0.08, angle: 0.3 });
+    const wasd = this.t3d.add('WASD / ARROWS', this.kid.x + 0.6, this.kid.y + 0.95, 0.6, T3D.sub, { size: 0.22, delay: 0.5, angle: 0.3 });
+    this.setGoal({ text: 'Swim to Dad', keys: [['WASD', ''], ['ARROWS', 'swim']] });
     await this.until(() => { this.meet(this.dad, H + 4.2, fy + 0.4); return this.near(this.kid, this.dad, 1.35); });
     swim.hide(); wasd.hide();
     this.tag(this.dad);
@@ -929,6 +941,41 @@ export class IntroScreen implements Screen {
   }
 
   // ---------------------------------------------------------------- e. the tutorial
+  /** the soft walls while the lessons run (a little behind the shop .. the far end of the reef) */
+  private tutBounds(): [number, number] { return [this.crabX - 8, this.area.bounds.x1 - 2]; }
+  /** where the lessons may put their props: past the shop, short of the mail buoy */
+  private lane(): [number, number] { return [this.crabX + 4, this.area.mailbox.x - 3]; }
+  /** a span of `len` metres starting `gap` ahead of x, toward the mail buoy if it fits there, else back the other way */
+  private ahead(x: number, gap: number, len: number): { x0: number; dir: 1 | -1 } {
+    const [lo, hi] = this.lane();
+    if (x + gap + len <= hi) return { x0: Math.max(lo, x + gap), dir: 1 };
+    if (x - gap - len >= lo) return { x0: x - gap, dir: -1 };
+    return { x0: clamp(x + gap, lo, hi - len), dir: 1 };
+  }
+  /** a lesson's name card: a big bubble word up ahead of the kid (and the key under it) */
+  private lessonCard(title: string, sub: string) {
+    const k = this.kid;
+    const x = k.x + 2.4, y = Math.min(-2.2, Math.max(k.y + 2.3, this.floorAt(k.x) + 4.4));
+    this.t3d.add(title, x, y, 0.4, T3D.title, { size: 0.62, life: 2.8, enter: 'drop', stagger: 0.07, angle: 0.15 });
+    if (sub) this.t3d.add(sub, x, y - 0.72, 0.4, T3D.sub, { size: 0.26, life: 2.6, delay: 0.5, stagger: 0.03, angle: 0.15 });
+    audio.play('jin_arrive', { vol: 0.32, dry: true, rate: 1.15 });
+  }
+  /** the kid and a point in one frame (a two-shot whose distance follows the gap between them) */
+  private twoShot(p: () => { x: number; y: number }, k = 2.5, min = 9, h = 0.5) {
+    const kid = this.kid;
+    this.shot(() => {
+      const q = p(), mx = (kid.x + q.x) / 2, my = (kid.y + q.y) / 2;
+      const span = Math.max(Math.abs(kid.x - q.x), Math.abs(kid.y - q.y) * 1.8);
+      return { x: mx, y: Math.max(my + 0.4, this.floorAt(mx) + 2.2), dist: clamp(6 + span, min, 14), yaw: 0.08, h };
+    }, k);
+  }
+  /** a short camera punch-in (catches, rings): `sec` real seconds on the framing, then back to `back` */
+  private punch(at: () => { x: number; y: number }, sec: number, back: () => void, dist = 5.5) {
+    this.shot(this.closeUp(at, { dist, yaw: 0.12, fov: 30 }), 7);
+    const t0 = this.real, g = this.gen;
+    this.ticker(() => { if (g !== this.gen) return true; if (this.real - t0 >= sec) { back(); return true; } });
+  }
+
   private async tutorial(from: number) {
     const k = this.kid;
     if (this.beat0 === 'tutorial') {
@@ -937,139 +984,372 @@ export class IntroScreen implements Screen {
       k.setGear({ ...DEFAULT_GEAR });
       k.model.weaponVisible = true;
       this.armed = true;
-      const sx = [this.crabX - 1, this.crabX + 9, this.crabX + 15, this.area.mailbox.x - 12][from];
-      this.place(sx, this.floorAt(sx) + 2.2);
+      const cx = this.crabX;
+      const sx = [cx - 1, cx + 25, cx + 22, cx + 17, cx + 22, this.area.mailbox.x - 12][from];
+      this.place(sx, this.floorAt(sx) + (from === 1 ? 3.6 : 2.2));
       if (from > 0) this.crab.group.position.set(sx - 3, this.floorAt(sx - 3) - 0.05, -0.45);
-      if (from >= 3) this.bag.push(materialId('seaGlass'), materialId('seaGlass'));
+      if (from >= L.parry) this.bag.push(materialId('seaGlass'), materialId('seaGlass'));
       this.fade(0, 1);
       audio.music('mu_shallows', 1.5);
     } else audio.music('mu_shallows', 3);
     this.letterbox(0, 1);
-    this.free(true, null);
+    this.free(true, this.tutBounds());
     this.followKid(11.5, 0.7);
     if (this.crabMode !== 'follow') this.crabVy = this.crab.group.position.y > this.floorAt(this.crab.group.position.x) + 0.3 ? 3.2 : 0;
     this.crabMode = 'follow';
-    const lessons = [() => this.lessonDash(), () => this.lessonBottles(), () => this.lessonParry(), () => this.lessonMail()];
+    const lessons = [() => this.lessonSwim(), () => this.lessonDart(), () => this.lessonCharge(), () => this.lessonBottles(), () => this.lessonParry(), () => this.lessonMail()];
     for (let i = from; i < lessons.length; i++) {
       this.step = i;
       await lessons[i]();
       audio.play('jin_good', { vol: 0.5, dry: true });
       this.setGoal(null);
-      await this.wait(0.9);
+      this.free(true, this.tutBounds());
+      await this.wait(0.7);
     }
   }
 
-  /** 1: hold SPACE to charge, let go: the charged dash, through a ring */
-  private async lessonDash() {
-    const cx = this.crabX, w = this.world, k = this.kid;
-    const ring = new Hoop(cx + 7.5, this.floorAt(cx + 7.5) + 2.4, 1.0);
-    this.worldScene.add(ring.group);
-    const sign = this.t3d.add('HOLD SPACE', ring.x, ring.y + 1.7, 0.3, T3D.hint, { size: 0.36, angle: 0.3 });
-    this.setGoal({ text: 'Charge-dash through the ring', keys: [['SPACE', 'hold, then let go']] });
-    this.bark('crab', 'See the ring? {shake}HOLD{/shake} Space to wind up, let go to shoot through it.', 3.6);
-    this.target = { x: ring.x, y: ring.y, label: 'RING' };
-    // the charged dash (src/combat/moveset.ts) emits 'dash' {charged}; without it, any fast pass counts
-    const charges = 'dashCharge' in k.combat;
-    let chargedT = 0, warned = -9;
-    const onDash = (d: Record<string, unknown>) => { if (d.charged) chargedT = 0.7; };
-    w.on('dash', onDash);
-    this.kidPrev.set(k.x, k.y);
+  /** 1: SWIM: a slalom through four kelp gates (low, high, low, high), then a warm current to ride */
+  private async lessonSwim() {
+    const k = this.kid, w = this.world, cx = this.crabX;
+    const xs = [cx + 5.5, cx + 9, cx + 12.5, cx + 16];
+    // high, low, high, low (the first one lifts the kid over the rocks by the shop); every gap clear of the scenery
+    const clear = (x: number, y: number) => Math.min(w.terrain.sdf(x, y), w.terrain.sdf(x - 1, y), w.terrain.sdf(x + 1, y));
+    const gates = xs.map((x, i) => {
+      const f = this.floorAt(x);
+      let gy = i % 2 ? f + 2.7 : f + 6.0;
+      for (let t = 0; t < 12 && clear(x, gy) < 1.5; t++) gy += 0.4;
+      const g = new KelpGate(x, f, Math.min(gy, -2.4), 2.9, -0.3, i * 2.1 + 1);
+      g.addTo(this.worldScene);
+      return g;
+    });
+    this.dbg = { gates };
+    const tick = () => { for (const g of gates) g.update(this.dt, this.time); };
+    // the establishing pan along the gates while Mr. Crab explains
+    this.script_();
+    this.letterbox(1, 0.6);
+    const f0 = this.floorAt(xs[1]);
+    const stopTick = this.ticker(() => { tick(); });
+    this.shot(this.push(() => ({ x: k.x + 2, y: k.y + 0.8, dist: 10, yaw: 0.1, h: 0.6 }), { x: xs[2] + 1.5, y: f0 + 4.4, dist: 16, yaw: 0.22, h: 1.2, fov: 38 }, 2.6), 3);
+    await this.talk([
+      { who: 'crab', text: 'Lesson one: {gold}swim{/gold}. Weave through the gaps in the kelp.' },
+      { who: 'crab', text: '{gold}WASD{/gold} or the {gold}arrow keys{/gold}. Up, down, up, down. Like a sea snake. A {wave}fancy{/wave} one.' },
+    ]);
+    this.letterbox(0, 0.8);
+    this.free(true, this.tutBounds());
+    this.followKid(11.5, 0.7);
+    this.lessonCard('SWIM', 'WASD / ARROWS');
+    let n = 0;
+    const cheers = ['That\'s it!', 'Up, up, up!', 'Now dive!', 'Look at those fins go!'];
+    const goal = () => this.setGoal({ text: 'Swim through the kelp gates', n, of: 4, keys: [['WASD', ''], ['ARROWS', 'swim']] });
+    goal();
     await this.until(() => {
-      ring.update(this.dt);
-      chargedT -= this.dt;
-      if (this.target && Math.abs(k.x - ring.x) < 6) this.target = null;
-      const thru = segDist(ring.x, ring.y, this.kidPrev.x, this.kidPrev.y, k.x, k.y).d < ring.r * 0.9;
-      this.kidPrev.set(k.x, k.y);
-      if (!thru || ring.passed) return ring.passed;
-      if (chargedT > 0 || (!charges && Math.hypot(k.vx, k.vy) > 6.2)) {
-        ring.celebrate();
-        w.sfx('pop', ring.x, 0.7, 1.2); w.sfx('jin_catch', ring.x, 0.4);
-        w.fx.burst('star', ring.x, ring.y, 12, 3); w.fx.emit('bubbleBig', ring.x, ring.y, { n: 14, spread: 0.8, speed: 2 });
-        this.t3d.add('WHOOSH!', ring.x, ring.y + 1.1, 0.6, T3D.gold, { size: 0.45, life: 1, rise: 0.7 });
-        return true;
+      const next = gates.find((g) => !g.passed);
+      for (const g of gates) g.ring.highlight(g === next ? 1 : 0);
+      if (next) this.target = { x: next.x, y: next.gapY, label: 'GATE' };
+      for (const g of gates) { const p = g.push(k.x, k.y); if (p.y) k.applyForce(p.x, p.y); }
+      const a = this.segA, b = this.segB;
+      for (const g of gates) {
+        if (g.passed || (a.x - g.x) * (b.x - g.x) > 0 || a.x === b.x) continue;
+        g.passed = true; n++;
+        const through = Math.abs(b.y - g.gapY) < g.gapH / 2 + 0.2;
+        g.ring.burst();
+        w.sfx('bubble', g.x, 0.7, 1); w.sfx('k_glass', g.x, 0.45, 1.2 + n * 0.18); audio.play('jin_catch', { vol: 0.3, dry: true, rate: 0.9 + n * 0.12 });
+        w.fx.emit('bubbleBig', g.x, g.gapY, { n: 14, spread: 0.9, speed: 2.2 });
+        w.fx.burst('star', g.x, g.gapY, 6, 2.5);
+        this.t3d.add(n < 4 ? `${n}` : 'GO!', g.x + 0.6, g.gapY + 1.3, 0.8, n < 4 ? T3D.gold : T3D.heal, { size: 0.5, life: 1, rise: 0.8 });
+        if (through) this.bark('crab', cheers[n - 1], 1.8);
+        goal();
       }
-      if (this.clock - warned > 2.5) { warned = this.clock; this.bark('crab', 'Not like that! {shake}HOLD{/shake} Space, then let go!', 2.4); }
-      return false;
+      return n >= 4;
     });
     this.target = null;
-    sign.hide();
-    this.bark('crab', 'Hah. Slippery little thing.', 2.2);
-    await this.wait(0.8);
-    ring.group.removeFromParent();
+    // the current: it carries the kid on to the minnow's patch
+    const fc = this.floorAt(xs[3] + 6);
+    const g4 = gates[3];
+    const cur = new CurrentStream([[xs[3] + 0.6, g4.gapY], [xs[3] + 3.4, g4.gapY + 0.7], [xs[3] + 6.5, fc + 4.6], [xs[3] + 9.5, fc + 3.9], [xs[3] + 11.5, fc + 3.8]], 1.7, 34);
+    this.worldScene.add(cur.group);
+    this.dbg.cur = cur;
+    cur.setOn(true);
+    const flow = audio.loop('lp_flow', 0, 1.1);
+    this.setGoal({ text: 'Ride the current!', keys: [['WASD', 'steer']] });
+    this.bark('crab', 'Feel that? A warm current. {wave}Hop on!{/wave}', 2.6);
+    this.target = { x: cur.start.x, y: cur.start.y, label: 'CURRENT' };
+    let riding = 0, cheered = false;
+    const end = cur.end;
+    await this.until(() => {
+      cur.update(this.dt, w.fx);
+      const f = cur.flow(k.x, k.y);
+      if (f.k > 0) k.applyForce(f.x, f.y);
+      riding = damp(riding, f.k > 0.05 ? 1 : 0, 4, this.dt);
+      flow.set(0.05 + riding * 0.35, 0.9 + riding * 0.4);
+      if (f.k > 0.1) {
+        this.target = null;
+        if (!cheered) {
+          cheered = true;
+          k.setExpr('cheer', 2.5);
+          w.sfx('flood_rush', k.x, 0.45, 1.2);
+          this.t3d.add('WHEEE!', 0, 0, 0.8, T3D.heal, { size: 0.5, life: 1.6, stagger: 0.05, follow: () => ({ x: k.x, y: k.y + 1.2 }) });
+          // ride-along: a wider lens, the camera leads with the flow
+          this.shot(() => ({ x: k.x + 1.6, y: clamp(k.y + 0.6, this.floorAt(k.x) + 2.4, -2.4), dist: 12.5, yaw: -0.12, h: 0.5, fov: 44 }), 3);
+        }
+      }
+      return k.x > end.x - 1.2 || (cheered && cur.along(k.x, k.y) > 0.96);
+    });
+    this.target = null;
+    cur.setOn(false);
+    flow.stop(1);
+    this.followKid(11.5, 0.7);
+    this.bark('crab', 'Hah! Showing off already.', 2);
+    stopTick();
+    // the gates and the current fade off behind the kid
+    const t0 = this.clock;
+    this.ticker(() => {
+      tick(); cur.update(this.dt);
+      if (this.clock - t0 < 2.5) return false;
+      for (const g of gates) g.dispose();
+      cur.dispose();
+      return true;
+    });
   }
 
-  /** 2: three giant glass bottles (human trash): slash them, they shatter */
+  /** 2: DART: a quick little minnow you can only really catch with a tap of SHIFT */
+  private async lessonDart() {
+    const k = this.kid, w = this.world, cx = this.crabX;
+    const [, hi] = this.lane();
+    const f = this.floorAt(cx + 23);
+    const box = { x0: cx + 17.5, x1: Math.min(hi - 0.5, cx + 29), y0: f + 1.3, y1: f + 7 };
+    const fish = new Minnow(box.x0 + 2.2, f + 4.2);
+    this.worldScene.add(fish.group);
+    this.dbg = { fish, box };
+    const at = () => ({ x: fish.x, y: fish.y });
+    let caught = 0, dartT = 0, near = 0, nearWas = false, nag = -9, tLast = this.clock, listen = true;
+    w.on('dash', (d) => { if (listen && !d.charged) dartT = 0.5; });
+    // keep the fish swimming through the cutscene
+    let live = true;
+    this.ticker(() => { if (!live) return true; if (this.control === 'script') fish.update(this.dt, k.x, k.y, box, 2.2); });
+    // the reveal: a squeak, a whip-pan to the minnow peeking out
+    this.script_();
+    this.letterbox(1, 0.4);
+    this.whip();
+    this.shot(this.closeUp(at, { dist: 4.2, yaw: -0.15, fov: 30 }), 6);
+    w.sfx('fish_squeak', fish.x, 0.5, 1.5);
+    await this.wait(0.9, true);
+    await this.talk([
+      { who: 'crab', text: 'Ooh. A minnow. Quickest thing on the reef.' },
+      { who: 'crab', text: 'You\'ll never catch it just paddling. {gold}Tap SHIFT{/gold} to {shake}dart{/shake} at it!' },
+    ]);
+    this.letterbox(0, 0.6);
+    this.free(true, this.tutBounds());
+    this.twoShot(at, 2.5, 9.5);
+    this.lessonCard('DART', 'TAP SHIFT');
+    const goal = () => this.setGoal({ text: 'Catch the minnow', n: caught, of: 2, keys: [['SHIFT', 'tap: dart']] });
+    goal();
+    await this.until(() => {
+      dartT -= this.dt;
+      // a player who can't get it: after a while the minnow tires
+      fish.slow = clamp((this.clock - tLast - 12) / 10, 0, 1);
+      if (this.control === 'free') fish.update(this.dt, k.x, k.y, box, 4.8 + caught * 0.3);
+      const d = Math.hypot(fish.x - k.x, fish.y - k.y);
+      // close but no dart: Mr. Crab reminds you (not too often)
+      const isNear = d < 1.9;
+      if (isNear && !nearWas) near++;
+      nearWas = isNear;
+      if (near >= 3 && dartT <= 0 && this.clock - nag > 6) { nag = this.clock; near = 0; this.bark('crab', 'Now! {gold}Tap SHIFT{/gold}! Dart!', 2); }
+      if (!fish.stunned && d < (dartT > 0 ? 1.05 : 0.8)) {
+        caught++;
+        tLast = this.clock;
+        fish.caught();
+        this.game.freeze(0.08); this.game.addShake(0.25);
+        w.sfx('fish_squeak', fish.x, 0.7, 1.7); w.sfx('pop', fish.x, 0.7, 1.1); audio.play('jin_catch', { vol: 0.45, dry: true, rate: 1 + caught * 0.15 });
+        w.fx.burst('star', fish.x, fish.y, 10, 3); w.fx.emit('bubbleBig', fish.x, fish.y, { n: 12, spread: 0.5, speed: 2.5 });
+        k.setExpr('cheer', 1.5);
+        this.t3d.add(caught < 2 ? 'GOTCHA!' : 'GOT IT!', fish.x, fish.y + 1.1, 0.9, T3D.gold, { size: 0.5, life: 1.3, rise: 0.7, shake: 0.3 });
+        this.bark('crab', dartT > 0 ? (caught < 2 ? 'Ha! Like a harpoon! Again!' : 'Quick fins. I like it.') : (caught < 2 ? 'Sneaky. Now try a dart.' : 'Got it. Good.'), 2.2);
+        this.punch(() => ({ x: (k.x + fish.x) / 2, y: (k.y + fish.y) / 2 + 0.2 }), 0.7, () => this.twoShot(at, 2.5, 9.5), 5);
+        goal();
+      }
+      return caught >= 2 && !fish.stunned;
+    });
+    listen = false;
+    live = false;
+    // the minnow zips off home
+    this.followKid(11.5, 0.7);
+    const fx0 = fish.x;
+    this.ticker(() => {
+      fish.update(this.dt, fish.x - 3, fish.y - 1, { x0: fx0 - 40, x1: fx0 + 40, y0: -40, y1: 0 }, 6);
+      if (Math.abs(fish.x - fx0) > 14 || fish.y > -1) { fish.dispose(); return true; }
+    });
+  }
+
+  /** 3: CHARGE: hold SHIFT to wind up a charged dash, let go to burst through three bubble rings in one go */
+  private async lessonCharge() {
+    const k = this.kid, w = this.world;
+    const sp = 2.3;
+    const { x0, dir } = this.ahead(k.x, 3.6, sp * 2);
+    const ry = clamp(k.y, this.floorAt(x0) + 2.4, this.floorAt(x0) + 5.5);
+    const rings = [0, 1, 2].map((i) => { const r = new BubbleRing(x0 + dir * i * sp, ry + i * 0.05, 0.95, '#d8f4ff'); this.worldScene.add(r.group); return r; });
+    const mid = { x: x0 + dir * sp, y: ry };
+    this.dbg = { rings, dir };
+    const tick = () => { for (const r of rings) r.update(this.dt); };
+    const stopTick = this.ticker(() => { tick(); });
+    // the establishing shot along the rings
+    this.script_();
+    this.letterbox(1, 0.5);
+    this.shot(this.push(() => ({ x: lerp(k.x, mid.x, 0.5), y: ry + 0.8, dist: 10, yaw: 0.1, h: 0.4 }), { x: mid.x + dir * 0.6, y: ry + 0.3, dist: 7.5, yaw: -0.25 * dir, h: 0.3, fov: 32 }, 2.4), 4);
+    await this.talk([
+      { who: 'crab', text: 'Now the big one. {gold}HOLD SHIFT{/gold} and you wind up. Like a spring. A {wave}squishy{/wave} spring.' },
+      { who: 'crab', text: 'Aim at the rings with your mouse — or hold a direction — and {shake}LET GO{/shake}. Straight through all three!' },
+    ]);
+    this.letterbox(0, 0.6);
+    this.free(true, this.tutBounds());
+    const frame = () => this.twoShot(() => ({ x: rings[2].x, y: ry }), 2.5, 9);
+    frame();
+    this.lessonCard('CHARGE', 'HOLD SHIFT, LET GO');
+    let n = 0, chargedT = 0, warned = -9, charging = false, chargeT0 = 0, misses = 0, listen = true;
+    const t0 = this.clock;
+    w.on('dash', (d) => { if (listen && d.charged) chargedT = 0.8; });
+    const goal = () => this.setGoal({ text: 'Charge-dash through the rings', n, of: 3, keys: [['SHIFT', 'hold, then let go']] });
+    goal();
+    await this.until(() => {
+      chargedT -= this.dt;
+      const next = rings.find((r) => !r.passed);
+      for (const r of rings) r.highlight(r === next ? 1 : 0.3);
+      this.target = next && Math.abs(k.x - next.x) > 7 ? { x: next.x, y: next.y, label: 'RINGS' } : null;
+      // the wind-up: time slows and the camera leans in on the kid, the rings in the frame behind
+      const isCharging = k.combat.move === 'dashCharge';
+      if (isCharging && !charging) {
+        charging = true; chargeT0 = this.real;
+        this.slowTok++; this.game.timeScale = 0.45;
+        this.shot(() => { const r = next ?? rings[2]; return { x: lerp(k.x, r.x, 0.35), y: lerp(k.y, r.y, 0.35) + 0.3, dist: 6.2, yaw: -0.18 * dir, h: 0.25, fov: 30 }; }, 4);
+        audio.play('charge', { vol: 0.35, dry: true, rate: 0.8 });
+      } else if (charging && (!isCharging || this.real - chargeT0 > 4)) {
+        charging = false;
+        this.normalSpeed();
+        this.whip(0.2);
+        this.shot(() => ({ x: k.x + clamp(k.vx * 0.25, -2.5, 2.5), y: Math.max(k.y + 0.4, this.floorAt(k.x) + 2.2), dist: 10, yaw: 0.06, h: 0.4, fov: 38 }), 5);
+        const back = this.real;
+        this.ticker(() => { if (this.real - back > 1.2) { if (rings.some((r) => !r.passed)) frame(); return true; } });
+      }
+      const a = this.segA, b = this.segB;
+      // patience: after a long struggle any pass will do
+      const lenient = this.clock - t0 > 40 || misses >= 5;
+      for (const r of rings) {
+        if (!r.crossed(a.x, a.y, b.x, b.y)) continue;
+        if (chargedT > 0 || k.combat.move === 'dash' || lenient) {
+          r.burst(); n++;
+          w.sfx('pop', r.x, 0.8, 1 + n * 0.15); w.sfx('k_glass', r.x, 0.5, 1.4 + n * 0.2);
+          w.fx.burst('star', r.x, r.y, 10, 3); w.fx.emit('bubbleBig', r.x, r.y, { n: 16, spread: 0.9, speed: 2.4 });
+          if (n === 1) this.t3d.add('WHOOSH!', r.x, r.y + 1.3, 0.7, T3D.gold, { size: 0.5, life: 1.1, rise: 0.7 });
+          if (n === 3) { this.game.addShake(0.3); this.game.freeze(0.06); this.t3d.add('PERFECT!', mid.x, ry + 1.6, 0.8, T3D.heal, { size: 0.55, life: 1.5, rise: 0.5, enter: 'slam' }); }
+          goal();
+        } else if (this.clock - warned > 2.5) {
+          warned = this.clock; misses++;
+          this.bark('crab', 'Not like that! {gold}HOLD SHIFT{/gold}, aim, then let go!', 2.4);
+        }
+      }
+      return n >= 3;
+    });
+    listen = false;
+    this.target = null;
+    if (charging) this.normalSpeed();
+    this.followKid(11.5, 0.7);
+    this.bark('crab', 'Hah. Slippery little thing.', 2.2);
+    await this.wait(1);
+    stopTick();
+    for (const r of rings) r.dispose();
+  }
+
+  /** 4: SLASH: three giant glass bottles (human trash): slash them, they shatter */
   private async lessonBottles() {
-    const cx = this.crabX, w = this.world;
+    const k = this.kid, w = this.world;
     const kinds: BottleKind[] = ['beer', 'jar', 'soda'];
     const lines = ['Humans. Leave their trash everywhere.', 'Ha! Pickles.', 'Now {wave}that\'s{/wave} recycling.'];
     const words = ['CRASH!', 'SMASH!', 'TINKLE!'];
     const bs: GlassBottle[] = [];
     let broken = 0;
+    const { x0, dir } = this.ahead(k.x, 3.2, 4.4);
+    const goal = () => this.setGoal({ text: 'Smash the bottles', n: broken, of: 3, keys: [['LMB', ''], ['J', 'slash']] });
     kinds.forEach((kind, i) => {
-      const x = cx + 11.5 + i * 2.2;
+      const x = x0 + dir * i * 2.2;
       const b = new GlassBottle(kind, x, this.floorAt(x));
       b.onBreak = () => {
         broken++;
         w.drop(b.x, b.y + 0.3, { item: materialId('seaGlass') });
-        this.t3d.add(words[i], b.x, b.y + 1.3, 0.6, T3D.gold, { size: 0.4, life: 1.2, rise: 0.6 });
+        this.t3d.add(words[i], b.x, b.y + 1.3, 0.6, T3D.gold, { size: 0.45, life: 1.2, rise: 0.6 });
         this.bark('crab', lines[i], 2.2);
-        this.setGoal({ text: 'Smash the bottles', n: broken, of: 3, keys: [['LMB', 'slash']] });
+        goal();
       };
       w.add(b);
       bs.push(b);
     });
-    const sign = this.t3d.add('SMASH!', cx + 13.7, this.floorAt(cx + 13.7) + 3.0, 0.3, T3D.hint, { size: 0.36, angle: 0.25 });
-    this.setGoal({ text: 'Smash the bottles', n: 0, of: 3, keys: [['LMB', 'slash'], ['J', 'slash']] });
-    this.bark('crab', 'Human trash. Glass. Smash it — we\'ll take the pieces.', 3);
-    this.target = { x: cx + 13.7, y: this.floorAt(cx + 13.7) + 1, label: 'BOTTLES' };
-    await this.until(() => { if (this.target && this.kid.x > cx + 9) this.target = null; return bs.every((b) => !b.alive); });
+    const mx = x0 + dir * 2.2, my = this.floorAt(mx);
+    this.dbg = { bottles: bs };
+    // a look at the trash first
+    this.script_();
+    this.whip(0.25);
+    this.shot({ x: mx, y: my + 1.6, dist: 7.5, yaw: 0.15 * dir, h: 0.6, fov: 34 }, 5);
+    await this.talk([{ who: 'crab', text: 'Human trash. Glass. {gold}Click{/gold} (or {gold}J{/gold}) to slash. Hit it till it pops — we\'ll keep the pieces.' }]);
+    this.free(true, this.tutBounds());
+    this.twoShot(() => ({ x: mx, y: my + 1.2 }), 2.5, 9);
+    this.lessonCard('SLASH', 'CLICK OR J');
+    goal();
+    this.target = { x: mx, y: my + 1, label: 'BOTTLES' };
+    await this.until(() => { if (this.target && Math.abs(k.x - mx) < 6) this.target = null; return bs.every((b) => !b.alive); });
     this.target = null;
-    sign.hide();
+    this.followKid(11.5, 0.7);
     // pick up the glass (the magnet does most of it)
     this.setGoal({ text: 'Grab the sea glass' });
     await Promise.race([this.until(() => this.bag.length >= 3), this.wait(5)]);
   }
 
-  /** 3: Mr. Crab lobs shells; tap K / right click as one flashes: a parry */
+  /** 5: PARRY: Mr. Crab lobs shells; tap K / right click as one flashes */
   private async lessonParry() {
     const w = this.world, k = this.kid;
     // he steps out in front of the kid so the shells come from where the kid is looking
-    const side = Math.sign(this.crab.group.position.x - k.x) || 1;
+    const [lo, hi] = this.lane();
+    const side = k.x + 3.4 < hi ? 1 : k.x - 3.4 > lo ? -1 : (Math.sign(this.crab.group.position.x - k.x) || 1);
     this.crabMode = 'goto'; this.crabGoal = k.x + side * 3.4;
-    this.setGoal({ text: 'Parry the shell as it flashes', n: 0, of: 2, keys: [['K', 'tap'], ['RMB', 'tap']] });
-    await this.talk([{ who: 'crab', text: 'Now the important bit. When something flies at you, {gold}tap K or right-click{/gold} right as it {shake}flashes{/shake}. That\'s a parry. Face me.' }]);
-    this.free(true, null);
+    const goal = (n: number) => this.setGoal({ text: 'Parry the shell as it flashes', n, of: 2, keys: [['RMB', ''], ['K', 'tap']] });
+    goal(0);
+    this.twoShot(() => { const g = this.crab.group.position; return { x: g.x, y: g.y + 0.6 }; }, 2.5, 8);
+    await this.talk([{ who: 'crab', text: 'Now the important bit. When something flies at you, {gold}right-click (or K){/gold} right as it {shake}flashes{/shake}. That\'s a parry. Face me.' }]);
+    this.free(true, this.tutBounds());
+    this.lessonCard('PARRY', 'RIGHT CLICK OR K');
     // frame the two of them: the throw, the flight and the parry all in shot
     this.shot(() => {
       const g = this.crab.group.position, mx = (k.x + g.x) / 2, my = (k.y + g.y + 0.6) / 2;
       const span = Math.max(Math.abs(k.x - g.x), Math.abs(k.y - g.y - 0.6) * 1.8);
       return { x: mx, y: Math.max(my, this.floorAt(mx) + 1.6), dist: clamp(6.5 + span, 8, 13), yaw: 0.1, h: 0.45 };
     }, 2.5);
-    let parries = 0, inFlight: ShellShot | null = null, nextT = 0.4;
+    let parries = 0, thrown = 0, inFlight: ShellShot | null = null, nextT = 0.6;
     const claw = () => { const g = this.crab.group.position; return { x: g.x - side * 0.55, y: g.y + 0.75 }; };
     await this.until(() => {
       this.crab.lookX = k.x;
       // stay a few metres in front of the kid
-      const want = k.x + side * 3.4;
+      const want = clamp(k.x + side * 3.4, lo - 2, hi + 2);
       if (Math.abs(this.crabGoal - want) > 1.2) this.crabGoal = want;
       if (inFlight && !inFlight.alive) inFlight = null;
-      if (!inFlight) {
+      if (!inFlight && parries < 2) {
         nextT -= this.dt;
         if (nextT <= 0) {
           const c = claw();
           this.crab.snip();
           k.combat.lastParry = null;
           w.sfx('swish_a', c.x, 0.5, 1.3);
-          const s = new ShellShot(c.x, c.y, claw, 2.2, (ww, sh) => glint(ww, sh.x, sh.y, { size: 0.8, follow: () => ({ x: sh.x, y: sh.y }) }));
+          thrown++;
+          // after a few misses the shells come slower (a longer look at the flash)
+          const s = new ShellShot(c.x, c.y, claw, thrown > 4 ? 1.7 : 2.2, (ww, sh) => glint(ww, sh.x, sh.y, { size: 0.8, follow: () => ({ x: sh.x, y: sh.y }) }));
           s.onResolve = (res) => {
-            nextT = 1.6;
-            if (res === 'parried') {
+            nextT = 1.5;
+            // patience: after many throws a block will do
+            const ok = res === 'parried' || (thrown >= 8 && res === 'blocked');
+            if (ok) {
               parries++;
               // the moveset calls out PARRY! itself: the count rides above it
-              this.t3d.add(`${parries} / 2`, k.x, k.y + 1.75, 0.8, T3D.gold, { size: 0.34, life: 1.1, rise: 0.6 });
-              this.setGoal({ text: 'Parry the shell as it flashes', n: parries, of: 2, keys: [['K', 'tap'], ['RMB', 'tap']] });
-              this.bark('crab', parries >= 2 ? 'That\'s it! You got it!' : 'Ha! Again!', 2);
+              this.t3d.add(`${parries} / 2`, k.x, k.y + 1.75, 0.8, T3D.gold, { size: 0.4, life: 1.1, rise: 0.6 });
+              goal(parries);
+              this.bark('crab', parries >= 2 ? (res === 'parried' ? 'That\'s it! You got it!' : 'Close enough. You\'ll learn the hard way.') : 'Ha! Again!', 2);
+              if (parries >= 2) { this.game.addShake(0.2); this.punch(() => ({ x: k.x, y: k.y + 0.2 }), 0.6, () => this.followKid(11.5, 0.7), 4.5); }
             } else if (res === 'blocked') this.bark('crab', k.combat.lastParry === 'late' ? 'A hair late! Tap right as it {shake}FLASHES{/shake}.' : 'That\'s a block. {gold}Tap{/gold} it, don\'t hold it.', 2.6);
             else if (res === 'dodged' || res === 'immune') this.bark('crab', 'Dodging works too. But I said {shake}PARRY{/shake}.', 2.6);
             else {
@@ -1079,10 +1359,11 @@ export class IntroScreen implements Screen {
           };
           w.add(s);
           inFlight = s;
+          this.dbg = { shell: s };
         }
       }
-      // training: the kid can't drop below half a heart
-      if (k.hp < 2) k.hp = 2;
+      // training: the kid can't drop below half its health
+      if (k.hp < k.maxHp / 2) k.hp = Math.ceil(k.maxHp / 2);
       return parries >= 2 && !inFlight;
     });
     k.hp = k.maxHp;
@@ -1090,31 +1371,46 @@ export class IntroScreen implements Screen {
     this.followKid(11.5, 0.7);
   }
 
-  /** 4: ring the mail buoy, give Marge the glass: it goes home */
+  /** 6: MAIL: ring the mail buoy, give Marge the glass: it goes home */
   private async lessonMail() {
     const mb = this.area.mailbox, k = this.kid;
-    const sign = this.t3d.add('MAIL BUOY', mb.x, -1.4, -0.4, T3D.name, { size: 0.36, angle: -0.2 });
+    // nothing to send (the glass was left lying about)? Mr. Crab hands some over
+    if (this.bag.length + this.run.items.filter((i) => i.gx < 0).length === 0) {
+      this.bag.push(materialId('seaGlass'));
+      this.bagFlash = 1;
+      this.bark('crab', 'You forgot your glass, kid. Here.', 2.4);
+      await this.wait(1.2);
+    }
+    const sign = this.t3d.add('MAIL BUOY', mb.x, -1.4, -0.4, T3D.name, { size: 0.4, angle: -0.2 });
     this.target = { x: mb.x, y: -2.5, label: 'MAIL' };
-    this.setGoal({ text: 'Swim to the mail buoy' });
+    this.setGoal({ text: 'Swim to the mail buoy', keys: [['WASD', 'swim']] });
     this.bark('crab', 'Glass is worth something. Mail it home: the manatee carries it. Ring the bell at the buoy.', 4);
-    let greeted = false, sent = false;
-    this.world.on('extract', () => { sent = true; });
+    let greeted = false, sent = false, rangT = -1, listen = true;
+    this.world.on('extract', () => { if (listen) sent = true; });
     await this.until(() => {
       const nearBuoy = Math.abs(k.x - mb.x) < 6, canRing = Math.abs(k.x - mb.x) < 4.5 && k.y > -8;
       if (nearBuoy) this.target = null;
       if (mb.manatee.state === 'away') this.setGoal(canRing ? { text: 'Ring the bell', keys: [['E', 'ring']] } : { text: nearBuoy ? 'Swim up to the bell' : 'Swim to the mail buoy', keys: [['WASD', 'swim']] });
-      else if (!mb.present) this.setGoal({ text: 'Marge is on her way...' });
-      else this.setGoal({ text: 'Give Marge your loot', keys: [['E', 'send home']] });
+      else {
+        if (rangT < 0) rangT = this.clock;
+        if (!mb.present) this.setGoal({ text: 'Marge is on her way...' });
+        else this.setGoal({ text: 'Give Marge your loot', keys: [['E', 'send home']] });
+      }
       if (!greeted && mb.present && this.near(k, mb.manatee, 5)) { greeted = true; this.greet().catch(() => {}); }
+      // never stuck: if the mail run doesn't happen, Mr. Crab waves it through (the loot still goes home at the end)
+      if (rangT >= 0 && this.clock - rangT > 45 && !this.dlg.blocking) { this.bark('crab', 'Eh. She\'ll find you later. Come on.', 2.6); return true; }
       return sent;
     });
+    listen = false;
     sign.hide();
     this.target = null;
     this.setGoal(null);
-    this.margeShot();
-    await this.wait(1.4);
-    this.bark('marge', 'It\'ll be waiting for you, hon. I always find the way.', 3);
-    await this.wait(2.6);
+    if (sent) {
+      this.margeShot();
+      await this.wait(1.4);
+      this.bark('marge', 'It\'ll be waiting for you, hon. I always find the way.', 3);
+      await this.wait(2.6);
+    }
     this.followKid(11.5, 0.7);
   }
   /** the kid and Marge in one frame */
@@ -1138,7 +1434,7 @@ export class IntroScreen implements Screen {
       { who: 'kid', text: '...I don\'t have one anymore.' },
       { who: 'marge', text: 'Oh, sweetie. {p=0.3}Then I\'ll hold it for you \'til you do.' },
     ]);
-    this.free(true, null);
+    this.free(true, this.tutBounds());
     this.followKid(11.5, 0.7);
   }
 
@@ -1303,7 +1599,9 @@ export class IntroScreen implements Screen {
         const fl = this.floorAt(k.x) + (this.step < 0 ? 1.1 : 0.5);
         if (k.y < fl) k.applyForce(0, (fl - k.y) * 8);
       }
+      this.segA.set(k.x, k.y);
       k.update(dt, w);
+      this.segB.set(k.x, k.y);
       // no sword until Mr. Crab hands one over (Blobfish.update re-shows it every frame)
       if (!this.armed) k.model.weaponPivot.visible = false;
       for (let i = 0; i < w.entities.length; i++) { const e = w.entities[i]; if (e.alive) e.update(dt, w); }
@@ -1411,7 +1709,7 @@ export class IntroScreen implements Screen {
 
   private interact() {
     this.prompt = null;
-    if (this.step < 3 || this.control !== 'free' || this.dlg.blocking) return;
+    if (this.step < L.mail || this.control !== 'free' || this.dlg.blocking) return;
     const k = this.kid, inp = this.game.input, mb = this.area.mailbox;
     const E = inp.hit('interact');
     const loose = this.run.items.filter((i) => i.gx < 0).length;
@@ -1450,7 +1748,7 @@ export class IntroScreen implements Screen {
 
   private hud(real: number) {
     const ui = this.ui;
-    if (this.step >= 0) { this.hearts(); this.bagRow(); }
+    if (this.step >= 0) { this.hpBar(); this.bagRow(); }
     if (this.goal && !this.dlg.blocking) this.goalLine();
     // the [E] prompt over the kid
     if (this.prompt && !this.dlg.blocking) {
@@ -1493,13 +1791,16 @@ export class IntroScreen implements Screen {
     }
   }
 
-  private hearts() {
+  /** health while training: the HP number on a little bar (the run HUD's look, kept tiny) */
+  private hpBar() {
     const ui = this.ui, k = this.kid;
-    const n = Math.ceil(k.maxHp / 2);
-    for (let i = 0; i < n; i++) {
-      const v = k.hp - i * 2;
-      ui.img(v >= 2 ? HUD_ART.heart : v === 1 ? HUD_ART.heartHalf : HUD_ART.heartEmpty, 5 + i * 10, 6);
-    }
+    const x = 6, y = 6, w = 54;
+    const f = clamp(k.hp / Math.max(1, k.maxHp), 0, 1);
+    ui.fill(x - 1, y - 1, w + 2, 9, '#06080e', 0.75);
+    ui.fill(x, y, w, 7, '#3a1a24');
+    ui.fill(x, y, Math.round(w * f), 7, f > 0.5 ? '#5ae08a' : f > 0.25 ? '#ffd860' : '#ff5a4a');
+    ui.fill(x, y, Math.round(w * f), 2, '#ffffff', 0.35);
+    ui.text(`HP ${Math.ceil(k.hp)}/${k.maxHp}`, x + w + 4, y - 1, { font: 'small', color: '#f4f0e6', outline: '#06080e' });
   }
 
   private bagRow() {

@@ -1,27 +1,33 @@
-// The dungeon-run HUD (v5, "the diver's kit"): one instrument set, read at a glance. Painted plates (crisp pixel
-// canvases drawn as planes BEHIND the 3D pieces, src/ui/obj/stage.ts PlanePool), lit low-poly miniatures on the
-// HUD's stage, and big Jersey numerals / bars on the PixelUI canvas on top.
+// The dungeon-run HUD (v6, "the diver's kit", chunky + detailed + ocean): one instrument set, read at a glance.
+// Painted plates (crisp pixel canvases at 1 texel per UI px, drawn as planes BEHIND the 3D pieces, src/ui/obj/stage.ts
+// PlanePool), lit low-poly miniatures on the HUD's stage, and big Jersey numerals / gauges on the PixelUI canvas on top.
 //
-//   top left      VITALS: our blobfish (a real BlobModel) in a brass PORTHOLE (water flashes red on a hit, pink on a
-//                 heal, the rim pulses red at one heart), a lacquered plate with a row of 3D jelly HEARTS, a clean
-//                 STAMINA glass tube in brass collars (the liquid eases, a meniscus and bubbles, a pale chip of what
-//                 you spent, amber while regen waits, red when guard-broken, white on a parry), a cut-crystal MANA
-//                 vial and the kelp-tea FLASKS as little 3D bottles that slosh and empty
+//   top left      VITALS: our blobfish (a real BlobModel) in a brass PORTHOLE is the face of your health: plump and
+//                 bouncy when healthy, bruised and sweaty when low, deflating (sagging, leaking bubbles, flashing red)
+//                 near death, squished by every hit (src/ui/obj/blobAvatar.ts). Beside it on a driftwood board: the HP
+//                 as a big rolling NUMBER ("60 / 60") over an HP glass tube (a chip of what a hit took, a pink pour
+//                 when you heal, ticks every 10 HP, a heartbeat when critical), the STAMINA tube, the MANA crystal,
+//                 and the HEALING CLAM in a carved alcove: a 3D clam with its charge count and a hanging [R] HEAL tag;
+//                 using one pops it open, slurps the glowing jelly and pours it into the HP tube.
+//                 Health is shown as HP = units x HP_PER (src/combat/types.ts): the -10 / +30 floats off the number.
 //                 RESOURCES: one brass strip under it, a turning model + a big rolling numeral per counter (pearls,
 //                 keys, bombs, the pack's cells); numbers roll and flash on change and a +n / -n floats off
-//   top right     NAVIGATION: one instrument: a lacquered plate with the area name, the stage pips, the parchment
-//                 STRIP MAP of the level in a recessed window, metres FROM HOME and the DEPTH readout, ending in the
-//                 brass DEPTH GAUGE (engraved knurled bezel, enamel face, spring needle, record flag) mirroring the porthole
+//   top right     NAVIGATION (no map: the journey forks at crossroads with signposts): a driftwood instrument with the
+//                 area name on a brass plate, the stage gems, and two ODOMETERS on rolling drums: metres FROM HOME
+//                 and the DEPTH, ending in the brass DEPTH GAUGE (engraved knurled bezel, enamel face, spring needle,
+//                 record flag) mirroring the porthole
 //   bottom left   the SKILLS: a hand of physical cards (keys 1-4), cooldown shadow + seconds
 //   bottom centre the BOSS: an engraved brass NAME PLATE with scrolled ends and enamel gems (stamps in), a riveted
-//                 iron housing with the health in a glass tube (chip + flash), poise, phase pips
+//                 housing with the health in a glass tube (chip + flash), poise, phase gems
 //   right         PICKUP cards: slide in fully on screen, the item's model turning in a display well, the name in
 //                 its rarity colour, the kind and one stat line; up to three stack
-//   centre        TITLE toasts (a banner, top centre) and the big AREA card for a new floor (letters stamp in)
+//   centre        TITLE toasts (a ribbon, top centre), BANNERS (a slam on a plate) and the big AREA card for a new
+//                 floor (letters stamp onto a weathered plank)
 //
 // Usage (unchanged): const hud = new Hud(); overlays: [hud.layer]; hud.resize(w, h, pr);
 //   hud.draw(dt, data, input)   or hud.drawInto(myUi, dt, data) inside your own ui.begin()/ui.end()
-//   hud.title(name, sub) / hud.areaCard(name, sub) / hud.pickup(itemId) / hud.flash('pack' | 'pearls' | ...)
+//   hud.title(name, sub) / hud.banner(t, sub, style) / hud.areaCard(name, sub) / hud.pickup(itemId) / hud.codex(name, model)
+//   hud.flash('pack' | 'pearls' | 'keys' | 'bombs' | 'hp')
 import * as THREE from 'three';
 import { PixelUI } from './pixel/ui';
 import type { Input } from '../core/input';
@@ -31,13 +37,15 @@ import type { SkillHudState } from '../skills/hud';
 import { UiStage, PlanePool } from './obj/stage';
 import { pixelize, ramp } from './obj/pixtex';
 import { BlobAvatar } from './obj/blobAvatar';
+import { HealClam3D } from './obj/clam';
+import { HP_PER, HEAL_ITEM, hpify } from '../combat/types';
 import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
 import { skin } from './pixel/skins';
-import { PAL, plate, bigText, bigMeasure, bar, tube, solid, caustics, GLYPH, type BigOpts } from './obj/plates';
+import { PAL, plate, bigText, bigMeasure, bar, tube, solid, caustics, GLYPH, gem, kelp, type BigOpts } from './obj/plates';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -53,6 +61,8 @@ export interface StripPoi {
   done?: boolean;
 }
 
+/** v5's strip map of the level. v6 draws NO map (the journey has crossroads with signposts instead): only `name`,
+ *  `floor` and `floors` are still read, as a fallback for HudData.area / HudData.stage. */
 export interface StripMap {
   /** level length (metres or any unit) */
   length: number;
@@ -72,17 +82,25 @@ export interface StripMap {
 }
 
 export interface HudData {
-  /** health in HALF hearts (6 = three hearts) and the containers, also in half hearts */
+  /** health in the player's internal units (the old half hearts, 6 for a new blobfish); SHOWN as HP = units x HP_PER */
   hp: number; maxHp: number;
-  /** blue soul / armour half hearts drawn after the red ones */
+  /** extra blue shield units (shown as +HP in sea blue on the HP readout) */
   soul?: number;
-  /** K's combat HUD: stamina, flasks, drinking, guard, parry flashes */
+  /** K's combat HUD: stamina, the healing clams (flasks / flasksMax / drinking), guard, parry flashes */
   combat?: PlayerCombatHud | null;
   mana?: number; maxMana?: number;
   pearls: number; keys: number; bombs: number;
   /** the pack's fill in cells */
   pack?: { used: number; total: number; full?: boolean };
+  /** deprecated (v6 has no map): only its name / floor / floors are read when `area` / `stage` are not given */
   strip?: StripMap | null;
+  /** the area's name for the navigation instrument ("Sunlit Reef") */
+  area?: string;
+  /** the stage gems: 1-based floor and the floor count */
+  stage?: { floor: number; floors: number } | null;
+  /** J6's journey place (v6 crossroads): the area, the stage, and the route taken at the last fork ('' = the main
+   *  way). Read when `area` / `stage` are not given. */
+  place?: { name: string; floor?: number; floors?: number; route?: string } | null;
   /** K's boss bar (drawn while visible) */
   boss?: BossBar | null;
   /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
@@ -130,57 +148,6 @@ type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
 // ------------------------------------------------------------------ materials
 const brassMat = new THREE.MeshStandardMaterial({ color: '#d8a038', roughness: 0.32, metalness: 0.75, flatShading: true });
 const darkBrass = new THREE.MeshStandardMaterial({ color: '#6a4a1c', roughness: 0.5, metalness: 0.6, flatShading: true });
-
-/** a heart split down the middle so halves can be full or empty */
-function heartHalf(side: -1 | 1, mat: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.27, 7, 5), mat); lobe.position.set(side * 0.2, 0.12, 0);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.55, 10, 1, false, side < 0 ? Math.PI : 0, Math.PI), mat);
-  tip.position.set(0, -0.25, 0); tip.rotation.x = Math.PI; tip.scale.z = 0.7;
-  const fillL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 5, side < 0 ? Math.PI : 0, Math.PI), mat); fillL.position.set(0, 0.02, 0);
-  g.add(lobe, tip, fillL);
-  return g;
-}
-const jelly = new THREE.MeshStandardMaterial({ color: '#ff4a6a', roughness: 0.22, emissive: '#b01434', emissiveIntensity: 0.35 });
-const jellySoul = new THREE.MeshStandardMaterial({ color: '#5a9aff', roughness: 0.22, emissive: '#1a3a9a', emissiveIntensity: 0.35 });
-const jellyEmpty = new THREE.MeshStandardMaterial({ color: '#2a3a44', roughness: 0.3, transparent: true, opacity: 0.85 });
-
-class Heart3D {
-  root = new THREE.Group();
-  private L: THREE.Group; private R: THREE.Group;
-  private state = '';
-  constructor() { this.L = heartHalf(-1, jelly); this.R = heartHalf(1, jelly); this.root.add(this.L, this.R); const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), new THREE.MeshBasicMaterial({ color: '#ffffff' })); s.position.set(-0.24, 0.22, 0.22); s.name = 'shine'; this.root.add(s); }
-  set(l: THREE.Material, r: THREE.Material) {
-    const k = (l as THREE.MeshStandardMaterial).uuid + (r as THREE.MeshStandardMaterial).uuid;
-    if (k === this.state) return; this.state = k;
-    this.L.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = l; });
-    this.R.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = r; });
-    (this.root.getObjectByName('shine') as THREE.Mesh).visible = l !== jellyEmpty;
-  }
-}
-
-/**
- * a kelp-tea bottle: the hand-painted flask prop (src/backpack/models/hud.ts), full or empty. It sloshes when its
- * level changes, tips up while you drink it and swaps to the empty bottle when it's gone.
- */
-class Flask3D {
-  root = new THREE.Group();
-  private tip = new THREE.Group();
-  private fullM = hudModel('flask'); private emptyM = hudModel('flaskEmpty');
-  private full = 1; private slosh = 0; private t = Math.random() * 6;
-  constructor() { this.tip.add(this.fullM, this.emptyM); this.root.add(this.tip); }
-  update(dt: number, level: number) {
-    this.t += dt;
-    if (Math.abs(level - this.full) > 0.01) this.slosh = 1;
-    this.full += (level - this.full) * Math.min(1, dt * 6);
-    this.slosh = Math.max(0, this.slosh - dt * 1.5);
-    const drinking = level > 0.02 && level < 0.98;
-    this.fullM.visible = this.full > 0.08; this.emptyM.visible = !this.fullM.visible;
-    this.tip.rotation.z = drinking ? -0.9 * Math.sin(Math.min(1, (1 - level) * 3) * Math.PI / 2) : 0;
-    this.root.rotation.z = Math.sin(this.t * 7) * 0.18 * this.slosh + Math.sin(this.t * 1.3) * 0.03;
-    this.root.rotation.y = Math.sin(this.t * 0.7) * 0.35;
-  }
-}
 
 // ------------------------------------------------------------------ an engraved brass bezel ring (painted, flat)
 /**
@@ -401,65 +368,6 @@ class DepthGauge {
   }
 }
 
-// ------------------------------------------------------------------ the strip map, painted flat (no fibres, no noise)
-function paintStrip(cv: HTMLCanvasElement, m: StripMap, t: number) {
-  const x = cv.getContext('2d')!, W = cv.width, H = cv.height;
-  x.imageSmoothingEnabled = false;
-  const f = (px: number, py: number, w: number, h: number, c: string, a = 1) => { x.globalAlpha = a; x.fillStyle = c; x.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); x.globalAlpha = 1; };
-  const L = Math.max(1e-6, m.length);
-  const X = (v: number) => 1 + Math.round(clamp01(v / L) * (W - 3));
-  // parchment in two flat tones, the water a pale wash
-  // a sea chart: pale water in two tones, light glinting across it in moving dashes (repainted each frame anyway:
-  // the strip is a few hundred px)
-  f(0, 0, W, H, '#d4e6dc');
-  f(0, 0, W, Math.round(H * 0.3), '#e2f0e6');
-  for (let row = 0; row < 2; row++) {
-    const yy = 1 + row * Math.max(2, Math.round(H * 0.2));
-    for (let cx = 0; cx < W; cx++) if (((cx + Math.floor(t * (row ? 7 : 11)) + row * 9) % 19) < 3) f(cx, yy + Math.round(Math.sin(cx * 0.4 + t * 2 + row) * 0.6), 1, 1, '#ffffff', 0.8);
-  }
-  for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 1, X(ln.x1) - X(ln.x0), Math.max(2, Math.round(H * 0.22)), '#b4d8d8');
-  const sb = m.seabed ?? [0.72];
-  const bedAt = (cx: number) => { const tt = clamp01(cx / Math.max(1, W - 1)) * (sb.length - 1); const i = Math.floor(tt), fr = tt - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], fr); };
-  let prev = -1;
-  for (let cx = 0; cx < W; cx++) {
-    const by = Math.round(clamp01(bedAt(cx)) * (H - 2));
-    f(cx, by + 1, 1, H - by - 1, '#cdb07c');
-    f(cx, by + 3, 1, H - by - 3, '#bf9f6a');
-    if (prev >= 0) f(cx, Math.min(prev, by), 1, Math.abs(prev - by) + 1, '#5a3a1a');
-    prev = by;
-  }
-  for (const ln of m.lanes ?? []) if (ln.kind === 'cave') for (let cx = X(ln.x0); cx <= X(ln.x1); cx++) { const by = Math.round(clamp01(bedAt(cx)) * (H - 2)); const mid = Math.round((by + 3 + H - 2) / 2); if (mid > by + 2) f(cx, mid, 1, Math.max(1, Math.round(H / 14)), '#4a3018'); }
-  // fog: the unexplored stretches in a flat darker paper with even diagonal hatching (a pattern, not noise)
-  const spans = [...m.explored].sort((a, b) => a[0] - b[0]);
-  let cur = 0;
-  const fog = (a: number, b: number) => {
-    if (b <= a) return; const xa = X(a), xb = X(b);
-    f(xa, 0, xb - xa + 1, H, '#9fb8b0');
-    for (let cx = xa; cx <= xb; cx++) for (let cy = 0; cy < H; cy++) if ((cx + cy) % 5 === 0) f(cx, cy, 1, 1, '#8aa49c');
-  };
-  for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
-  if (cur < L) fog(cur, L);
-  // POIs as inked glyphs
-  const defY: Record<PoiType, number> = { treasure: 0.62, shop: 0.5, post: 0.45, challenge: 0.5, secret: 0.8, boss: 0.5, arena: 0.5, start: 0.5 };
-  const glyph: Record<PoiType, string> = { treasure: 'mTreasure', shop: 'mShop', post: 'mPost', challenge: 'mChallenge', secret: 'mSecret', boss: 'mBoss', arena: 'mArena', start: 'mStart' };
-  const up = H >= 26 ? 2 : 1;
-  for (const p of m.pois) {
-    const known = p.known !== false;
-    const ic = hudArt(known ? glyph[p.type] : 'mSecret');
-    const iw = ic.width * up, ih = ic.height * up;
-    const gx = Math.max(0, Math.min(W - iw, X(p.x) - Math.floor(iw / 2)));
-    const gy = Math.max(0, Math.min(H - ih, Math.round(clamp01(p.y ?? defY[p.type]) * (H - 1)) - Math.floor(ih / 2)));
-    if (p.type === 'boss') f(X(p.x), 0, 1, H, '#9a2a24', 0.8);
-    x.globalAlpha = !known ? 0.5 : p.done ? 0.4 : 1; x.drawImage(ic, gx, gy, iw, ih); x.globalAlpha = 1;
-  }
-  // you: a coral pin with a pulse ring
-  const plx = X(m.player), ply = Math.max(2, Math.min(H - 3, Math.round(clamp01(m.playerY ?? 0.5) * (H - 1))));
-  const pr = Math.round(2 + (Math.sin(t * 5) * 0.5 + 0.5) * 2) * up;
-  x.strokeStyle = PAL.coral; x.lineWidth = 1; x.globalAlpha = 0.6; x.beginPath(); x.arc(plx + 0.5, ply + 0.5, pr, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 1;
-  const s = 1 + up;
-  f(plx - s, ply - s, s * 2 + 1, s * 2 + 1, PAL.ink2); f(plx - s + 1, ply - s + 1, s * 2 - 1, s * 2 - 1, PAL.coral); f(plx - s + 1, ply - s + 1, up, up, '#ffc0b0');
-}
-
 // ------------------------------------------------------------------ pickup cards / title toasts
 interface PickCard { id: string; title: string; sub: string; kind: string; color: string; t: number; life: number; y: number; model: THREE.Object3D }
 interface Toast { title: string; sub: string; color: string; t: number; life: number; area?: boolean; banner?: 'danger' | 'gold'; landed?: boolean }
@@ -481,14 +389,22 @@ export class Hud {
   private prev: HudData | null = null;
   private avatar = new BlobAvatar();
   private port = new Porthole3D(PR);
-  private hearts: Heart3D[] = [];
-  private heartBump: number[] = [];
-  private flasks: Flask3D[] = [];
+  private clam = new HealClam3D();
+  /** the HP number as shown (counts up on a heal, drops on a hit) and its floating deltas */
+  private hpShown = -1; private hpFlash = 0;
+  private hpDeltas: { n: number; t: number }[] = [];
+  /** the HP tube: shown fraction, the pale chip of what a hit took, the pink pour of a heal */
+  private hpBar = 1; private hpChip = 1; private hpChipHold = 0; private hpPour = 0;
+  /** the heal's sparkles flying from the clam to the HP tube */
+  private healSparks: { t: number; x0: number; y0: number; x1: number; y1: number; arc: number }[] = [];
+  private clamAt = { x: 0, y: 0 }; private hpAt = { x: 0, y: 0 };
+  private lastFlasks = -1;
+  /** the odometers' shown values (they roll toward the real ones) */
+  private farShown = -1; private depthShown = -1;
   private models: Record<'pearls' | 'keys' | 'bombs' | 'pack', THREE.Object3D>;
   private gauge = new DepthGauge(PR);
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
-  private stripCv = document.createElement('canvas');
   private stamShown = 1; private stamChip = 1; private stamChipHold = 0; private stamFlash = 0;
   private manaShown = 0; private manaChip = 0;
   private bossShown = 1; private bossChip = 1; private bossChipHold = 0; private bossFlash = 0; private bossIn = 0; private bossName = ''; private bossShake = 0;
@@ -502,7 +418,7 @@ export class Hud {
 
   constructor() {
     const S = this.stage;
-    S.ui.add(this.port.root, this.avatar.root, this.gauge.root);
+    S.ui.add(this.port.root, this.avatar.root, this.gauge.root, this.clam.root);
     this.avatar.root.userData.noPixel = true; // the blobfish keeps its own soft skin shading
     this.port.root.userData.noPixel = false;
     this.models = { pearls: hudModel('pearlCoin'), keys: hudModel('key'), bombs: hudModel('bomb'), pack: itemModel('cutpursePouch') };
@@ -556,12 +472,12 @@ export class Hud {
     const model = itemModel(itemId);
     this.stage.ui.add(model);
     const col = d ? RARITY_COLOR[d.rarity] : PAL.cream;
-    const line = sub ?? (d ? (statLines(itemId, 1)[0]?.text ?? d.desc) : '');
+    const line = hpify(sub ?? (d ? (statLines(itemId, 1)[0]?.text ?? d.desc) : ''));
     const y0 = this.picks.length ? this.picks[this.picks.length - 1].y + 40 : 70;
     this.picks.push({ id: itemId, title: clean(name ?? d?.name ?? itemId), sub: clean(line), kind: d ? `${d.rarity} ${d.kind}`.toUpperCase() : '', t: 0, life: 3.8, color: col, y: y0, model });
   }
-  /** bounce / flash a counter */
-  flash(what: Counter) { this.pop[what] = 1; if (what !== 'hp') this.rolls[what].flash = 1; }
+  /** bounce / flash a counter ('hp': the HP number flashes and the avatar gives a little hop) */
+  flash(what: Counter) { this.pop[what] = 1; if (what !== 'hp') this.rolls[what].flash = 1; else this.hpFlash = 1; }
 
   /** begin + draw + end on the HUD's own PixelUI */
   draw(dt: number, s: HudData, input: Input | null = null) {
@@ -586,8 +502,12 @@ export class Hud {
     this.animate(dt, s);
     const on = !s.hidden;
     for (const o of this.stage.ui.children) o.visible = on;
+    // the death moment: the dark closes in from the edges, the porthole's glass cracks
+    this.deathT = on && s.hp <= 0 && s.maxHp > 0 ? this.deathT + dt : 0;
+    if (this.deathT > 0) this.planes.draw(vignette(pui.w, pui.h), 0, 0, { w: pui.w, h: pui.h, alpha: Math.min(0.9, this.deathT * 0.45), back: true });
     if (on) {
       const vit = this.vitals(ui, dt, s);
+      if (this.deathT > 0.05) this.crack(ui, Math.min(1, this.deathT * 3));
       this.resources(ui, s, vit);
       const navL = this.nav(ui, dt, s, vit.right);
       this.topGap = [vit.right, navL];
@@ -607,12 +527,39 @@ export class Hud {
     const p = this.prev;
     if (p) {
       const tot = s.hp + (s.soul ?? 0), ptot = p.hp + (p.soul ?? 0);
-      if (tot < ptot) { this.avatar.hurt(); this.hurtT = 1; const i = Math.floor(Math.max(0, s.hp) / 2); this.heartBump[i] = 1; }
-      else if (s.hp > p.hp) { this.avatar.heal(); this.healT = 1; for (let i = Math.floor(p.hp / 2); i < Math.ceil(s.hp / 2); i++) this.heartBump[i] = 1; }
+      if (tot < ptot) {
+        // a hit: the avatar squishes (harder for a bigger bite), the number drops at once and a -n floats off, the tube
+        // keeps a pale chip of what was lost for a moment
+        this.avatar.hurt((ptot - tot) / Math.max(1, s.maxHp) * 4); this.hurtT = 1;
+        this.hpDeltas.push({ n: -(ptot - tot), t: 0 });
+        const was = p.maxHp > 0 ? clamp01(p.hp / p.maxHp) : 0;
+        this.hpChip = Math.max(this.hpChip, was); this.hpChipHold = 0.55; this.hpFlash = 0.7;
+      } else if (s.hp > p.hp) {
+        this.avatar.heal(); this.healT = 1;
+        this.hpDeltas.push({ n: s.hp - p.hp, t: 0 }); this.hpPour = 1;
+        // eating a clam: sparkles fly from the clam's alcove into the HP tube
+        if ((s.combat?.drinking ?? 0) > 0 || (p.combat && s.combat && s.combat.flasks < p.combat.flasks)) this.spawnHealSparks();
+      }
       if (s.combat?.lastParry && s.combat.lastParryAge < (p.combat?.lastParryAge ?? 99)) this.parryFlash = s.combat.lastParry === 'perfect' ? 1 : 0.5;
     }
     this.hurtT = Math.max(0, this.hurtT - dt * 1.6); this.healT = Math.max(0, this.healT - dt * 1.2);
-    for (let i = 0; i < this.heartBump.length; i++) this.heartBump[i] = Math.max(0, (this.heartBump[i] ?? 0) - dt * 3);
+    // the HP readout: the number counts up on a heal (drops at once on a hit), deltas float off, the tube eases
+    const hpNow = Math.max(0, s.hp) * HP_PER;
+    if (this.hpShown < 0 || hpNow < this.hpShown) this.hpShown = hpNow;
+    else this.hpShown = Math.min(hpNow, this.hpShown + Math.max(1, (hpNow - this.hpShown) * 6) * dt * 6);
+    for (const d of this.hpDeltas) d.t += dt;
+    this.hpDeltas = this.hpDeltas.filter((d) => d.t < 1.2).slice(-3);
+    this.hpFlash = Math.max(0, this.hpFlash - dt * 2.4);
+    const hf = s.maxHp > 0 ? clamp01(Math.max(0, s.hp) / s.maxHp) : 0;
+    if (hf < this.hpBar) this.hpBar = hf; else this.hpBar = lerp(this.hpBar, hf, 1 - Math.exp(-dt * 5));
+    if (this.hpChipHold > 0) this.hpChipHold -= dt; else this.hpChip = Math.max(this.hpBar, this.hpChip - dt * 0.7);
+    this.hpPour = Math.max(0, this.hpPour - dt * 1.4);
+    for (const q of this.healSparks) q.t += dt;
+    this.healSparks = this.healSparks.filter((q) => q.t < 0.9);
+    // a clam came back (a new floor refills them): the clam hops
+    const fl = s.combat?.flasks ?? -1;
+    if (this.lastFlasks >= 0 && fl > this.lastFlasks) this.clam.pop();
+    this.lastFlasks = fl;
     for (const k of Object.keys(this.pop) as Counter[]) this.pop[k] = Math.max(0, this.pop[k] - dt * 3.5);
     this.parryFlash = Math.max(0, this.parryFlash - dt * 3);
     // counters roll to their new value, flash and float a +n / -n
@@ -654,74 +601,140 @@ export class Hud {
     this.planes.drawTiled(caustics(), ui.p(x) + i, ui.p(y) + i, ui.p(w) - 2 * i, ui.p(h) - 2 * i, { tile: 56, ox: this.t * 0.021 + seed, oy: this.t * 0.013 + seed * 0.7, alpha: 0.22 * alpha });
   }
 
-  // ---------------------------------------------------------------- top left: porthole + hearts + bars + flasks
+  private deathT = 0;
+  /** the porthole's glass cracking (k 0..1: the cracks running out from the hit point) */
+  private crack(ui: DUi, k: number) {
+    const cx = M + PR + 4 + 6, cy = M + PR + 3 - 7;
+    const arms: [number, number][][] = [
+      [[0, 0], [5, -3], [9, -2], [14, -7], [18, -9]], [[0, 0], [-4, -6], [-6, -11], [-11, -15]], [[0, 0], [-7, 2], [-12, 1], [-17, 5]],
+      [[0, 0], [3, 6], [2, 11], [6, 16]], [[0, 0], [8, 4], [12, 9]], [[5, -3], [7, -8]], [[-7, 2], [-9, 7]],
+    ];
+    for (const arm of arms) {
+      const n = Math.max(1, Math.round((arm.length - 1) * k));
+      for (let i = 0; i < n; i++) {
+        const [x0, y0] = arm[i], [x1, y1] = arm[i + 1];
+        const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * ui.k;
+        for (let j = 0; j <= steps; j++) {
+          const x = ui.p(cx + x0 + (x1 - x0) * (j / steps)), y = ui.p(cy + y0 + (y1 - y0) * (j / steps));
+          ui.ui.fill(x, y, 1, 1, '#ffffff', 0.85); ui.ui.fill(x + 1, y + 1, 1, 1, '#0a1a22', 0.6);
+        }
+      }
+    }
+    ui.ui.fill(ui.p(cx) - 1, ui.p(cy) - 1, 3, 3, '#ffffff', 0.9);
+  }
+
+  // ---------------------------------------------------------------- top left: the porthole + HP + stamina + the clam
+  private spawnHealSparks() {
+    const a = this.clamAt, b = this.hpAt;
+    for (let i = 0; i < 9; i++) this.healSparks.push({ t: -i * 0.035, x0: a.x + (i % 3 - 1) * 3, y0: a.y - 2, x1: b.x - 30 + i * 7, y1: b.y, arc: 14 + (i % 4) * 5 });
+  }
+
   private vitals(ui: DUi, dt: number, s: HudData): { right: number; bottom: number } {
     const S = this.stage, c = s.combat;
     const pc = { x: M + PR + 4, y: M + PR + 3 };
-    // the porthole and the blobfish looking out of it
-    const frac = s.maxHp > 0 ? clamp01(s.hp / s.maxHp) : 0;
-    const low = s.hp > 0 && s.hp <= 2;
-    this.avatar.update(dt, frac, low);
-    this.port.update(this.t, this.hurtT, this.healT, low, ui.k);
+    // the porthole and the blobfish looking out of it: the avatar IS the health
+    const units = Math.max(0, s.hp), maxU = Math.max(1, s.maxHp);
+    const frac = clamp01(units / maxU);
+    const crit = units > 0 && (frac <= 0.3 || units <= 1);
+    this.avatar.update(dt, frac, crit);
+    this.port.update(this.t, this.hurtT, this.healT, crit, ui.k);
     const shake = this.hurtT > 0.5 ? Math.sin(this.t * 60) * (this.hurtT - 0.5) * 3 : 0;
     S.put(this.port.root, pc.x + shake, pc.y, 0);
     this.avatar.root.scale.setScalar(23);
     S.put(this.avatar.root, pc.x + shake + 1, pc.y + 5, 10);
-    // the hearts
-    const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2), total = red + soul;
-    const perRow = 8, rows = Math.max(1, Math.ceil(total / perRow));
-    const x0 = pc.x + PR + 9, y0 = pc.y - 21;
-    const heartsW = Math.min(total, perRow) * 13;
-    // the bars and the flasks
-    const nF = c?.flasksMax ?? 0;
-    const barW = 104;
-    const hy = y0 + 10, by = y0 + 7 + rows * 13;
+    // the board: HP readout + tubes, then the clam's alcove
     const hasStam = !!c && c.staminaMax > 0, hasMana = !!s.maxMana;
-    const flaskX = x0 + barW + 10;
-    const right = Math.max(x0 + heartsW + 4, nF ? flaskX + nF * 11 + 1 : x0 + barW + 4) + 7;
-    const bottom = Math.max(by + (hasStam ? 10 : 0) + (hasMana ? 8 : 0) + 3, y0 + 40);
-    // the lacquered plate (behind everything; the porthole covers its left end)
-    const px0 = pc.x, pw = right - px0, ph = bottom - y0;
-    this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer', { rope: [ui.p(pw) - 15] }), ui.p(px0), ui.p(y0), { shadow: 2 });
+    const nF = c?.flasksMax ?? 0;
+    const x0 = pc.x + PR + 9, y0 = pc.y - 23;
+    const barW = 112;
+    const ph = 42 + (hasMana ? 7 : 0);
+    const aw = nF ? 40 : 0, ax = x0 + barW + 7;
+    const right = (nF ? ax + aw : x0 + barW) + 8;
+    const px0 = pc.x, pw = right - px0;
+    this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer', { plank: 15 }), ui.p(px0), ui.p(y0), { shadow: 2 });
     this.shimmer(ui, px0, y0, pw, ph, 0);
-    while (this.hearts.length < total) { const h = new Heart3D(); S.ui.add(h.root); this.hearts.push(h); }
-    this.hearts.forEach((h, i) => {
-      h.root.visible = i < total;
-      if (i >= total) return;
-      let l: THREE.Material, r: THREE.Material;
-      if (i < red) { const v = s.hp - i * 2; l = v >= 1 ? jelly : jellyEmpty; r = v >= 2 ? jelly : jellyEmpty; }
-      else { const v = (s.soul ?? 0) - (i - red) * 2; l = v >= 1 ? jellySoul : jellyEmpty; r = v >= 2 ? jellySoul : jellyEmpty; }
-      h.set(l, r);
-      const bump = this.heartBump[i] ?? 0;
-      const beat = low && i === Math.ceil(s.hp / 2) - 1 ? Math.max(0, Math.sin(this.t * 7.5)) ** 8 * 0.25 : 0;
-      const wob = Math.sin(this.t * 2.4 + i * 0.7);
-      const sc = 11.5;
-      h.root.scale.set(sc * (1 + beat + bump * 0.3), sc * (1 + beat - bump * 0.15 + wob * 0.02), sc);
-      h.root.rotation.set(0, Math.sin(this.t * 1.3 + i) * 0.25, wob * 0.06);
-      S.put(h.root, x0 + 6 + (i % perRow) * 13, hy + Math.floor(i / perRow) * 13 - Math.sin(bump * Math.PI) * 4 + Math.sin(this.t * 2.2 + i * 0.8) * 0.8, 10);
+    // --- the HP number: a little brass "HP" tag, the big rolling numeral, "/ max"
+    const shown = Math.round(this.hpShown), maxShown = Math.round(maxU * HP_PER);
+    const lowBlink = crit && Math.sin(this.t * 7.5) > 0;
+    const numCol = units <= 0 ? PAL.coral : lowBlink ? PAL.coral2 : this.hpFlash > 0 ? lerpHex(PAL.cream, this.hpDeltas.some((d) => d.n > 0 && d.t < 0.8) ? '#ffb8e0' : PAL.coral2, this.hpFlash) : PAL.cream;
+    const tagW = 15, ty = y0 + 4;
+    this.planes.draw(plate(ui.p(tagW), ui.p(11), 'brass'), ui.p(x0 - 1), ui.p(ty + 2));
+    ui.big('HP', x0 + tagW / 2 - 1, ty + 4.5, 5.5, { color: '#2a1608', outline: null, shadow: null, align: 'center' });
+    const pop = this.pop.hp, cap = 13 * (1 + Math.sin(Math.min(1, pop) * Math.PI) * 0.12);
+    const nx = x0 + tagW + 3;
+    const nw = ui.big(String(shown), nx, ty - (cap - 13) / 2, cap, { color: numCol, color2: units > 0 && !crit ? '#fff8e8' : undefined });
+    ui.big(`/${maxShown}`, nx + nw + 2, ty + 6, 6.5, { color: crit ? PAL.coral2 : PAL.dim });
+    if (s.soul && s.soul > 0) { const sw2 = ui.bigW(`/${maxShown}`, 6.5); ui.big(`+${Math.round(s.soul * HP_PER)}`, nx + nw + 5 + sw2, ty + 6, 6.5, { color: PAL.sea2 }); }
+    this.hpAt = { x: nx + nw / 2, y: ty + 14 };
+    // the deltas float up off the number
+    for (const d of this.hpDeltas) {
+      const a = 1 - clamp01((d.t - 0.7) / 0.5), up = easeOut(d.t * 1.5) * 12;
+      ui.big((d.n > 0 ? '+' : '') + Math.round(d.n * HP_PER), nx + nw + 30, ty + 3 - up, 7.5, { color: d.n > 0 ? '#ffb8e0' : PAL.coral, alpha: a, align: 'center' });
+    }
+    // --- the HP tube: coral liquid, a pale chip of the last hit, a pink pour while healing, a heartbeat when critical
+    let yy = y0 + 20;
+    const ticks = maxU > 1 && maxU <= 40 ? 1 / maxU : 0;
+    tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(9, ui.p(10)), this.hpBar, {
+      col: crit ? '#e8303a' : '#e0564a', chip: this.hpChip, ticks, t: this.t,
+      gain: this.hpPour > 0 ? Math.min(1, this.hpBar + this.hpPour * 0.25) : undefined, gainCol: '#ff8ac0',
+      flash: this.hurtT > 0.7 ? (this.hurtT - 0.7) * 2 : 0, pulse: crit ? Math.max(0, Math.sin(this.t * 7.5)) ** 4 : 0,
     });
-    // stamina: teal, amber while regen waits, red guard-broken, white on a parry; a pale chip of what you just spent
-    let yy = by;
+    yy += 12;
+    // --- stamina: teal, amber while regen waits, red guard-broken, white on a parry; a pale chip of what you spent
     if (hasStam && c) {
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
       const col = broken ? PAL.coral : c.staminaDelay > 0 ? '#e8a818' : '#2ac8a0';
       const jig = c.guard === 'riposte' ? Math.round(Math.sin(this.t * 30)) * 0.5 : 0;
-      tube(ui.ui, ui.p(x0 - 2), ui.p(yy + jig), ui.p(barW + 4), Math.max(7, ui.p(8)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25, t: this.t });
-      yy += 10;
+      tube(ui.ui, ui.p(x0 - 2), ui.p(yy + jig), ui.p(barW + 4), Math.max(7, ui.p(7)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25, t: this.t });
     }
-    if (hasMana) {
-      tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(6, ui.p(6)), this.manaShown, { col: '#5a7aff', chip: this.manaChip, t: this.t + 3, crystal: true });
-      yy += 8;
+    yy += 9;
+    if (hasMana) tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(6, ui.p(6)), this.manaShown, { col: '#5a7aff', chip: this.manaChip, t: this.t + 3, crystal: true });
+    // --- the HEALING CLAM in its alcove, the charge count, the [R] HEAL tag hanging under the board
+    this.clam.root.visible = nF > 0;
+    if (nF > 0 && c) {
+      const ay = y0 + 3, ah = ph - 6;
+      const eating = c.drinking > 0 && c.drinking < 1 ? c.drinking : 0;
+      const has = c.flasks > 0;
+      this.planes.draw(plate(ui.p(aw), ui.p(ah), 'alcove'), ui.p(ax), ui.p(ay));
+      // the jelly's pink glow lights the hollow (and flares while eating)
+      const glow = this.clam.glow * (eating ? 1 : 0.5);
+      if (glow > 0.02) ui.fill(ax + 3, ay + 6, aw - 6, ah - 11, '#ff6aa8', glow * 0.22);
+      this.clam.update(dt, { has, eating });
+      this.clam.root.scale.setScalar(29);
+      this.clam.root.rotation.set(0, 0, 0);
+      const ccx = ax + aw / 2 - 4, ccy = ay + ah * 0.52;
+      S.put(this.clam.root, ccx, ccy, 14);
+      this.clamAt = { x: ccx, y: ccy - 6 };
+      // the count: "x2" at the top right, coral when none are left
+      const cnt = String(Math.max(0, c.flasks));
+      const xw = ui.bigW('x', 5.5);
+      ui.big('x', ax + 5, ay + 5, 5.5, { color: has ? PAL.dim : PAL.coral1 });
+      ui.big(cnt, ax + 6 + xw, ay + 1.5, 9, { color: has ? PAL.cream : PAL.coral });
+      // the charge pips down the alcove's right edge
+      const pip = GLYPH.clamPip(), off = GLYPH.clamPipOff(), gs = Math.max(1, Math.round(ui.k));
+      for (let i = 0; i < Math.min(nF, 4); i++) {
+        const on = i < c.flasks, bounce = eating && i === c.flasks ? Math.sin(this.t * 20) * 0.6 : 0;
+        ui.ui.img(on ? pip : off, ui.p(ax + aw - 3) - pip.width * gs, ui.p(ay + 13 + i * 6.5 + bounce), { w: pip.width * gs, h: pip.height * gs });
+      }
+      // the hanging tag: [R] HEAL on a brass plate on two cords
+      const kw = ui.ui.keycapW(HEAL_ITEM.key) / ui.k;
+      const lw = ui.bigW(HEAL_ITEM.verb, 6);
+      const tw = kw + lw + 24, tx = ax + aw / 2 - tw / 2 - 2, tyy = y0 + ph + 3;
+      for (const cx2 of [tx + 4, tx + tw - 5]) { ui.fill(cx2, y0 + ph - 1, 1, 4, '#2a1a0c'); ui.fill(cx2 + 1, y0 + ph - 1, 1, 4, '#c8a070'); }
+      this.planes.draw(plate(ui.p(tw), ui.p(16), 'brass'), ui.p(tx), ui.p(tyy), { shadow: 1 });
+      ui.ui.keycap(HEAL_ITEM.key, ui.p(tx + 3), ui.p(tyy + 1.5), false, eating > 0);
+      ui.big(HEAL_ITEM.verb, tx + 6 + kw, tyy + 5, 6, { color: has ? '#2a1608' : '#7a3a2a', outline: null, shadow: null });
+      if (!has && Math.sin(this.t * 3) > 0) ui.big('EMPTY', ax + aw / 2, ay + ah - 9, 4.5, { color: PAL.coral2, align: 'center' });
     }
-    while (this.flasks.length < nF) { const f = new Flask3D(); S.ui.add(f.root); this.flasks.push(f); }
-    this.flasks.forEach((f, i) => {
-      f.root.visible = i < nF;
-      if (i >= nF || !c) return;
-      const drinking = c.drinking > 0 && i === c.flasks;
-      f.update(dt, i < c.flasks ? 1 : drinking ? 1 - c.drinking : 0);
-      f.root.scale.setScalar(13);
-      S.put(f.root, flaskX + 6 + i * 11, by + (hasMana ? 8 : 4), 8);
-    });
+    // the heal's sparkles: pink flecks arcing from the clam into the HP tube, twinkling as they land
+    for (const q of this.healSparks) {
+      if (q.t < 0) continue;
+      const k = easeOut(q.t / 0.55), x = lerp(q.x0, q.x1, k), y = lerp(q.y0, q.y1, k) - Math.sin(k * Math.PI) * q.arc;
+      const a = 1 - clamp01((q.t - 0.55) / 0.35);
+      const big2 = q.t > 0.5 && q.t < 0.65;
+      ui.fill(x - (big2 ? 1 : 0), y, big2 ? 3 : 1, 1, '#ffd8ec', a); ui.fill(x, y - (big2 ? 1 : 0), 1, big2 ? 3 : 1, '#ffd8ec', a);
+      ui.fill(x, y, 1, 1, '#ffffff', a);
+    }
     // bubbles drift up out of the porthole's top, wobbling, popping at the screen's edge
     for (let i = 0; i < 4; i++) {
       const ph2 = (this.t * 0.22 + i * 0.29) % 1;
@@ -729,7 +742,9 @@ export class Hud {
       const g = ph2 < 0.5 || i % 2 ? GLYPH.bubble() : GLYPH.bubbleS(), gs = Math.max(1, Math.round(ui.k));
       ui.ui.img(g, ui.p(bx), ui.p(by), { w: g.width * gs, h: g.height * gs, alpha: Math.min(1, (1 - ph2) * 1.6) * 0.9 });
     }
-    return { right, bottom: Math.max(bottom, pc.y + PR + 4) };
+    // kelp hanging off the board's right end, swaying
+    kelp(ui.ui, ui.p(right - 6), ui.p(y0 + ph - 2), Math.round(ui.p(10)), this.t, 0.7, 1);
+    return { right, bottom: Math.max(y0 + ph + (nF ? 19 : 0), pc.y + PR + 4) };
   }
 
   // ---------------------------------------------------------------- the resource strip: pearls, keys, bombs, the pack
@@ -789,58 +804,106 @@ export class Hud {
     });
   }
 
-  // ---------------------------------------------------------------- top right: the navigation instrument
+  // ---------------------------------------------------------------- top right: the navigation instrument (no map)
+  /**
+   * an ODOMETER: `digits` number drums in a brass-lipped slot showing `v` (metres). The units drum turns smoothly
+   * with the value; each higher drum turns only while every drum below it rolls over from 9 to 0, like a real one.
+   */
+  private odometer(ui: DUi, x: number, y: number, v: number, digits: number, cw: number, ch: number, cap: number, col: string) {
+    const W = digits * cw;
+    this.planes.draw(plate(ui.p(W + 4), ui.p(ch + 4), 'well', { face: '#2a1a0c' }), ui.p(x - 2), ui.p(y - 2));
+    v = Math.max(0, v);
+    for (let i = 0; i < digits; i++) {
+      const pw = 10 ** i, lower = v % pw, step = Math.floor(v / pw) % 10;
+      // the carry: this drum turns during the last metre of the drums below it
+      const pos = i === 0 ? v % 10 : step + (lower > pw - 1 ? lower - (pw - 1) : 0);
+      const d0 = Math.floor(pos) % 10, fr = pos - Math.floor(pos);
+      const dx = x + (digits - 1 - i) * cw;
+      this.planes.draw(plate(ui.p(cw), ui.p(ch), 'drum'), ui.p(dx), ui.p(y));
+      const lead = i > 0 && v < pw - 0.5;
+      ui.ui.clip(ui.p(dx) + 1, ui.p(y) + 1, ui.p(cw) - 2, ui.p(ch) - 2);
+      const ty = y + (ch - cap) / 2 - 0.5;
+      ui.big(String(d0), dx + cw / 2, ty - fr * ch, cap, { color: lead ? '#a08a64' : col, outline: null, shadow: null, align: 'center' });
+      if (fr > 0.001) ui.big(String((d0 + 1) % 10), dx + cw / 2, ty + (1 - fr) * ch, cap, { color: lead ? '#a08a64' : col, outline: null, shadow: null, align: 'center' });
+      ui.ui.unclip();
+      // the drum's curve: shade rows at the top and bottom of the slot over the digits
+      ui.fill(dx + 1, y + 1, cw - 2, 1, '#3a2410', 0.35); ui.fill(dx + 1, y + ch - 2, cw - 2, 1, '#3a2410', 0.45);
+    }
+    return W;
+  }
+
   private nav(ui: DUi, dt: number, s: HudData, leftLimit: number): number {
-    const m = s.strip ?? null, d = s.depth ?? null;
+    const d = s.depth ?? null;
     const far = s.far ?? (s.strip as { far?: number } | null | undefined)?.far;
+    const area = (s.area ?? s.place?.name ?? s.strip?.name ?? '').toUpperCase();
+    const stage = s.stage ?? (s.place?.floors ? { floor: s.place.floor ?? 1, floors: s.place.floors } : null) ?? (s.strip ? { floor: s.strip.floor, floors: s.strip.floors } : null);
+    const route = (s.place?.route ?? '').toUpperCase();
     this.gauge.root.visible = !!d;
-    if (!m && !d) return ui.w;
+    if (!area && !d && far === undefined) return ui.w;
     const gc = { x: ui.w - M - PR - 4, y: M + PR + 3 };
     const x1 = d ? gc.x : ui.w - M;
-    const NW = Math.max(150, Math.min(Math.round(ui.w * 0.34), 250, x1 - leftLimit - 24));
-    const x0 = x1 - NW, y0 = gc.y - 21, h = 46;
-    this.planes.draw(plate(ui.p(NW), ui.p(h), 'lacquer', { rope: [4] }), ui.p(x0), ui.p(y0), { shadow: 2 });
+    const cw = 8, ch = 13, dcap = 8.5;
+    const farDig = Math.max(3, String(Math.round(far ?? 0)).length), depDig = Math.max(3, String(Math.round(d?.m ?? 0)).length);
+    const g1 = GLYPH.house(), g2 = GLYPH.down(), gs = Math.max(1, Math.round(ui.k));
+    // the readouts' widths decide the board's (a glyph, the drums, the unit)
+    const unitW = ui.bigW('M', 6);
+    const r1w = far !== undefined ? g1.width * gs / ui.k + 3 + farDig * cw + 3 + unitW : 0;
+    const r2w = d ? g2.width * gs / ui.k + 3 + ui.bigW('-', 8) + 1 + depDig * cw + 3 + unitW : 0;
+    const gemsW = stage && stage.floors > 0 ? stage.floors * 8 + ui.bigW(`${stage.floor}/${stage.floors}`, 6) + 12 : 0;
+    const content = Math.max(r1w + (r1w && r2w ? 14 : 0) + r2w, (area ? ui.bigW(area, 6.5) + 26 : 0) + gemsW + 6);
+    const NW = Math.max(150, Math.min(13 + content + (d ? PR + 9 : 8), 290, x1 - leftLimit - 24));
+    const x0 = x1 - NW, y0 = gc.y - 23, h = 48;
+    this.planes.draw(plate(ui.p(NW), ui.p(h), 'lacquer', { rope: [4], plank: 22 }), ui.p(x0), ui.p(y0), { shadow: 2 });
     this.shimmer(ui, x0, y0, NW, h, 3.1);
-    const cr = (d ? gc.x - PR - 9 : x1 - 8);
-    const cl = x0 + 8;
-    // the area name and the stage pips
-    if (m) {
-      const nm = (m.name ?? '').toUpperCase();
-      ui.big(nm, cl + 6, y0 + 5, 6, { color: PAL.brass2 });
-      const st = `${m.floor}/${m.floors}`;
-      const sw = ui.bigW(st, 6);
-      ui.big(st, cr, y0 + 5, 6, { color: PAL.cream, align: 'right' });
-      for (let i = 0; i < m.floors; i++) {
-        const px = cr - sw - 6 - (m.floors - 1 - i) * 7, py = y0 + 8;
-        const on = i < m.floor, cur = i === m.floor - 1;
-        diamond(ui, px, py, 3, on ? (cur ? PAL.brass2 : PAL.brass) : PAL.teal1, PAL.ink2);
-        if (cur) diamond(ui, px, py, 1, PAL.glint, PAL.glint);
+    const cr = d ? gc.x - PR - 9 : x1 - 8;
+    const cl = x0 + 13;
+    // row 1: the area's name on a brass plate, the stage gems + "1/3"
+    if (area) {
+      const aw = Math.min(ui.bigW(area, 6.5) + 26, cr - cl - gemsW + 3);
+      this.planes.draw(plate(ui.p(aw), ui.p(14), 'brass'), ui.p(cl - 3), ui.p(y0 + 4));
+      ui.ui.clip(ui.p(cl + 6), ui.p(y0 + 4), ui.p(aw - 18), ui.p(14));
+      ui.big(area, cl + 9, y0 + 7.5, 6.5, { color: '#2a1608', outline: null, shadow: null });
+      ui.ui.unclip();
+      // the route taken at the last crossroads, as a little sign tag hung under the board
+      if (route) {
+        const rw2 = ui.bigW(route, 4.5) + 12, rx2 = cl + 4, ry2 = y0 + h + 1;
+        for (const sx of [rx2 + 3, rx2 + rw2 - 4]) ui.fill(sx, y0 + h - 2, 0.5, 4, '#2a1a0c');
+        this.planes.draw(plate(ui.p(rw2), ui.p(11), 'board', { barnacles: false, algae: false, plank: 11 }), ui.p(rx2), ui.p(ry2 + 1));
+        ui.big(route, rx2 + 6, ry2 + 4, 4.5, { color: PAL.cream });
       }
-      // the strip map in a recessed window
-      const mx = cl - 2, my = y0 + 14, mw = cr - cl + 4, mh = 18;
-      this.planes.draw(plate(ui.p(mw), ui.p(mh), 'well'), ui.p(mx), ui.p(my));
-      const cw = ui.p(mw) - 4, ch = ui.p(mh) - 4;
-      if (this.stripCv.width !== cw || this.stripCv.height !== ch) { this.stripCv.width = Math.max(4, cw); this.stripCv.height = Math.max(4, ch); }
-      paintStrip(this.stripCv, m, this.t);
-      this.planes.draw(this.stripCv, ui.p(mx) + 2, ui.p(my) + 2, { dirty: true });
     }
-    // the readouts: metres from home (left) and the depth (right, next to the gauge)
-    const ry = y0 + h - 12;
+    if (stage && stage.floors > 0) {
+      const st = `${stage.floor}/${stage.floors}`;
+      const sw = ui.bigW(st, 6);
+      ui.big(st, cr, y0 + 7, 6, { color: PAL.cream, align: 'right' });
+      for (let i = 0; i < stage.floors; i++) {
+        const px = cr - sw - 7 - (stage.floors - 1 - i) * 8, py = y0 + 10;
+        const on = i < stage.floor, cur = i === stage.floor - 1;
+        gem(ui.ui, ui.p(px), ui.p(py), Math.max(2, ui.p(cur ? 3.5 : 3)), cur ? '#f2c66d' : '#c8913a', on);
+      }
+    }
+    // row 2: the odometers: metres FROM HOME, the DEPTH
+    const ry = y0 + 22;
+    let rx = cl - 1;
     if (far !== undefined) {
-      const g = GLYPH.house(), gs = Math.max(1, Math.round(ui.k)), fx = cl + 7;
-      ui.ui.img(g, ui.p(fx), ui.p(ry + 1), { w: g.width * gs, h: g.height * gs });
-      const fw = ui.big(`${Math.round(far)}`, fx + g.width * gs / ui.k + 3, ry, 7.5, { color: PAL.cream });
-      ui.big('M FROM HOME', fx + g.width * gs / ui.k + 5 + fw, ry + 2, 5, { color: PAL.dim });
+      this.farShown = this.farShown < 0 ? far : lerp(this.farShown, far, 1 - Math.exp(-dt * 4));
+      ui.ui.img(g1, ui.p(rx), ui.p(ry + 1), { w: g1.width * gs, h: g1.height * gs });
+      rx += g1.width * gs / ui.k + 3;
+      const w = this.odometer(ui, rx, ry, this.farShown, farDig, cw, ch, dcap, '#2a1a0c');
+      ui.big('M', rx + w + 3, ry + 5, 6, { color: PAL.cream });
+      ui.big('FROM HOME', rx, ry + ch + 3, 4.5, { color: PAL.dim });
+      rx += w + 3 + unitW + 14;
     }
     if (d) {
-      const dm = Math.round(d.m);
-      const txt = dm > 0 ? `-${dm}` : '0';
-      const col = d.descending ? PAL.sea2 : PAL.cream;
-      const uw = ui.bigW('M', 5);
-      const tw = ui.big(txt, cr - uw - 2, ry - 1, 9, { color: col, align: 'right' });
-      ui.big('M', cr, ry + 3, 5, { color: PAL.dim, align: 'right' });
-      const g = GLYPH.down(), gs = Math.max(1, Math.round(ui.k));
-      ui.ui.img(g, ui.p(cr - uw - 4 - tw) - g.width * gs - 2, ui.p(ry + 2), { w: g.width * gs, h: g.height * gs });
+      this.depthShown = this.depthShown < 0 ? d.m : lerp(this.depthShown, d.m, 1 - Math.exp(-dt * 8));
+      const dx = Math.max(rx, cr - (r2w - 2));
+      ui.ui.img(g2, ui.p(dx), ui.p(ry + 3), { w: g2.width * gs, h: g2.height * gs });
+      let ox = dx + g2.width * gs / ui.k + 3;
+      ox += ui.big('-', ox, ry + 3, 8, { color: d.descending ? PAL.sea2 : PAL.cream }) + 1;
+      const w = this.odometer(ui, ox, ry, this.depthShown, depDig, cw, ch, dcap, d.descending ? '#1d5a96' : '#2a1a0c');
+      ui.big('M', ox + w + 3, ry + 5, 6, { color: PAL.cream });
+      const zone = (d.zone ?? '').toUpperCase();
+      ui.big(zone ? zone + ' ZONE' : 'DEPTH', ox, ry + ch + 3, 4.5, { color: d.descending ? PAL.sea2 : PAL.dim });
       this.gauge.update(dt, this.t, d, ui.k * ui.ui.hd, ui.k);
       this.stage.put(this.gauge.root, gc.x, gc.y, 0);
     }
@@ -864,7 +927,7 @@ export class Hud {
     if (po < 0.999) bar(ui.ui, ui.p(bx + 6), ui.p(py + 17.5), ui.p(BW - 12), Math.max(3, ui.p(3)), po, { col: '#f2c66d', back: '#160a0e' });
     // the phase pips, centred on the plate's bottom rim
     const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
-    if (n > 1) for (let i = 0; i < n; i++) { const px = cx + (i - (n - 1) / 2) * 10, pyy = py + 23; diamond(ui, px, pyy, 3.5, i < ph ? PAL.coral : '#3a2228', PAL.ink2); if (i < ph) diamond(ui, px - 0.5, pyy - 0.5, 1, '#ffd0c0', '#ffd0c0'); }
+    if (n > 1) for (let i = 0; i < n; i++) { const px = cx + (i - (n - 1) / 2) * 10, pyy = py + 23; gem(ui.ui, ui.p(px), ui.p(pyy), Math.max(2, ui.p(3.5)), '#e0564a', i < ph); }
     // the name ribbon stamps down onto the plate
     const name = b.name.toUpperCase();
     const st = clamp01((this.bossIn - 0.15) * 4), sEase = easeOutBack(st);
@@ -907,7 +970,7 @@ export class Hud {
       // the key on a little brass disc on the frame, the cooldown seconds big over the art
       const lift = i === sk.sel ? 5 : 0;
       const kx = x - c.w / 2 + 2, ky = y - c.h / 2 - 3 - lift;
-      diamond(ui, kx + 3, ky + 4, 5.5, i === sk.sel ? PAL.brass2 : PAL.brass, PAL.ink2);
+      gem(ui.ui, ui.p(kx + 3), ui.p(ky + 4), Math.max(3, ui.p(5.5)), i === sk.sel ? '#f2c66d' : '#c8913a');
       ui.big(String(i + 1), kx + 3, ky + 1, 6, { color: PAL.ink, outline: null, shadow: null, align: 'center' });
       if (cd > 0) ui.big(String(Math.ceil(sl.cd)), x, y - 9, 11, { color: '#ffffff', align: 'center' });
       else if (!ready) ui.big('MANA', x, y - 4, 4.5, { color: PAL.sea2, align: 'center' });
@@ -987,34 +1050,39 @@ export class Hud {
     for (const c of this.toasts) {
       const outK = clamp01((c.t - c.life + 0.45) / 0.45);
       if (c.area) {
-        // a cinematic band across the upper screen, the name stamped in letter by letter, brass rules, the sub line
-        const cy = ui.h * 0.25, cap = 20;
-        // (planes drawn BEHIND the HUD's plates and cards, so the band never dims an instrument)
-        const bandA = clamp01(c.t * 4) * (1 - outK) * 0.4;
-        this.planes.draw(solid(PAL.ink2), 0, ui.p(cy - 9), { w: ui.ui.w, h: ui.p(cap + 29), alpha: bandA, back: true });
-        this.planes.draw(solid(PAL.brass), 0, ui.p(cy - 9), { w: ui.ui.w, h: 1, alpha: Math.min(1, bandA * 1.6), back: true });
-        this.planes.draw(solid(PAL.brass), 0, ui.p(cy + cap + 19), { w: ui.ui.w, h: 1, alpha: Math.min(1, bandA * 1.6), back: true });
+        // a weathered plank swings down on two ropes across the upper screen, the name stamped into it letter by
+        // letter, kelp hanging off it, the sub line on a dark strip under it
+        // (below the top row of instruments and the resource strip)
+        const cy = Math.max(ui.h * 0.3, 122), cap = 20;
         const tw = ui.bigW(c.title, cap);
-        let lx = ui.w / 2 - tw / 2;
+        const pw = Math.min(ui.w - 24, tw + 96), phh = cap + 22;
+        const drop = easeOutBack(c.t * 2.6), sw = Math.sin(c.t * 3.1) * Math.max(0, 1 - c.t) * 2.5;
+        const px = ui.w / 2 - pw / 2 + sw, py = cy - 11 - (1 - drop) * 40 - outK * 8;
+        const pa = clamp01(c.t * 5) * (1 - outK);
+        // (planes drawn BEHIND the HUD's plates and cards, so the plank never covers an instrument)
+        for (const rx of [px + 22, px + pw - 27]) for (let yy = 0; yy < py + 3; yy += 1) {
+          const ph3 = Math.floor(yy * ui.k) % 4;
+          ui.fill(rx, yy, 0.5, 1, '#2a1a0c', pa); ui.fill(rx + 0.5, yy, 2, 1, ph3 === 0 ? '#6a4a24' : ph3 === 1 ? '#f0d49a' : ph3 === 2 ? '#d8b878' : '#b08a52', pa);
+        }
+        this.planes.draw(plate(ui.p(pw), ui.p(phh), 'board', { rope: [ui.p(18), ui.p(pw) - ui.p(31)], plank: Math.round(ui.p(phh) / 2) }), ui.p(px), ui.p(py), { alpha: pa, back: true });
+        this.planes.draw(solid('#000000'), ui.p(px + 3), ui.p(py + phh), { w: ui.p(pw - 6), h: ui.p(3), alpha: pa * 0.3, back: true });
         const chars = [...c.title];
+        let lx = ui.w / 2 - tw / 2 + sw;
         chars.forEach((ch, i) => {
-          const lt = c.t - 0.1 - i * 0.045;
+          const lt = c.t - 0.25 - i * 0.045;
           const k = clamp01(lt * 6);
           const w = ui.bigW(ch === ' ' ? 'I' : ch, cap) - 1 / ui.k;
-          if (k > 0 && ch !== ' ') ui.big(ch, lx, cy - (1 - easeOutBack(k)) * 14 - outK * 6, cap, { color: c.color, color2: PAL.brass2, alpha: k * (1 - outK) });
+          if (k > 0 && ch !== ' ') ui.big(ch, lx, py + (phh - cap) / 2 - 1 - (1 - easeOutBack(k)) * 14, cap, { color: c.color, color2: PAL.brass2, alpha: k * (1 - outK) });
           lx += ch === ' ' ? w * 0.7 : w;
         });
-        const rk = easeOut((c.t - 0.3) * 2.5);
-        const rw = Math.min(ui.w * 0.4, tw * 0.5 + 40) * rk;
-        if (rk > 0) {
-          for (const sx of [-1, 1]) {
-            const x0 = sx < 0 ? ui.w / 2 - tw / 2 - 10 - rw : ui.w / 2 + tw / 2 + 10;
-            ui.fill(x0, cy + cap / 2 - 1, rw, 2, PAL.brass, 1 - outK); ui.fill(x0, cy + cap / 2 - 1, rw, 1, PAL.brass2, 1 - outK);
-            diamond(ui, sx < 0 ? x0 + rw + 4 : x0 - 4, cy + cap / 2, 3, PAL.brass2, PAL.ink2);
-          }
-        }
+        // kelp hanging off the plank's ends, swaying
+        if (pa > 0.05) { kelp(ui.ui, ui.p(px + 8), ui.p(py + phh - 3), ui.p(16), this.t, 0.3, pa); kelp(ui.ui, ui.p(px + pw - 10), ui.p(py + phh - 3), ui.p(11), this.t, 2.1, pa); }
         const sa = clamp01((c.t - 0.7) * 3) * (1 - outK);
-        if (c.sub && sa > 0) ui.big(c.sub, ui.w / 2, cy + cap + 7, 6.5, { color: PAL.cream, align: 'center', alpha: sa });
+        if (c.sub && sa > 0) {
+          const sw2 = ui.bigW(c.sub, 6.5) + 20, sy = py + phh + 4;
+          this.planes.draw(plate(ui.p(sw2), ui.p(14), 'well', { face: PAL.ink }), ui.p(ui.w / 2 - sw2 / 2), ui.p(sy), { alpha: sa * 0.95, back: true });
+          ui.big(c.sub, ui.w / 2, sy + 3.5, 6.5, { color: PAL.cream, align: 'center', alpha: sa });
+        }
         continue;
       }
       if (c.banner) {
@@ -1065,15 +1133,23 @@ export class Hud {
   }
 }
 
-/** a small pixel diamond (pips, gems), centre (x, y) and radius r in D */
-function diamond(ui: DUi, x: number, y: number, r: number, col: string, out: string) {
-  const R = Math.max(1, Math.round(r * ui.k)), cx = Math.round(x * ui.k), cy = Math.round(y * ui.k);
-  for (let i = -R; i <= R; i++) {
-    const w = R - Math.abs(i);
-    ui.ui.fill(cx - w - 1, cy + i, w * 2 + 3, 1, out);
+/** a dark vignette (UI px): the deep closing in from the edges in five stepped bands, clear in the middle */
+const vigCache = new Map<string, HTMLCanvasElement>();
+function vignette(w: number, h: number): HTMLCanvasElement {
+  const key = `${w}|${h}`;
+  let c = vigCache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d')!, img = x.createImageData(w, h), D = img.data;
+  for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+    const dx = (px - w / 2) / (w * 0.62), dy = (py - h / 2) / (h * 0.66), d = Math.hypot(dx, dy) + Math.sin(px * 0.05 + py * 0.03) * 0.015;
+    const band = Math.max(0, Math.min(5, Math.floor((d - 0.38) * 14)));
+    const i = (py * w + px) * 4; D[i] = 2; D[i + 1] = 6; D[i + 2] = 12; D[i + 3] = [0, 60, 110, 160, 205, 240][band];
   }
-  ui.ui.fill(cx, cy - R - 1, 1, 1, out); ui.ui.fill(cx, cy + R + 1, 1, 1, out);
-  for (let i = -R + 1; i <= R - 1; i++) { const w = R - 1 - Math.abs(i); ui.ui.fill(cx - w, cy + i, w * 2 + 1, 1, col); }
+  x.putImageData(img, 0, 0);
+  vigCache.set(key, c);
+  if (vigCache.size > 6) vigCache.clear();
+  return c;
 }
 function lerpHex(a: string, b: string, t: number) {
   const A = new THREE.Color(a), B = new THREE.Color(b);

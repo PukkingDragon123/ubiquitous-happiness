@@ -26,6 +26,10 @@ import { icon, iconTex, mouseTex, cursorTex, type CursorName } from './art';
 import { easeOutBack } from '../../core/math';
 import { iconAt } from '../../backpack/icons';
 
+/** frond and rope ramps for the live decorations (dark -> light) */
+const KELP = ['#0c200e', '#183a14', '#28561c', '#3c7426', '#559234', '#78b04a', '#a8d06c'];
+const ROPE = ['#1e1309', '#3e2b12', '#644a22', '#8c6e38', '#b49250', '#d6b874', '#efdba4'];
+
 export type TipLine = string | { text: string; color?: string; font?: FontName; icon?: HTMLCanvasElement; gap?: number; /** a keycap drawn before the text (hint rows) */ key?: string };
 
 export interface ButtonOpts {
@@ -300,7 +304,7 @@ export class PixelUI {
     this.drawFx();
     for (const t of this.tips) t();
     if (this.drawCursor && this.inside && this.cursorVisible) {
-      const c = cursorTex(this.cursor, this.hd);
+      const c = cursorTex(this.cursor);
       this.ctx.drawImage(c.cv, this.mx - c.hx, this.my - c.hy, c.w, c.h);
     }
     if (this.hot && this.hot !== this.lastHot && this.sfx) audio.play('k_tick1', { vol: 0.12, dry: true, rate: 1.3 });
@@ -449,7 +453,7 @@ export class PixelUI {
       if (p.delay > 0) continue;
       const a = Math.min(1, (p.life - p.t) / 0.25) * Math.min(1, p.t / 0.08);
       if (p.kind === 'drop') { this.ctx.globalAlpha = a; this.ctx.fillStyle = '#bff0ff'; this.ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1); this.ctx.globalAlpha = 1; continue; }
-      const b = bubbleArt(p.r, this.hd), S = 2 * p.r + 1;
+      const b = bubbleArt(p.r), S = b.width;
       this.ctx.globalAlpha = a; this.ctx.drawImage(b, Math.round(p.x - p.r), Math.round(p.y - p.r), S, S); this.ctx.globalAlpha = 1;
     }
   }
@@ -459,48 +463,67 @@ export class PixelUI {
    */
   caustic(x: number, y: number, w: number, h: number, alpha = 0.1) {
     if (!this.deco || w < 4 || h < 4) return;
-    const hd = this.hd, key = String(hd);
-    let pat = this.pats.get(key);
-    if (pat === undefined) { pat = this.ctx.createPattern(causticTile(hd), 'repeat'); this.pats.set(key, pat); }
+    // the 1x tile in UI space (so its lines are chunky UI pixels), slid by whole UI pixels (pixel-snapped motion)
+    let pat = this.pats.get('1');
+    if (pat === undefined) { pat = this.ctx.createPattern(causticTile(), 'repeat'); this.pats.set('1', pat); }
     if (!pat) return;
     const c = this.ctx;
-    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
-    c.beginPath(); c.rect(Math.round(x) * hd, Math.round(y + this.liftY) * hd, Math.round(w) * hd, Math.round(h) * hd); c.clip();
+    const X = Math.round(x), Y = Math.round(y + this.liftY), Wd = Math.round(w), Hd = Math.round(h);
+    c.save();
+    c.beginPath(); c.rect(X, Y, Wd, Hd); c.clip();
+    c.imageSmoothingEnabled = false;
     c.fillStyle = pat;
     for (const [sx, sy, k] of [[6, 3.5, 1], [-4.5, 5, 0.7]] as const) {
-      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.round((this.t * sx + (k < 1 ? 41 : 0)) * hd), Math.round((this.t * sy + (k < 1 ? 17 : 0)) * hd)]));
+      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.round(this.t * sx + (k < 1 ? 41 : 0)), Math.round(this.t * sy + (k < 1 ? 17 : 0))]));
       c.globalAlpha = alpha * k * this.fadeK;
-      c.fillRect(Math.round(x) * hd, Math.round(y + this.liftY) * hd, Math.round(w) * hd, Math.round(h) * hd);
+      c.fillRect(X, Y, Wd, Hd);
     }
     c.restore();
   }
-  /** a kelp strand draped over an edge at (x, y), hanging down and swaying; side -1 hangs out to the left, +1 right */
+  /**
+   * a kelp frond draped over an edge at (x, y), hanging down and swaying (side -1 hangs out to the left, +1 right): a
+   * ruffled ribbon one UI px per row (ink rim, a lit left margin, a paler midrib, a shaded right margin), a cast
+   * shadow, a gas bladder at its stipe, all on whole UI pixels so the motion steps chunkily
+   */
   kelp(x: number, y: number, side: -1 | 1, len = 12, phase = 0) {
-    const pts: [number, number, number][] = [];
-    let px = x, py = y, ang = side > 0 ? 0 : Math.PI;
-    for (let i = 0; i < len; i++) {
-      const k = Math.min(1, i / 4);
-      const target = Math.PI / 2 + side * 0.12;                                    // hanging down
-      const base = side > 0 ? 0 : Math.PI;
-      ang = base + (target - base) * (k * k * (3 - 2 * k)) + Math.sin(this.t * 1.7 + phase - i * 0.45) * 0.09 * (i / len) * side;
-      px += Math.cos(ang) * 2.4; py += Math.sin(ang) * 2.4;
-      pts.push([px, py, i < 2 ? 3 : i < len - 4 ? 4 : i < len - 1 ? 3 : 2]);
+    const K = KELP;
+    const rows: [number, number, number][] = [];
+    // the stipe runs out over the edge for 3 px, then the frond hangs
+    for (let i = 0; i < 3; i++) rows.push([Math.round(x + side * i), Math.round(y + (i > 1 ? 1 : 0)), 2]);
+    const L = len * 2;
+    for (let i = 0; i < L; i++) {
+      const k = i / L;
+      const sway = Math.sin(this.t * 1.6 + phase - i * 0.2) * Math.pow(k, 1.4) * 3.2 + Math.sin(this.t * 0.7 + phase * 1.3) * k * 1.2;
+      const cx = x + side * 3 + side * Math.sin(k * 2.4) * 2 + sway;
+      const w = k > 0.86 ? 1 : k > 0.7 ? 2 : 3 + ((i >> 2) % 2);
+      rows.push([Math.round(cx - w / 2), Math.round(y + 2 + i), w]);
     }
-    for (const [qx, qy, w] of pts) this.fill(Math.round(qx - w / 2) - 1, Math.round(qy) - 1, w + 2, 4, KIT.ink);
-    for (const [qx, qy, w] of pts) { this.fill(Math.round(qx - w / 2), Math.round(qy), w, 2, KIT.kelp[2]); this.fill(Math.round(qx - w / 2), Math.round(qy), 1, 2, KIT.kelp[3]); if (w > 2) this.fill(Math.round(qx - w / 2) + w - 1, Math.round(qy), 1, 2, KIT.kelp[1]); }
-    // a float bladder two thirds down
-    const [bx, by] = pts[Math.floor(len * 0.62)];
-    this.fill(Math.round(bx) - 2, Math.round(by) - 2, 5, 5, KIT.ink); this.fill(Math.round(bx) - 1, Math.round(by) - 1, 3, 3, '#7a9a2a'); this.fill(Math.round(bx) - 1, Math.round(by) - 1, 1, 1, '#c8e070');
+    for (const [rx, ry, w] of rows) this.fill(rx + 1, ry + 1, w, 1, '#000000', 0.28);
+    for (const [rx, ry, w] of rows) this.fill(rx - 1, ry - 1, w + 2, 3, K[0]);
+    rows.forEach(([rx, ry, w], i) => {
+      if (w === 1) { this.fill(rx, ry, 1, 1, K[4]); return; }
+      this.fill(rx, ry, w, 1, K[3]);
+      this.fill(rx, ry, 1, 1, K[5]);
+      this.fill(rx + w - 1, ry, 1, 1, K[2]);
+      if (w >= 3) this.fill(rx + Math.floor(w / 2), ry, 1, 1, (i >> 1) % 3 === 0 ? K[6] : K[4]);
+    });
+    // a gas bladder where the frond leaves the stipe
+    const [bx, by] = rows[4];
+    this.fill(bx - side * 2 - 1, by - 1, 4, 4, K[0]);
+    this.fill(bx - side * 2, by, 2, 2, '#a08a2c'); this.fill(bx - side * 2, by, 1, 1, '#ecd878'); this.fill(bx - side * 2 + 1, by + 1, 1, 1, '#6e5c1c');
   }
-  /** a loose rope end hanging from (x, y), swaying, frayed at the tip */
+  /** a loose rope end hanging from (x, y), swaying, its strands twisting, frayed at the tip */
   ropeEnd(x: number, y: number, len = 6, phase = 0) {
-    let px = x, py = y;
+    const P = ROPE;
     const seg: [number, number][] = [];
-    for (let i = 0; i < len; i++) { const a = Math.PI / 2 + Math.sin(this.t * 1.3 + phase - i * 0.35) * 0.18 * (i / len); px += Math.cos(a) * 2; py += Math.sin(a) * 2; seg.push([px, py]); }
-    for (const [qx, qy] of seg) this.fill(Math.round(qx) - 1, Math.round(qy) - 1, 4, 3, KIT.ink);
-    seg.forEach(([qx, qy], i) => { this.fill(Math.round(qx), Math.round(qy), 2, 2, i % 2 ? '#82683a' : '#d6bc80'); this.fill(Math.round(qx), Math.round(qy), 1, 1, i % 2 ? '#b09254' : '#f0dca6'); });
+    for (let i = 0; i < len * 2; i++) seg.push([Math.round(x + Math.sin(this.t * 1.3 + phase - i * 0.18) * (i / (len * 2)) * 1.6), y + i]);
+    for (const [qx, qy] of seg) this.fill(qx + 1, qy + 1, 2, 1, '#000000', 0.3);
+    for (const [qx, qy] of seg) this.fill(qx - 1, qy - 1, 4, 3, P[0]);
+    seg.forEach(([qx, qy], i) => { const k = i % 3; this.fill(qx, qy, 1, 1, k === 2 ? P[2] : P[5]); this.fill(qx + 1, qy, 1, 1, k === 0 ? P[2] : k === 1 ? P[3] : P[1]); });
+    // the whipping (a binding of darker twine) and the frayed tip
     const [ex, ey] = seg[seg.length - 1];
-    for (const dx of [-1, 1, 2]) this.fill(Math.round(ex) + dx, Math.round(ey) + 2, 1, 2 + (dx === 1 ? 1 : 0), '#b09254');
+    this.fill(ex - 1, ey - 3, 4, 2, P[0]); this.fill(ex, ey - 3, 2, 1, P[2]);
+    for (const [dx, h, c] of [[-1, 3, 4], [0, 4, 5], [1, 3, 3], [2, 2, 4]] as const) this.fill(ex + dx, ey + 1, 1, h, P[c]);
   }
   /**
    * the living decorations of a panel (called by panel(); call it yourself after ui.frame() for a hand-drawn panel):
@@ -553,7 +576,7 @@ export class PixelUI {
   frame(kind: SkinKind, x: number, y: number, w: number, h: number, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK;
     w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
-    c.drawImage(skin(kind, w, h, this.hd), Math.round(x), Math.round(y + this.liftY), w, h);
+    c.drawImage(skin(kind, w, h), Math.round(x), Math.round(y + this.liftY), w, h);
     c.globalAlpha = 1;
   }
   text(str: string, x: number, y: number, o: TextOpts = {}) {
@@ -582,7 +605,7 @@ export class PixelUI {
     c.globalAlpha = 1;
   }
   /** a kit icon at this canvas's density; returns its width (UI px) */
-  icon(name: string, x: number, y: number, alpha = 1) { const i = iconTex(name, this.hd), w = i.width / this.hd; this.img(i, x, y, { alpha, w, h: i.height / this.hd }); return w; }
+  icon(name: string, x: number, y: number, alpha = 1) { const i = iconTex(name); this.img(i, x, y, { alpha, w: i.width, h: i.height }); return i.width; }
   /** item icon fitted to a size box (nearest-safe downsample) */
   item(id: string, x: number, y: number, w: number, h = w, level = 1, alpha = 1) {
     // rendered at the canvas density: a 24 UI px slot gets a 72 px model icon on a 3x canvas
@@ -596,7 +619,7 @@ export class PixelUI {
   keycap(label: string, x: number, y: number, dark = false, down = false) {
     const tw = label ? this.measure(label, 'small') : 0;
     const w = Math.max(KEYCAP_H, Math.ceil(tw) + 7);
-    this.img(keycapBody(w, KEYCAP_H, dark, down, this.hd), x, y, { w, h: KEYCAP_H });
+    this.img(keycapBody(w, KEYCAP_H, dark, down), x, y, { w, h: KEYCAP_H });
     if (label) this.text(label, x + w / 2, y + (down ? 3 : 1) + Math.round((8 - this.cap('small')) / 2), { font: 'small', color: dark ? KIT.text : KIT.ink, shadow: null, align: 'center' });
     return w;
   }
@@ -628,20 +651,28 @@ export class PixelUI {
     if (!o.id) key += '#' + n;
     const D = 0.2;
     const pt = this.pop && o.pop !== false ? this.anim('panel:' + key) : 9;
-    let fx = x, fy = y, fw = w, fh = h, fa = o.alpha ?? 1;
+    let fx = x, fy = y, fa = o.alpha ?? 1, amp = 0;
+    const fw = w, fh = h;
     if (pt < 0.45) {
-      // spring in from 86% with an overshoot, then a damped WATER WOBBLE (width and height breathing out of phase)
+      // rise in from 8 px below with an overshoot, fading in, while a damped WATER WOBBLE runs through the frame: its
+      // rows slide sideways on a travelling wave by whole UI pixels, so the art stays chunky the whole way in
       const k = Math.min(1, pt / D);
-      const s = 0.86 + 0.14 * easeOutBack(k, 2.2);
-      const wob = 0.045 * Math.sin(pt * 34) * Math.exp(-pt * 8);
-      fw = Math.max(8, Math.round(w * s * (1 + wob))); fh = Math.max(8, Math.round(h * s * (1 - wob)));
-      fx = x + Math.round((w - fw) / 2); fy = y + Math.round((h - fh) / 2);
+      fy = y + Math.round((1 - easeOutBack(k, 2.2)) * 8);
+      amp = 2.4 * Math.exp(-pt * 7);
       fa *= Math.min(1, pt / 0.07);
       // a burst of bubbles off the bottom edge as it lands
       if (pt === 0 && this.deco && o.deco !== false && w >= 60 && (kind === 'wood' || kind === 'stone' || kind === 'cream' || kind === 'dark')) for (let i = 0; i < 6; i++) this.bubble(x + 10 + ((i * 37 + w) % Math.max(1, w - 20)), y + 2, { vy: -18 - (i % 3) * 6, r: 1 + (i % 2), delay: i * 0.05, life: 0.9 });
     }
-    if (fw === w && fh === h) this.frame(kind, fx, fy, fw, fh, fa);
-    else { const c = this.ctx; c.globalAlpha = fa; c.drawImage(skin(kind, Math.round(w), Math.round(h), this.hd), fx, fy, fw, fh); c.globalAlpha = 1; }
+    if (amp < 0.5) this.frame(kind, fx, fy, fw, fh, fa);
+    else {
+      const c = this.ctx, cv = skin(kind, Math.round(w), Math.round(h));
+      c.globalAlpha = fa;
+      for (let sy = 0; sy < cv.height; sy += 2) {
+        const dx = Math.round(Math.sin(sy * 0.19 - pt * 32) * amp), sh = Math.min(2, cv.height - sy);
+        c.drawImage(cv, 0, sy, cv.width, sh, Math.round(fx) + dx, Math.round(fy) + sy, cv.width, sh);
+      }
+      c.globalAlpha = 1;
+    }
     if (this.deco && o.deco !== false) this.panelFx(kind, fx, fy, fw, fh, key, fa);
     if (title) {
       const lacq = kind === 'wood' || kind === 'stone' || kind === 'cream';
@@ -690,7 +721,9 @@ export class PixelUI {
     let clicked = c0;
     if (o.key && !o.disabled && this.input?.keyHit(o.key)) clicked = true;
     const state: BtnState = o.state ?? (o.disabled ? 'disabled' : held ? 'down' : o.on ? 'on' : over ? 'hover' : 'normal');
-    this.img(btnSkin(st, state, w, h, this.hd), x, y, { w: Math.max(6, Math.round(w)), h: Math.max(8, Math.round(h)) });
+    // a soft cast shadow on whatever it rests on (1 px under the lip and down the right edge; none while pressed)
+    if (state !== 'down') { this.fill(x + 2, y + h, w - 2, 1, '#000000', 0.32); this.fill(x + w, y + 3, 1, h - 2, '#000000', 0.24); }
+    this.img(btnSkin(st, state, w, h), x, y, { w: Math.max(6, Math.round(w)), h: Math.max(8, Math.round(h)) });
     const P = BTN[st];
     const [ft, fh] = btnFace(state, h);
     const fy = y + ft;
@@ -721,9 +754,9 @@ export class PixelUI {
     }
     const font = o.font ?? 'body';
     const ty = fy + Math.round((fh - this.cap(font)) / 2);
-    // string icons come painted at this canvas's density; a caller's canvas is taken as UI px
-    const icCv = typeof o.icon === 'string' ? iconTex(o.icon, this.hd) : o.icon;
-    const ic = icCv ? { cv: icCv, width: typeof o.icon === 'string' ? icCv.width / this.hd : icCv.width, height: typeof o.icon === 'string' ? icCv.height / this.hd : icCv.height } : undefined;
+    // kit icons are 1 texel per UI px, like the rest of the kit; a caller's canvas is taken as UI px
+    const icCv = typeof o.icon === 'string' ? iconTex(o.icon) : o.icon;
+    const ic = icCv ? { cv: icCv, width: icCv.width, height: icCv.height } : undefined;
     const kc = o.key ? (o.keyLabel ?? labelForKey(o.key)) : '';
     const kcW = kc ? this.keycapW(kc) : 0;
     const tw = label ? this.measure(label, font) : 0;
@@ -757,7 +790,7 @@ export class PixelUI {
     let clicked = c0;
     const key = o.key === undefined ? 'Escape' : o.key;
     if (key && !o.disabled && this.input?.keyHit(key)) clicked = true;
-    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal'), this.hd), x, y, { w: s, h: s + 3 });
+    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal')), x, y, { w: s, h: s + 3 });
     if (over && o.tip) this.tooltip(o.tip);
     if (clicked && this.sfx && o.sfx !== '') audio.play(o.sfx ?? 'k_close1', { vol: 0.4, dry: true });
     return clicked;
@@ -777,7 +810,7 @@ export class PixelUI {
       const on = i === sel;
       const { over, clicked } = this.interact(id + ':' + i, cx, y, w, h);
       const dy = on ? 0 : over ? 2 : 3;
-      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy, this.hd), cx, y + dy, { w: Math.round(w), h: h - dy });
+      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy), cx, y + dy, { w: Math.round(w), h: h - dy });
       this.text(l, cx + w / 2, y + dy + Math.round((h - dy - this.cap(font)) / 2) + (on ? 0 : -1), { font, color: on ? KIT.cream[3] : over ? KIT.cream[2] : KIT.textDim, outline: on ? KIT.ink : null, shadow: on ? null : '#06141a', align: 'center' });
       if (clicked && !on) { out = i; if (this.sfx) audio.play('tab1', { vol: 0.4, dry: true }); }
       cx += w + (o.gap ?? 2);
@@ -791,17 +824,25 @@ export class PixelUI {
     const { over, held } = this.interact(id, x - 4, y - 3, w + 8, 16);
     const k = Math.max(0, Math.min(1, (v - min) / (max - min || 1)));
     const fillC = o.style === 'blue' || o.style === 'tv' ? KIT.sea : KIT.kelp;
-    // track: an ink-outlined groove with the filled part lit
+    // track: a groove cut in a driftwood rail (shadowed top row, lit lower lip), the filled part a kelp ribbon
     const ty = y + 3;
+    this.fill(x - 1, ty - 1, w + 2, 8, '#845230');
+    this.fill(x - 1, ty - 1, w + 2, 1, '#bd8751'); this.fill(x - 1, ty + 6, w + 2, 1, '#48291f');
     this.fill(x, ty, w, 6, KIT.ink);
-    this.fill(x + 1, ty + 1, w - 2, 4, KIT.oil[0]);
-    this.fill(x + 1, ty + 4, w - 2, 1, KIT.oil[2]);
+    this.fill(x + 1, ty + 1, w - 2, 4, '#0a1a25');
+    this.fill(x + 1, ty + 1, w - 2, 1, '#030a10');
+    this.fill(x + 1, ty + 4, w - 2, 1, '#204a56');
     const fw = Math.round((w - 2) * k);
-    if (fw > 0) { this.fill(x + 1, ty + 1, fw, 4, fillC[2]); this.fill(x + 1, ty + 1, fw, 1, fillC[3]); this.fill(x + 1, ty + 4, fw, 1, fillC[1]); }
-    // notches
-    for (let i = 1; i < 4; i++) this.fill(x + Math.round((w - 1) * i / 4), ty + 7, 1, 2, KIT.teal[3]);
+    if (fw > 0) {
+      this.fill(x + 1, ty + 1, fw, 4, fillC[2]); this.fill(x + 1, ty + 1, fw, 1, fillC[3]); this.fill(x + 1, ty + 4, fw, 1, fillC[1]);
+      // ruffles along the ribbon, a pale bead of light at its end
+      for (let i = 3; i < fw - 2; i += 5) { this.fill(x + 1 + i, ty + 2, 1, 1, fillC[3]); this.fill(x + 2 + i, ty + 3, 1, 1, fillC[1]); }
+      this.fill(x + fw - 1, ty + 1, 1, 2, '#ffffff', 0.5);
+    }
+    // brass notches under the rail
+    for (let i = 1; i < 4; i++) { const nx = x + Math.round((w - 1) * i / 4); this.fill(nx, ty + 7, 1, 2, '#a86a24'); this.fill(nx, ty + 7, 1, 1, '#f8d880'); }
     const kx = x + Math.round((w - 1) * k) - 4;
-    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal', this.hd), kx, y - 1, { w: 9, h: 14 });
+    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal'), kx, y - 1, { w: 9, h: 14 });
     if (held) {
       let nv = min + ((this.mx - x) / (w - 1)) * (max - min);
       if (o.step) nv = Math.round(nv / o.step) * o.step;
@@ -818,7 +859,7 @@ export class PixelUI {
     const font = o.font ?? 'body';
     const w = 13 + 5 + Math.ceil(this.measure(label, font));
     const { over, held, clicked } = this.interact(id, x, y, w, 13);
-    this.img(checkArt(on, over, held, 13, this.hd), x, y, { w: 13, h: 13 });
+    this.img(checkArt(on, over, held, 13), x, y, { w: 13, h: 13 });
     this.text(label, x + 18, y + Math.round((13 - this.cap(font)) / 2), { font, color: o.color ?? (over ? '#ffffff' : KIT.text), shadow: '#06141a' });
     if (clicked) { if (this.sfx) audio.play('k_toggle2', { vol: 0.35, dry: true }); return !on; }
     return on;
@@ -895,8 +936,8 @@ export class PixelUI {
   hint(key: string, label: string, x: number, y: number, o: { color?: string; dark?: boolean; font?: FontName } = {}) {
     let w = 0;
     if (key === 'LMB' || key === 'RMB' || key === 'MMB') {
-      const g = this.mouseGlyph(key), gw = g.width / this.hd;
-      this.img(g, x, y + Math.round((KEYCAP_H - g.height / this.hd) / 2), { w: gw, h: g.height / this.hd }); w = gw + 3;
+      const g = this.mouseGlyph(key), gw = g.width;
+      this.img(g, x, y + Math.round((KEYCAP_H - g.height) / 2), { w: gw, h: g.height }); w = gw + 3;
     } else w = this.keycap(key, x, y, o.dark) + 4;
     const f = o.font ?? 'small';
     w += this.text(label, x + w, y + Math.round((KEYCAP_H - 2 - this.cap(f)) / 2), { font: f, color: o.color ?? KIT.text, shadow: '#06141a' });
@@ -904,7 +945,7 @@ export class PixelUI {
   }
   /** the width hint() takes */
   hintW(key: string, label: string, font: FontName = 'small') { return (key === 'LMB' || key === 'RMB' || key === 'MMB' ? 12 : this.keycapW(key) + 4) + Math.ceil(this.measure(label, font)) + 10; }
-  private mouseGlyph(k: string) { return mouseTex(k === 'LMB' ? 'L' : k === 'RMB' ? 'R' : 'M', this.hd); }
+  private mouseGlyph(k: string) { return mouseTex(k === 'LMB' ? 'L' : k === 'RMB' ? 'R' : 'M'); }
 
   /**
    * a scrollable list of n rows; row(i, x, y, w, hovered) draws one. Returns the clicked row or -1.
@@ -939,19 +980,22 @@ export class PixelUI {
     this.unclip();
     if (maxScroll > 0) {
       const tx = x + w - sbW;
-      // the track: a recessed groove; the thumb: a brass bar with grip lines
+      // the track: a recessed groove (shadowed left, lit right lip); the thumb: a bevelled brass bar with grip grooves
       this.fill(tx, y, sbW, h, KIT.ink);
-      this.fill(tx + 1, y + 1, sbW - 2, h - 2, KIT.oil[0]);
+      this.fill(tx + 1, y + 1, sbW - 2, h - 2, '#0a1a25');
+      this.fill(tx + 1, y + 1, 1, h - 2, '#030a10'); this.fill(tx + sbW - 2, y + 1, 1, h - 2, '#204a56');
       const th = Math.max(14, Math.round((h * h) / contentH));
       const ty = y + Math.round(((h - th) * sc) / maxScroll);
       const sbHover = this.hover(tx - 2, y, sbW + 2, h);
       if (sbHover && this.pressed) { s.drag = this.my - ty; if (s.drag < 0 || s.drag > th) s.drag = th / 2; }
       if (s.drag >= 0) { if (!this.down) s.drag = -1; else { s.target = s.scroll = Math.max(0, Math.min(maxScroll, ((this.my - s.drag - y) / (h - th)) * maxScroll)); } }
       const lit = s.drag >= 0 || sbHover;
+      const B = lit ? ['#7a4416', '#cc9236', '#e8b850', '#f8d880', '#fff4c8'] : ['#4a240e', '#a86a24', '#cc9236', '#e8b850', '#f8d880'];
       this.fill(tx, ty, sbW, th, KIT.ink);
-      this.fill(tx + 1, ty + 1, sbW - 2, th - 2, lit ? '#dba552' : KIT.brass[2]);
-      this.fill(tx + 1, ty + 1, sbW - 2, 1, KIT.brass[3]); this.fill(tx + 1, ty + th - 2, sbW - 2, 1, KIT.brass[1]);
-      for (const gy of [-2, 0, 2]) this.fill(tx + 2, ty + Math.round(th / 2) + gy, sbW - 4, 1, KIT.brass[1]);
+      this.fill(tx + 1, ty + 1, sbW - 2, th - 2, B[2]);
+      this.fill(tx + 1, ty + 1, sbW - 2, 1, B[4]); this.fill(tx + 1, ty + 1, 1, th - 2, B[3]);
+      this.fill(tx + sbW - 2, ty + 1, 1, th - 2, B[1]); this.fill(tx + 1, ty + th - 2, sbW - 2, 1, B[0]);
+      for (const gy of [-3, -1, 1]) { this.fill(tx + 2, ty + Math.round(th / 2) + gy, sbW - 4, 1, B[0]); this.fill(tx + 2, ty + Math.round(th / 2) + gy + 1, sbW - 4, 1, B[4]); }
     }
     return clicked;
   }
@@ -1004,7 +1048,7 @@ export class PixelUI {
     }
     // checkbox
     const bx = X + 6, by = y + 3 + Math.round((rowH - 11) / 2);
-    this.img(checkArt(done, false, false, 11, this.hd), bx, by, { alpha: a, w: 11, h: 11 });
+    this.img(checkArt(done, false, false, 11), bx, by, { alpha: a, w: 11, h: 11 });
     let cx = X + 22;
     if (o.icon) { this.item(o.icon, cx, y + 3 + Math.round((rowH - 14) / 2), 14, 14, 1, a); cx += iconW; }
     const ty = y + 3 + Math.round((rowH - cap) / 2);
@@ -1063,9 +1107,14 @@ export class PixelUI {
     const cwid = Math.round(iw * chip), fw = Math.round(iw * shown);
     if (cwid > fw) this.fill(x + 1 + fw, y + 1, cwid - fw, h - 2, o.chip ?? '#f3e7c9', 0.85);
     if (fw > 0) {
+      // the fill: a lit top row, a soft upper band, the body, a shaded bottom row, a glint at its left end and a
+      // brighter meniscus at its leading edge
       this.fill(x + 1, y + 1, fw, h - 2, col);
-      if (h > 3) this.fill(x + 1, y + 1, fw, 1, '#ffffff', 0.4);
-      if (h > 5) this.fill(x + 1, y + h - 2, fw, 1, '#000000', 0.25);
+      if (h > 3) this.fill(x + 1, y + 1, fw, 1, '#ffffff', 0.42);
+      if (h > 6) this.fill(x + 1, y + 2, fw, Math.floor((h - 4) / 3), '#ffffff', 0.14);
+      if (h > 5) this.fill(x + 1, y + h - 2, fw, 1, '#000000', 0.3);
+      if (h > 4 && fw > 6) { this.fill(x + 2, y + 2, 2, 1, '#ffffff', 0.7); this.fill(x + 2, y + 3, 1, 1, '#ffffff', 0.45); }
+      if (fw > 2 && fw < iw) this.fill(x + fw, y + 1, 1, h - 2, '#ffffff', 0.35);
     }
     if (o.ticks && o.ticks > 1) for (let i = 1; i < o.ticks; i++) this.fill(x + 1 + Math.round((iw * i) / o.ticks), y + 1, 1, h - 2, KIT.ink, 0.55);
     if (flash > 0) this.fill(x + 1, y + 1, Math.max(fw, cwid), h - 2, '#ffffff', flash * 0.6);

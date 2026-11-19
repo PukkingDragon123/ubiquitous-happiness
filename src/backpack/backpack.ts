@@ -30,6 +30,7 @@ import { audio } from '../audio/audio';
 import { easeOutBack } from '../core/math';
 import { K, modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
 import { bubbles, kelp, caustics, SeaFx } from '../hideout/seaFx';
+import { Px, R, SPR, stamp, algae, coralline, grass, planks, wraps, lerpC } from '../ui/pixel/decor';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
@@ -107,7 +108,11 @@ function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
     for (let cy = 0; cy < nh; cy++) for (let cx = 0; cx < nw; cx++) {
       const X = gx0 + cx * c, Y = gy0 + cy * c;
       f(X, Y, c, c, LN.base);
-      for (let yy = 2; yy < c - 1; yy++) for (let xx = 2; xx < c - 1; xx++) if ((xx + yy) % 4 === 0) f(X + xx, Y + yy, 1, 1, LN.twill);
+      // the oilcloth's long fibres: a couple of wavering strands per pocket, broken unevenly (placed, never noise)
+      for (let k = 0, yy = 5 + ((cx * 3 + cy) % 4); yy < c - 3; k++, yy += 6 + ((cx + k) % 3)) {
+        const x0 = 3 + ((cx * 7 + cy * 5 + k * 3) % 6), L = Math.min(c - 4 - x0, 6 + ((cx * 5 + cy * 3 + k * 7) % 11));
+        for (let i = 0; i < L; i++) f(X + x0 + i, Y + yy + (((x0 + i + k * 5) >> 2) % 3 === 0 ? 1 : 0), 1, 1, (cx + cy + k) % 4 === 0 ? LN.wear : LN.twill);
+      }
       f(X, Y, c, 2, LN.sh); f(X, Y, 2, c, LN.sh);
       f(X + 2, Y + c - 2, c - 2, 1, LN.lit); f(X + c - 2, Y + 2, 1, c - 3, LN.lit);
       // worn corners: the oilcloth rubbed pale where pockets crease
@@ -168,65 +173,71 @@ function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
     }
     // a salt tide-line dried along the bottom, barnacles grown on both bottom corners
     for (let px = bx0 + 8; px < bx1 - 8; px++) { const yy = by1 - 5 + Math.round(Math.sin(px * 0.21) * 1.2); if ((px * 5) % 11 < 8) f(px, yy, 1, 1, '#c8b49a'); }
-    const barn = (bx: number, by: number) => { for (const [cx, cy, r] of [[bx + 3, by + 2, 3], [bx + 8, by + 3, 2], [bx + 4, by + 6, 2]]) { f(cx - r, cy, r * 2 + 1, r, '#2e2a24'); f(cx - r + 1, cy, r * 2 - 1, r - 1, '#b8aea0'); f(cx - r + 1, cy, r, 1, '#ece4d6'); f(cx - 1, cy, 3, 1, '#2e2a24'); } };
-    barn(bx0 + 1, by1 - 9); barn(bx1 - 12, by1 - 9);
-    return cv;
+    // ---- the sea has been at it: algae films along the bottom, barnacles and a limpet crusted on, a sea star clinging
+    const px = new Px(W, H + 1);
+    const img = x.getImageData(0, 0, W, H + 1);
+    px.D.set(img.data);
+    const onBag = (X: number, Y: number) => inBody(X, Y, 1) && !(X >= gx0 - 3 && X < gx0 + gw + 3 && Y >= gy0 - 3 && Y < gy0 + gh + 4);
+    algae(px, bx0 + bw * 0.3, by1 - 3, 12, 2.6, 1.7, { inside: onBag });
+    algae(px, bx0 + bw * 0.62, by1 - 3, 8, 2.4, 4.1, { inside: onBag, brown: true });
+    algae(px, bx1 - 3, by0 + (by1 - by0) * 0.72, 2.4, 9, 2.6, { inside: onBag });
+    for (const [sp, sx, sy] of [[SPR.barnacleL, bx0 + 2, by1 - 6], [SPR.barnacleM, bx0 + 6, by1 - 4], [SPR.barnacleS, bx0 + 1, by1 - 9], [SPR.barnacleL, bx1 - 8, by1 - 6], [SPR.barnacleS, bx1 - 11, by1 - 4], [SPR.barnacleM, bx1 - 4, by1 - 10]] as const) stamp(px, sp, sx, sy, { onlyOn: true });
+    stamp(px, SPR.limpet, fx0 + 24, 6, { onlyOn: true });
+    stamp(px, SPR.star, bx1 - 2, Math.round(H * 0.6), { onlyOn: true });
+    coralline(px, bx0 + 2, by0 + (by1 - by0) * 0.55, 2, 4, 5, { inside: onBag });
+    return px.done();
   });
 }
 
-/** the seabed tray: a grained driftwood frame with brass corner plates around rippled sand and a few shore finds */
+/** the seabed tray: a driftwood frame (planks, rope wraps at the corners, a barnacle crust) round rippled sand with a
+ *  few shore finds lying on it (a sea star, a scallop, a limpet, sea glass, a pebble, sea-grass tufts, a snail) */
 function trayArt(w: number, h: number): HTMLCanvasElement {
   return cached(`tray|${w}|${h}`, () => {
-    const [cv, x] = canvas(w, h);
-    const f: Fill = (px, py, ww, hh, col) => { x.fillStyle = col; x.fillRect(px, py, ww, hh); };
-    const WD = { out: '#16110c', d2: '#3a3026', d1: '#5a4c3c', b: '#7c6c58', l1: '#a09078', l2: '#c8b89a' };
-    const SA = { b: '#c4a06a', d: '#a9844f', l: '#dcbf8a', dd: '#8a6a3e', sh: '#9a7a48' };
+    const px = new Px(w, h);
+    const DW = R.wood.map((c) => lerpC(c, R.salt[Math.min(6, 2)], 0.25));
     const F = 7;
-    // the frame: plank faces lit from the top-left, grain lines running along each plank
-    for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
-      if (!inRound(px, py, 0, 0, w - 1, h - 1, 4)) continue;
-      let col = WD.b;
-      if (!inRound(px, py, 1, 1, w - 2, h - 2, 3)) col = WD.out;
-      else if (py === 1 || (px === 1 && py < h - 2)) col = WD.l2;
-      else if (py >= h - 2 || px >= w - 2) col = WD.d2;
-      else if (py < F && px >= py && px <= w - 1 - py) col = (py === 3 && (px * 7) % 23 > 3) || (py === 5 && (px * 11) % 29 > 9) ? WD.l1 : WD.b; // top plank
-      else if (py >= h - F && px >= h - 1 - py && px <= w - 1 - (h - 1 - py)) col = (py === h - 4 && (px * 5) % 19 > 4) || (py === h - 6 && (px * 13) % 31 > 12) ? WD.d1 : WD.b;
-      else if (px < F) col = (px === 3 && (py * 7) % 17 > 3) || (px === 5 && (py * 3) % 11 > 4) ? WD.l1 : WD.b;
-      else if (px >= w - F) col = (px === w - 4 && (py * 5) % 13 > 3) || (px === w - 6 && (py * 7) % 19 > 6) ? WD.d1 : WD.b;
-      f(px, py, 1, 1, col);
+    planks(px, 1, 1, w - 2, F - 2, true, DW, 21, { lit: 1, flakes: true });
+    planks(px, 1, h - F + 1, w - 2, F - 2, true, DW, 24, { lit: -1 });
+    planks(px, 1, F - 1, h - 2 * F + 2, F - 2, false, DW, 27);
+    planks(px, w - F + 1, F - 1, h - 2 * F + 2, F - 2, false, DW, 29, { lit: -1 });
+    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
+      const dx = Math.min(x, w - 1 - x), dy = Math.min(y, h - 1 - y);
+      if ((dx === 0 && dy < 2) || (dy === 0 && dx < 2)) { px.set(x, y, R.ink, 0); continue; }
+      if (dx === 0 || dy === 0 || (dx === 1 && dy === 1)) px.set(x, y, R.ink);
     }
-    // mitre joints
-    for (const [cx, cy, dx, dy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]]) for (let i = 0; i < F; i++) f(cx + dx * i, cy + dy * i, 1, 1, WD.d2);
-    // a knot on the top and the bottom plank (a dark ring with a lit lip)
-    for (const [kx, ky] of [[Math.round(w * 0.33), 2], [Math.round(w * 0.71), h - 5]]) { f(kx - 2, ky, 5, 2, WD.d2); f(kx - 1, ky, 3, 2, WD.d1); f(kx, ky, 1, 1, WD.out); f(kx - 3, ky + 1, 1, 1, WD.d1); f(kx + 3, ky, 1, 1, WD.l1); }
-    // rope lashed round each corner (three wraps), and a nail at every plank end
-    const RP = ['#2a1e0e', '#8a6a3a', '#c8a464', '#ecd29a'];
-    for (const [cx, cy, dx, dy] of [[0, 0, 1, 1], [w - 1, 0, -1, 1], [0, h - 1, 1, -1], [w - 1, h - 1, -1, -1]]) {
-      for (let wr = 0; wr < 3; wr++) for (let i = 0; i < 7; i++) f(cx + dx * (1 + wr * 2 + i), cy + dy * (7 - i), 1, 1, i === 0 || i === 6 ? RP[0] : i % 3 === 0 ? RP[3] : i % 3 === 1 ? RP[2] : RP[1]);
-    }
-    for (let px = 24; px < w - 24; px += 36) { f(px, 2, 2, 2, '#2a2420'); f(px, 2, 1, 1, '#9a948c'); f(px, h - 4, 2, 2, '#2a2420'); f(px, h - 4, 1, 1, '#9a948c'); }
-    // the sand: a shadowed rim under the frame, ripple bands, shore finds
+    for (let x = 2; x < w - 2; x++) { px.set(x, 1, DW[8]); px.set(x, h - 2, DW[1]); }
+    for (let y = 2; y < h - 2; y++) { px.set(1, y, DW[7]); px.set(w - 2, y, DW[2]); }
+    // the sand: wet and dark under the frame's edge, ripple crests (a lit line over a shadow line), shore finds
     const ix = F, iy = F, iw = w - F * 2, ih = h - F * 2;
-    f(ix - 1, iy - 1, iw + 2, ih + 2, WD.out);
-    f(ix, iy, iw, ih, SA.b);
-    f(ix, iy, iw, 2, SA.dd); f(ix, iy, 2, ih, SA.sh); f(ix, iy + 2, iw, 1, SA.sh);
-    for (let band = 0; band * 9 + 7 < ih; band++) {
-      const by = iy + band * 9 + 7;
-      for (let px = ix + 3; px < ix + iw - 3; px++) {
-        const off = Math.round(Math.sin((px + band * 17) * 0.11) * 1.6);
-        const yy = by + off;
-        if (yy > iy + 3 && yy < iy + ih - 2) { f(px, yy, 1, 1, SA.d); if (yy - 1 > iy + 3) f(px, yy - 1, 1, 1, SA.l); }
-      }
+    const SA = R.sand;
+    for (let y = iy - 1; y < iy + ih + 1; y++) for (let x = ix - 1; x < ix + iw + 1; x++) {
+      if (y === iy - 1 || x === ix - 1 || y === iy + ih || x === ix + iw) { px.set(x, y, R.ink); continue; }
+      const u = x - ix, v = y - iy;
+      const wv = Math.round(Math.sin((u + 17) * 0.11) * 1.6 + Math.sin(u * 0.29 + v * 0.05) * 0.5);
+      const p = (v + wv + 90) % 9;
+      let c = p === 0 ? SA[3] : p === 1 ? SA[5] : p === 2 ? SA[4] : SA[4];
+      if (p >= 5) c = lerpC(SA[4], SA[3], 0.45);
+      if (v < 2 || u < 2) c = v < 1 || u < 1 ? SA[1] : SA[2];
+      px.set(x, y, c);
     }
-    // a pebble, a scallop shell, a starfish
-    const pb = (px: number, py: number) => { f(px, py + 1, 7, 4, '#2e2a34'); f(px + 1, py, 5, 6, '#2e2a34'); f(px + 1, py + 1, 5, 3, '#6e6878'); f(px + 1, py + 1, 2, 1, '#bdb6c4'); f(px + 1, py + 5, 6, 1, SA.dd); };
-    pb(ix + iw - 12, iy + ih - 8);
-    { const sx = ix + 4, sy = iy + ih - 9;
-      f(sx, sy + 1, 7, 5, '#6e3e3a'); f(sx + 1, sy, 5, 7, '#6e3e3a'); f(sx + 1, sy + 1, 5, 4, '#e8b4a0'); for (const k of [2, 4]) f(sx + k, sy + 1, 1, 4, '#c08878'); f(sx + 1, sy + 1, 1, 1, '#fff0e0'); f(sx + 2, sy + 6, 3, 1, '#6e3e3a'); }
-    { const sx = ix + Math.round(iw * 0.55), sy = iy + ih - 7;
-      for (const [dx, dy] of [[0, -3], [3, -1], [2, 2], [-2, 2], [-3, -1]]) { f(sx + Math.round(dx * 0.5), sy + Math.round(dy * 0.5), 2, 2, '#c8582c'); f(sx + dx, sy + dy, 1, 1, '#e8783c'); }
-      f(sx, sy, 2, 2, '#f09a5a'); }
-    return cv;
+    const ok = (X: number, Y: number) => X >= ix && Y >= iy && X < ix + iw && Y < iy + ih;
+    stamp(px, SPR.star, ix + Math.round(iw * 0.55), iy + ih - 9, { onlyOn: true });
+    stamp(px, SPR.scallop, ix + 4, iy + ih - 8, { onlyOn: true });
+    stamp(px, SPR.limpet, ix + Math.round(iw * 0.82), iy + ih - 6, { onlyOn: true });
+    stamp(px, SPR.glass, ix + Math.round(iw * 0.36), iy + ih - 6, { onlyOn: true });
+    const pb = (bx: number, by: number) => { for (const [dx, dy, c] of [[1, 0, 3], [2, 0, 4], [3, 0, 3], [0, 1, 2], [1, 1, 4], [2, 1, 3], [3, 1, 2], [4, 1, 1], [1, 2, 2], [2, 2, 1], [3, 2, 1]] as const) px.set(bx + dx, by + dy, R.barn[c]); px.shade(bx + 5, by + 2, 0.7); px.shade(bx + 4, by + 3, 0.7); };
+    pb(ix + iw - 12, iy + ih - 5);
+    grass(px, ix + Math.round(iw * 0.18), iy + ih - 1, 3, 9, 6, { inside: ok });
+    grass(px, ix + Math.round(iw * 0.7), iy + ih - 1, 4, 13, 8, { inside: ok });
+    stamp(px, SPR.snail, ix + Math.round(iw * 0.74), iy + ih - 7, { onlyOn: true });
+    // the frame's sea crust: rope wraps at the corners, barnacles, a coralline patch, algae along the bottom
+    wraps(px, F + 2, 1, F - 2, true, 2); wraps(px, w - F - 8, 1, F - 2, true, 2);
+    wraps(px, F + 2, h - F + 1, F - 2, true, 2); wraps(px, w - F - 8, h - F + 1, F - 2, true, 2);
+    const onFrame = (X: number, Y: number) => X >= 1 && Y >= 1 && X < w - 1 && Y < h - 1 && !ok(X, Y);
+    algae(px, w * 0.4, h - 4, 10, 2.4, 3.3, { inside: onFrame });
+    coralline(px, w - 4, h * 0.45, 2, 4, 2, { inside: onFrame });
+    for (const [sp, sx, sy] of [[SPR.barnacleL, Math.round(w * 0.3), 1], [SPR.barnacleS, Math.round(w * 0.3) + 5, 3], [SPR.barnacleM, 1, Math.round(h * 0.5)]] as const) stamp(px, sp, sx, sy, { onlyOn: true });
+    return px.done();
   });
 }
 
@@ -492,15 +503,14 @@ export class BackpackScreen implements Screen {
     const tw = fg.measure('BACKPACK', 'title'), cw = fg.measure(cap, 'body') + 10, ph = fg.cap('title') + 9;
     const pw = tw + 20 + cw + 4, px = Math.round(x + art.width / 2 - pw / 2), py = y - 4;
     fg.fill(px + 1, py + 2, pw, ph, '#000000', 0.45);
-    fg.fill(px, py, pw, ph, K.brassD);
-    fg.fill(px + 1, py + 1, pw - 2, ph - 2, K.brass1);
-    fg.fill(px + 1, py + 1, pw - 2, 1, K.brass2); fg.fill(px + 1, py + 1, 1, ph - 2, K.brass2);
-    fg.fill(px + 1, py + ph - 2, pw - 2, 1, K.brass0);
-    fg.fill(px + 3, py + Math.round(ph / 2) - 1, 2, 2, K.brassW);
+    fg.frame('brass', px, py, pw, ph);
     fg.text('BACKPACK', px + 9, py + Math.round((ph - fg.cap('title')) / 2), { font: 'title', color: '#3a2008', shadow: '#f8dc90' });
     const cx0 = px + pw - cw - 3;
+    // the counter: a little window let into the plate (a dark rim, a shadowed top row, a lit lower lip)
     fg.fill(cx0, py + 3, cw, ph - 6, K.ink2);
     fg.fill(cx0 + 1, py + 4, cw - 2, ph - 8, full ? '#5a1810' : K.teal1);
+    fg.fill(cx0 + 1, py + 4, cw - 2, 1, full ? '#3a0c08' : '#0b2a30');
+    fg.fill(cx0, py + ph - 3, cw, 1, '#f8d880');
     fg.text(cap, cx0 + cw / 2, py + Math.round((ph - fg.cap('body')) / 2), { font: 'body', color: full ? K.coralL : K.cream, shadow: K.ink2, align: 'center' });
     // an empty bag says what it is for
     if (!run.items.some((i) => i.gx >= 0) && !this.held) {

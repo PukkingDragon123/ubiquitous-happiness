@@ -1,11 +1,13 @@
-// Keyboard + mouse input. Actions are queried by name so rebinding stays in one place.
+// Keyboard + mouse input. Actions are queried by name so rebinding stays in one place. Dash is SHIFT (either side):
+// tap to dart, hold to charge a dash, let go to launch it (src/combat/moveset.ts). Space no longer dashes; it only
+// advances dialogue / skips cards where a screen asks for it.
 // Mouse position is kept in normalised device coords (ndc) and pixels; systems that need a world point
 // call game.mouseWorld() (ray onto the z = 0 gameplay plane).
 export type Action = 'left' | 'right' | 'up' | 'down' | 'dash' | 'attack' | 'ability' | 'ability2' | 'interact' | 'bag' | 'pause' | 'rotate' | 'map';
 
 const BIND: Record<Action, string[]> = {
   left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
-  dash: ['Space', 'ShiftLeft'], attack: ['KeyJ', 'Mouse0'], ability: ['KeyK', 'Mouse2'], ability2: ['KeyL', 'KeyQ'],
+  dash: ['ShiftLeft', 'ShiftRight'], attack: ['KeyJ', 'Mouse0'], ability: ['KeyK', 'Mouse2'], ability2: ['KeyL', 'KeyQ'],
   interact: ['KeyE', 'KeyF'], bag: ['Tab', 'KeyI', 'KeyB'], pause: ['Escape', 'KeyP'], rotate: ['KeyR'], map: ['KeyM'],
 };
 
