@@ -459,6 +459,8 @@ export class KelpGate {
       m.position.set(px, py, pz);
       if (down) m.rotation.z = Math.PI;
       m.rotation.y = sd * 1.3;
+      // (beefier than background kelp: these stalks are the gate's walls)
+      m.scale.set(1.7, 1, 1.7);
       m.castShadow = false;
       this.group.add(m);
       this.stalks.push({ m, ph: sd, base: m.rotation.z });

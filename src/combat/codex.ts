@@ -4,7 +4,7 @@
 //   import { codexId } from '../combat';  codexSeen(codexId(e.kind), depthM)   codexBeaten(codexId(e.kind))
 import * as THREE from 'three';
 import { registerCodex } from '../ui/codex';
-import { buildFish } from '../fish';
+import { fishPortrait } from '../fish/portrait';
 import { makeDiver } from '../humans/diver';
 import type { DiverArch, WeaponKind } from '../humans';
 import { buildMantis } from './reeflife';
@@ -16,7 +16,8 @@ export function codexId(kind: string): string {
   return ({ puffer: 'pufferfish', angler: 'anglerfish', jelly: 'jellyfish' } as Record<string, string>)[kind] ?? kind;
 }
 
-const fish = (species: string, seed = 3) => () => buildFish(species, seed).group;
+// (portraits: long-bodied species framed head-and-shoulders so they read on the HUD's small codex medallion)
+const fish = (species: string, seed = 3) => () => fishPortrait(species, seed);
 
 function giant(arch: DiverArch, weapon: WeaponKind, scars: string[], lantern: boolean, trophies: number) {
   return (): THREE.Object3D => {

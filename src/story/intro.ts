@@ -154,6 +154,8 @@ export class IntroScreen implements Screen {
   private angler: Fisherman | null = null;
   private gate: Gate;
   private ambience: ReturnType<typeof audio.loop> | null = null;
+  /** lesson sound loops (the current's rush): stopped on teardown, so a skip never leaves one running */
+  private sfxLoops: ReturnType<typeof audio.loop>[] = [];
   private engine: ReturnType<typeof audio.loop> | null = null;
   // layout
   private home = 0; private crabX = 0; private ruinX = 0;
@@ -252,6 +254,8 @@ export class IntroScreen implements Screen {
   private teardown() {
     const w = this.world;
     this.built = false;
+    for (const l of this.sfxLoops) l.stop(0.3);
+    this.sfxLoops = [];
     if (!w) return;
     this.area?.dispose();
     w.clear();
@@ -969,7 +973,7 @@ export class IntroScreen implements Screen {
     this.shot(() => {
       const q = p(), mx = (kid.x + q.x) / 2, my = (kid.y + q.y) / 2;
       const span = Math.max(Math.abs(kid.x - q.x), Math.abs(kid.y - q.y) * 1.8);
-      return { x: mx, y: Math.max(my + 0.4, this.floorAt(mx) + 2.2), dist: clamp(6 + span, min, 14), yaw: 0.08, h };
+      return { x: mx, y: Math.max(my + 0.3, this.floorAt(mx) + 1.5), dist: clamp(6 + span, min, 14), yaw: 0.08, h };
     }, k);
   }
   /** a short camera punch-in (catches, rings): `sec` real seconds on the framing, then back to `back` */
@@ -1074,6 +1078,7 @@ export class IntroScreen implements Screen {
     this.dbg.cur = cur;
     cur.setOn(true);
     const flow = audio.loop('lp_flow', 0, 1.1);
+    this.sfxLoops.push(flow);
     this.setGoal({ text: 'Ride the current!', keys: [['WASD', 'steer']] });
     this.bark('crab', 'Feel that? A warm current. {wave}Hop on!{/wave}', 2.6);
     this.target = { x: cur.start.x, y: cur.start.y, label: 'CURRENT' };
@@ -1209,7 +1214,7 @@ export class IntroScreen implements Screen {
     const frame = () => this.twoShot(() => ({ x: rings[2].x, y: ry }), 2.5, 9);
     frame();
     this.lessonCard('CHARGE', 'HOLD SHIFT, LET GO');
-    let n = 0, chargedT = 0, warned = -9, charging = false, chargeT0 = 0, misses = 0, listen = true;
+    let n = 0, chargedT = 0, warned = -9, charging = false, chargeT0 = 0, misses = 0, listen = true, firstT = 0;
     const t0 = this.clock;
     w.on('dash', (d) => { if (listen && d.charged) chargedT = 0.8; });
     const goal = () => this.setGoal({ text: 'Charge-dash through the rings', n, of: 3, keys: [['SHIFT', 'hold, then let go']] });
@@ -1243,8 +1248,9 @@ export class IntroScreen implements Screen {
           r.burst(); n++;
           w.sfx('pop', r.x, 0.8, 1 + n * 0.15); w.sfx('k_glass', r.x, 0.5, 1.4 + n * 0.2);
           w.fx.burst('star', r.x, r.y, 10, 3); w.fx.emit('bubbleBig', r.x, r.y, { n: 16, spread: 0.9, speed: 2.4 });
-          if (n === 1) this.t3d.add('WHOOSH!', r.x, r.y + 1.3, 0.7, T3D.gold, { size: 0.5, life: 1.1, rise: 0.7 });
-          if (n === 3) { this.game.addShake(0.3); this.game.freeze(0.06); this.t3d.add('PERFECT!', mid.x, ry + 1.6, 0.8, T3D.heal, { size: 0.55, life: 1.5, rise: 0.5, enter: 'slam' }); }
+          if (n === 1) { firstT = this.clock; this.t3d.add('WHOOSH!', r.x, r.y + 1.3, 0.7, T3D.gold, { size: 0.5, life: 1.1, rise: 0.7 }); }
+          // all three in one dash: a slam, a freeze, a shake
+          if (n === 3) { const one = this.clock - firstT < 0.8; this.game.addShake(one ? 0.3 : 0.15); if (one) this.game.freeze(0.06); this.t3d.add(one ? 'PERFECT!' : 'ALL THREE!', mid.x, ry + 1.6, 0.8, T3D.heal, { size: 0.55, life: 1.5, rise: 0.5, enter: one ? 'slam' : 'pop' }); }
           goal();
         } else if (this.clock - warned > 2.5) {
           warned = this.clock; misses++;
@@ -1389,7 +1395,7 @@ export class IntroScreen implements Screen {
     this.free(true, this.tutBounds());
     this.followKid(10, 0.6);
     this.lessonCard('HEAL', `${HEAL_ITEM.key}: EAT A CLAM`);
-    this.setGoal({ text: `Eat a ${HEAL_ITEM.name}`, keys: [[HEAL_ITEM.key, 'eat'], ['H', '']] });
+    this.setGoal({ text: `Eat a ${HEAL_ITEM.name}`, keys: [[HEAL_ITEM.key, ''], ['H', 'eat']] });
     let ate = false, listen = true;
     const hp0 = k.hp, t0 = this.clock;
     w.on('flask', () => { if (listen) ate = true; });

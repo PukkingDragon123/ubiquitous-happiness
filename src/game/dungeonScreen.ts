@@ -516,7 +516,13 @@ export class DungeonScreen implements Screen {
     let y = save || at ? lvl.terrain.floorUnder(x, plan.top) + 2.5 : plan.top - 1.2;
     // RESUME after a quit: where it was (a cave under a lid stays the cave), if that's open water
     if (save && this.checkY !== null && this.checkY < plan.top - 0.6 && lvl.terrain.sdf(x, this.checkY) > 0.6) y = this.checkY;
-    this.checkY = null;
+    // never back into a lane that was sealed off (an older save, a checkpoint over a cave lid): the lane taken instead
+    if (save) for (const f of plan.forks) {
+      if (f.chosen < 0 || f.kind === 'end') continue;
+      const took = f.lanes[f.chosen];
+      if (f.lanes.some((l, j) => j !== f.chosen && x > l.x0 - 1.2 && x < l.x1 + 1.2 && y > l.y0 && y < l.y1)) y = took.side === 'lower' ? took.y1 - 2 : took.y0 + 2.5;
+    }
+    if (!save) this.checkY = null;
     p.sb.place(x, y); p.x = x; p.y = y;
     if (!save && !at) { p.sb.accel(open ? 2 / 0.016 : 0, -6 / 0.016, 0.016); this.world.fx.emit('bubbleBig', x, y + 1, { n: 24, spread: 1, speed: 2.5 }); }
     if (p.obj.parent !== this.scene) this.scene.add(p.obj);
@@ -1356,8 +1362,9 @@ export class DungeonScreen implements Screen {
     const p = this.player;
     for (const f of this.plan.forks) {
       if (f.chosen >= 0 || (f.kind === 'end' && !this.level?.exitOpen && p.x < f.x - 2)) continue;
+      // (it starts framing a little before the frame's own left edge: you see the choice coming)
       const v = f.view;
-      if (p.x > v.x0 && p.x < v.x1 && p.y > v.y0 - 4 && p.y < v.y1 + 6) return v;
+      if (p.x > v.x0 - 8 && p.x < v.x1 + 2 && p.y > v.y0 - 4 && p.y < v.y1 + 6) return v;
     }
     return null;
   }
@@ -1751,7 +1758,7 @@ export class DungeonScreen implements Screen {
     const fv = !f && !this.desc ? this.forkView() : null;
     this.forkK = snap ? (fv ? 1 : 0) : damp(this.forkK, fv ? 1 : 0, 1.4, this.frameDt);
     let fit = 0;
-    if (fv) fit = clamp(Math.max((fv.x1 - fv.x0) / 2 / (Math.tan(fov) * this.camera.aspect), (fv.y1 - fv.y0) / 2 / Math.tan(fov)), 16.5, 24);
+    if (fv) fit = clamp(Math.max((fv.x1 - fv.x0) / 2 / (Math.tan(fov) * this.camera.aspect), (fv.y1 - fv.y0) / 2 / Math.tan(fov)), 16.5, 26);
     // the moment of choosing: a quick lean in toward the lane
     const bt = this.beat ? Math.sin(Math.PI * Math.min(1, this.beat.t / 1.1)) : 0;
     let dist = f ? (f.arena.kind === 'boss' ? 20 : 18.5) : 16.5 + this.vistaK * 4.5;
