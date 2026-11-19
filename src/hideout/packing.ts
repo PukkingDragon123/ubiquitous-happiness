@@ -408,6 +408,8 @@ export class Packing {
     this.swim.board.rotation.z = sign === 'swim' ? Math.sin(this.t * 14) * 0.03 : 0;
     if (sign) { ui.cursor = 'point'; tip = { at: this.local(sign === 'swim' ? 2.7 : -2.75, 1.5, -0.3), lines: sign === 'swim' ? [{ text: 'SWIM OUT', font: 'title' }, { text: `the journey starts at the reef · M${this.mastery}`, color: '#3a2810' }, { text: `${this.pack.length} things packed`, color: '#5a4a3a' }] : [{ text: 'back inside', color: '#3a2810' }] }; }
     if (live && !this.diving && ((sign === 'swim' && ui.pressed) || input.keyHit('Enter'))) this.dive();
+    // a plain, always-visible way out too (the painted sign alone was easy to miss): bottom right, green
+    if (live && !this.diving && !this.drag && ui.button('pack:swim', 'SWIM OUT', ui.w - 104, ui.h - 30, 96, 22, { style: 'green', font: 'title' })) this.dive();
     else if (live && !this.diving && !this.drag && ((sign === 'home' && ui.pressed) || input.keyHit('Escape'))) { this.onClose?.(); return; }
     // ---- items
     const n = this.layout(item);
