@@ -14,10 +14,12 @@
 // ornate trim, legendaries gold.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { ITEMS, type ItemDef } from '../game/items';
+import { ITEMS } from '../game/items';
+import type { Build } from './models/types';
 import { voxelMesh } from './voxel';
 import { paintIconAt } from './icons';
 import { B } from './models/kit';
+export type { Build } from './models/types';
 import { MATERIAL_MODELS } from './models/materials';
 import { TOOL_MODELS } from './models/tools';
 import { TRINKET_MODELS } from './models/trinkets';
@@ -26,9 +28,7 @@ import { GEAR_MODELS } from './models/gear';
 import { BUILD_MODELS } from './models/builds';
 import { BIG_MODELS } from './models/big';
 import { HUD_MODELS } from './models/hud';
-import { LEGACY_MODELS, LEGACY_HUD, LegacyB, runLegacy } from './models/legacy';
 
-export type Build = (b: B, d: ItemDef) => void;
 const MODELS: Record<string, Build> = { ...MATERIAL_MODELS, ...TOOL_MODELS, ...TRINKET_MODELS, ...CORE_MODELS, ...GEAR_MODELS, ...BUILD_MODELS, ...BIG_MODELS };
 
 // ------------------------------------------------------------------ cache + merge + fit
@@ -86,7 +86,6 @@ function template(id: string): THREE.Object3D {
   const fn = MODELS[id] as Build | undefined;
   let raw: THREE.Object3D;
   if (fn && d) { const b = new B(); fn(b, d); raw = mergeByMaterial(b.g); }
-  else if (d && LEGACY_MODELS[id]) raw = runLegacy(id, d)!;
   else if (d) {
     // no bespoke model (a new item): the hand-painted icon extruded into chunky voxels (0.5 m per cell -> 1 unit per cell)
     const v = voxelMesh(d, 1, paintIconAt(d, 1, 32));
@@ -114,14 +113,10 @@ export function itemModel(id: string, o: { cell?: number } = {}): THREE.Object3D
 export function hudModel(name: string): THREE.Object3D {
   const key = 'hud:' + name;
   let t = templates.get(key);
-  if (!t) {
-    if (HUD_MODELS[name]) { const b = new B(); HUD_MODELS[name](b); t = fit(mergeByMaterial(b.g), 1, 1, 0.92); }
-    else { const lb = new (LegacyB)(); (LEGACY_HUD[name] ?? LEGACY_HUD.pearlCoin)(lb); t = fit(lb.g, 1, 1, 0.92); }
-    templates.set(key, t);
-  }
+  if (!t) { const b = new B(); (HUD_MODELS[name] ?? HUD_MODELS.pearlCoin)(b); t = fit(mergeByMaterial(b.g), 1, 1, 0.92); templates.set(key, t); }
   return t.clone(true);
 }
 
 /** every item id with a bespoke 3D model */
 export const BESPOKE_MODELS = Object.keys(MODELS);
-export const HUD_MODEL_NAMES = [...new Set([...Object.keys(LEGACY_HUD), ...Object.keys(HUD_MODELS)])];
+export const HUD_MODEL_NAMES = Object.keys(HUD_MODELS);

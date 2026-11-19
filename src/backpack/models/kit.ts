@@ -157,22 +157,25 @@ export function bipyr(r: number, h: number, n = 6, tip = 0.3, rects: BoxRects | 
  * a lathe with real uvs: u around, v by arc length along the profile into `side`; flat rings (caps) take planar uvs
  * into `cap` when given. Non-indexed (ready to facet).
  */
-export function lathe(prof: V2[], n = 8, o: { side?: UR; cap?: UR; phase?: number; arc?: number } = {}): THREE.BufferGeometry {
+export function lathe(prof: V2[], n = 8, o: { side?: UR; cap?: UR; capB?: UR; phase?: number; arc?: number } = {}): THREE.BufferGeometry {
   const side = o.side ?? FULL, cap = o.cap, ph = o.phase ?? 0, arc = o.arc ?? TAU;
+  const isCap = (j: number) => !!cap && Math.abs(prof[j + 1][1] - prof[j][1]) < 1e-6;
+  // v runs by arc length over the side segments only (caps are planar), so the whole side page is used
   const L: number[] = [0];
-  for (let j = 1; j < prof.length; j++) L.push(L[j - 1] + Math.hypot(prof[j][0] - prof[j - 1][0], prof[j][1] - prof[j - 1][1]));
+  for (let j = 1; j < prof.length; j++) L.push(L[j - 1] + (isCap(j - 1) ? 0 : Math.hypot(prof[j][0] - prof[j - 1][0], prof[j][1] - prof[j - 1][1])));
   const tot = L[L.length - 1] || 1;
   const rMax = Math.max(...prof.map((p) => p[0])) || 1;
+  const yMid = (Math.min(...prof.map((p) => p[1])) + Math.max(...prof.map((p) => p[1]))) / 2;
   const P: number[] = [], U: number[] = [];
   for (let i = 0; i < n; i++) {
     const a0 = ph + (i / n) * arc, a1 = ph + ((i + 1) / n) * arc;
     for (let j = 0; j < prof.length - 1; j++) {
       const [r0, y0] = prof[j], [r1, y1] = prof[j + 1];
-      const flat = cap && Math.abs(y1 - y0) < 1e-6;
+      const flat = isCap(j), top = y0 > yMid, cr = flat ? (!top && o.capB ? o.capB : cap!) : cap;
       const pt = (r: number, y: number, a: number): V3 => [Math.sin(a) * r, y, Math.cos(a) * r];
       const q = [pt(r0, y0, a0), pt(r0, y0, a1), pt(r1, y1, a1), pt(r1, y1, a0)];
       const uvq = flat
-        ? q.map((p) => [lerp(cap![0], cap![2], p[0] / rMax / 2 + 0.5), lerp(cap![1], cap![3], (y0 > 0 ? -p[2] : p[2]) / rMax / 2 + 0.5)])
+        ? q.map((p) => [lerp(cr![0], cr![2], p[0] / rMax / 2 + 0.5), lerp(cr![1], cr![3], (top ? -p[2] : p[2]) / rMax / 2 + 0.5)])
         : [[i / n, L[j] / tot], [(i + 1) / n, L[j] / tot], [(i + 1) / n, L[j + 1] / tot], [i / n, L[j + 1] / tot]].map(([u, v]) => [lerp(side[0], side[2], u), lerp(side[1], side[3], v)]);
       // two triangles (skip the degenerate one at a pole), wound to face outward for a bottom-to-top profile
       const tri = (A: number, Bi: number, C: number) => {
@@ -189,13 +192,13 @@ export function lathe(prof: V2[], n = 8, o: { side?: UR; cap?: UR; phase?: numbe
   return g;
 }
 /** a cylinder / frustum with optional chamfered rims; sides into `side`, caps planar into `cap` */
-export function cyl(r: number, h: number, n = 8, o: { rTop?: number; ch?: number; side?: UR; cap?: UR; phase?: number; open?: boolean } = {}): THREE.BufferGeometry {
+export function cyl(r: number, h: number, n = 8, o: { rTop?: number; ch?: number; side?: UR; cap?: UR; capB?: UR; phase?: number; open?: boolean } = {}): THREE.BufferGeometry {
   const rt = o.rTop ?? r, c = o.ch ?? 0, y0 = -h / 2, y1 = h / 2;
   const prof: V2[] = [];
   if (!o.open) prof.push([0, y0]);
   if (c > 0) prof.push([r - c, y0], [r, y0 + c], [rt, y1 - c], [rt - c, y1]); else prof.push([r, y0], [rt, y1]);
   if (!o.open) prof.push([0, y1]);
-  return lathe(prof, n, { side: o.side, cap: o.cap ?? o.side, phase: o.phase ?? Math.PI / n });
+  return lathe(prof, n, { side: o.side, cap: o.cap ?? o.side, capB: o.capB, phase: o.phase ?? Math.PI / n });
 }
 /** a cone (pointing up +y), base at -h/2 */
 export function cone(r: number, h: number, n = 6, o: { side?: UR; cap?: UR } = {}) {
@@ -208,7 +211,7 @@ export function cone(r: number, h: number, n = 6, o: { side?: UR; cap?: UR } = {
  */
 export function tube(pts: V3[], r: number | ((t: number) => number), o: { radial?: number; segs?: number; uv?: UR; closed?: boolean; sx?: number; caps?: boolean; tension?: number } = {}): THREE.BufferGeometry {
   const curve = new THREE.CatmullRomCurve3(pts.map(v3), !!o.closed, 'catmullrom', o.tension ?? 0.5);
-  const S = o.segs ?? Math.max(4, pts.length * 3), Rn = o.radial ?? 6, uvr = o.uv ?? FULL, sx = o.sx ?? 1;
+  const S = o.segs ?? Math.max(4, pts.length * 2), Rn = o.radial ?? 5, uvr = o.uv ?? FULL, sx = o.sx ?? 1;
   const fr = curve.computeFrenetFrames(S, !!o.closed);
   const rf = typeof r === 'number' ? () => r : r;
   const rings: THREE.Vector3[][] = [];
@@ -322,4 +325,11 @@ export class B {
   }
   /** mirror a builder across x (the same parts, flipped): for symmetric pairs */
   mirror(fn: (b: B, s: 1 | -1) => void) { fn(this, 1); fn(this, -1); }
+}
+
+/** the Euler rotation that sends local x, y, z to the given world directions (orthonormal) */
+export function basis(x: V3, y: V3, z: V3): V3 {
+  const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z));
+  const e = new THREE.Euler().setFromRotationMatrix(m);
+  return [e.x, e.y, e.z];
 }

@@ -234,11 +234,11 @@ export class Pt extends Px {
     }
   }
   /** a stitched seam: thread dashes on a dark groove */
-  stitch(x0: number, y0: number, x1: number, y1: number, thread: string | Pal = '#e8d4a0', groove = '#1e1008', t = 4) {
+  stitch(x0: number, y0: number, x1: number, y1: number, thread: string | Pal | RGB = '#e8d4a0', groove: string | RGB = '#1e1008', t = 4) {
     const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
     for (let i = 0; i <= n; i++) {
       const x = Math.round(x0 + ((x1 - x0) * i) / (n || 1)), y = Math.round(y0 + ((y1 - y0) * i) / (n || 1));
-      if (i % 3 === 2) this.set(x, y, groove); else this.set(x, y, typeof thread === 'string' ? hex(thread) : tc(thread, t));
+      if (i % 3 === 2) this.set(x, y, groove); else this.set(x, y, typeof thread === 'string' ? hex(thread) : typeof thread[0] === 'number' ? (thread as RGB) : tc(thread as Pal, t));
     }
   }
   /** leather / skin creases: short curved dark strokes with a lit ridge above */

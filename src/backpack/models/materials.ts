@@ -1,10 +1,11 @@
 // MATERIALS: line, hooks, shot, cork, kelp, pearls, coral, sea glass, nails, coins, ores, gems, teeth, wood, lenses,
 // spines, mana crystals, scrap, shells. Commons look worn (rust, chips, bleaching); uncommons clean; rares cut and glinting.
 import * as THREE from 'three';
-import { mat, cbox, hull, rock, prism, bipyr, cyl, cone, tube, ext, ball, surf, warp, torus, lathe, TAU, type V2, type V3 } from './kit';
-import { tx, PAL, pal, Pt, type Pal } from './paint';
-import { pageMap, jHook, coin, brilliant, stepCut, fanShell } from './parts';
+import { B, mat, cbox, hull, rock, prism, bipyr, cyl, cone, tube, ext, ball, surf, warp, torus, lathe, TAU, type V2, type V3 } from './kit';
+import { tx, PAL, pal, tc, type Pt, type Pal } from './paint';
+import { jHook, coin, brilliant, stepCut, fanShell, toothPart } from './parts';
 import type { Build } from './types';
+import { S } from './shared';
 import { hash2 } from '../../core/math';
 
 // ------------------------------------------------------------------ shared pages
@@ -25,10 +26,10 @@ export const MATERIAL_MODELS: Record<string, Build> = {
       for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) { const k = (x + y * 2) % 6; p.t(x, y, PAL.teal, k < 2 ? 4.5 : k < 4 ? 3.5 : 3); }
       p.R(0, 0, 32, 1, PAL.teal, 5);
     });
-    const line = mat('line', T, { rough: 0.3, emissive: '#1a6a5a', ek: 0.3 });
+    const line = S.line(); void T;
     const kp: V3[] = [];
     for (let i = 0; i < 15; i++) { const t = (i / 15) * TAU; kp.push([(Math.sin(t) + 2 * Math.sin(2 * t)) * 0.125, (Math.cos(t) - 2 * Math.cos(2 * t)) * 0.115, -Math.sin(3 * t) * 0.14]); }
-    b.add(tube(kp, 0.026, { closed: true, radial: 4, segs: 45 }), line, [0, 0.04, 0], [0.35, 0.25, 0.3]);
+    b.add(tube(kp, 0.026, { closed: true, radial: 4, segs: 36 }), line, [0, 0.04, 0], [0.35, 0.25, 0.3]);
     b.add(tube([[-0.05, -0.05, 0.1], [0.12, -0.12, 0.16], [0.26, -0.08, 0.1], [0.3, 0.06, 0.02], [0.18, 0.12, -0.05]], 0.024, { radial: 4, segs: 14, closed: false }), line);
     // the snapped tails, one frayed into three hairs
     b.add(tube([[0.2, -0.18, 0.05], [0.32, -0.3, 0.1], [0.42, -0.33, 0.04]], 0.022, { radial: 4, segs: 8 }), line);
@@ -37,38 +38,37 @@ export const MATERIAL_MODELS: Record<string, Build> = {
     // a red-and-white bead float still threaded on, and a split shot crimped beside it
     const bead = tx('lineBead', 16, 16, (p) => { p.R(0, 0, 16, 8, PAL.red, 3.5); p.R(0, 8, 16, 8, PAL.white, 4); p.R(0, 7, 16, 2, PAL.ink, 2); p.R(2, 2, 3, 2, PAL.red, 5); });
     b.add(ball(0.085, 8, 6), mat('lineBead', bead, { rough: 0.3 }), [-0.42, 0.44, 0.1], [0.3, 0, -0.5], 1, { smooth: 1.2 });
-    b.add(ball(0.05, 6, 4), mat('lead', leadPage(), { rough: 0.6, metal: 0.3 }), [0.3, -0.3, 0.09]);
+    b.add(ball(0.05, 6, 4), S.lead(), [0.3, -0.3, 0.09]);
   },
 
   // ---------------------------------------------------------------- the J-hook: eye, shank, bend, point, a big barb
   rustyHook(b) {
     const T = rustyIron();
     const iron = mat('rustyIron', T, { rough: 0.75, metal: 0.25 });
-    const point = mat('hookPoint', tx('hookPt', 8, 8, (p) => { p.all(PAL.steel, 3.5); p.R(0, 0, 8, 2, PAL.steel, 5); p.R(0, 6, 8, 2, PAL.steel, 2); p.glint(3, 3, 1); }), { rough: 0.3, metal: 0.6 });
-    jHook(b, iron, point, { r: 0.04 });
+    const point = S.point();
+    jHook(b, iron, point, { r: 0.05 });
     // a whipping of red thread at the eye with a tag end, and a curl of line
-    const thread = mat('redThread', tx('redThread', 16, 8, (p) => p.rope(0, 0, 16, 8, PAL.red, { pitch: 3 })), { rough: 0.8 });
-    b.add(cyl(0.05, 0.08, 6), thread, [0.06, 0.29, 0]);
-    b.add(tube([[0.06, 0.25, 0.04], [0.16, 0.18, 0.08], [0.2, 0.05, 0.06], [0.16, -0.02, 0.04]], 0.014, { radial: 3, segs: 9 }), thread);
+    const thread = S.thread();
+    b.add(cyl(0.065, 0.1, 6), thread, [0.06, 0.28, 0]);
+    b.add(tube([[0.06, 0.24, 0.05], [0.17, 0.17, 0.09], [0.22, 0.04, 0.07], [0.18, -0.04, 0.05]], 0.018, { radial: 3, segs: 9 }), thread);
   },
 
   // ---------------------------------------------------------------- split shot: three lead balls, slits facing out
   leadShot(b) {
-    const m = mat('lead', leadPage(), { rough: 0.6, metal: 0.3 });
-    const slit = mat('leadSlit', tx('leadSlit', 8, 8, (p) => p.all(PAL.ink, 1)), { rough: 1 });
+    const m = S.lead();
+    const slit = mat('leadSlit', tx('leadSlit', 8, 8, (p) => { p.all(PAL.ink, 1); p.R(0, 0, 8, 1, PAL.lead, 4); }), { rough: 1 });
     const shot = (pos: V3, r: number, rot: V3) => {
       const s = b.sub(pos, rot);
-      const half = lathe([[0, 0.012], [r * 0.7, 0.012], [r * 0.95, r * 0.3], [r * 0.95, r * 0.55], [r * 0.7, r * 0.82], [r * 0.38, r * 0.97], [0, r]], 9, { cap: [0, 0, 1, 1] });
-      s.add(half, m);
-      s.add(half, m, [0, 0, 0], [Math.PI, 0, 0]);
-      s.add(cyl(r * 0.93, 0.03, 9), slit);
+      s.add(ball(r, 10, 7), m, [0, 0, 0], [0, 0, 0], 1, { smooth: 0.9 });
+      // the split: a dark half-disc biting into the front half only
+      s.add(lathe([[0, -0.018], [r * 1.03, -0.018], [r * 1.03, 0.018], [0, 0.018]], 6, { arc: Math.PI, phase: -Math.PI / 2 }), slit);
     };
-    shot([-0.16, -0.13, 0.05], 0.2, [0.25, 0, 0.45]);
-    shot([0.19, -0.1, -0.02], 0.18, [-0.2, 0.3, -0.35]);
-    shot([0.0, 0.2, -0.05], 0.17, [0.5, 0, 0.1]);
+    shot([-0.17, -0.14, 0.06], 0.2, [0.3, 0.1, 0.35]);
+    shot([0.2, -0.1, -0.02], 0.18, [0.2, -0.3, -0.4]);
+    shot([0.0, 0.2, -0.05], 0.17, [0.4, 0.2, 0.1]);
     // a scrap of line crimped through two of them
-    const line = mat('line', null);
-    b.add(tube([[-0.45, -0.3, 0.02], [-0.16, -0.13, 0.05], [0.19, -0.1, -0.02], [0.44, 0.05, 0.02]], 0.014, { radial: 3, segs: 12 }), line);
+    const line = S.line();
+    b.add(tube([[-0.46, -0.3, 0.02], [-0.17, -0.14, 0.06], [0.2, -0.1, -0.02], [0.44, 0.06, 0.02]], 0.016, { radial: 3, segs: 12 }), line);
   },
 
   // ---------------------------------------------------------------- a wine cork: pores, a wine-stained end, a stamp
@@ -85,14 +85,12 @@ export const MATERIAL_MODELS: Record<string, Build> = {
       p.text('VINO', 24, 15, '#4a2a12'); p.R(22, 13, 18, 1, '#5a3418'); p.R(22, 21, 18, 1, '#5a3418');
       p.R(0, 31, 64, 1, C, 1.5);
       // caps: the wine-soaked end (left) and the corkscrew end (right)
-      p.ellipse(8, 40, 8, 8, (nx, ny) => { const d = Math.hypot(nx, ny); return d > 0.8 ? PAL.ruby[1] as unknown as null : null; });
       p.ellipse(8, 40, 8, 8, (nx, ny) => { const d = Math.hypot(nx, ny); const c = d > 0.82 ? 2 : (nx + ny < -0.4 ? 2.5 : 1.5); return hexOf(PAL.ruby, c); });
       p.ellipse(32, 40, 8, 8, (nx, ny) => { const d = Math.hypot(nx, ny); return hexOf(C, d > 0.82 ? 2 : (nx + ny < -0.3 ? 4 : 3)); });
       for (let i = 0; i < 14; i++) { const a = i * 0.9, r = 1 + i * 0.4; p.t(32 + Math.cos(a) * r, 40 + Math.sin(a) * r, C, 0); }
     });
     const m = mat('cork', T, { rough: 0.95 });
-    b.add(cyl(0.2, 0.7, 10, { rTop: 0.18, ch: 0.035, side: T.r(0, 0, 64, 32), cap: T.r(24, 32, 16, 16) }), m, [0, 0, 0], [0, 0, -0.85]);
-    b.add(cyl(0.2, 0.012, 10, { side: T.r(0, 32, 16, 16), cap: T.r(0, 32, 16, 16) }), m, [0.3 * Math.sin(0.85) * 1.17, -0.3 * Math.cos(0.85) * 1.17, 0], [0, 0, -0.85]);
+    b.add(cyl(0.2, 0.7, 10, { rTop: 0.18, ch: 0.035, side: T.r(0, 0, 64, 32), cap: T.r(0, 32, 16, 16), capB: T.r(24, 32, 16, 16) }), m, [0, 0, 0], [0.2, 0, -0.85]);
   },
 
   // ---------------------------------------------------------------- a kelp frond: stipe, ruffled blades, gas bladders
@@ -109,7 +107,7 @@ export const MATERIAL_MODELS: Record<string, Build> = {
     const bladder = mat('kelpBladder', tx('kelpBladder', 16, 16, (p) => { p.all(pal('#a88e2a'), 3); p.R(0, 10, 16, 6, pal('#a88e2a'), 2); p.R(3, 3, 4, 3, pal('#a88e2a'), 5); p.glint(4, 4, 1); }), { rough: 0.3 });
     b.add(tube([[0, -0.92, 0], [0.04, -0.45, 0.02], [-0.02, 0.05, 0], [0.04, 0.55, -0.02], [0.0, 0.8, 0]], (t) => 0.04 - t * 0.015, { radial: 5, segs: 14 }), stem);
     const leaf = (L: number, W: number, seed: number): V2[] => {
-      const out: V2[] = [], n = 9;
+      const out: V2[] = [], n = 6;
       for (let i = 0; i <= n; i++) { const y = (i / n) * L, w = W * Math.pow(Math.sin((i / n) * Math.PI * 0.94 + 0.08), 0.8) * (1 + 0.18 * Math.sin(i * 2.1 + seed)); out.push([w, y]); }
       for (let i = n; i >= 0; i--) { const y = (i / n) * L, w = W * Math.pow(Math.sin((i / n) * Math.PI * 0.94 + 0.08), 0.8) * (1 + 0.18 * Math.sin(i * 2.4 + seed + 1)); out.push([-w, y]); }
       return out;
@@ -118,38 +116,38 @@ export const MATERIAL_MODELS: Record<string, Build> = {
     for (const [y, rz, L, W, sd] of blades) {
       const g = warp(ext(leaf(L, W, sd), 0.02, 0.006), (v) => { v.z += Math.sin((v.y / L) * Math.PI) * 0.1 * (sd % 2 ? 1 : -1) + Math.abs(v.x) * 0.4; });
       b.add(g, bm, [0, y + 0.04, 0], [0, 0, rz]);
-      b.add(ball(0.075, 7, 5), bladder, [Math.sin(-rz) * 0.04, y, 0.02], [0, 0, rz], [1, 1.25, 1], { smooth: 1 });
+      b.add(ball(0.075, 6, 4), bladder, [Math.sin(-rz) * 0.04, y, 0.02], [0, 0, rz], [1, 1.25, 1], { smooth: 1 });
     }
     // the holdfast: little claw roots
     const root = mat('kelpRoot', tx('kelpRoot', 16, 8, (p) => { p.all(pal('#5a4020'), 2.5); p.R(0, 1, 16, 2, pal('#5a4020'), 4); }), { rough: 0.9 });
-    for (const [dx, dz] of [[-0.18, 0.05], [-0.06, 0.12], [0.1, 0.1], [0.2, -0.02], [0.02, -0.12]] as V2[]) b.add(tube([[0, -0.86, 0], [dx * 0.6, -0.9, dz * 0.6], [dx, -0.98, dz]], (t) => 0.03 * (1 - t * 0.6), { radial: 4, segs: 5 }), root);
+    for (const [dx, dz] of [[-0.18, 0.05], [-0.06, 0.12], [0.1, 0.1], [0.2, -0.02], [0.02, -0.12]] as V2[]) b.add(tube([[0, -0.86, 0], [dx * 0.6, -0.9, dz * 0.6], [dx, -0.98, dz]], (t) => 0.03 * (1 - t * 0.6), { radial: 3, segs: 3 }), root);
   },
 
   // ---------------------------------------------------------------- a giant pearl in an open oyster half
   pearl(b) {
     const outerT = tx('oysterOut', 32, 32, (p) => {
-      const O = pal('#7a6a72');
+      const O = pal('#9a8a92');
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { const ring = Math.floor((y + Math.sin(x * 0.6) * 1.5) / 4); p.t(x, y, O, 2.5 + (ring % 2) * 0.5 + (y > 26 ? 1 : 0)); }
       for (let y = 3; y < 32; y += 4) for (let x = 0; x < 32; x++) if ((x + y) % 3) p.t(x, y + Math.round(Math.sin(x * 0.6) * 1.5), O, 1);
       p.R(0, 29, 32, 3, O, 4);
     });
-    const innerT = tx('oysterIn', 32, 32, (p) => { p.nacre(0, 0, 32, 32, 3, 0.7); p.R(0, 28, 32, 4, PAL.pearl, 4.5); p.ellipse(16, 8, 5, 3, (nx, ny) => hexOf(PAL.purple, Math.hypot(nx, ny) > 0.7 ? 3 : 4)); });
-    const out = mat('oysterOut', outerT, { rough: 0.85 }), inn = mat('oysterIn', innerT, { rough: 0.35, emissive: '#2a2a3a', ek: 0.25 });
-    const S = (u: number, v: number, inside: boolean): V3 => {
-      const a = u * TAU, R = 0.46 * (1 + 0.09 * Math.sin(a * 7) + 0.06 * Math.sin(a * 3 + 1));
-      const y = 0.2 * v * v + 0.035 * Math.sin(a * 9) * v * v * v - (inside ? 0 : 0.07 * (1 - v * v));
-      return [Math.cos(a) * R * v * 1.1, y, Math.sin(a) * R * v * 0.85];
+    const innerT = tx('oysterIn', 32, 32, (p) => { p.nacre(0, 0, 32, 32, 3, 0.7); p.R(0, 0, 32, 4, PAL.pearl, 4.5); p.R(0, 0, 32, 1, PAL.pearl, 2); p.ellipse(16, 26, 6, 4, (nx, ny) => hexOf(PAL.purple, Math.hypot(nx, ny) > 0.7 ? 3 : 4)); });
+    const out = mat('oysterOut', outerT, { rough: 0.85 }), inn = mat('oysterIn', innerT, { rough: 0.3, emissive: '#3a3a52', ek: 0.35 });
+    const SH = (u: number, v: number, inside: boolean): V3 => {
+      const a = u * TAU, R = 0.5 * (1 + 0.1 * Math.sin(a * 7) + 0.06 * Math.sin(a * 3 + 1));
+      const y = 0.3 * v * v + 0.05 * Math.sin(a * 9) * v * v * v - (inside ? 0 : 0.08 * (1 - v * v));
+      return [Math.cos(a) * R * v * 1.12, y, Math.sin(a) * R * v * 0.9];
     };
-    const sh = b.sub([0, -0.16, 0], [0.95, 0, 0]);
-    sh.add(surf(18, 3, (u, v) => S(u, v, true), { back: true }), inn);
-    sh.add(surf(18, 3, (u, v) => S(u, v, false)), out);
+    const sh = b.sub([0, -0.12, -0.05], [1.1, 0, 0]);
+    sh.add(surf(20, 3, (u, v) => SH(u, v, true)), inn);
+    sh.add(surf(20, 3, (u, v) => SH(u, v, false), { back: true }), out);
     const pearlT = tx('pearl', 32, 16, (p) => {
       p.all(PAL.pearl, 3.5);
       for (let x = 0; x < 32; x++) { p.t(x, 4 + Math.round(Math.sin(x * 0.4) * 1.5), PAL.pink, 4.5); p.t(x, 11 + Math.round(Math.sin(x * 0.3 + 2)), PAL.nacre, 4); }
       p.R(0, 13, 32, 3, PAL.pearl, 2.5);
       p.R(5, 3, 4, 3, PAL.pearl, 5); p.glint(6, 4, 1);
     });
-    b.add(ball(0.27, 12, 9), mat('pearl', pearlT, { rough: 0.2, metal: 0.1, emissive: '#4a3a5a', ek: 0.35 }), [0.0, 0.08, 0.12], [0.3, 0.5, 0], 1, { smooth: 1.3 });
+    b.add(ball(0.24, 12, 9), mat('pearl', pearlT, { rough: 0.2, metal: 0.1, emissive: '#4a3a5a', ek: 0.35 }), [0.0, 0.0, 0.16], [0.3, 0.5, 0], 1, { smooth: 1.3 });
   },
 
   // ---------------------------------------------------------------- a snapped branch of fire coral (L footprint)
@@ -162,7 +160,7 @@ export const MATERIAL_MODELS: Record<string, Build> = {
       p.R(0, 0, 3, 16, C, 2);
     });
     const m = mat('coral', T, { rough: 0.7 });
-    const tip = mat('coralTip', tx('coralTip', 8, 8, (p) => { p.all(PAL.yellow, 4); p.R(0, 5, 8, 3, PAL.coral, 4); p.R(1, 1, 2, 2, PAL.yellow, 5); }), { rough: 0.5, emissive: '#a03a10', ek: 0.35 });
+    const tip = S.coralTip();
     const br = (pts: V3[], r0: number, r1: number) => { b.add(tube(pts, (t) => r0 + (r1 - r0) * t, { radial: 5, segs: pts.length * 3 }), m); b.add(ball(r1 * 1.25, 6, 4), tip, pts[pts.length - 1]); };
     br([[-0.55, -0.82, 0], [-0.5, -0.4, 0.04], [-0.56, 0.1, 0], [-0.48, 0.5, -0.03], [-0.42, 0.86, 0]], 0.12, 0.05);
     br([[-0.52, -0.48, 0.02], [-0.15, -0.36, 0.06], [0.3, -0.4, 0.02], [0.84, -0.3, 0]], 0.09, 0.045);
@@ -179,17 +177,18 @@ export const MATERIAL_MODELS: Record<string, Build> = {
     const glass = (key: string, c: string) => {
       const P = pal(c);
       const T = tx('sg:' + key, 32, 32, (p) => {
-        p.all(P, 3);
-        p.ellipse(16, 17, 13, 12, (nx, ny) => hexOf(P, Math.hypot(nx, ny) > 0.7 ? 3 : 2.5));
-        p.R(0, 0, 32, 3, P, 4.5); p.R(0, 0, 3, 32, P, 4); p.R(0, 29, 32, 3, P, 2);
-        for (const [x, y] of [[9, 12], [20, 21], [14, 25], [23, 9]] as V2[]) { p.t(x, y, P, 5); p.t(x + 1, y + 1, P, 1.5); }
-        p.R(6, 5, 5, 2, P, 5); p.glint(7, 6, 1);
+        p.all(P, 4);
+        p.ellipse(16, 17, 12, 11, (nx, ny) => hexOf(P, Math.hypot(nx, ny) > 0.65 ? 3.5 : 3));
+        p.R(0, 0, 32, 4, P, 5); p.R(0, 0, 4, 32, P, 4.5); p.R(0, 28, 32, 4, P, 3);
+        for (const [x, y] of [[9, 12], [20, 21], [14, 25], [23, 9]] as V2[]) { p.t(x, y, P, 5); p.t(x + 1, y + 1, P, 2); }
+        p.R(7, 6, 4, 2, PAL.white, 5);
       });
-      return mat('sg:' + key, T, { rough: 0.45, emissive: c, ek: 0.28 });
+      return mat('sg:' + key, T, { rough: 0.55, emissive: c, ek: 0.35 });
     };
-    b.add(rock(5, 0.25, [1.25, 0.6, 0.85], 12, 0.14), glass('green', '#4ab07a'), [-0.04, -0.13, 0.12], [0.6, 0.2, 0.2], 1, { smooth: 0.6 });
-    b.add(rock(6, 0.2, [1.1, 0.65, 0.9], 11, 0.16), glass('blue', '#3a7ad8'), [-0.2, 0.17, -0.08], [0.5, 0.6, -0.4], 1, { smooth: 0.6 });
-    b.add(rock(7, 0.17, [1.2, 0.6, 0.9], 10, 0.16), glass('amber', '#d8902a'), [0.25, 0.15, -0.02], [0.7, -0.4, 0.5], 1, { smooth: 0.6 });
+    b.add(rock(5, 0.27, [1.2, 0.62, 0.9], 16, 0.1), glass('green', '#5cc08e'), [-0.06, -0.14, 0.1], [0.7, 0.2, 0.25], 1, { smooth: 1.0 });
+    b.add(rock(6, 0.22, [1.15, 0.6, 0.95], 14, 0.12), glass('blue', '#4a9ae0'), [-0.12, 0.16, -0.06], [0.6, 0.6, -0.35], 1, { smooth: 1.0 });
+    b.add(rock(7, 0.18, [1.2, 0.6, 0.9], 12, 0.12), glass('amber', '#e09a3a'), [0.24, 0.08, 0.02], [0.7, -0.4, 0.5], 1, { smooth: 1.0 });
+    b.add(rock(8, 0.12, [1.2, 0.55, 0.9], 10, 0.12), glass('frost', '#d8e8e4'), [0.22, -0.22, 0.12], [0.8, 0.3, -0.2], 1, { smooth: 1.0 });
   },
 
   // ---------------------------------------------------------------- a bent, square-cut nail, rusted through
@@ -201,9 +200,9 @@ export const MATERIAL_MODELS: Record<string, Build> = {
       p.R(42, 0, 6, 8, PAL.iron, 3);
     });
     const m = mat('nail', T, { rough: 0.85, metal: 0.2 });
-    const path: V3[] = [[0.32, 0.36, 0], [0.12, 0.13, 0.01], [0.0, -0.02, 0.03], [-0.05, -0.17, 0.02], [-0.18, -0.3, 0], [-0.33, -0.38, 0]];
-    b.add(tube(path, (t) => (t < 0.72 ? 0.042 : 0.042 * Math.max(0.12, 1 - (t - 0.72) / 0.28)), { radial: 4, segs: 16 }), m);
-    b.add(cyl(0.1, 0.045, 7, { ch: 0.012 }), mat('nailHead', tx('nailHead', 16, 16, (p) => { p.all(PAL.rust, 2.5); p.ellipse(8, 8, 6, 6, (nx, ny) => hexOf(PAL.rust, nx + ny < -0.3 ? 3.5 : 2)); p.rust(10, 9, 3, 4); }), { rough: 0.85, metal: 0.2 }), [0.335, 0.375, 0], [0, 0, 0.76]);
+    const path: V3[] = [[0.24, 0.36, 0], [0.1, 0.15, 0.01], [0.02, 0.02, 0.02], [-0.1, -0.06, 0.02], [-0.38, -0.18, 0]];
+    b.add(tube(path, (t) => (t < 0.7 ? 0.06 : 0.06 * Math.max(0.1, 1 - (t - 0.7) / 0.3)), { radial: 4, segs: 14 }), m);
+    b.add(cyl(0.13, 0.06, 8, { ch: 0.015 }), mat('nailHead', tx('nailHead', 16, 16, (p) => { p.all(PAL.rust, 2.5); p.ellipse(8, 8, 6, 6, (nx, ny) => hexOf(PAL.rust, nx + ny < -0.3 ? 3.5 : 2)); p.rust(10, 9, 3, 4); p.R(0, 0, 16, 2, PAL.iron, 3); }), { rough: 0.85, metal: 0.2 }), [0.25, 0.37, 0], [0, 0, 0.58]);
   },
 
   // ---------------------------------------------------------------- a pirate doubloon (the skull winks)
@@ -265,14 +264,16 @@ export const MATERIAL_MODELS: Record<string, Build> = {
 
   // ---------------------------------------------------------------- a smooth grey pebble with a white quartz band
   riverStone(b) {
-    const S = pal('#7a7a86');
-    const T = tx('pebble', 48, 48, (p) => {
-      p.all(S, 3);
-      for (let x = 0; x < 48; x++) { const y = 22 + Math.round(Math.sin(x * 0.15) * 3 + x * 0.12); p.R(x, y - 3, 1, 5, PAL.white, 4); p.t(x, y - 3, PAL.white, 5); p.t(x, y + 2, S, 2); }
-      for (const [x, y] of [[8, 8], [36, 12], [14, 36], [38, 38], [26, 6]] as V2[]) { p.t(x, y, S, 1.5); p.t(x + 2, y + 1, S, 1.5); p.t(x + 1, y + 3, S, 4); }
-      p.R(6, 4, 8, 2, S, 4.5);
+    const SP = pal('#868694');
+    const T = tx('pebble', 48, 32, (p) => {
+      for (let y = 0; y < 32; y++) p.R(0, y, 48, 1, SP, 3);
+      for (let x = 0; x < 48; x++) { const y = 14 + Math.round(Math.sin(x * 0.27) * 1.2); p.R(x, y, 1, 3, PAL.white, 4); p.t(x, y, PAL.white, 5); p.t(x, y + 3, SP, 2); p.t(x, y - 1, SP, 2.5); }
+      for (const [x, y] of [[8, 4], [30, 6], [14, 24], [38, 26], [24, 2], [4, 28]] as V2[]) { p.t(x, y, SP, 1.5); p.t(x + 2, y + 1, SP, 1.5); p.t(x + 1, y + 3, SP, 4.5); }
     });
-    b.add(rock(7, 0.4, [1.25, 0.7, 0.9], 26, 0.07), mat('pebble', T, { rough: 0.55 }), [0, 0, 0], [0.2, 0.3, 0.15], 1, { smooth: 0.75 });
+    const prof: V2[] = [];
+    for (let i = 0; i <= 8; i++) { const a = -Math.PI / 2 + (i / 8) * Math.PI; prof.push([Math.cos(a) * 0.4, Math.sin(a) * 0.4]); }
+    const g = warp(lathe(prof, 12), (v) => { v.y *= 1.2; v.z *= 0.6; v.x *= 0.95; v.x += Math.sin(v.y * 5) * 0.02; });
+    b.add(g, mat('pebble', T, { rough: 0.55 }), [0, 0, 0], [0.1, 0.25, 1.05], 1, { smooth: 0.8 });
   },
 
   // ---------------------------------------------------------------- an amethyst cluster on a geode chip
@@ -364,30 +365,8 @@ export const MATERIAL_MODELS: Record<string, Build> = {
 
   // ---------------------------------------------------------------- a serrated shark tooth (white crown, grey band, root)
   sharkTooth(b) {
-    const out: V2[] = [];
-    const edge = (x0: number, y0: number, x1: number, y1: number, n: number, side: number) => {
-      for (let i = 0; i < n; i++) { const t = i / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t; out.push([x, y]); const t2 = (i + 0.5) / n; out.push([x0 + (x1 - x0) * t2 + side * 0.028, y0 + (y1 - y0) * t2 + 0.012]); }
-    };
-    edge(-0.31, -0.1, -0.02, 0.44, 7, -1);
-    out.push([0.0, 0.47]);
-    edge(0.03, 0.44, 0.31, -0.1, 7, 1);
-    out.push([0.35, -0.2], [0.3, -0.38], [0.14, -0.31], [0.0, -0.25], [-0.14, -0.31], [-0.3, -0.38], [-0.35, -0.2]);
-    const W = 40, H = 48, f = pageMap(out, W, H);
-    const T = tx('tooth', W, H + 8, (p) => {
-      p.all(PAL.sand, 2.5);
-      p.poly(f.poly(out.slice(0, 31)), hexOf(PAL.bone, 4));
-      p.poly(f.poly([[-0.31, -0.1], [-0.02, 0.44], [0.0, 0.47], [0.0, -0.1]]), hexOf(PAL.bone, 4.5));
-      const [ax, ay] = f([0, 0.47]);
-      p.ln(ax, ay + 2, ax, ay + 26, PAL.bone, 5); p.ln(ax + 1, ay + 4, ax + 1, ay + 26, PAL.bone, 3);
-      for (let i = 0; i < 31; i += 2) { const [x, y] = f(out[i]); p.t(x, y, PAL.bone, 2); }
-      const [, by] = f([0, -0.1]);
-      for (let x = 0; x < W; x++) { const yy = by + Math.round(Math.abs(x - W / 2) * -0.25) + 2; p.R(x, yy, 1, 3, PAL.stone, 2.5); p.t(x, yy, PAL.stone, 4); }
-      for (let y = by + 6; y < H; y += 3) for (let x = 6 + (y % 2) * 2; x < W - 6; x += 5) p.t(x, y, PAL.sand, 1);
-      p.glint(Math.round(ax - 6), Math.round(ay + 12), 1);
-      p.R(0, H, W, 8, PAL.bone, 3);
-    });
-    const g = warp(ext(out, 0.14, 0.035, { rects: { pz: T.r(0, 0, W, H), nz: T.r(0, 0, W, H), side: T.r(0, H, W, 8) } }), (v) => { v.z *= 1 - 0.55 * Math.abs(v.x) / 0.35; if (v.y > -0.1) v.z -= 0.16 * (v.y + 0.1) * (v.y + 0.1); });
-    b.add(g, mat('tooth', T, { rough: 0.35 }), [0, 0, 0], [0.15, -0.2, -0.15]);
+    const { g, m } = toothPart();
+    b.add(g, m, [0, 0, 0], [0.1, 0.05, -0.12]);
   },
 
   // ---------------------------------------------------------------- a twisted, sea-bleached branch
@@ -426,19 +405,20 @@ export const MATERIAL_MODELS: Record<string, Build> = {
 
   // ---------------------------------------------------------------- a prickly bouquet of urchin spines tied with twine
   urchinSpine(b) {
-    const P = PAL.purple;
+    const P = pal('#9a4ad0');
     const T = tx('spine', 8, 32, (p) => {
-      for (let y = 0; y < 32; y++) p.R(0, y, 8, 1, P, y < 6 ? 4.5 - y * 0.2 : (Math.floor(y / 4) % 2 ? 1.5 : 2.5));
-      p.R(0, 0, 8, 2, P, 5); p.R(1, 0, 1, 32, P, 3.5);
+      for (let y = 0; y < 32; y++) p.R(0, y, 8, 1, P, y < 5 ? 5 : (Math.floor(y / 5) % 2 ? 2 : 4));
+      p.R(1, 0, 2, 32, P, 4.5); p.R(6, 0, 2, 32, P, 1);
     });
-    const m = mat('spine', T, { rough: 0.45 });
-    for (let i = 0; i < 9; i++) {
-      const a = (i - 4) * 0.16, l = 0.72 - Math.abs(i - 4) * 0.04 + (i % 2) * 0.06;
-      b.add(cone(0.03, l, 4), m, [Math.sin(a) * l * 0.5, -0.3 + Math.cos(a) * l * 0.5, (i % 3 - 1) * 0.05], [(i % 3 - 1) * 0.25, 0, -a]);
+    const m = mat('spine', T, { rough: 0.4 });
+    for (let i = 0; i < 7; i++) {
+      const a = (i - 3) * 0.26, l = 0.78 - Math.abs(i - 3) * 0.05 + (i % 2) * 0.05;
+      b.add(cone(0.065, l, 5), m, [Math.sin(a) * l * 0.5, -0.2 + Math.cos(a) * l * 0.5, (i % 3 - 1) * 0.07], [(i % 3 - 1) * 0.2, 0, -a]);
+      b.add(cone(0.05, 0.18, 4), m, [-Math.sin(a) * 0.08, -0.29 - Math.cos(a) * 0.08, (i % 3 - 1) * 0.05], [Math.PI, 0, -a]);
     }
-    b.add(ball(0.11, 8, 5, [0, 0, 1, 1]), mat('urchinTest', tx('urchinTest', 16, 16, (p) => { p.all(P, 2); for (let y = 2; y < 16; y += 4) for (let x = (y % 8 === 2 ? 0 : 2); x < 16; x += 4) { p.t(x, y, P, 4.5); p.t(x + 1, y + 1, P, 0.5); } }), { rough: 0.6 }), [0, -0.38, 0], [0, 0, 0], [1.3, 0.7, 1.1]);
-    b.add(torus(0.07, 0.026, 4, 10), mat('twine', tx('twine', 32, 8, (p) => p.rope(0, 0, 32, 8, pal('#c8a46a'))), { rough: 0.9 }), [0, -0.2, 0], [Math.PI / 2, 0, 0]);
-    b.add(tube([[0.05, -0.2, 0.07], [0.14, -0.27, 0.1], [0.2, -0.36, 0.08]], 0.016, { radial: 3, segs: 5 }), mat('twine', null));
+    b.add(torus(0.12, 0.045, 4, 10), S.twine(), [0, -0.22, 0], [Math.PI / 2 + 0.1, 0, 0]);
+    b.add(tube([[0.08, -0.22, 0.11], [0.18, -0.3, 0.14], [0.24, -0.42, 0.12]], 0.025, { radial: 3, segs: 5 }), S.twine());
+    b.add(tube([[0.03, -0.22, 0.12], [0.07, -0.34, 0.14], [0.03, -0.46, 0.12]], 0.025, { radial: 3, segs: 5 }), S.twine());
   },
 
   // ---------------------------------------------------------------- a double-terminated mana crystal, floating, with chips
@@ -482,13 +462,13 @@ export const MATERIAL_MODELS: Record<string, Build> = {
 
   // ---------------------------------------------------------------- a cockle shell: ribs, bands, growth lines
   seashell(b) {
-    const S = PAL.shell;
+    const SP = PAL.shell;
     const T = tx('cockle', 36, 32, (p) => {
       for (let y = 0; y < 32; y++) for (let x = 0; x < 36; x++) {
         const rib = x % 2 ? 4 : 2.5, band = Math.floor((31 - y) / 5) % 2 ? 0 : -0.5;
-        p.t(x, y, (Math.floor((31 - y) / 7) % 2) ? S : PAL.orange, rib + band);
+        p.t(x, y, (Math.floor((31 - y) / 7) % 2) ? SP : PAL.orange, rib + band);
       }
-      for (let y = 4; y < 32; y += 5) p.R(0, y, 36, 1, S, 1.5);
+      for (let y = 4; y < 32; y += 5) p.R(0, y, 36, 1, SP, 1.5);
       p.R(0, 0, 36, 2, PAL.leather, 2);
       p.R(0, 28, 36, 4, PAL.purple, 2.5);
     });
@@ -498,22 +478,11 @@ export const MATERIAL_MODELS: Record<string, Build> = {
 };
 
 // ------------------------------------------------------------------ helpers
-function leadPage() {
-  return tx('lead', 32, 32, (p) => {
-    p.all(PAL.lead, 3);
-    for (let y = 0; y < 32; y += 6) p.R(0, y, 32, 1, PAL.lead, 2.5);
-    p.R(0, 0, 32, 4, PAL.lead, 4); p.R(0, 26, 32, 6, PAL.lead, 2);
-    for (const [x, y] of [[8, 12], [11, 12], [22, 18], [25, 18]] as V2[]) { p.t(x, y, PAL.lead, 1); p.t(x, y + 1, PAL.lead, 4.5); }
-    p.scratch(4, 8, 7, PAL.lead, 0.25); p.scratch(18, 24, 6, PAL.lead, -0.2);
-    p.R(5, 5, 4, 2, PAL.lead, 5);
-  });
-}
 /** a palette tone as an RGB for ellipse / poly callbacks */
-function hexOf(p: Pal, t: number) { return tcRGB(p, t); }
-import { tc as tcRGB } from './paint';
+function hexOf(p: Pal, t: number) { return tc(p, t); }
 
 /** crystal points rising from a base: [x, z, h, r, tiltZ, tiltX] */
-function crystals(b: import('./kit').B, key: string, P: Pal, cs: number[][], base: number, glow: number) {
+function crystals(b: B, key: string, P: Pal, cs: number[][], base: number, glow: number) {
   const T = tx('xtal:' + key, 32, 48, (p: Pt) => {
     for (let y = 0; y < 48; y++) for (let x = 0; x < 32; x++) p.t(x, y, P, y > 40 ? 1.5 : y > 28 ? 2.5 : y > 12 ? 3 : 4);
     for (const x of [5, 13, 21, 28]) p.R(x, 10, 1, 34, P, 2);
@@ -523,4 +492,3 @@ function crystals(b: import('./kit').B, key: string, P: Pal, cs: number[][], bas
   const m = mat('xtal:' + key, T, { rough: 0.15, metal: 0.1, emissive: P[3], ek: glow });
   for (const [x, z, h, r, tz, tx2] of cs) b.add(prism(r, h, 6, 0.3, { rTop: r * 0.92 }), m, [x, base, z], [tx2, x * 3, tz]);
 }
-void cbox; void TAU;
