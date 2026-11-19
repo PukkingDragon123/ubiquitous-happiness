@@ -44,6 +44,13 @@ an oilcloth satchel, a pinned waterproof card — readable at a glance, satisfyi
 - **3D objects where they add life**: item models (src/backpack/models.ts `itemModel`), skill cards
   (src/ui/obj/cards.ts), the blobfish avatar, coins/keys as tiny turning models — via `src/ui/obj/stage.ts`.
 
+## Detail (user, 2026-11-19: "UI isn't detailed enough, I want detailed texture")
+Every UI surface carries rich hand-authored pixel texture, never a flat fill: wood with grain lines, knots, plank
+seams and worn edges; brass with engraved borders, rivets, patina in recesses and polished bands; paper/oilcloth with
+fibre lines, a fold, a stain edge and stitched or tacked borders; leather with stitching and edge burnish; buttons
+with 4–6 tone bevels and engraved label plates. Detail is structured and placed on purpose (no random noise / dither /
+speckle), uses hue-shifted ramps, the 2x canvas density where available, and never fights the text.
+
 ## Owners (v5 UI pass) — edit only your files; ask the lead for anything else
 | Area | Owner |
 | --- | --- |
