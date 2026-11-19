@@ -6,7 +6,8 @@
 // key hints, banners) and the 3D objects on their layers (HUD instruments, the avatar, item models) -- and picks the
 // free LANE it likes best: bottom-centre above the key hints first, then tucked down the right side under the top
 // instruments, then top-centre, then the left side. It slides in from the nearest edge, glides aside if a panel opens
-// under it, and shrinks to a compact one-line card when nothing full-size fits.
+// under it, shrinks to a compact one-line card when nothing full-size fits, and when nothing fits at all (the bag is
+// open) it waits -- or ducks out with its clock paused -- until a lane frees up.
 import type { Game } from '../game/game';
 import { PixelUI } from '../ui/pixel/ui';
 import { KIT } from '../ui/pixel/skins';
@@ -47,13 +48,13 @@ export class Toasts {
     if (key !== this.size) { this.size = key; this.ui.resize(g.w, g.h, pr); if (this.cur) this.cur.lane = null; }
     const c = this.cur;
     dt = Math.min(dt, 0.1);
-    // it only starts (jingle and all) once there is a free lane; after 25 s it takes the least crowded one anyway
+    // it only starts (jingle and all) once there is a free lane (a safety valve after 2 minutes takes the least crowded)
     if (!c.started) {
       c.wait += dt; c.checkT -= dt;
       if (c.checkT > 0) return null;
       c.checkT = 0.3;
       const lane = this.choose(c.ach, c.reward);
-      if (lane.cost >= 100 && c.wait < 25) return null;
+      if (lane.cost >= 100 && c.wait < 120) return null;
       c.started = true; c.lane = lane; c.x = lane.x; c.y = lane.y;
       audio.play('jin_rare1', { vol: 0.55, dry: true });
       audio.play('pickup_sparkle1', { vol: 0.35, dry: true, delay: 0.25 });
