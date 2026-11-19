@@ -100,3 +100,104 @@ export function canvasPlane(cv: HTMLCanvasElement, w = cv.width, h = cv.height):
   m.tex = tex;
   return m;
 }
+
+/**
+ * v5: a 2D pixel canvas drawn UNDER the 3D objects of a host PixelUI's layer (the host's own canvas stays on top),
+ * so a screen can lay plates / panel frames, then 3D miniatures, then text, all in one overlay:
+ *
+ *   const under = new UnderLayer();
+ *   each frame (after host.begin()):  under.begin(host, dt); ...under.ui.fill() / img()...; under.end()
+ *
+ * The under canvas is a second PixelUI (same size and scale as the host, no input of its own) whose quad is moved
+ * into the host's scene and drawn FIRST in the opaque pass (renderOrder -100, blended by hand), so every opaque or
+ * transparent 3D object on the host's stage draws over it.
+ */
+export class UnderLayer {
+  ui: PixelUI;
+  private mounted: THREE.Scene | null = null;
+  private dev = [0, 0];
+  private quad: THREE.Mesh | null = null;
+  constructor(private order = -100) {
+    // constructed lazily from the host's class so this module needs no runtime import of the kit
+    this.ui = null as unknown as PixelUI;
+  }
+  begin(host: PixelUI, dt: number) {
+    if (!this.ui) this.ui = new (host.constructor as new () => PixelUI)();
+    const [dw, dh] = host.deviceSize;
+    if (dw !== this.dev[0] || dh !== this.dev[1]) { this.dev = [dw, dh]; this.ui.resize(dw, dh, 1); }
+    if (!this.quad) {
+      const q = this.ui.layer.scene.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+      if (q) {
+        const m = q.material as THREE.MeshBasicMaterial;
+        m.transparent = false; m.blending = THREE.CustomBlending;
+        m.blendSrc = THREE.SrcAlphaFactor; m.blendDst = THREE.OneMinusSrcAlphaFactor;
+        m.blendSrcAlpha = THREE.OneFactor; m.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+        m.needsUpdate = true;
+        q.renderOrder = this.order;
+        this.quad = q;
+      }
+    }
+    if (this.quad && this.mounted !== host.layer.scene) { host.layer.scene.add(this.quad); this.mounted = host.layer.scene; }
+    if (this.quad) this.quad.visible = true;
+    this.ui.begin(null, dt);
+  }
+  end() { this.ui?.end(); }
+  /** hide (a screen that stops drawing it) */
+  hide() { if (this.quad) this.quad.visible = false; }
+}
+
+/**
+ * v5: painted 2D canvases (plates, panel skins, slot frames, the strip map) drawn as crisp planes BEHIND a stage's
+ * 3D objects, in UI pixels, immediate-mode (no full-screen canvas upload: each canvas is a cached texture):
+ *
+ *   const planes = new PlanePool(stage);
+ *   each frame:  planes.begin(); planes.draw(cv, x, y); ... planes.end();      x / y: top-left in UI px
+ *
+ * Later draws stack on top of earlier ones; all of them sit behind anything put on the stage (z < -300), and the
+ * host PixelUI's canvas (text, bars) still draws over everything.
+ */
+export class PlanePool {
+  group = new THREE.Group();
+  private meshes: THREE.Mesh[] = [];
+  private used = 0;
+  private texs = new WeakMap<HTMLCanvasElement, THREE.CanvasTexture>();
+  private geo = new THREE.PlaneGeometry(1, 1);
+  constructor(stage: UiStage) { this.group.name = 'planes'; stage.root.add(this.group); }
+  /** start a frame: everything drawn last frame is hidden until drawn again */
+  begin() { this.used = 0; for (const m of this.meshes) m.visible = false; }
+  /** the cached texture of a canvas (dirty: re-upload it) */
+  tex(cv: HTMLCanvasElement, dirty = false) {
+    let t = this.texs.get(cv);
+    if (!t) {
+      t = new THREE.CanvasTexture(cv);
+      t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace;
+      this.texs.set(cv, t);
+    } else if (dirty) t.needsUpdate = true;
+    return t;
+  }
+  /** draw canvas `cv` with its top-left at UI px (x, y); w / h default to the canvas size; dirty re-uploads it */
+  draw(cv: HTMLCanvasElement, x: number, y: number, o: { w?: number; h?: number; z?: number; alpha?: number; dirty?: boolean; tint?: string; shadow?: number } = {}): THREE.Mesh {
+    // a soft drop shadow: the same silhouette in ink, offset down-right, under it
+    if (o.shadow) this.draw(cv, x + o.shadow, y + o.shadow, { w: o.w, h: o.h, z: o.z, alpha: (o.alpha ?? 1) * 0.4, tint: '#000000' });
+    const tex = this.tex(cv, o.dirty);
+    let m = this.meshes[this.used];
+    if (!m) {
+      m = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ transparent: true, toneMapped: false, depthWrite: false }));
+      m.frustumCulled = false; this.group.add(m); this.meshes.push(m);
+    }
+    const mat = m.material as THREE.MeshBasicMaterial;
+    if (mat.map !== tex) { const had = !!mat.map; mat.map = tex; if (!had) mat.needsUpdate = true; }
+    const a = o.alpha ?? 1;
+    mat.opacity = a; mat.color.set(o.tint ?? '#ffffff');
+    const w = o.w ?? cv.width, h = o.h ?? cv.height;
+    m.scale.set(w, h, 1);
+    m.position.set(Math.round(x) + w / 2, -(Math.round(y) + h / 2), (o.z ?? -300) + this.used * 0.05);
+    m.visible = a > 0.003;
+    m.renderOrder = -50 + this.used * 0.001;
+    this.used++;
+    return m;
+  }
+  end() { for (let i = this.used; i < this.meshes.length; i++) this.meshes[i].visible = false; }
+  /** hide everything (a screen that stops drawing) */
+  clear() { this.begin(); this.end(); }
+}

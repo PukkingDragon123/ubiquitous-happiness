@@ -1,22 +1,37 @@
-// The dungeon run's HUD layer: agent L's Hud (src/ui/hud3.ts: hearts, stamina, flasks, counters, the strip map,
-// the boss bar, title cards, pickup streaks) drawn into one PixelUI together with the run's own interactive bits:
-// [key] prompts anchored in the world, the post office's mail picker and the pause menu.
+// The dungeon run's HUD layer: the instrument HUD (src/ui/hud3.ts: porthole + hearts, bars, flasks, the resource
+// strip, the navigation instrument, the boss, title cards, pickup cards) drawn into one PixelUI together with the
+// run's own interactive bits, all in the v5 "diver's kit":
+//   PROMPTS     a lacquered tag over the thing you can use: [E] + one verb, a cream note with the long text for a
+//               moment; at Mr. Crab's stands a SHOP CARD (the item, its rarity, two stat lines, the price, BUY)
+//   POST OFFICE the manatee's mail panel: your pack as 3D models in slots (click to pick, a POST stamp on picked
+//               ones, a house mark on what home needs), six parcel stamps for her bag, the "builds at home" list with
+//               before / after bars, SEND / ALL MATERIALS / DONE
+//   PAUSE       a kit panel: where you are, RESUME / BACKPACK / QUIT TO HOME, the run-is-saved note
 //
 //   const hud = new DungeonHud();  overlays: [..., hud.ui.layer];  hud.resize(w, h, pr)
-//   const act = hud.draw(dt, state, input)   -> 'resume' | 'bag' | 'quit' | 'mail:send' | 'mail:close' | 'mail:<uid>' | null
-//   hud.l.title(...) / hud.l.pickup(id) / hud.l.flash('pack')
+//   const act = hud.draw(dt, state, input)   -> 'resume' | 'bag' | 'quit' | 'mail:send' | 'mail:close' | 'mail:mats' | 'mail:<uid>' | null
+//   hud.l.title(...) / hud.l.areaCard(...) / hud.l.pickup(id) / hud.l.flash('pack')
 import { PixelUI } from '../ui/pixel/ui';
 import { Hud, type HudData } from '../ui/hud3';
 import * as THREE from 'three';
 import { itemModel } from '../backpack/models';
 import { contactShadow } from '../ui/obj/stage';
 import { audio } from '../audio/audio';
-import { ITEMS, getItem } from '../game/items';
+import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
+import { skin, PAD } from '../ui/pixel/skins';
+import { closeArt } from '../ui/pixel/art';
+import { PAL, plate, bigText, bigMeasure, bar, GLYPH, solid } from '../ui/obj/plates';
+import { ramp } from '../ui/obj/pixtex';
+import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
 
 export interface HudAnchor { x: number; y: number; on: boolean }
-export interface Prompt { key: string; label: string; at?: HudAnchor; bad?: boolean }
+export interface Prompt {
+  key: string; label: string; at?: HudAnchor; bad?: boolean;
+  /** a shop stand: the goods (an item id, or 'heart' | 'key' | 'bomb') and the price in pearls; `bad` = can't afford */
+  shop?: { id: string; name: string; price: number };
+}
 /** the post office: what's in the pack, what's picked, how many parcels her bag still takes, and what it builds */
 export interface MailState {
   items: ItemInst[]; picked: Set<number>;
@@ -39,7 +54,7 @@ export interface DepthHud {
   deeper: boolean; descending: boolean;
 }
 
-/** everything the dungeon HUD shows: L's HudData + the run's prompts and menus */
+/** everything the dungeon HUD shows: the instrument HudData + the run's prompts and menus */
 export interface DungeonHudState {
   data: HudData;
   prompt: Prompt | null;
@@ -47,26 +62,22 @@ export interface DungeonHudState {
   mail: MailState | null;
   /** "SUNLIT REEF · -32 M · FLOOR 1" for the pause menu */
   where: string;
-  /** the depth gauge (also handed to L's Hud as data.depth) */
+  /** the depth gauge (also handed to the Hud as data.depth) */
   depth: DepthHud;
   /** a full-screen card is up (the run summary): the HUD tucks away and the cursor shows */
   menu?: boolean;
 }
 
-const C = { white: '#f4f0e6', red: '#ff6a5a', ink: '#06080e' };
+const INK = '#2a1a0c', INK_DIM = '#6a5638';
 
 export class DungeonHud {
   ui = new PixelUI();
   l = new Hud();
   private t = 0;
-  /** design (360-row) units -> UI px */
-  private k = 1;
-  private promptKey = ''; private promptT = 0;
-  private journal = new THREE.Group();
-  private bag = new THREE.Group();
-  private tag = new THREE.Group();
+  private promptKey = ''; private promptT = 0; private promptA = 0;
   private mailModels = new Map<number, THREE.Object3D>();
-  private built = false;
+  private mailT = 0; private pauseT = 0;
+  private mailHover = -1;
   resize(w: number, h: number, pr: number) { this.ui.resize(w, h, pr); this.l.resize(w, h, pr); }
 
   draw(dt: number, s: DungeonHudState, input: Parameters<PixelUI['begin']>[0], extra?: (ui: PixelUI) => void): string | null {
@@ -74,213 +85,293 @@ export class DungeonHud {
     ui.drawCursor = s.paused || !!s.mail || !!s.menu;
     ui.begin(input, dt);
     this.t += dt;
-    // menus are physical objects: the HUD tucks itself away while the journal / mailbag is open
-    // the depth gauge's data rides along as data.depth (agent L's brass gauge reads it)
+    // the depth gauge's data rides along as data.depth; menus tuck the instruments away
     const data = { ...s.data, depth: s.depth } as HudData;
-    this.l.drawInto(ui, dt, s.paused || s.mail || s.menu ? { ...data, hidden: true } : data);
-    // (the depth reads once, on the brass gauge's plaque: no separate counter)
-    this.k = Math.max(1, ui.h / 360);
-    this.journal.visible = s.paused && !s.mail; this.bag.visible = !!s.mail; this.tag.visible = false;
+    this.l.drawInto(ui, dt, s.paused || s.mail || s.menu ? { ...data, hidden: true, menu: true } : data);
     for (const [uid, m] of this.mailModels) if (!s.mail?.items.some((i) => i.uid === uid)) { m.removeFromParent(); this.mailModels.delete(uid); }
     let out: string | null = null;
-    if (s.prompt && !s.paused && !s.mail && !s.menu) this.prompt(s.prompt);
+    this.mailT = s.mail ? this.mailT + dt : 0;
+    this.pauseT = s.paused ? this.pauseT + dt : 0;
+    if (s.prompt && !s.paused && !s.mail && !s.menu) this.prompt(s.prompt, dt); else { this.promptA = 0; this.promptKey = ''; }
     extra?.(ui);
-    if (s.mail) out = this.mailPicker(s.mail);
-    if (s.paused) out = this.pauseMenu(s) ?? out;
+    if (s.mail) out = this.mailPanel(s.mail);
+    if (s.paused) out = this.pauseCard(s) ?? out;
     ui.end();
     return out;
   }
 
-  /** build the physical pieces once (on the HUD's stage) */
-  private build() {
-    if (this.built) return;
-    this.built = true;
-    const st = this.l.stage.ui;
-    const M = (c: string, rough = 0.75, metal = 0) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: metal, flatShading: true });
-    // the [key] prompt: a small brass tag
-    const tagBody = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 2), M('#c89a4a', 0.35, 0.7)); tagBody.name = 'body';
-    const tagIn = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.6), M('#3a2410', 0.6)); tagIn.position.z = 1.2; tagIn.name = 'inset';
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(2, 0.6, 4, 8), M('#c89a4a', 0.35, 0.7)); ring.name = 'ring';
-    this.tag.add(tagBody, tagIn, ring); st.add(this.tag);
-    // the pause journal: an open leather-bound logbook with a ribbon
-    const cover = new THREE.Mesh(new THREE.BoxGeometry(272, 164, 4), new THREE.MeshStandardMaterial({ map: leatherTex('#5a2e16'), roughness: 0.8 })); cover.position.z = -2;
-    const spine = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 160, 6), M('#3a1a0c', 0.8)); spine.position.z = 1;
-    const pm = new THREE.MeshStandardMaterial({ map: pageTex(), roughness: 0.95 });
-    for (const sx of [-1, 1]) { const pg = new THREE.Mesh(new THREE.BoxGeometry(128, 152, 3, 4, 1, 1), pm); const pos = pg.geometry.attributes.position as THREE.BufferAttribute; for (let i = 0; i < pos.count; i++) { const x = pos.getX(i) / 64; pos.setZ(i, pos.getZ(i) + (1 - (x * sx + 1) / 2) * 4); } pg.geometry.computeVertexNormals(); pg.position.set(sx * 66, 0, 2); this.journal.add(pg); }
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(5, 40, 1), M('#a81c24', 0.7)); rib.position.set(30, -96, 4); rib.rotation.z = 0.08;
-    for (const [x, y] of [[-134, 80], [134, 80], [-134, -80], [134, -80]]) { const c = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 5), M('#d8a038', 0.35, 0.7)); c.position.set(x, y, 0); this.journal.add(c); }
-    this.journal.add(cover, spine, rib);
-    st.add(this.journal);
-    // the manatee's mailbag: a stitched canvas satchel, flap open, a brass clasp and a postage label
-    const bagBody = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 8), new THREE.MeshStandardMaterial({ map: canvasTex(), roughness: 0.9 })); bagBody.name = 'body';
-    const bagRim = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 6), M('#4a3018', 0.8)); bagRim.name = 'rim'; bagRim.position.z = -2;
-    const flap = new THREE.Mesh(new THREE.BoxGeometry(1, 22, 6), new THREE.MeshStandardMaterial({ map: leatherTex('#6a4a2a'), roughness: 0.85 })); flap.name = 'flap';
-    const clasp = new THREE.Mesh(new THREE.BoxGeometry(14, 10, 4), M('#d8a038', 0.35, 0.7)); clasp.name = 'clasp';
-    const label = new THREE.Mesh(new THREE.BoxGeometry(1, 13, 2), M('#f0e2c0', 0.9)); label.name = 'label';
-    this.bag.add(bagRim, bagBody, flap, clasp, label);
-    st.add(this.bag);
-  }
+  /** UI px per design unit (the UI is ~360 rows tall; taller windows get proportionally bigger panels) */
+  private get k() { return Math.max(1, this.ui.h / 360); }
 
-  /** a plain depth readout until L's brass gauge reads data.depth */
-  private depthCounter(d: DepthHud) {
+  // ---------------------------------------------------------------- the [key] prompt tag / the shop card
+  private prompt(p: Prompt, dt: number) {
     const ui = this.ui;
-    const t = `-${Math.round(d.m)} M`;
-    const x = ui.w - 8, y = 104;
-    ui.text(t, x, y, { font: 'title', color: d.descending ? '#9fe8ff' : '#f4f0e6', outline: '#06080e', align: 'right' });
-    ui.text(d.record > 0 ? `BEST -${Math.round(Math.max(d.record, d.runMax))} M` : d.zone.toUpperCase(), x, y + ui.lh('title'), { font: 'small', color: '#9aa8b8', outline: '#06080e', align: 'right' });
-  }
-
-  private prompt(p: Prompt) {
-    const ui = this.ui, k = this.k;
-    this.build();
-    const short = shortLabel(p.label);
     const full = p.label.trim();
-    if (full !== this.promptKey) { this.promptKey = full; this.promptT = 0; }
-    this.promptT += 1 / 60;
+    if (full !== this.promptKey) { this.promptKey = full; this.promptT = 0; this.promptA = Math.min(this.promptA, 0.4); }
+    this.promptT += dt;
+    this.promptA = Math.min(1, this.promptA + dt * 6);
     const at = p.at && p.at.on ? p.at : { x: ui.w / 2, y: ui.h - 70, on: true };
-    const lw = ui.measure(short, 'body');
-    const kw = p.key ? ui.keycap(p.key, 0, -100) : 0;
-    const w = lw + (kw ? kw + 5 : 0) + 12, h = 17;
-    const x = Math.round(Math.max(4, Math.min(ui.w - w - 4, at.x - w / 2))), y = Math.round(Math.max(4, at.y - 28));
-    // the tag hangs from a little ring and sways a touch (3D in design units, text in UI px)
-    this.tag.visible = true;
-    (this.tag.getObjectByName('body') as THREE.Mesh).scale.set(w / k, h / k, 1);
-    (this.tag.getObjectByName('inset') as THREE.Mesh).scale.set((w - 4) / k, (h - 4) / k, 1);
-    (this.tag.getObjectByName('ring') as THREE.Mesh).position.set(0, h / k / 2 + 1.5, 0);
-    this.tag.rotation.z = Math.sin(this.t * 2.2) * 0.03;
-    this.l.stage.put(this.tag, (x + w / 2) / k, (y + h / 2) / k, 60);
-    if (kw) ui.keycap(p.key, x + 6, y + 3, true);
-    ui.text(short, x + 6 + (kw ? kw + 5 : 0), y + 3, { font: 'body', color: p.bad ? C.red : '#fff0c8', outline: '#1a0c04' });
-    // the longer explanation, when there is one: a scrap of paper pinned under the tag for a moment
-    if (full.toUpperCase() !== short && full.length > short.length + 3 && this.promptT < 2.4) {
-      const lines = wrap(full.replace(/^[A-Z ]+:\s*/, (m0) => (m0.includes(':') ? '' : m0)), 'small', 150);
-      const nw = Math.max(...lines.map((l) => ui.measure(l, 'small'))) + 10, nh = lines.length * 10 + 6;
-      const nx = Math.round(Math.max(4, Math.min(ui.w - nw - 4, x + w / 2 - nw / 2))), ny = y + h + 3;
-      const a = Math.min(1, (2.4 - this.promptT) * 3);
-      ui.fill(nx + 2, ny + 2, nw, nh, '#000000', 0.3 * a);
-      ui.fill(nx, ny, nw, nh, '#ecdcb4', a); ui.fill(nx, ny, nw, 1, '#fff4d8', a); ui.fill(nx, ny + nh - 1, nw, 1, '#b89a6a', a);
-      ui.fill(nx + nw / 2 - 1, ny - 1, 3, 3, '#a81c24', a);
-      lines.forEach((l, i) => ui.text(l, nx + 5, ny + 4 + i * 10, { font: 'small', color: '#3a2410', shadow: null, alpha: a }));
+    if (p.shop) { this.shopCard(p, at); return; }
+    const short = shortLabel(p.label);
+    const a = this.promptA, pop = 1 - (1 - a) ** 3;
+    const kw = p.key ? ui.keycap(p.key, -999, -999) : 0;
+    const tw = ui.measure(short, 'body');
+    const w = Math.round(tw + (kw ? kw + 6 : 0) + 16), h = 20;
+    const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2))), y = Math.round(Math.max(6, at.y - 34)) + Math.round((1 - pop) * 6);
+    const rim = p.bad ? PAL.coral : PAL.brass;
+    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x + 2, y + 2, { alpha: 0.35 * a });
+    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x, y, { alpha: a });
+    // a little pointer down to the thing
+    const px = Math.round(Math.max(x + 6, Math.min(x + w - 7, at.x)));
+    for (let i = 0; i < 4; i++) { ui.fill(px - 3 + i, y + h - 1 + i, 7 - i * 2, 1, PAL.ink2, a); if (i < 3) ui.fill(px - 2 + i, y + h - 1 + i, 5 - i * 2, 1, ramp(rim)[2], a); }
+    let cx = x + 8;
+    if (kw) { ui.keycap(p.key, cx, y + Math.round((h - 13) / 2)); cx += kw + 6; }
+    ui.text(short, cx, y + Math.round((h - ui.cap('body')) / 2), { font: 'body', color: p.bad ? PAL.coral2 : PAL.cream, alpha: a });
+    // the longer explanation, when there is one: a cream note pinned under the tag for a moment
+    const rest = full.replace(/^[A-Z ]+:\s*/, (m0) => (m0.includes(':') ? '' : m0));
+    if (full.toUpperCase() !== short && full.length > short.length + 3 && this.promptT < 3) {
+      const lines = wrap(rest, 'small', 170, ui.hd);
+      const nw = Math.round(Math.max(...lines.map((l) => ui.measure(l, 'small'))) + 14), nh = lines.length * ui.lh('small') + 9;
+      const nx = Math.round(Math.max(6, Math.min(ui.w - nw - 6, x + w / 2 - nw / 2))), ny = y + h + 6;
+      const na = Math.min(1, (3 - this.promptT) * 3, (this.promptT - 0.15) * 6);
+      if (na > 0) {
+        ui.frame('paper', nx, ny, nw, nh, na);
+        lines.forEach((l, i) => ui.text(l, nx + 7, ny + 5 + i * ui.lh('small'), { font: 'small', color: INK, shadow: null, alpha: na }));
+      }
     }
   }
 
-  private mailPicker(m: MailState): string | null {
-    const ui = this.ui;
-    this.build();
-    // the bag grows sideways for a big pack (v4's larger grid) so it never runs off the screen
-    const cols = Math.min(10, Math.max(6, Math.ceil(m.items.length / 6))), cell = 36;
-    const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
-    const rows = Math.max(1, Math.ceil(m.items.length / cols));
-    const w = Math.max(290, cols * cell + 32), h = rows * cell + 86;
-    const x = Math.round((ui.w - w) / 2), y = Math.round((ui.h - h) / 2) + 8;
-    const st = this.l.stage, k = this.k;
-    (this.bag.getObjectByName('body') as THREE.Mesh).scale.set(w / k, h / k, 1);
-    (this.bag.getObjectByName('rim') as THREE.Mesh).scale.set((w + 8) / k, (h + 8) / k, 1);
-    const flap = this.bag.getObjectByName('flap') as THREE.Mesh; flap.scale.x = (w - 10) / k; flap.position.set(0, h / k / 2 + 8, 2); flap.rotation.x = -0.5;
-    const clasp = this.bag.getObjectByName('clasp') as THREE.Mesh; clasp.position.set(0, h / k / 2 - 2, 7);
-    const label = this.bag.getObjectByName('label') as THREE.Mesh; label.scale.x = (w - 40) / k; label.position.set(0, (h / 2 - 20) / k, 5);
-    this.bag.rotation.set(-0.06 + Math.sin(this.t * 0.9) * 0.01, Math.sin(this.t * 0.7) * 0.02, 0);
-    st.put(this.bag, (x + w / 2) / k, (y + h / 2) / k, 80);
-    ui.text('THE MANATEE\'S MAILBAG', x + w / 2, y - 26, { font: 'title', color: '#ffe8c0', outline: '#1a0c04', align: 'center' });
-    ui.text(`${m.used}/${m.capacity} PARCELS · CLICK TO PICK`, x + w / 2, y + 9, { font: 'small', color: m.used > m.capacity ? '#c8283a' : '#3a2410', shadow: null, align: 'center' });
+  /** Mr. Crab's stand: what it is, what it does, what it costs */
+  private shopCard(p: Prompt, at: HudAnchor) {
+    const ui = this.ui, sh = p.shop!;
+    const d = ITEMS[sh.id];
+    const col = d ? RARITY_COLOR[d.rarity] : PAL.cream;
+    const name = d ? d.name : sh.name;
+    const kind = d ? `${d.rarity} ${d.kind}`.toUpperCase() : sh.id === 'heart' ? 'HEALS ONE HEART' : sh.id === 'key' ? 'OPENS A LOCKED CHEST' : 'BLASTS CRACKED ROCK';
+    const lines = d ? statLines(sh.id, 1).slice(0, 2).map((l) => l.text) : [];
+    if (d && !lines.length) lines.push(...wrap(d.desc, 'small', 150, ui.hd).slice(0, 2));
+    const a = this.promptA, pop = 1 - (1 - a) ** 3;
+    const tw = Math.max(ui.measure(name, 'title'), ui.measure(kind, 'small'), ...lines.map((l) => ui.measure(l, 'small')));
+    const w = Math.round(Math.max(190, tw + 64));
+    const head = 10 + ui.lh('title') + ui.lh('small') * (1 + lines.length);
+    const h = Math.round(Math.max(54, head) + 32);
+    // under the stand (the seabed's foreground is quiet), a pointer up to it; kept clear of the HUD's top row
+    const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2)));
+    const y = Math.round(Math.max(96, Math.min(ui.h - h - 8, at.y + 16))) + Math.round((1 - pop) * 8);
+    ui.img(skin('wood', w, h), x + 3, y + 3, { alpha: 0.35 * a });
+    ui.img(skin('wood', w, h), x, y, { alpha: a });
+    const px = Math.round(Math.max(x + 12, Math.min(x + w - 13, at.x)));
+    for (let i = 0; i < 6; i++) ui.fill(px - i, y - 1 - i + 1, i * 2 + 1, 1, i === 5 ? PAL.ink2 : '#2a6b6f', a);
+    const ix = x + 11, iy = y + 11;
+    ui.img(skin('slot', 38, 38), ix, iy, { alpha: a });
+    if (d) ui.item(sh.id, ix + 3, iy + 3, 32, 32, 1, a);
+    else { const g = hudArt(sh.id === 'heart' ? 'heart' : sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
+    const tx = ix + 46;
+    ui.text(name, tx, iy - 1, { font: 'title', color: ramp(col)[4], alpha: a });
+    let ly = iy - 1 + ui.lh('title');
+    ui.text(kind, tx, ly, { font: 'small', color: PAL.dim, alpha: a }); ly += ui.lh('small');
+    for (const l of lines) { ui.text(l, tx, ly, { font: 'small', color: PAL.kelp2, alpha: a }); ly += ui.lh('small'); }
+    // the price and BUY
+    const by = y + h - 27;
+    ui.fill(x + 9, by - 3, w - 18, 1, '#2a6b6f', a);
+    const can = !p.bad;
+    const pearl = this.pearlIcon();
+    ui.img(pearl, x + 13, by + 3, { alpha: a });
+    const pw = bigText(ui, String(sh.price), x + 13 + pearl.width + 4, by + 3, { cap: 12, color: can ? PAL.brass2 : PAL.coral, alpha: a });
+    ui.text('PEARLS', x + 13 + pearl.width + 8 + pw, by + 7, { font: 'small', color: PAL.dim, alpha: a });
+    if (can) {
+      const kw = ui.keycap(p.key || 'E', -999, -999);
+      const lw = ui.measure('BUY', 'title');
+      const bx = x + w - 13 - lw - kw - 6;
+      ui.keycap(p.key || 'E', bx, by + 4);
+      ui.text('BUY', bx + kw + 6, by + 2, { font: 'title', color: PAL.kelp2, alpha: a });
+    } else ui.text('NOT ENOUGH', x + w - 13, by + 5, { font: 'body', color: PAL.coral2, align: 'right', alpha: a });
+  }
+  private pearlCv: HTMLCanvasElement | null = null;
+  private pearlIcon() { if (!this.pearlCv) { const g = hudArt('pearl'); const c = document.createElement('canvas'); c.width = g.width * 2; c.height = g.height * 2; const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; x.drawImage(g, 0, 0, c.width, c.height); this.pearlCv = c; } return this.pearlCv; }
+
+  // ---------------------------------------------------------------- the post office
+  private mailPanel(m: MailState): string | null {
+    const ui = this.ui, L = this.l, st = L.stage, planes = L.planes;
+    const n = m.items.length;
+    const cell = 36, gap = 3;
+    const cols = Math.max(6, Math.min(9, Math.ceil(n / 4)));
+    const rows = Math.max(3, Math.min(5, Math.ceil(n / cols)));
+    const gridW = cols * (cell + gap) - gap, gridH = rows * (cell + gap) - gap;
+    const goalsW = 184, P = PAD.wood, pad = P[0] + 4;
+    const W = Math.min(ui.w - 12, gridW + goalsW + pad * 2 + 12);
+    const H = Math.min(ui.h - 20, gridH + 128);
+    const pop = 1 - (1 - Math.min(1, this.mailT * 6)) ** 3;
+    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + 6 + Math.round((1 - pop) * 16);
+    const a = Math.min(1, this.mailT * 7);
+    planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
+    ui.block(0, 0, ui.w, ui.h);
+    planes.draw(skin('wood', W, H), x, y, { alpha: a, shadow: 3 });
+    // the header: the title on a brass plaque over the top edge, one line of what this is, the close X
+    const title = 'POST OFFICE';
+    const tw = ui.measure(title, 'title');
+    planes.draw(skin('plaque', tw + 30, 25), x + 14, y - 11, { alpha: a });
+    ui.text(title, x + 29, y - 11 + Math.round((23 - ui.cap('title')) / 2), { font: 'title', color: INK, shadow: null, alpha: a });
     let out: string | null = null;
+    if (this.closeBtn('mail:x', x + W - 27, y + 6)) out = 'mail:close';
+    ui.text('The manatee mails your loot home. It stays safe even if you sink.', x + pad, y + 20, { font: 'small', color: PAL.dim, alpha: a });
+    // her bag: one stamp per parcel she still takes, the picked ones filled
+    const gx = x + pad, rowY = y + 36;
+    ui.text('PARCELS', gx, rowY + 3, { font: 'small', color: PAL.cream, alpha: a });
+    const cap0 = Math.max(m.capacity, m.used, 1);
+    const sx0 = gx + ui.measure('PARCELS', 'small') + 8;
+    const pc = GLYPH.parcel(), po = GLYPH.parcelOff(), sc = 2;
+    for (let i = 0; i < cap0; i++) {
+      const on = i < m.used, over = i >= m.capacity;
+      const bump = on && i === m.used - 1 ? Math.max(0, 1 - this.lastPick * 5) : 0;
+      ui.img(on ? pc : po, sx0 + i * (pc.width * sc + 3), rowY - Math.round(bump * 3), { w: pc.width * sc, h: pc.height * sc, alpha: a * (over ? 0.5 + 0.5 * Math.sin(this.t * 10) : 1) });
+    }
+    this.lastPick += 1 / 60;
+    const left = m.capacity - m.used;
+    const lx = sx0 + cap0 * (pc.width * sc + 3) + 4;
+    ui.text(m.used > m.capacity ? 'TOO MANY!' : left > 0 ? `${left} LEFT` : 'BAG FULL', lx, rowY + 3, { font: 'small', color: m.used > m.capacity ? PAL.coral2 : left > 0 ? PAL.dim : PAL.brass2, alpha: a });
+    // the pack: every item as a 3D model in a slot
+    const gy = rowY + 22;
+    planes.draw(skin('inset', gridW + 8, gridH + 8), gx - 4, gy - 4, { alpha: a });
+    const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
+    const kk = st.ui.scale.x || 1;
     m.items.forEach((it, i) => {
-      const ix = x + (w - cols * cell) / 2 + (i % cols) * cell, iy = y + 30 + Math.floor(i / cols) * cell;
+      if (i >= cols * rows) { const mo0 = this.mailModels.get(it.uid); if (mo0) mo0.visible = false; return; }
+      const ix = gx + (i % cols) * (cell + gap), iy = gy + Math.floor(i / cols) * (cell + gap);
       const on = m.picked.has(it.uid);
-      const hov = ui.hover(ix, iy, cell - 2, cell - 2);
+      const h = ui.hover(ix, iy, cell, cell);
+      ui.mark('mail:' + it.uid, ix, iy, cell, cell);
+      if (h) ui.cursor = 'point';
+      planes.draw(skin('slot', cell, cell), ix, iy, { alpha: a });
+      if (on) { ui.rect(ix - 1, iy - 1, cell + 2, cell + 2, PAL.ink2); ui.rect(ix, iy, cell, cell, PAL.brass2); ui.rect(ix + 1, iy + 1, cell - 2, cell - 2, PAL.brass); }
       let mo = this.mailModels.get(it.uid);
-      if (!mo) { mo = itemModel(it.id); const sh = contactShadow(1.0, 0.8, 0.5); sh.position.set(0.08, -0.08, -0.4); mo.add(sh); this.mailModels.set(it.uid, mo); }
+      if (!mo) { mo = itemModel(it.id); const sh2 = contactShadow(1.0, 0.8, 0.5); sh2.position.set(0.08, -0.08, -0.4); mo.add(sh2); st.ui.add(mo); this.mailModels.set(it.uid, mo); }
       const d = getItem(it.id);
       const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
-      mo.visible = true; // (the HUD hides every stage child while a menu is up: the bag shows its own)
-      mo.scale.setScalar(((cell - 6) / Math.max(cw, ch) / k) * (hov ? 1.12 : 1));
-      mo.rotation.set(0.3, -0.3 + (hov || on ? Math.sin(this.t * 2.5) * 0.4 : 0), 0);
-      st.put(mo, (ix + cell / 2 - 1) / k, (iy + cell / 2 - 1 - (on ? 3 : 0)) / k, 100 + (on ? 10 : 0));
-      if (on) { ui.fill(ix + cell - 16, iy + cell - 11, 15, 9, '#c8202a', 0.92); ui.text('POST', ix + cell - 15, iy + cell - 10, { font: 'small', color: '#fff0d8', shadow: null }); }
-      if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + 1, iy + cell - 10, { font: 'small', color: '#3a2410', shadow: null });
-      // a little house mark on materials the house still needs
-      if (needs.has(it.id)) { ui.fill(ix + 1, iy + 1, 9, 7, '#2a7a24', 0.9); ui.fill(ix + 3, iy - 1, 5, 2, '#2a7a24', 0.9); ui.fill(ix + 4, iy + 4, 3, 4, '#ecdcb4'); }
-      if (hov) {
+      mo.visible = a > 0.1;
+      mo.scale.setScalar(((cell - 9) / Math.max(cw, ch) / kk) * (h ? 1.15 : 1));
+      mo.rotation.set(0.3, -0.3 + (h || on ? Math.sin(this.t * 2.5) * 0.4 : 0), 0);
+      st.put(mo, (ix + cell / 2) / kk, (iy + cell / 2 - (on ? 2 : 0)) / kk, 100 + (on ? 10 : 0));
+      if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + cell - 3, iy + cell - ui.lh('small') + 1, { font: 'small', color: PAL.cream, align: 'right', alpha: a });
+      if (needs.has(it.id)) ui.img(GLYPH.house(), ix + 3, iy + 3, { alpha: a });
+      if (on) {
+        // the POST stamp on the corner
+        const sw = ui.measure('POST', 'small') + 6;
+        ui.fill(ix + cell - sw - 1, iy + 2, sw, 11, PAL.coral1, a); ui.fill(ix + cell - sw, iy + 3, sw - 2, 9, PAL.coral, a);
+        ui.text('POST', ix + cell - sw + 2, iy + 4, { font: 'small', color: PAL.paper, shadow: null, alpha: a });
+      }
+      if (h) {
         const cells = d.shape.length;
-        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [`${cells} cell${cells > 1 ? 's' : ''} · ${ITEMS[it.id]?.kind === 'material' ? 'builds the house' : 'to your stash'}`]));
-        if (ui.pressed) { out = 'mail:' + it.uid; audio.play('k_click1', { vol: 0.3, dry: true }); }
+        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [{ text: `${cells} cell${cells > 1 ? 's' : ''} - ${ITEMS[it.id]?.kind === 'material' ? (needs.has(it.id) ? 'home needs this!' : 'builds the house') : 'goes to your stash'}`, color: '#1a4a7a' }, { text: on ? 'click: take it back out' : 'click: post it home', color: '#6a5638' }]));
+        if (ui.pressed) { out = 'mail:' + it.uid; this.lastPick = 0; audio.play('k_click1', { vol: 0.3, dry: true }); }
       }
     });
-    if (!m.items.length) ui.text('YOUR PACK IS EMPTY', x + w / 2, y + 40, { font: 'small', color: '#3a2410', shadow: null, align: 'center' });
-    const by = y + h - 28;
-    if (ui.button('mail:send', m.picked.size ? `SEND ${m.picked.size}` : 'SEND', x + 14, by, w / 2 - 18, 18, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
-    if (ui.button('mail:close', 'DONE', x + w / 2 + 4, by, w / 2 - 18, 18, { style: 'wood', key: 'Escape' })) out = 'mail:close';
-    if (m.items.some((i) => ITEMS[i.id]?.kind === 'material') && ui.button('mail:mats', 'ALL MATERIALS', x + w / 2 - 50, y + h + 4, 100, 16, { style: 'wood', key: 'KeyA' })) out = 'mail:mats';
-    // what the parcel builds at home: the house's goal (and anything else it helps), counts before -> after
-    const gx = x + w + 10, gw = Math.min(170, ui.w - gx - 6);
-    if (m.goals.length && gw > 90) {
-      const lineH = 11;
-      const gh = 24 + m.goals.reduce((n, g) => n + 14 + g.lines.length * lineH, 0);
-      const gy = Math.max(6, y + h / 2 - gh / 2);
-      ui.fill(gx + 3, gy + 3, gw, gh, '#000000', 0.3);
-      ui.fill(gx, gy, gw, gh, '#ecdcb4'); ui.fill(gx, gy, gw, 1, '#fff4d8'); ui.fill(gx, gy + gh - 1, gw, 1, '#b89a6a');
-      ui.fill(gx + gw / 2 - 1, gy - 1, 3, 3, '#a81c24');
-      ui.text('BUILDS AT HOME', gx + gw / 2, gy + 5, { font: 'small', color: '#7a2a10', shadow: null, align: 'center' });
-      let yy = gy + 18;
-      for (const g of m.goals) {
-        const tag = g.ready && !g.readyBefore ? '  READY!' : g.readyBefore ? '  (READY)' : g.goal ? '  - GOAL' : '';
-        const tw = ui.text(g.name.toUpperCase() + tag, gx + 6, yy, { font: 'small', color: g.ready ? '#2a7a24' : '#3a2410', shadow: null });
-        if (g.ready) ui.icon('check', gx + 8 + (typeof tw === 'number' ? tw : ui.measure(g.name.toUpperCase() + tag, 'small')), yy - 1);
-        yy += 12;
-        for (const l of g.lines) {
-          const done = l.after >= l.need, add = l.after - l.have;
-          ui.text(l.name.toUpperCase(), gx + 10, yy, { font: 'small', color: '#5a3a1c', shadow: null });
-          const cnt = `${Math.min(l.after, l.need)}/${l.need}${add > 0 ? `  +${add}` : ''}`;
-          ui.text(cnt, gx + gw - (done ? 16 : 6), yy, { font: 'small', color: done ? '#2a7a24' : add > 0 ? '#a86a10' : '#7a5a3a', shadow: null, align: 'right' });
-          if (done) ui.icon('check', gx + gw - 14, yy - 1);
-          // a little bar: before (dark) and what this parcel adds (gold)
-          const bw = gw - 20, b0 = Math.min(1, l.have / l.need), b1 = Math.min(1, l.after / l.need);
-          ui.fill(gx + 10, yy + 9, bw, 1, '#c8b08a'); ui.fill(gx + 10, yy + 9, Math.round(bw * b1), 1, done ? '#3a9a2a' : '#d89a20'); ui.fill(gx + 10, yy + 9, Math.round(bw * b0), 1, '#5a3a1c');
-          yy += lineH;
-        }
-        yy += 2;
+    if (n > cols * rows) ui.text(`+${n - cols * rows} MORE IN YOUR PACK`, gx + gridW, gy + gridH + 5, { font: 'small', color: PAL.dim, align: 'right', alpha: a });
+    if (!n) {
+      ui.text('YOUR PACK IS EMPTY', gx + gridW / 2, gy + gridH / 2 - 12, { font: 'body', color: PAL.cream, align: 'center', alpha: a });
+      ui.text('Bring loot here to mail it home.', gx + gridW / 2, gy + gridH / 2 + 4, { font: 'small', color: PAL.dim, align: 'center', alpha: a });
+    }
+    // what the parcel builds at home
+    const rx = x + W - pad - goalsW, ry = rowY - 4, rh = gy + gridH + 4 - ry;
+    planes.draw(skin('inset', goalsW, rh), rx, ry, { alpha: a });
+    ui.text('BUILDS AT HOME', rx + 8, ry + 6, { font: 'small', color: PAL.brass2, alpha: a });
+    let yy = ry + 6 + ui.lh('small') + 3;
+    if (!m.goals.length) ui.textBox('Nothing left to build: everything you send goes to your stash.', rx + 8, yy, goalsW - 16, { font: 'small', color: PAL.dim });
+    for (const g of m.goals) {
+      if (yy > ry + rh - 22) break;
+      const ready = g.ready, newly = g.ready && !g.readyBefore;
+      ui.text(g.name.toUpperCase(), rx + 8, yy, { font: 'body', color: ready ? PAL.kelp2 : PAL.cream, alpha: a });
+      if (newly) { const bw = ui.measure('READY!', 'small') + 8; ui.fill(rx + goalsW - bw - 8, yy, bw, 12, PAL.kelp1, a); ui.text('READY!', rx + goalsW - bw - 4, yy + 2, { font: 'small', color: PAL.paper, shadow: null, alpha: a }); }
+      else if (g.readyBefore) ui.text('READY', rx + goalsW - 8, yy + 1, { font: 'small', color: PAL.kelp2, align: 'right', alpha: a });
+      else if (g.goal) ui.text('GOAL', rx + goalsW - 8, yy + 1, { font: 'small', color: PAL.brass2, align: 'right', alpha: a });
+      yy += ui.lh('body') + 1;
+      for (const l of g.lines) {
+        if (yy > ry + rh - 16) break;
+        const done = l.after >= l.need, add = l.after - l.have;
+        ui.item(l.id, rx + 8, yy - 2, 14, 14, 1, a);
+        ui.text(l.name, rx + 26, yy, { font: 'small', color: PAL.cream, alpha: a });
+        const cnt = `${Math.min(l.after, l.need)}/${l.need}`;
+        ui.text(cnt, rx + goalsW - 8, yy, { font: 'small', color: done ? PAL.kelp2 : add > 0 ? PAL.brass2 : PAL.dim, align: 'right', alpha: a });
+        if (add > 0) ui.text(`+${add}`, rx + goalsW - 12 - ui.measure(cnt, 'small'), yy, { font: 'small', color: PAL.brass2, align: 'right', alpha: a });
+        // what you had (filled) and what this parcel adds (gold)
+        bar(ui, rx + 26, yy + ui.lh('small') - 1, goalsW - 34, 5, Math.min(1, l.have / l.need), { col: done ? PAL.kelp : '#8a7a5a', gain: Math.min(1, l.after / l.need), gainCol: done ? PAL.kelp2 : PAL.brass2 });
+        yy += ui.lh('small') + 8;
       }
-      // clicking outside the bag and the note closes the picker (no way to get stuck in it)
-      if (ui.pressed && !ui.hover(x - 6, y - 30, w + 12, h + 56) && !ui.hover(gx, gy, gw, gh)) out = out ?? 'mail:close';
-    } else if (ui.pressed && !ui.hover(x - 6, y - 30, w + 12, h + 56)) out = out ?? 'mail:close';
+      yy += 3;
+    }
+    // the buttons
+    const by = y + H - P[3] - 26;
+    const bw = 112;
+    const sendLabel = m.picked.size ? `SEND ${m.picked.size}` : 'SEND';
+    if (ui.button('mail:send', sendLabel, gx, by, bw, 24, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
+    const hasMats = m.items.some((i) => ITEMS[i.id]?.kind === 'material');
+    if (ui.button('mail:mats', 'ALL MATERIALS', gx + bw + 6, by, 140, 24, { style: 'brass', key: 'KeyA', disabled: !hasMats })) out = 'mail:mats';
+    if (ui.button('mail:close', 'DONE', x + W - pad - 96, by, 96, 24, { style: 'wood', key: 'Escape' })) out = 'mail:close';
+    // clicking outside the panel closes it (no way to get stuck in it)
+    if (ui.pressed && !ui.hover(x - 4, y - 14, W + 8, H + 18)) out = out ?? 'mail:close';
     return out;
+  }
+  private lastPick = 9;
+
+  /** the kit's brass-ringed red X (returns true on click) */
+  private closeBtn(id: string, x: number, y: number, size = 20): boolean {
+    const ui = this.ui;
+    const h = ui.hover(x, y, size, size);
+    ui.mark(id, x, y, size, size);
+    if (h) ui.cursor = 'point';
+    ui.img(closeArt(size, h && ui.down ? 'down' : h ? 'hover' : 'normal'), x, y);
+    if (h && ui.pressed) { audio.play('k_close1', { vol: 0.4, dry: true }); return true; }
+    return false;
   }
 
-  private pauseMenu(s: DungeonHudState): string | null {
+  // ---------------------------------------------------------------- pause
+  private pauseCard(s: DungeonHudState): string | null {
     const ui = this.ui;
-    this.build();
-    // the logbook lies open in the middle of the screen, the entries are inked on the right page
-    const k = this.k, cx = ui.w / 2, cy = ui.h / 2;
-    this.journal.rotation.set(-0.12 + Math.sin(this.t * 0.8) * 0.01, Math.sin(this.t * 0.6) * 0.03, 0);
-    this.l.stage.put(this.journal, cx / k, cy / k, 120);
-    const L = cx - 66 * k;
-    ui.text('PAUSED', L, cy - 62 * k, { font: 'big', color: '#3a2410', shadow: null, align: 'center' });
-    ui.fill(L - 40 * k, cy - 62 * k + 36, 80 * k, 1, '#8a6a4a');
-    ui.textBox(s.where, L - 58 * k, cy - 12 * k, 116 * k, { font: 'body', color: '#5a3a1c', shadow: null, align: 'center' });
-    ui.textBox('The run is saved: RESUME it from the hideout any time.', L - 58 * k, cy + 22 * k, 116 * k, { font: k >= 1.75 ? 'body' : 'small', color: '#7a5a3a', shadow: null, align: 'center' });
-    let out: string | null = null;
-    const entries: [string, string, string][] = [['resume', 'RESUME', ''], ['bag', 'BACKPACK', 'TAB'], ['quit', 'QUIT TO HIDEOUT', '']];
-    entries.forEach(([id, label, key], i) => {
-      const ex = cx + 14 * k, ey = cy + (-46 + i * 28) * k, ew = 112 * k, eh = 20 * k;
-      const hov = ui.hover(ex, ey, ew, eh);
-      ui.mark('p:' + id, ex, ey, ew, eh);
-      if (hov) { ui.cursor = 'point'; ui.fill(ex, ey + eh - 3, ew, 1, '#a81c24'); ui.text('>', ex - 9, ey + 4, { font: 'body', color: '#a81c24', shadow: null }); }
-      ui.text(label, ex, ey + 4, { font: k > 1.2 ? 'title' : 'body', color: hov ? '#a81c24' : id === 'quit' ? '#6a1a10' : '#2a1808', shadow: null });
-      if (key) ui.keycap(key, ex + ew - 26, ey + 3);
-      if (hov && ui.pressed) out = id;
-    });
+    const pop = Math.min(1, this.pauseT * 6), e = 1 + 2.4 * (pop - 1) ** 3 + 1.4 * (pop - 1) ** 2;
+    const W = 250, H = 214;
+    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - e) * 20);
+    const a = Math.min(1, this.pauseT * 8);
+    ui.fill(0, 0, ui.w, ui.h, PAL.ink2, 0.6 * a);
     ui.block(0, 0, ui.w, ui.h);
-    if (this.game_keyTab()) out = 'bag';
-    if (out) audio.play('k_click1', { vol: 0.3, dry: true });
+    ui.img(skin('wood', W, H), x + 3, y + 3, { alpha: 0.35 * a });
+    ui.img(skin('wood', W, H), x, y, { alpha: a });
+    const cap = 22;
+    bigText(ui, 'PAUSED', x + W / 2, y + 16, { cap, color: PAL.cream, color2: PAL.brass2, align: 'center', alpha: a });
+    // where you are: the area, metres from home, the depth
+    const parts = s.where.split('·').map((q) => q.trim()).filter(Boolean);
+    const area = parts[0] ?? '';
+    const far = parts.find((q) => /FROM HOME/.test(q)) ?? '';
+    const dep = parts.find((q) => /^-?\d+ M$/.test(q)) ?? '';
+    let ty = y + 16 + cap + 8;
+    ui.text(area, x + W / 2, ty, { font: 'body', color: PAL.brass2, align: 'center', alpha: a });
+    ty += ui.lh('body');
+    const info = [far.replace(' FROM HOME', ''), dep].filter(Boolean);
+    if (info.length) {
+      const hg = GLYPH.house(), dg = GLYPH.down();
+      const t1 = info[0] ?? '', t2 = info[1] ?? '';
+      const w1 = t1 ? hg.width + 3 + ui.measure(t1 + ' FROM HOME', 'small') : 0, w2 = t2 ? dg.width + 3 + ui.measure(t2 + ' DEEP', 'small') : 0;
+      let cx = x + W / 2 - (w1 + w2 + (t1 && t2 ? 14 : 0)) / 2;
+      if (t1) { ui.img(hg, cx, ty, { alpha: a }); ui.text(t1 + ' FROM HOME', cx + hg.width + 3, ty + 1, { font: 'small', color: PAL.cream, alpha: a }); cx += w1 + 14; }
+      if (t2) { ui.img(dg, cx, ty + 2, { alpha: a }); ui.text(t2 + ' DEEP', cx + dg.width + 3, ty + 1, { font: 'small', color: PAL.cream, alpha: a }); }
+      ty += ui.lh('small') + 6;
+    }
+    let out: string | null = null;
+    const bw = W - 48, bx = x + 24, bh = 24;
+    if (ui.button('p:resume', 'RESUME', bx, ty, bw, bh, { style: 'green', key: 'Escape', keyLabel: 'ESC' }) && this.pauseT > 0.15) out = 'resume';
+    ty += bh + 6;
+    if (ui.button('p:bag', 'BACKPACK', bx, ty, bw, bh, { style: 'brass', key: 'Tab' })) out = 'bag';
+    ty += bh + 6;
+    if (ui.button('p:quit', 'QUIT TO HOME', bx, ty, bw, bh, { style: 'red' })) out = 'quit';
+    ty += bh + 8;
+    ui.textBox('Your run is saved: RESUME it from home any time.', x + 18, ty, W - 36, { font: 'small', color: PAL.dim, align: 'center' });
     return out;
   }
-  private game_keyTab() { return !!this.ui.input?.keyHit('Tab'); }
 }
 
 /** the 1-2 word verb for a world prompt ("CLIMB THE ROPE: SURFACE WITH YOUR PACK" -> "SURFACE") */
 const SHORT: [RegExp, string][] = [
-  [/^PACK FULL/, 'PACK FULL'], [/^LOCKED/, 'LOCKED'], [/^UNLOCK/, 'UNLOCK'], [/^BUY/, 'BUY'], [/^MAIL/, 'MAIL'],
-  [/SURFACE|CLIMB THE ROPE/, 'SURFACE'], [/DIVE|SWIM DOWN|DESCEND/, 'DIVE'], [/^HEALTH FULL/, 'FULL'], [/^TALK|^CHAT/, 'TALK'],
+  [/^PACK FULL/, 'PACK FULL'], [/^LOCKED/, 'LOCKED'], [/^UNLOCK/, 'UNLOCK'], [/^BUY/, 'BUY'], [/^MAIL/, 'MAIL HOME'],
+  [/SURFACE|CLIMB THE ROPE/, 'SURFACE'], [/DIVE|SWIM DOWN|DESCEND/, 'DIVE'], [/^HEALTH FULL/, 'HEALTH FULL'], [/^TALK|^CHAT/, 'TALK'],
   [/^OPEN/, 'OPEN'], [/^TAKE|^PICK/, 'TAKE'], [/^READ/, 'READ'],
 ];
 function shortLabel(label: string): string {
@@ -289,41 +380,4 @@ function shortLabel(label: string): string {
   const head = L.split(/[:·(]/)[0].trim().split(/\s+/).slice(0, 2).join(' ');
   return head || L;
 }
-
-/** logbook paper: laid lines, fibres, a foxing stain, a darker gutter edge */
-function pageTex(): THREE.Texture {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#ecdcb4'; g.fillRect(0, 0, 64, 64);
-  for (let y = 0; y < 64; y += 2) { g.fillStyle = y % 6 === 0 ? '#e2d0a4' : '#efe2c0'; g.fillRect(0, y, 64, 1); }
-  g.fillStyle = '#d4bc8c'; for (let i = 0; i < 40; i++) g.fillRect((i * 29) % 64, (i * 41) % 64, 2 + (i % 3), 1);
-  g.fillStyle = '#c8a878'; g.globalAlpha = 0.35; g.beginPath(); g.ellipse(46, 18, 7, 4, 0.3, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
-  g.fillStyle = '#b8a07a'; for (let y = 6; y < 64; y += 8) g.fillRect(4, y, 56, 1);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2.4);
-  t.magFilter = THREE.NearestFilter;
-  return t;
-}
-/** leather: grain creases, a stitched border with holes, a couple of scuffs */
-function leatherTex(base: string): THREE.Texture {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-  const g = c.getContext('2d')!;
-  g.fillStyle = base; g.fillRect(0, 0, 64, 64);
-  g.fillStyle = 'rgba(0,0,0,0.18)'; for (let i = 0; i < 18; i++) g.fillRect((i * 23) % 60, (i * 37) % 60, 3 + (i % 4), 1);
-  g.fillStyle = 'rgba(255,220,180,0.12)'; for (let i = 0; i < 10; i++) g.fillRect((i * 17 + 5) % 60, (i * 29 + 9) % 60, 5, 1);
-  for (let x = 3; x < 61; x += 4) { g.fillStyle = '#e8c890'; g.fillRect(x, 3, 2, 1); g.fillRect(x, 60, 2, 1); g.fillStyle = '#1a0c06'; g.fillRect(x + 2, 3, 1, 1); g.fillRect(x + 2, 60, 1, 1); }
-  for (let y = 3; y < 61; y += 4) { g.fillStyle = '#e8c890'; g.fillRect(3, y, 1, 2); g.fillRect(60, y, 1, 2); }
-  g.fillStyle = 'rgba(255,240,210,0.25)'; g.fillRect(40, 44, 9, 1); g.fillRect(42, 45, 6, 1);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter;
-  return t;
-}
-/** the mailbag's canvas: a twill weave, a stamped postal mark, patches */
-function canvasTex(): THREE.Texture {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#8a6a42'; g.fillRect(0, 0, 64, 64);
-  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if ((x + y * 2) % 5 === 0) { g.fillStyle = '#7a5c38'; g.fillRect(x, y, 1, 1); } else if ((x * 2 - y + 64) % 7 === 0) { g.fillStyle = '#9a7a50'; g.fillRect(x, y, 1, 1); }
-  g.strokeStyle = 'rgba(168,28,36,0.55)'; g.lineWidth = 1; g.beginPath(); g.arc(48, 46, 8, 0, Math.PI * 2); g.stroke(); g.beginPath(); g.arc(48, 46, 5, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = '#6a5030'; g.fillRect(6, 40, 12, 10); g.fillStyle = '#e8c890'; for (let x = 6; x < 18; x += 2) { g.fillRect(x, 40, 1, 1); g.fillRect(x, 49, 1, 1); }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter;
-  return t;
-}
+void bigMeasure;

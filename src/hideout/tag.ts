@@ -1,59 +1,73 @@
-// Paper and wood TAGS: the hub's words live on objects, never on flat UI. A Tag is a little painted card (aged paper
-// with an ink border, or a wooden plank with nail heads) whose lines are set in the crisp pixel fonts and which
-// floats in the 3D scene just in front of the camera at a world anchor (a station, an item, a poster), sized so one
-// texel is one rendered pixel. A TableCard is the same painting lying on a surface (the mastery note on the table).
+// TAGS: the hub's words live on cards pinned to things. A Tag is a clean kit card (src/ui/pixel: a cream card with
+// an ink outline and a brass pin, or a dark oilcloth card) whose lines are set in the UI's screen font, floating at a
+// world anchor (a station, an item, a poster). v5: tags are drawn by the PixelUI that is drawing when place() is
+// called (the screen's own UI), so they share the kit's pixel size and fonts exactly, crisp at any resolution; the
+// `mesh` stays for API compatibility (add it to the scene as before: it is never visible). A TableCard is the same
+// card painted onto a surface (a texture in the 3D scene, classic fonts).
 //
 //   const t = new Tag('paper'); scene.add(t.mesh);
-//   t.show([{ text: 'Kelp Cathedral', font: 'title' }, { text: 'Towering kelp', color: '#3a2810' }]);
-//   t.place(camera, anchorWorld, internalHeight, [dx, dy]);   every frame while shown;  t.hide()
+//   t.show([{ text: 'Kelp Cathedral', font: 'title' }, { text: 'Towering kelp', color: '#3a2810' }, { text: 'enter', key: 'E' }]);
+//   t.place(camera, anchorWorld, internalHeight, [dx, dy]);   every frame while shown (inside ui.begin/end);  t.hide()
+//
+// Line fonts default to 'body'; a first line in 'title' is the heading (accent colour, a rule under it); a line
+// with `key` gets that keycap in front (the hint row).
 import * as THREE from 'three';
 import { drawText, measure, lineH, wrap, type FontName } from '../ui/pixel/font';
-import { hash2 } from '../core/math';
+import { PixelUI, drawCard, cardLayout } from '../ui/pixel/ui';
+import { KIT, type SkinKind } from '../ui/pixel/skins';
+import { easeOutBack } from '../core/math';
 
 export interface TagLine { text: string; font?: FontName; color?: string; gap?: number; key?: string }
 export type TagStyle = 'paper' | 'wood' | 'brass' | 'slate';
 
-/** paint lines onto a fresh canvas in a style; returns the canvas (sized to fit, maxW wraps) */
+const kindOf = (s: TagStyle): SkinKind => (s === 'paper' || s === 'brass' ? 'paper' : 'dark');
+/** tag lines -> card lines (default fonts and colours per style) */
+function cardLines(lines: TagLine[], style: TagStyle) {
+  const dark = kindOf(style) === 'dark';
+  return lines.map((l, i) => ({
+    text: l.text, key: l.key, gap: l.gap,
+    font: l.font ?? 'body',
+    color: l.color ?? (i === 0 && l.font === 'title' ? (dark ? KIT.brass[3] : KIT.teal[2]) : dark ? KIT.text : KIT.textInk),
+  }));
+}
+
+/** draw a tag card with a PixelUI at a UI position (top-left); returns its rect */
+export function drawTag(ui: PixelUI, lines: TagLine[], style: TagStyle, maxW: number, x: number, y: number, alpha = 1) {
+  return drawCard(ui, cardLines(lines, style), kindOf(style), maxW, [x, y], { alpha, pin: style === 'paper' });
+}
+
+/**
+ * paint lines onto a fresh canvas (classic fonts, for 3D surfaces: TableCard): a flat cream card with an ink outline
+ * and a card edge (or a dark card for wood / slate). No texture noise.
+ */
 export function paintTag(lines: TagLine[], style: TagStyle, maxW = 150, pad = 6): HTMLCanvasElement {
+  const dark = style === 'wood' || style === 'slate';
   const rows: { text: string; font: FontName; color: string; key?: string; y: number }[] = [];
   let y = pad, w = 0;
   for (const l of lines) {
-    const font = l.font ?? 'small';
+    const font = l.font === 'title' ? 'body' : l.font ?? 'small';
     y += l.gap ?? 0;
     const kw = l.key ? measure(l.key, 'small') + 7 : 0;
-    for (const s of wrap(l.text, font, maxW - kw)) { rows.push({ text: s, font, color: l.color ?? (style === 'wood' || style === 'slate' ? '#fff0d0' : style === 'brass' ? '#2a1404' : '#2a1808'), key: rows.length && !l.key ? undefined : l.key, y }); w = Math.max(w, measure(s, font) + kw); y += lineH(font); }
+    for (const s of wrap(l.text, font, maxW - kw)) { rows.push({ text: s, font, color: l.color ?? (dark ? KIT.text : KIT.textInk), key: rows.length && !l.key ? undefined : l.key, y }); w = Math.max(w, measure(s, font) + kw); y += lineH(font); }
   }
-  const W = Math.ceil(w + pad * 2), H = Math.ceil(y + pad - 2);
+  const W = Math.ceil(w + pad * 2), H = Math.ceil(y + pad);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d')!;
-  const img = c.createImageData(W, H), D = img.data;
-  const pal = style === 'slate' ? [[28, 38, 34], [34, 46, 40], [44, 56, 50]] : style === 'wood' ? [[74, 50, 28], [96, 66, 38], [118, 84, 48]] : style === 'brass' ? [[176, 124, 48], [204, 152, 64], [230, 186, 96]] : [[214, 192, 146], [228, 210, 166], [238, 224, 186]];
-  for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) {
-    const i = (yy * W + xx) * 4;
-    const e = Math.min(xx, yy, W - 1 - xx, H - 1 - yy);
-    let k = style === 'wood' ? (Math.floor((yy + Math.sin(xx * 0.05 + yy) * 1.5) / 4) % 3 === 0 ? 0 : 1 + (hash2(xx >> 3, yy >> 2, 7) > 0.6 ? 1 : 0)) : hash2(xx >> 1, yy >> 1, 3) > 0.8 ? 0 : hash2(xx >> 2, yy >> 2, 5) > 0.5 ? 1 : 2;
-    if (style === 'brass') k = (xx - yy * 0.6) % 23 < 3 ? 2 : yy < 2 ? 2 : yy > H - 3 ? 0 : 1;
-    if (style === 'slate') k = hash2(xx >> 2, yy >> 2, 9) > 0.7 ? 2 : hash2(xx, yy, 4) > 0.9 ? 0 : 1;
-    const p = pal[k];
-    let r = p[0], g = p[1], b = p[2];
-    if (style === 'slate' && e < 3) { r = 120 - e * 20; g = 84 - e * 14; b = 48 - e * 8; }
-    else if (e === 0) { r = style === 'paper' ? 90 : 30; g = style === 'paper' ? 62 : 18; b = style === 'paper' ? 34 : 8; }
-    else if (e === 1 && style === 'paper') { r -= 30; g -= 30; b -= 30; }
-    D[i] = r; D[i + 1] = g; D[i + 2] = b; D[i + 3] = 255;
-  }
-  c.putImageData(img, 0, 0);
-  if (style === 'wood') for (const [nx, ny] of [[3, 3], [W - 4, 3], [3, H - 4], [W - 4, H - 4]]) { c.fillStyle = '#2a2420'; c.fillRect(nx - 1, ny - 1, 2, 2); }
-  if (style === 'paper') { c.fillStyle = '#c8241c'; c.fillRect(Math.floor(W / 2) - 1, 1, 3, 3); }
+  const fill = (x: number, yy: number, ww: number, hh: number, col: string) => { c.fillStyle = col; c.fillRect(x, yy, ww, hh); };
+  fill(1, 0, W - 2, H, KIT.ink); fill(0, 1, W, H - 2, KIT.ink);
+  fill(1, 1, W - 2, H - 2, dark ? KIT.oil[1] : KIT.cream[2]);
+  fill(1, 1, W - 2, 1, dark ? KIT.teal[3] : KIT.cream[3]);
+  fill(1, H - 3, W - 2, 2, dark ? KIT.oil[0] : KIT.cream[0]);
   for (const r of rows) {
     let x = pad;
     if (r.key) {
       const kw = measure(r.key, 'small') + 4;
-      c.fillStyle = '#1a1410'; c.fillRect(x, r.y - 2, kw, lineH('small') + 1);
-      c.fillStyle = '#e8dcc0'; c.fillRect(x + 1, r.y - 1, kw - 2, lineH('small') - 1);
-      drawText(c, r.key, x + 2, r.y, { font: 'small', color: '#1a1410' });
+      fill(x, r.y - 2, kw, lineH('small') + 1, KIT.ink);
+      fill(x + 1, r.y - 1, kw - 2, lineH('small') - 1, KIT.cream[2]);
+      drawText(c, r.key, x + 2, r.y, { font: 'small', color: KIT.ink, shadow: null });
       x += kw + 3;
     }
-    drawText(c, r.text, x, r.y, { font: r.font, color: r.color });
+    drawText(c, r.text, x, r.y, { font: r.font, color: r.color, shadow: dark ? undefined : null });
   }
   return cv;
 }
@@ -65,57 +79,65 @@ function canvasTex(cv: HTMLCanvasElement) {
 }
 
 export class Tag {
+  /** kept for API compatibility (screens add it to their scene): never visible, the card is drawn by the UI */
   mesh: THREE.Mesh;
-  private mat: THREE.MeshBasicMaterial;
+  private lines: TagLine[] = [];
   private key = '';
-  /** size in rendered pixels (after show) */
-  w = 1; h = 1;
+  private shown = false;
   private pop = 0;
+  /** UI px per rendered (internal) px, from the last place() */
+  private k = 1;
+  private wUI = 1; private hUI = 1;
+  private v = new THREE.Vector3();
   constructor(private style: TagStyle = 'paper', private maxW = 150) {
-    this.mat = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat);
-    this.mesh.renderOrder = 50; this.mesh.visible = false; this.mesh.frustumCulled = false;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ visible: false }));
+    this.mesh.visible = false; this.mesh.frustumCulled = false;
   }
+  /** the card's size in rendered (internal) pixels, the units of place()'s offsets */
+  get w() { return this.wUI / this.k; }
+  get h() { return this.hUI / this.k; }
   show(lines: TagLine[]) {
     const key = JSON.stringify(lines);
     if (key !== this.key) {
-      this.key = key;
-      const cv = paintTag(lines, this.style, this.maxW);
-      this.mat.map?.dispose();
-      this.mat.map = canvasTex(cv); this.mat.needsUpdate = true;
-      this.w = cv.width; this.h = cv.height;
-      this.pop = 0;
+      this.key = key; this.lines = lines;
+      if (!this.shown) this.pop = 0;
+      this.measure(PixelUI.current);
     }
-    this.mesh.visible = true;
+    this.shown = true;
   }
-  hide() { this.mesh.visible = false; this.key = ''; }
-  get visible() { return this.mesh.visible; }
+  hide() { this.shown = false; this.key = ''; this.pop = 0; }
+  get visible() { return this.shown; }
+  private measure(ui: PixelUI | null) {
+    if (!ui) return;
+    const L = cardLayout(ui, cardLines(this.lines, this.style), kindOf(this.style), Math.min(this.maxW + 20, ui.w - 16));
+    this.wUI = L.w; this.hUI = L.h;
+  }
   /**
-   * float the card at an anchor's screen position (offset in rendered pixels; the card's bottom-centre by default),
-   * 1 m in front of the camera, one texel per rendered pixel, swinging in on its pin
+   * float the card at an anchor's screen position: `off` is in rendered (internal) pixels as before, the card's
+   * bottom-centre by default (or its left / right edge, vertically centred), clamped on screen, dropping in on
+   * its pin. Call inside the screen UI's begin()/end(); otherwise it draws on the next screen UI end().
    */
   place(cam: THREE.PerspectiveCamera, anchor: THREE.Vector3, internalH: number, off: [number, number] = [0, -10], dt = 1 / 60, align: 'bottom' | 'left' | 'right' = 'bottom') {
-    if (!this.mesh.visible) return;
-    this.pop = Math.min(1, this.pop + dt * 6);
-    const d = Math.max(1, cam.near * 1.6);
-    const th = Math.tan((cam.fov * Math.PI) / 360);
-    const px = (2 * d * th) / internalH; // world metres per rendered pixel at distance d
-    const ndc = anchor.clone().project(cam);
-    if (ndc.z > 1) { this.mesh.visible = false; return; }
-    const W = internalH * cam.aspect;
-    // anchor in rendered pixels from the screen centre, then the card's centre, snapped to whole pixels
-    let sx = (ndc.x * W) / 2 + off[0], sy = (ndc.y * internalH) / 2 - off[1];
-    if (align === 'bottom') sy += this.h / 2; else if (align === 'left') sx += this.w / 2; else sx -= this.w / 2;
-    sx = Math.max(-W / 2 + this.w / 2 + 2, Math.min(W / 2 - this.w / 2 - 2, sx));
-    sy = Math.max(-internalH / 2 + this.h / 2 + 2, Math.min(internalH / 2 - this.h / 2 - 2, sy));
-    sx = Math.round(sx - this.w / 2) + this.w / 2; sy = Math.round(sy - this.h / 2) + this.h / 2;
-    const p = new THREE.Vector3(sx * px, sy * px, -d);
-    cam.localToWorld(p);
-    this.mesh.position.copy(p);
-    this.mesh.quaternion.copy(cam.quaternion);
-    const k = 0.5 + 0.5 * this.pop;
-    this.mesh.scale.set(this.w * px * k, this.h * px * k, 1);
-    this.mesh.rotateZ((1 - this.pop) * 0.25);
+    if (!this.shown) return;
+    this.pop = Math.min(1, this.pop + dt / 0.16);
+    const ndc = this.v.copy(anchor).project(cam);
+    if (ndc.z > 1) return;
+    const nx = ndc.x, ny = ndc.y;
+    const draw = (ui: PixelUI) => {
+      this.k = ui.h / Math.max(1, internalH);
+      this.measure(ui);
+      const w = this.wUI, h = this.hUI;
+      const ax = (nx * 0.5 + 0.5) * ui.w + off[0] * this.k, ay = (1 - (ny * 0.5 + 0.5)) * ui.h + off[1] * this.k;
+      let x: number, y: number;
+      if (align === 'bottom') { x = ax - w / 2; y = ay - h; } else if (align === 'left') { x = ax; y = ay - h / 2; } else { x = ax - w; y = ay - h / 2; }
+      x = Math.round(Math.max(4, Math.min(ui.w - 4 - w, x)));
+      y = Math.round(Math.max(4, Math.min(ui.h - 4 - h, y)));
+      const p = this.pop;
+      const drop = Math.round((1 - easeOutBack(p, 2)) * -5);
+      drawTag(ui, this.lines, this.style, Math.min(this.maxW + 20, ui.w - 16), x, y + drop, Math.min(1, p * 2));
+    };
+    const ui = PixelUI.current;
+    if (ui) ui.later(draw); else PixelUI.overlay.push(draw);
   }
 }
 

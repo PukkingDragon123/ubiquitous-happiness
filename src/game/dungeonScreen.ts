@@ -498,17 +498,15 @@ export class DungeonScreen implements Screen {
       if (i > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
       this.world.emit('enterNode', { type: 'floor', n: i });
     }
-    // the area title, stamped in 3D: "KELP CATHEDRAL" (the depth number is on the HUD gauge plaque)
+    // the area card (the HUD's big title, stamped in letter by letter): the place, then the stage of the voyage, how far
+    // from home and the zone (the gauge keeps the live depth)
     const dTop = Math.round(depthOf(plan, plan.base));
     this.after(0.6, () => {
       const deeper = i >= this.planned;
-      const tx = this.camLook.x, ty = this.camLook.y + 1.6;
-      // a stage of the voyage: the place, then how far from home and how deep (the gauge keeps the live number)
       const farM = Math.round(plan.far0 / 10) * 10;
-      this.t3d.add(AREA_NAME(area).toUpperCase(), tx, ty, 2.2, deeper ? T3D.danger : T3D.title, { size: 0.5, life: 4, enter: 'slam', stagger: 0.04, onLand: (k) => { if (k % 4 === 0) audio.play('k_tick1', { vol: 0.25, dry: true }); } });
       const stage = deeper ? 'THE DEEP' : `STAGE ${i + 1} OF ${this.planned}`;
-      this.t3d.add(i === 0 && farM === 0 ? `${stage} · OUTSIDE YOUR FRONT DOOR` : `${stage} · ${farM} M FROM HOME · ${ZONE_NAME[zoneOf(dTop)]}`, tx, ty - 0.7, 2.2, T3D.sub, { size: 0.2, life: 3.6, delay: 0.7, stagger: 0.012 });
-      audio.play('thud_heavy1', { vol: 0.5, dry: true });
+      const sub = i === 0 && farM === 0 ? `${stage} - OUTSIDE YOUR FRONT DOOR` : `${stage} - ${farM} M FROM HOME - ${ZONE_NAME[zoneOf(dTop)]}`;
+      this.hud.l.areaCard(AREA_NAME(area).toUpperCase(), sub, deeper ? '#ff9a84' : '#f3e7c9');
       this.game.addShake(0.15);
     });
     audio.play('jin_biome', { vol: 0.5 });
@@ -978,7 +976,9 @@ export class DungeonScreen implements Screen {
         const price = best.slot.price, can = this.run.coins >= price;
         const label = `${this.shop.label(best).toUpperCase()} · ${price} PEARLS`;
         if (E) this.buy(best);
-        return { key: 'E', label: can ? `BUY ${label}` : label, at: this.anchor(best.x, best.y - 0.6), bad: !can };
+        // the HUD shows a shop card for a stand: the goods, what they do, the price and BUY
+        const goods = best.slot.kind === 'item' ? best.slot.id! : best.slot.kind;
+        return { key: 'E', label: can ? `BUY ${label}` : label, at: this.anchor(best.x, best.y - 0.2), bad: !can, shop: { id: goods, name: this.shop.label(best), price } };
       }
       if (this.shopPoi && Math.abs(p.x - this.shopPoi.x) < 12 && !this.shopPoi.known) { /* noop */ }
     }
@@ -1325,7 +1325,7 @@ export class DungeonScreen implements Screen {
     this.water?.update(this.game.renderer, dt, this.camLook.x);
     this.fx?.update(dt);
     this.game.cursor = 'none';
-    this.hud.draw(dt, { ...this.hudState(null), menu: true }, this.game.input, (ui) => { if (sm.card.draw(ui, dt) === 'continue') sm.go = true; });
+    this.hud.draw(dt, { ...this.hudState(null), menu: true }, this.game.input, (ui) => { if (sm.card.draw(ui, dt, { stage: this.hud.l.stage, planes: this.hud.l.planes }) === 'continue') sm.go = true; });
     if (sm.go) { this.summary = null; this.leave(sm.r); }
   }
   private leave(r: DungeonResult) {

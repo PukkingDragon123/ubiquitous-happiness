@@ -1,39 +1,41 @@
-// The dungeon-run HUD (v3, "UI as objects"): lit 3D miniatures on a stage inside the HUD's PixelUI layer
-// (src/ui/obj/stage.ts), rendered after post so they are crisp and never fogged. Text only lives on plaques.
+// The dungeon-run HUD (v5, "the diver's kit"): one instrument set, read at a glance. Painted plates (crisp pixel
+// canvases drawn as planes BEHIND the 3D pieces, src/ui/obj/stage.ts PlanePool), lit low-poly miniatures on the
+// HUD's stage, and big Jersey numerals / bars on the PixelUI canvas on top.
 //
-//   top left      HEALTH is a chibi of our blobfish (a real BlobModel) that bounces at full health, squishes
-//                 and jiggles on hits, wears a plaster when low, sweats at one heart and glows when healed; next to
-//                 it a row of wobbly pink JELLY HEARTS (full / half / empty glass) gives the exact count.
-//                 STAMINA is a glass tube of glowing seawater that drains (amber while regen waits, red when
-//                 guard-broken); MANA a cut-crystal vial; the kelp-tea FLASKS are real bottles that slosh and
-//                 empty as they are drunk; PEARLS / KEYS / BOMBS are a turning pearl, a rusty key and a puffer bomb
-//                 with their counts on little brass plaques; the PACK a leather pouch with cells used.
-//   top right     the STRIP MAP: an old parchment strip-chart rolled between two brass rollers, inked with the
-//                 level (explored stretch, upper lane, seabed, caves, POIs) and a red pin for you
-//   bottom left   the SKILLS: a hand of physical cards (keys 1-4): sculpted rarity frames, photographed art, gems,
-//                 a shadow sweeping over the art + a spinning sand-timer while on cooldown; they tilt toward the
-//                 mouse and breathe on hover
-//   bottom centre the BOSS plaque: an engraved bronze plaque with a red enamel health inlay, a pale damage chip,
-//                 phase gems
-//   centre        title cards and pickup streaks (the item's model turning on a ribbon)
+//   top left      VITALS: our blobfish (a real BlobModel) in a brass PORTHOLE (water flashes red on a hit, pink on a
+//                 heal, the rim pulses red at one heart), a lacquered plate with a row of 3D jelly HEARTS, a clean
+//                 STAMINA bar (eases, leaves a pale chip, amber while regen waits, red when guard-broken, white on a
+//                 parry), a MANA bar and the kelp-tea FLASKS as little 3D bottles that slosh and empty
+//                 RESOURCES: one brass strip under it, a turning model + a big rolling numeral per counter (pearls,
+//                 keys, bombs, the pack's cells); numbers roll and flash on change and a +n / -n floats off
+//   top right     NAVIGATION: one instrument: a lacquered plate with the area name, the stage pips, the parchment
+//                 STRIP MAP of the level in a recessed window, metres FROM HOME and the DEPTH readout, ending in the
+//                 brass DEPTH GAUGE (spring needle, record flag) that mirrors the porthole
+//   bottom left   the SKILLS: a hand of physical cards (keys 1-4), cooldown shadow + seconds
+//   bottom centre the BOSS: a crimson name ribbon (stamps in), a dark plate with the health bar (chip + flash), poise,
+//                 phase pips and two red gems that flare on hits
+//   right         PICKUP cards: slide in fully on screen, the item's model turning in a display well, the name in
+//                 its rarity colour, the kind and one stat line; up to three stack
+//   centre        TITLE toasts (a banner, top centre) and the big AREA card for a new floor (letters stamp in)
 //
 // Usage (unchanged): const hud = new Hud(); overlays: [hud.layer]; hud.resize(w, h, pr);
 //   hud.draw(dt, data, input)   or hud.drawInto(myUi, dt, data) inside your own ui.begin()/ui.end()
-//   hud.title(name, sub) / hud.pickup(itemId) / hud.flash('pack' | 'pearls' | ...)
+//   hud.title(name, sub) / hud.areaCard(name, sub) / hud.pickup(itemId) / hud.flash('pack' | 'pearls' | ...)
 import * as THREE from 'three';
 import { PixelUI } from './pixel/ui';
 import type { Input } from '../core/input';
 import type { PlayerCombatHud, BossBar } from '../combat/types';
 import { ITEMS, RARITY_COLOR, statLines } from '../game/items';
 import type { SkillHudState } from '../skills/hud';
-import { UiStage, contactShadow, canvasPlane } from './obj/stage';
-import { pixelize } from './obj/pixtex';
+import { UiStage, PlanePool } from './obj/stage';
+import { pixelize, ramp } from './obj/pixtex';
 import { BlobAvatar } from './obj/blobAvatar';
 import { SkillCard3D } from './obj/cards';
 import { hudModel, itemModel } from '../backpack/models';
 import { hudArt } from './hudArt';
 import { audio } from '../audio/audio';
-import { drawText, type FontName } from './pixel/font';
+import { drawText } from './pixel/font';
+import { PAL, plate, bigText, bigMeasure, bar, GLYPH, type BigOpts } from './obj/plates';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -83,19 +85,20 @@ export interface HudData {
   boss?: BossBar | null;
   /** the skill slots (keys 1-4), bottom left: player.skillHud(); replaces the old SkillBar overlay */
   skills?: SkillHudState | null;
-  /** the diving depth gauge: metres now, the deepest ever (red marker); floorMax = the dial's full scale */
   /** metres travelled from home (the journey) */
   far?: number;
+  /** the diving depth gauge: metres now, the deepest ever (red marker); floorMax = the dial's full scale */
   depth?: { m: number; record: number; floorMax?: number; floorTop?: number; floorBottom?: number; zone?: string; descending?: boolean } | null;
   /** hide everything but title cards (cutscenes) */
   hidden?: boolean;
+  /** a menu / panel is up: hide everything, title cards too (they wait their turn) */
+  menu?: boolean;
 }
 
-const C = { white: '#f6f1e6', ink: '#06080e' };
-
 /**
- * The HUD is laid out in a 360-row DESIGN space and drawn at the finer UI density (~540 rows): 3D pieces scale up
- * by k, 2D text stays at its native pixel size (so it reads finer and crisper), positions are multiplied by k.
+ * The HUD is laid out in a 360-row DESIGN space (D) and drawn at the UI density: positions and sizes are multiplied
+ * by k = ui.h / 360 (3D pieces scale with the stage, plates are painted at the exact UI px size, text is Jersey at
+ * a cap height given in D), so the whole instrument set keeps its proportions at any resolution.
  */
 class DUi {
   k = 1;
@@ -104,75 +107,28 @@ class DUi {
   get h() { return this.ui.h / this.k; }
   get mx() { return this.ui.mx / this.k; }
   get my() { return this.ui.my / this.k; }
-  /** on a tall logical canvas (720p / 1440p, k ~2) the native fonts read small next to the 2x objects: promote one step */
-  font(f: FontName = 'body'): FontName {
-    if (this.k < 1.75) return f;
-    return f === 'small' || f === 'tiny' ? 'body' : f;
-  }
-  /** cap height of a (promoted) font in design units */
-  cap(f: FontName = 'body') { return this.ui.cap(this.font(f)) / this.k; }
-  text(str: string, x: number, y: number, o: Parameters<PixelUI['text']>[3] = {}) { return this.ui.text(str, Math.round(x * this.k), Math.round(y * this.k), { ...o, font: this.font(o.font) }) / this.k; }
-  measure(str: string, f?: Parameters<PixelUI['measure']>[1]) { return this.ui.measure(str, this.font(f)) / this.k; }
-  img(c: HTMLCanvasElement, x: number, y: number, o?: Parameters<PixelUI['img']>[3]) { this.ui.img(c, Math.round(x * this.k), Math.round(y * this.k), o); }
+  /** design units -> UI px */
+  p(v: number) { return Math.round(v * this.k); }
+  /** big Jersey text, cap in D; returns the width in D */
+  big(str: string, x: number, y: number, cap: number, o: Omit<BigOpts, 'cap'> = {}) { return bigText(this.ui, str, x * this.k, y * this.k, { ...o, cap: cap * this.k }) / this.k; }
+  bigW(str: string, cap: number, o: Omit<BigOpts, 'cap'> = {}) { return bigMeasure(this.ui, str, { ...o, cap: cap * this.k }) / this.k; }
+  fill(x: number, y: number, w: number, h: number, col: string, a = 1) { const X = this.p(x), Y = this.p(y); this.ui.fill(X, Y, Math.max(1, this.p(x + w) - X), Math.max(1, this.p(y + h) - Y), col, a); }
+  img(c: HTMLCanvasElement, x: number, y: number, o?: Parameters<PixelUI['img']>[3]) { this.ui.img(c, this.p(x), this.p(y), o); }
   hover(x: number, y: number, w: number, h: number) { return this.ui.hover(x * this.k, y * this.k, w * this.k, h * this.k); }
 }
 
-/** an engraved brass page (canvas): polished band, an engraved border with corner rosettes, patina in the cuts */
-function brassPage(w: number, h: number, label?: string): HTMLCanvasElement {
-  const cv = document.createElement('canvas'); cv.width = Math.max(4, Math.round(w)); cv.height = Math.max(4, Math.round(h));
-  const x = cv.getContext('2d')!, W = cv.width, H = cv.height;
-  const f = (px: number, py: number, ww: number, hh: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, ww, hh); };
-  f(0, 0, W, H, '#c88a2a');
-  for (let yy = 0; yy < H; yy++) { const k = yy / H; f(0, yy, W, 1, k < 0.18 ? '#f0c060' : k < 0.3 ? '#e0a840' : k > 0.82 ? '#9a6418' : '#c88a2a'); }
-  f(0, Math.round(H * 0.22), W, 1, '#fff0b0');
-  f(0, 0, W, 1, '#5a3a0c'); f(0, H - 1, W, 1, '#3a2408'); f(0, 0, 1, H, '#5a3a0c'); f(W - 1, 0, 1, H, '#3a2408');
-  if (W > 10 && H > 8) {
-    for (let px = 3; px < W - 3; px++) { f(px, 2, 1, 1, px % 2 ? '#7a5010' : '#a87020'); f(px, H - 3, 1, 1, px % 2 ? '#7a5010' : '#a87020'); }
-    for (let py = 3; py < H - 3; py++) { f(2, py, 1, 1, '#7a5010'); f(W - 3, py, 1, 1, '#7a5010'); }
-    for (const [cx, cy] of [[2, 2], [W - 3, 2], [2, H - 3], [W - 3, H - 3]]) { f(cx - 1, cy, 3, 1, '#5a8a6a'); f(cx, cy - 1, 1, 3, '#5a8a6a'); f(cx, cy, 1, 1, '#fff0b0'); }
-  }
-  if (label) {
-    drawText(x, label, W / 2 + 1, Math.round((H - 7) / 2) + 1, { font: 'small', color: '#fff0b0', shadow: null, align: 'center' });
-    drawText(x, label, W / 2, Math.round((H - 7) / 2), { font: 'small', color: '#3a2008', shadow: null, align: 'center' });
-  }
-  return cv;
-}
-const brassTexCache = new Map<string, THREE.CanvasTexture>();
-const drawTextWidth = (s: string) => { const c = document.createElement('canvas').getContext('2d')!; c.font = "16px 'M5x7'"; return Math.ceil(c.measureText(s).width); };
-function brassTex(w: number, h: number, label?: string) {
-  const k = `${w}|${h}|${label ?? ''}`;
-  let t = brassTexCache.get(k);
-  if (!t) { t = new THREE.CanvasTexture(brassPage(w, h, label)); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; brassTexCache.set(k, t); }
-  return t;
-}
-/** the pickup card face (2x pixels): parchment, a border in the rarity colour with darker bevel, corner rivets */
-const cardArtCache = new Map<string, HTMLCanvasElement>();
-function itemCardArt(col: string): HTMLCanvasElement {
-  let cv = cardArtCache.get(col);
-  if (cv) return cv;
-  cv = document.createElement('canvas'); cv.width = 264; cv.height = 76;
-  const x = cv.getContext('2d')!, W = 264, H = 76;
-  const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
-  f(0, 0, W, H, '#1a0e06'); f(2, 2, W - 4, H - 4, col); f(2, 2, W - 4, 2, '#ffffff'); f(4, H - 6, W - 8, 2, '#00000080');
-  f(6, 6, W - 12, H - 12, '#3a2410'); f(8, 8, W - 16, H - 16, '#ecd8ac');
-  for (let yy = 12; yy < H - 10; yy += 4) f(80, yy, W - 92, 1, yy % 8 ? '#e2cc9c' : '#dcc490');
-  f(8, 8, W - 16, 2, '#fff4d8'); f(8, H - 10, W - 16, 2, '#c8aa7a');
-  f(10, 10, 62, H - 20, '#d8c090'); f(10, 10, 62, 2, '#c4a878'); f(10, 10, 2, H - 20, '#c4a878');
-  for (const [rx, ry] of [[4, 4], [W - 8, 4], [4, H - 8], [W - 8, H - 8]]) { f(rx, ry, 4, 4, '#5a3a0c'); f(rx, ry, 2, 2, '#fff0b0'); }
-  cardArtCache.set(col, cv);
-  return cv;
-}
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const easeOutBack = (t: number) => { const c = 1.9; t = clamp01(t) - 1; return 1 + (c + 1) * t * t * t + c * t * t; };
+const easeOut = (t: number) => 1 - (1 - clamp01(t)) ** 3;
+/** HUD strings are drawn in Jersey: drop glyphs it doesn't carry (a trailing check mark is drawn as a glyph) */
+const clean = (s: string) => s.replace(/[✓✔]/g, '').replace(/[^\x20-\x7E·]/g, '').replace(/·/g, '-').trim();
 type Counter = 'pearls' | 'keys' | 'bombs' | 'pack' | 'hp';
-interface Card { title: string; sub: string; icon?: string; t: number; life: number; color: string; model?: THREE.Object3D; board?: THREE.Object3D; kind?: string }
 
 // ------------------------------------------------------------------ materials
 const glassMat = () => new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, depthWrite: false });
 const brassMat = new THREE.MeshStandardMaterial({ color: '#d8a038', roughness: 0.32, metalness: 0.75, flatShading: true });
 const darkBrass = new THREE.MeshStandardMaterial({ color: '#6a4a1c', roughness: 0.5, metalness: 0.6, flatShading: true });
-const bronzeMat = new THREE.MeshStandardMaterial({ color: '#9a6a3a', roughness: 0.38, metalness: 0.7, flatShading: true });
-const grooveMat = new THREE.MeshStandardMaterial({ color: '#1a0c0a', roughness: 0.9 });
 
 /** a heart split down the middle so halves can be full or empty */
 function heartHalf(side: -1 | 1, mat: THREE.Material): THREE.Group {
@@ -186,13 +142,12 @@ function heartHalf(side: -1 | 1, mat: THREE.Material): THREE.Group {
 }
 const jelly = new THREE.MeshStandardMaterial({ color: '#ff4a6a', roughness: 0.22, emissive: '#b01434', emissiveIntensity: 0.35 });
 const jellySoul = new THREE.MeshStandardMaterial({ color: '#5a9aff', roughness: 0.22, emissive: '#1a3a9a', emissiveIntensity: 0.35 });
-const jellyEmpty = new THREE.MeshStandardMaterial({ color: '#3a1a2a', roughness: 0.3, transparent: true, opacity: 0.75 });
+const jellyEmpty = new THREE.MeshStandardMaterial({ color: '#2a3a44', roughness: 0.3, transparent: true, opacity: 0.85 });
 
 class Heart3D {
   root = new THREE.Group();
   private L: THREE.Group; private R: THREE.Group;
   private state = '';
-  bump = 0; flash = 0;
   constructor() { this.L = heartHalf(-1, jelly); this.R = heartHalf(1, jelly); this.root.add(this.L, this.R); const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), new THREE.MeshBasicMaterial({ color: '#ffffff' })); s.position.set(-0.24, 0.22, 0.22); s.name = 'shine'; this.root.add(s); }
   set(l: THREE.Material, r: THREE.Material) {
     const k = (l as THREE.MeshStandardMaterial).uuid + (r as THREE.MeshStandardMaterial).uuid;
@@ -200,46 +155,6 @@ class Heart3D {
     this.L.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = l; });
     this.R.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = r; });
     (this.root.getObjectByName('shine') as THREE.Mesh).visible = l !== jellyEmpty;
-  }
-}
-
-/** a horizontal glass tube with a glowing liquid inside (stamina: seawater; mana: a cut-crystal vial) */
-class Tube3D {
-  root = new THREE.Group();
-  private liquid: THREE.Mesh; private chip: THREE.Mesh; private liqMat: THREE.MeshStandardMaterial; private meniscus!: THREE.Mesh;
-  private bubbles: THREE.Mesh[] = [];
-  readonly len: number; private r: number;
-  constructor(len: number, r: number, color: string, crystal = false) {
-    this.len = len; this.r = r;
-    const sides = crystal ? 6 : 8;
-    const glass = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, sides, 1, true), glassMat()); glass.rotation.z = Math.PI / 2;
-    this.liqMat = new THREE.MeshStandardMaterial({ color, roughness: 0.25, emissive: color, emissiveIntensity: 0.35, flatShading: crystal });
-    this.liquid = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, 1, sides), this.liqMat); this.liquid.rotation.z = Math.PI / 2;
-    this.meniscus = new THREE.Mesh(new THREE.SphereGeometry(r * 0.78, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, transparent: true, opacity: 0.55, emissive: color, emissiveIntensity: 0.4 }));
-    this.meniscus.rotation.z = -Math.PI / 2; this.meniscus.scale.y = 0.35; this.root.add(this.meniscus);
-    this.chip = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.76, r * 0.76, 1, sides), new THREE.MeshStandardMaterial({ color: '#fff4d8', emissive: '#fff0c0', emissiveIntensity: 0.5, transparent: true, opacity: 0.7 })); this.chip.rotation.z = Math.PI / 2;
-    for (const sx of [-1, 1]) {
-      const cap = new THREE.Mesh(crystal ? new THREE.ConeGeometry(r * 1.25, r * 2.2, 6) : new THREE.CylinderGeometry(r * 1.3, r * 1.3, r * 1.4, 8), crystal ? new THREE.MeshStandardMaterial({ color: '#a8a0ff', roughness: 0.15, flatShading: true, emissive: '#5a4ad0', emissiveIntensity: 0.4 }) : new THREE.MeshStandardMaterial({ map: brassTex(24, 8), roughness: 0.35, metalness: 0.6 }));
-      cap.rotation.z = sx * Math.PI / 2; cap.position.x = sx * (len / 2 + (crystal ? r * 0.9 : r * 0.45));
-      this.root.add(cap);
-      if (!crystal) {
-        // a collar band and a domed screw cap with a rivet
-        const band = new THREE.Mesh(new THREE.TorusGeometry(r * 1.32, r * 0.18, 4, 14), brassMat); band.rotation.y = Math.PI / 2; band.position.x = sx * (len / 2 - r * 0.15); this.root.add(band);
-        const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 1.0, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), brassMat); dome.rotation.z = -sx * Math.PI / 2; dome.position.x = sx * (len / 2 + r * 1.15); dome.scale.y = 0.5; this.root.add(dome);
-      }
-    }
-    for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(r * 0.22, 5, 4), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 })); this.bubbles.push(b); this.root.add(b); }
-    const inner = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.86, r * 0.86, len, sides), new THREE.MeshStandardMaterial({ color: '#0c1a24', roughness: 0.6 })); inner.rotation.z = Math.PI / 2; inner.position.z = -r * 0.2;
-    const shine = new THREE.Mesh(new THREE.BoxGeometry(len * 0.9, r * 0.22, 0.2), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55 })); shine.position.set(0, r * 0.55, r * 0.9);
-    this.root.add(inner, this.liquid, this.chip, glass, shine);
-  }
-  update(t: number, v: number, chip: number, color?: string) {
-    if (color) { this.liqMat.color.set(color); this.liqMat.emissive.set(color); }
-    const L = this.len, w = Math.max(0.001, L * clamp01(v)), cw = Math.max(0.001, L * clamp01(chip));
-    this.liquid.scale.y = w; this.liquid.position.x = -L / 2 + w / 2; this.liquid.visible = v > 0.002;
-    this.meniscus.visible = v > 0.01 && v < 0.995; this.meniscus.position.x = -L / 2 + w + Math.sin(t * 9) * 0.15;
-    this.chip.scale.y = Math.max(0.001, cw - w); this.chip.position.x = -L / 2 + w + (cw - w) / 2; this.chip.visible = cw > w + 0.3;
-    this.bubbles.forEach((b, i) => { const k = (t * 0.35 + i * 0.27) % 1; b.position.set(-L / 2 + ((i * 0.31 + t * 0.05) % 1) * w, (k - 0.5) * this.r * 1.2, this.r * 0.2); b.visible = v > 0.05; });
   }
 }
 
@@ -280,156 +195,60 @@ class Flask3D {
   }
 }
 
-/** a little brass plaque the counts are printed on (the number itself is 2D text on top) */
-function plaque(w: number, h: number): THREE.Group {
-  const g = new THREE.Group();
-  const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2), [brassMat, brassMat, brassMat, brassMat, new THREE.MeshStandardMaterial({ map: brassTex(w * 2, h * 2), roughness: 0.4, metalness: 0.5 }), brassMat]); g.add(p);
-  const inset = new THREE.Mesh(new THREE.BoxGeometry(w - 5, h - 5, 0.6), darkBrass); inset.position.z = 1.1; g.add(inset);
-  for (const sx of [-1, 1]) { const r = new THREE.Mesh(new THREE.SphereGeometry(0.9, 6, 4), brassMat); r.position.set(sx * (w / 2 - 1.6), 0, 1.2); g.add(r); }
-  return g;
-}
-
-// ------------------------------------------------------------------ the strip map: parchment between brass rollers
-class ScrollMap {
+// ------------------------------------------------------------------ the brass porthole the blobfish looks out of
+class Porthole3D {
   root = new THREE.Group();
-  cv = document.createElement('canvas');
-  private tex: THREE.CanvasTexture;
-  private paper: THREE.Mesh;
-  private rollers: THREE.Group[] = [];
-  private W = 0; private H = 0; private res = 1;
-  private plate: THREE.Mesh; private plateName = '';
-  constructor() {
-    this.tex = new THREE.CanvasTexture(this.cv);
-    this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.paper = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 12, 1), new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.95 }));
-    this.root.add(this.paper);
-    this.plate = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1.6), new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.5 }));
-    this.root.add(this.plate);
-    for (let i = 0; i < 2; i++) {
-      const r = new THREE.Group();
-      const rod = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 1, 10), new THREE.MeshStandardMaterial({ color: '#d8c49a', roughness: 0.9, flatShading: true }));
-      r.add(rod);
-      for (const sy of [-1, 1]) { const cap = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 2.4, 10), brassMat); cap.position.y = sy * 0.5; cap.name = 'cap'; r.add(cap); const knob = new THREE.Mesh(new THREE.SphereGeometry(2.4, 8, 6), brassMat); knob.name = 'knob'; r.add(knob); }
-      this.rollers.push(r); this.root.add(r);
+  private water: THREE.MeshBasicMaterial;
+  private ring: THREE.MeshBasicMaterial;
+  private glint: THREE.Mesh;
+  readonly R: number;
+  constructor(R: number) {
+    this.R = R;
+    // the water behind the glass: three flat teal bands and two soft light shafts (painted, no gradients)
+    const cv = document.createElement('canvas'); cv.width = cv.height = 48;
+    const x = cv.getContext('2d')!;
+    x.fillStyle = '#1d4f55'; x.fillRect(0, 0, 48, 48);
+    x.fillStyle = '#246068'; x.fillRect(0, 0, 48, 16);
+    x.fillStyle = '#163f46'; x.fillRect(0, 32, 48, 16);
+    x.fillStyle = '#2f7478';
+    for (const [x0, w0] of [[10, 5], [26, 3]] as [number, number][]) for (let yy = 0; yy < 30; yy++) x.fillRect(x0 + Math.floor(yy / 4), yy, w0, 1);
+    x.fillStyle = '#c8aa7a'; x.fillRect(0, 42, 48, 6); x.fillStyle = '#a88a5a'; x.fillRect(0, 42, 48, 1);
+    const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
+    this.water = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    const back = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), this.water); back.position.z = -8;
+    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R, 3.4, 6, 32), brassMat);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(R - 3.2, 1.2, 4, 32), darkBrass); lip.position.z = 0.6;
+    const backing = new THREE.Mesh(new THREE.CylinderGeometry(R + 3.8, R + 3.8, 3, 32), darkBrass); backing.rotation.x = Math.PI / 2; backing.position.z = -4;
+    this.root.add(back, backing, bezel, lip);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 1.8, 6), brassMat); b.rotation.x = Math.PI / 2;
+      b.position.set(Math.cos(a) * R, Math.sin(a) * R, 3.2); this.root.add(b);
     }
+    // a hinge on the left and a dog-clamp on the right, like a real ship's port
+    const hinge = new THREE.Mesh(new THREE.BoxGeometry(4.5, 11, 4), brassMat); hinge.position.set(-R - 3, 0, -0.5);
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 13, 8), darkBrass); pin.position.set(-R - 3, 0, 1.6);
+    this.root.add(hinge, pin);
+    // the glass: a faint pane and a hard crescent glint
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.05, transparent: true, opacity: 0.08, depthWrite: false }));
+    glass.position.z = 24;
+    this.glint = new THREE.Mesh(new THREE.RingGeometry(R - 6.5, R - 4.2, 20, 1, Math.PI * 0.58, Math.PI * 0.34), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false }));
+    this.glint.position.z = 25;
+    const dot = new THREE.Mesh(new THREE.CircleGeometry(1.3, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false }));
+    dot.position.set(-R * 0.18, R * 0.72, 25);
+    // the warning rim: a red ring around the bezel that pulses at one heart
+    this.ring = new THREE.MeshBasicMaterial({ color: '#ff3a2a', transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(R + 3.6, R + 5.6, 40), this.ring); ring.position.z = -2;
+    this.root.add(glass, this.glint, dot, ring);
   }
-  /** the area name engraved on a brass plate riveted to the top of the left roller */
-  setName(name: string, k: number) {
-    if (name === this.plateName) return;
-    this.plateName = name;
-    const tw = Math.ceil((drawTextWidth(name) + 12) / k), th = Math.ceil(13 / k);
-    const m = this.plate.material as THREE.MeshStandardMaterial;
-    m.map = brassTex(Math.round(tw * k), Math.round(th * k), name); m.needsUpdate = true;
-    this.plate.scale.set(tw, th, 1);
-    this.plate.position.set(-this.W / 2 + tw / 2 - 2, this.H / 2 + th / 2 + 1, 3);
-  }
-  layout(W: number, H: number, res = 1) {
-    if (W === this.W && H === this.H && res === this.res) return;
-    this.W = W; this.H = H; this.res = res; this.plateName = '';
-    this.cv.width = Math.round(W * res); this.cv.height = Math.round(H * res);
-    this.tex.dispose(); this.tex = new THREE.CanvasTexture(this.cv);
-    this.tex.magFilter = THREE.NearestFilter; this.tex.minFilter = THREE.NearestFilter; this.tex.colorSpace = THREE.SRGBColorSpace;
-    (this.paper.material as THREE.MeshStandardMaterial).map = this.tex;
-    // the paper bows slightly toward the viewer in the middle and curls into the rollers
-    const g = new THREE.PlaneGeometry(W, H, 16, 1);
-    const pos = g.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i) / (W / 2); pos.setZ(i, (1 - x * x) * 2.5 - (Math.abs(x) > 0.92 ? 3 : 0)); }
-    g.computeVertexNormals();
-    this.paper.geometry.dispose(); this.paper.geometry = g;
-    this.rollers.forEach((r, i) => {
-      r.position.set((i ? 1 : -1) * (W / 2 + 1), 0, 0);
-      const rod = r.children[0]; rod.scale.y = H + 4;
-      r.children.forEach((c) => { if (c.name === 'cap') c.position.y = Math.sign(c.position.y || 1) * (H / 2 + 3); if (c.name === 'knob') c.position.y = (c.id % 2 ? 1 : -1) * (H / 2 + 5.5); });
-    });
-    let k = 0; for (const r of this.rollers) r.children.forEach((c) => { if (c.name === 'knob') { c.position.y = (k++ % 2 ? 1 : -1) * (H / 2 + 5.5); } });
-  }
-  draw(m: StripMap, t: number) {
-    const x = this.cv.getContext('2d')!, W = this.cv.width, H = this.cv.height;
-    const f = (px: number, py: number, w: number, h: number, c: string, a = 1) => { x.globalAlpha = a; x.fillStyle = c; x.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); x.globalAlpha = 1; };
-    const L = Math.max(1e-6, m.length);
-    const X = (v: number) => 2 + Math.round(clamp01(v / L) * (W - 5));
-    // parchment: laid lines, fibres, a couple of tea stains, scorched edges
-    f(0, 0, W, H, '#e8d4a6');
-    for (let yy = 0; yy < H; yy += 3) f(0, yy, W, 1, '#e0c898', 0.5);
-    for (let i = 0; i < W * 0.6; i++) { const fx = (i * 37) % W, fy = (i * 53) % H; f(fx, fy, 2 + (i % 3), 1, i % 2 ? '#d8c090' : '#f2e2bc', 0.7); }
-    for (const [sx, sy, sr] of [[W * 0.18, H * 0.3, 6], [W * 0.66, H * 0.7, 8]]) { x.globalAlpha = 0.18; x.strokeStyle = '#8a5a20'; x.beginPath(); x.ellipse(sx, sy, sr, sr * 0.6, 0, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 0.08; x.fillStyle = '#a07030'; x.fill(); x.globalAlpha = 1; }
-    f(0, 0, W, 1, '#c8a870'); f(0, H - 1, W, 1, '#a88a58');
-    // water (light wash), upper lanes, seabed, caves, in ink tones
-    for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 2, X(ln.x1) - X(ln.x0), 6, '#b8d0c8', 0.8);
-    const sb = m.seabed ?? [0.72];
-    const bedAt = (cx: number) => { const tt = clamp01(cx / Math.max(1, W - 1)) * (sb.length - 1); const i = Math.floor(tt), fr = tt - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], fr); };
-    let prev = -1;
-    for (let cx = 1; cx < W - 1; cx++) {
-      const by = Math.round(clamp01(bedAt(cx)) * (H - 2));
-      f(cx, by + 1, 1, H - by - 2, '#c8ac78', 0.9);
-      if (prev >= 0) f(cx, Math.min(prev, by), 1, Math.abs(prev - by) + 1, '#5a3a1a');
-      prev = by;
-    }
-    for (const ln of m.lanes ?? []) if (ln.kind === 'cave') for (let cx = X(ln.x0); cx <= X(ln.x1); cx++) { const by = Math.round(clamp01(bedAt(cx)) * (H - 2)); const top = by + 3, bot = H - 3; if (bot > top) { f(cx, Math.round((top + bot) / 2), 1, 2, '#3a2410'); if (cx % 3 === 0) f(cx, top, 1, 1, '#7a5a3a'); } }
-    // fog: unexplored stretches hatched in faded ink
-    const spans = [...m.explored].sort((a, b) => a[0] - b[0]);
-    let cur = 0;
-    const fog = (a: number, b: number) => { if (b <= a) return; const xa = X(a), xb = X(b); f(xa, 1, xb - xa + 1, H - 2, '#d8c090', 0.85); for (let cx = xa; cx < xb; cx += 4) f(cx, 2 + ((cx / 4) % 3) * 3, 2, 1, '#a88a58', 0.6); };
-    for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
-    if (cur < L) fog(cur, L);
-    // POIs as inked glyphs
-    const defY: Record<PoiType, number> = { treasure: 0.62, shop: 0.5, post: 0.45, challenge: 0.5, secret: 0.8, boss: 0.5, arena: 0.5, start: 0.5 };
-    const glyph: Record<PoiType, string> = { treasure: 'mTreasure', shop: 'mShop', post: 'mPost', challenge: 'mChallenge', secret: 'mSecret', boss: 'mBoss', arena: 'mArena', start: 'mStart' };
-    for (const p of m.pois) {
-      const known = p.known !== false;
-      const ic = hudArt(known ? glyph[p.type] : 'mSecret');
-      const gx = Math.max(1, Math.min(W - ic.width - 1, X(p.x) - Math.floor(ic.width / 2)));
-      const gy = Math.max(1, Math.min(H - ic.height - 1, Math.round(clamp01(p.y ?? defY[p.type]) * (H - 1)) - Math.floor(ic.height / 2)));
-      if (p.type === 'boss') f(gx - 1, 1, 1, H - 2, '#8a1424');
-      x.globalAlpha = !known ? 0.5 : p.done ? 0.4 : 1; x.drawImage(ic, gx, gy); x.globalAlpha = 1;
-    }
-    // you: a red pin with a pulse ring
-    const plx = X(m.player), ply = Math.round(clamp01(m.playerY ?? 0.5) * (H - 1));
-    const pr = 3 + Math.round((Math.sin(t * 5) * 0.5 + 0.5) * 2);
-    x.strokeStyle = '#c8202a'; x.globalAlpha = 0.5; x.beginPath(); x.arc(plx + 0.5, ply + 0.5, pr, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 1;
-    f(plx - 1, ply - 1, 3, 3, '#c8202a'); f(plx - 1, ply - 1, 1, 1, '#ff8a8a');
-    // a torn-edge vignette
-    for (let cx = 0; cx < W; cx += 2) { f(cx, 0, 1, 1 + ((cx * 7) % 3 === 0 ? 1 : 0), '#a88a58', 0.6); f(cx, H - 1 - ((cx * 5) % 3 === 0 ? 1 : 0), 1, 1, '#8a6a3a', 0.6); }
-    this.tex.needsUpdate = true;
-  }
-}
-
-// ------------------------------------------------------------------ the boss plaque
-class BossPlaque {
-  root = new THREE.Group();
-  private hp: THREE.Mesh; private chip: THREE.Mesh; private gems: THREE.Mesh[] = []; private gemOn: THREE.MeshStandardMaterial; private gemOff: THREE.MeshStandardMaterial;
-  private poise: THREE.Mesh;
-  W = 0;
-  constructor() {
-    this.hp = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1.6), new THREE.MeshStandardMaterial({ color: '#c8182a', roughness: 0.25, emissive: '#7a0a14', emissiveIntensity: 0.5 }));
-    this.chip = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1.4), new THREE.MeshStandardMaterial({ color: '#ffe0b0', emissive: '#ffc880', emissiveIntensity: 0.6 }));
-    this.poise = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: '#ffd860', emissive: '#c89020', emissiveIntensity: 0.5 }));
-    this.gemOn = new THREE.MeshStandardMaterial({ color: '#ff5a4a', roughness: 0.12, flatShading: true, emissive: '#ff2a1a', emissiveIntensity: 0.9 });
-    this.gemOff = new THREE.MeshStandardMaterial({ color: '#3a1a1a', roughness: 0.3, flatShading: true });
-  }
-  layout(W: number) {
-    if (W === this.W) return; this.W = W;
-    for (const c of [...this.root.children]) this.root.remove(c);
-    const sh = new THREE.Shape(); const w = W + 20, h = 16, r = 6;
-    sh.moveTo(-w / 2 + r, -h / 2); sh.lineTo(w / 2 - r, -h / 2); sh.lineTo(w / 2, 0); sh.lineTo(w / 2 - r, h / 2); sh.lineTo(-w / 2 + r, h / 2); sh.lineTo(-w / 2, 0); sh.lineTo(-w / 2 + r, -h / 2);
-    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 3, bevelEnabled: true, bevelThickness: 1.2, bevelSize: 1.2, bevelSegments: 1 }), bronzeMat);
-    body.position.z = -2;
-    const groove = new THREE.Mesh(new THREE.BoxGeometry(W + 2, 7, 1), grooveMat); groove.position.z = 2.2;
-    this.root.add(body, groove, this.chip, this.hp, this.poise);
-    this.hp.position.z = 2.6; this.chip.position.z = 2.5; this.poise.position.set(0, -6.5, 2.6);
-    for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(4, 0), this.gemOn); g.position.set(sx * (W / 2 + 6), 0, 2.5); g.scale.z = 0.6; this.root.add(g); }
-    this.gems = [];
-  }
-  update(dt: number, shown: number, chip: number, flash: number, b: BossBar) {
-    const W = this.W;
-    const fw = Math.max(0.001, W * shown), cw = Math.max(0.001, W * chip);
-    this.hp.scale.x = fw; this.hp.position.x = -W / 2 + fw / 2; this.hp.visible = shown > 0.001;
-    this.chip.scale.x = Math.max(0.001, cw - fw); this.chip.position.x = -W / 2 + fw + (cw - fw) / 2; this.chip.visible = cw > fw + 0.5;
-    (this.hp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + flash * 1.5;
-    const po = clamp01(b.poise ?? 1); this.poise.scale.set(Math.max(0.001, W * po), 1, 1); this.poise.position.x = -W / 2 + (W * po) / 2; this.poise.visible = po < 0.999;
-    const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
-    while (this.gems.length < n) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(2.6, 0), this.gemOff); g.scale.z = 0.6; this.root.add(g); this.gems.push(g); }
-    this.gems.forEach((g, i) => { g.visible = i < n && n > 1; g.position.set((i - (n - 1) / 2) * 9, -10, 2.6); g.material = i < ph ? this.gemOn : this.gemOff; g.rotation.y += dt * (i < ph ? 1.4 : 0.2); });
+  /** hurt / heal: 0..1 flashes; low: at one heart */
+  update(t: number, hurt: number, heal: number, low: boolean) {
+    const c = this.water.color;
+    c.setRGB(1, 1, 1);
+    if (hurt > 0) c.lerp(new THREE.Color('#ff5040'), Math.min(1, hurt * 1.6) * 0.7);
+    if (heal > 0) c.lerp(new THREE.Color('#ffc8f0'), Math.min(1, heal * 1.4) * 0.6);
+    this.ring.opacity = low ? 0.35 + 0.45 * Math.max(0, Math.sin(t * 7.5)) ** 2 : hurt * 0.6;
+    this.glint.rotation.z = Math.sin(t * 0.5) * 0.08;
   }
 }
 
@@ -439,23 +258,22 @@ class DepthGauge {
   private face: THREE.Mesh; private faceCv = document.createElement('canvas'); private faceTex: THREE.CanvasTexture;
   private needle = new THREE.Group(); private rec = new THREE.Group(); private glint: THREE.Mesh;
   private ang = 0; private angV = 0; private scaleMax = 0; private faceRes = 0; private lastTen = -1; private prevM = 0;
-  readonly R = 24;
-  constructor() {
-    const R = this.R;
-    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R + 1.5, 3, 4, 16), brassMat);
-    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3, R + 3, 5, 16), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -3;
-    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const b = new THREE.Mesh(new THREE.SphereGeometry(1.1, 6, 4), brassMat); b.position.set(Math.cos(a) * (R + 1.5), Math.sin(a) * (R + 1.5), 2.6); this.root.add(b); }
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(0, R + 6, 0);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(3.4, 1.1, 4, 10), brassMat); ring.position.set(0, R + 11, 0);
+  readonly R: number;
+  constructor(R = 24) {
+    this.R = R;
+    const bezel = new THREE.Mesh(new THREE.TorusGeometry(R, 3.4, 6, 32), brassMat);
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(R + 3.8, R + 3.8, 3, 32), darkBrass); back.rotation.x = Math.PI / 2; back.position.z = -4;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8; const b = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 1.8, 6), brassMat); b.rotation.x = Math.PI / 2; b.position.set(Math.cos(a) * R, Math.sin(a) * R, 3.2); this.root.add(b); }
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 5, 8), brassMat); crown.position.set(R + 4, 0, -0.5); crown.rotation.z = Math.PI / 2;
+    const knurl = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 3.8, 3, 10), darkBrass); knurl.position.set(R + 7.5, 0, -0.5); knurl.rotation.z = Math.PI / 2;
     this.faceCv.width = this.faceCv.height = R * 2;
-    this.faceRes = 1;
     this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace;
-    this.face = new THREE.Mesh(new THREE.CircleGeometry(R, 28), new THREE.MeshStandardMaterial({ map: this.faceTex, roughness: 0.7 }));
+    this.face = new THREE.Mesh(new THREE.CircleGeometry(R - 1, 32), new THREE.MeshBasicMaterial({ map: this.faceTex, toneMapped: false }));
     this.face.position.z = 0.5;
     // the needle: a black arrow with a red tip, a brass hub
     const nm = new THREE.MeshStandardMaterial({ color: '#141418', roughness: 0.5, flatShading: true });
     const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.4, R * 0.82, 0.8), nm); shaft.position.y = R * 0.32;
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(1.6, 5, 4), new THREE.MeshStandardMaterial({ color: '#d02020', roughness: 0.4, flatShading: true })); tip.position.y = R * 0.76;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(1.7, 5, 4), new THREE.MeshStandardMaterial({ color: '#e0564a', roughness: 0.4, flatShading: true })); tip.position.y = R * 0.76;
     const tail = new THREE.Mesh(new THREE.BoxGeometry(2.4, 5, 0.8), nm); tail.position.y = -3.5;
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 2, 10), brassMat); hub.rotation.x = Math.PI / 2;
     this.needle.add(shaft, tip, tail, hub); this.needle.position.z = 2.2;
@@ -463,32 +281,30 @@ class DepthGauge {
     const rm = new THREE.Mesh(new THREE.ConeGeometry(2, 4.5, 3), new THREE.MeshStandardMaterial({ color: '#e83030', emissive: '#801010', emissiveIntensity: 0.5, flatShading: true }));
     rm.position.y = R - 2.5; rm.rotation.z = Math.PI; this.rec.add(rm); this.rec.position.z = 1.4;
     // the glass cover with a moving glint
-    const glass = new THREE.Mesh(new THREE.SphereGeometry(R, 12, 3, 0, Math.PI * 2, 0, Math.PI * 0.18), new THREE.MeshStandardMaterial({ color: '#e8f8ff', roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }));
-    glass.rotation.x = Math.PI / 2; glass.scale.set(1, 0.35, 1); glass.position.z = -R * 0.3 + 3;
-    this.glint = new THREE.Mesh(new THREE.PlaneGeometry(3, R * 1.1), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false }));
-    this.glint.position.set(-6, 4, 4.5); this.glint.rotation.z = -0.6;
-    this.root.add(back, bezel, crown, ring, this.face, this.rec, this.needle, glass, this.glint);
+    this.glint = new THREE.Mesh(new THREE.RingGeometry(R - 6.5, R - 4.2, 20, 1, Math.PI * 0.58, Math.PI * 0.34), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false }));
+    this.glint.position.z = 5;
+    this.root.add(back, bezel, crown, knurl, this.face, this.rec, this.needle, this.glint);
   }
-  /** the engraved face: metre scale on a 270-degree sweep, major ticks with numbers, minor ticks */
+  /** the face: cream enamel, a metre scale on a 270-degree sweep, major ticks with numbers, a coral danger arc */
   private paintFace(max: number, res: number) {
-    const S = Math.round(this.R * 2 * res), R = S / 2;
-    if (this.faceCv.width !== S) { this.faceCv.width = this.faceCv.height = S; this.faceTex.dispose(); this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace; (this.face.material as THREE.MeshStandardMaterial).map = this.faceTex; (this.face.material as THREE.MeshStandardMaterial).needsUpdate = true; }
+    const S = Math.max(16, Math.round(this.R * 2 * res)), R = S / 2;
+    if (this.faceCv.width !== S) { this.faceCv.width = this.faceCv.height = S; this.faceTex.dispose(); this.faceTex = new THREE.CanvasTexture(this.faceCv); this.faceTex.magFilter = THREE.NearestFilter; this.faceTex.minFilter = THREE.NearestFilter; this.faceTex.colorSpace = THREE.SRGBColorSpace; (this.face.material as THREE.MeshBasicMaterial).map = this.faceTex; (this.face.material as THREE.MeshBasicMaterial).needsUpdate = true; }
     const c = this.faceCv.getContext('2d')!;
-    c.fillStyle = '#ece0c4'; c.fillRect(0, 0, S, S);
-    const g = c.createRadialGradient(R - 6, R - 8, 2, R, R, R); g.addColorStop(0, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(90,60,30,0.35)');
-    c.fillStyle = g; c.fillRect(0, 0, S, S);
+    c.imageSmoothingEnabled = false;
+    c.fillStyle = PAL.cream; c.fillRect(0, 0, S, S);
+    // a flat inner disc a shade darker (the dial's chapter ring stays light)
+    c.fillStyle = '#e8d8b0'; c.beginPath(); c.arc(R, R, R * 0.62, 0, Math.PI * 2); c.fill();
     const at = (k: number, r: number): [number, number] => { const a = (-135 + 270 * k) * Math.PI / 180; return [R + Math.sin(a) * r, R - Math.cos(a) * r]; };
+    // the danger arc: the last quarter of the sweep
+    c.fillStyle = PAL.coral; c.beginPath(); c.arc(R, R, R - 2, (-45 - 90 + 202.5) * Math.PI / 180, (135 - 90) * Math.PI / 180); c.arc(R, R, R - 2 - Math.max(2, res * 2), (135 - 90) * Math.PI / 180, (-45 - 90 + 202.5) * Math.PI / 180, true); c.fill();
     const step = max <= 60 ? 5 : max <= 150 ? 10 : max <= 400 ? 25 : 50;
     for (let v = 0; v <= max + 0.01; v += step / 5) {
       const k = v / max, major = Math.abs(v / step - Math.round(v / step)) < 0.01;
-      const [x0, y0] = at(k, R - 2), [x1, y1] = at(k, R - (major ? 6 : 4));
-      c.strokeStyle = major ? '#1a1008' : '#6a5440'; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+      const [x0, y0] = at(k, R - 2), [x1, y1] = at(k, R - (major ? 4 + res * 2 : 2 + res * 1.5));
+      c.strokeStyle = major ? PAL.ink : '#7a6a50'; c.lineWidth = major ? Math.max(1, Math.round(res)) : 1; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
     }
-    c.fillStyle = '#7a1414'; c.beginPath(); c.arc(R, R, R - 3, (-45) * Math.PI / 180, (45) * Math.PI / 180); c.arc(R, R, R - 5, (45) * Math.PI / 180, (-45) * Math.PI / 180, true); c.fill();
-    for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R - 15); drawText(c, String(Math.round(max * k)), x, y - 4, { font: 'small', color: '#1a1008', shadow: null, align: 'center' }); }
-    // the maker's word only when the face is big enough to keep it clear of the 0 / max numerals
-    if (R >= 44) drawText(c, 'DEPTH', R, R + 9, { font: 'small', color: '#6a5440', shadow: null, align: 'center' });
-    // the maker's engraved ring and a hairline inner bezel
+    const font = res >= 2.5 ? 'body' : 'small';
+    for (const k of [0, 0.5, 1]) { const [x, y] = at(k, R * 0.6); drawText(c, String(Math.round(max * k)), x, y - (font === 'body' ? 5 : 3), { font, color: PAL.ink, shadow: null, align: 'center' }); }
     c.strokeStyle = '#8a7050'; c.lineWidth = 1; c.beginPath(); c.arc(R, R, R - 1.5, 0, Math.PI * 2); c.stroke();
     this.faceTex.needsUpdate = true;
   }
@@ -506,84 +322,147 @@ class DepthGauge {
     this.ang += this.angV * dt;
     this.needle.rotation.z = -this.ang;
     this.rec.rotation.z = -toAng(d.record);
-    this.glint.position.x = -6 + Math.sin(t * 0.5) * 3;
+    this.glint.rotation.z = Math.sin(t * 0.5) * 0.08;
     const ten = Math.floor(d.m / 10);
     if (this.lastTen >= 0 && ten !== this.lastTen && audio.has('k_tick1')) audio.play('k_tick1', { vol: 0.25, dry: true, rate: 0.7 + Math.min(1, d.m / 1000) * 0.6 });
     this.lastTen = ten;
   }
 }
 
+// ------------------------------------------------------------------ the strip map, painted flat (no fibres, no noise)
+function paintStrip(cv: HTMLCanvasElement, m: StripMap, t: number) {
+  const x = cv.getContext('2d')!, W = cv.width, H = cv.height;
+  x.imageSmoothingEnabled = false;
+  const f = (px: number, py: number, w: number, h: number, c: string, a = 1) => { x.globalAlpha = a; x.fillStyle = c; x.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); x.globalAlpha = 1; };
+  const L = Math.max(1e-6, m.length);
+  const X = (v: number) => 1 + Math.round(clamp01(v / L) * (W - 3));
+  // parchment in two flat tones, the water a pale wash
+  f(0, 0, W, H, '#ead9b0');
+  f(0, 0, W, Math.round(H * 0.3), '#efe2c0');
+  for (const ln of m.lanes ?? []) if (ln.kind === 'upper') f(X(ln.x0), 1, X(ln.x1) - X(ln.x0), Math.max(2, Math.round(H * 0.22)), '#bcd8cc');
+  const sb = m.seabed ?? [0.72];
+  const bedAt = (cx: number) => { const tt = clamp01(cx / Math.max(1, W - 1)) * (sb.length - 1); const i = Math.floor(tt), fr = tt - i; return lerp(sb[i], sb[Math.min(sb.length - 1, i + 1)], fr); };
+  let prev = -1;
+  for (let cx = 0; cx < W; cx++) {
+    const by = Math.round(clamp01(bedAt(cx)) * (H - 2));
+    f(cx, by + 1, 1, H - by - 1, '#cdb07c');
+    f(cx, by + 3, 1, H - by - 3, '#bf9f6a');
+    if (prev >= 0) f(cx, Math.min(prev, by), 1, Math.abs(prev - by) + 1, '#5a3a1a');
+    prev = by;
+  }
+  for (const ln of m.lanes ?? []) if (ln.kind === 'cave') for (let cx = X(ln.x0); cx <= X(ln.x1); cx++) { const by = Math.round(clamp01(bedAt(cx)) * (H - 2)); const mid = Math.round((by + 3 + H - 2) / 2); if (mid > by + 2) f(cx, mid, 1, Math.max(1, Math.round(H / 14)), '#4a3018'); }
+  // fog: the unexplored stretches in a flat darker paper with even diagonal hatching (a pattern, not noise)
+  const spans = [...m.explored].sort((a, b) => a[0] - b[0]);
+  let cur = 0;
+  const fog = (a: number, b: number) => {
+    if (b <= a) return; const xa = X(a), xb = X(b);
+    f(xa, 0, xb - xa + 1, H, '#d6bf8e');
+    for (let cx = xa; cx <= xb; cx++) for (let cy = 0; cy < H; cy++) if ((cx + cy) % 5 === 0) f(cx, cy, 1, 1, '#c4a876');
+  };
+  for (const [a, b] of spans) { if (a > cur) fog(cur, a); cur = Math.max(cur, b); }
+  if (cur < L) fog(cur, L);
+  // POIs as inked glyphs
+  const defY: Record<PoiType, number> = { treasure: 0.62, shop: 0.5, post: 0.45, challenge: 0.5, secret: 0.8, boss: 0.5, arena: 0.5, start: 0.5 };
+  const glyph: Record<PoiType, string> = { treasure: 'mTreasure', shop: 'mShop', post: 'mPost', challenge: 'mChallenge', secret: 'mSecret', boss: 'mBoss', arena: 'mArena', start: 'mStart' };
+  const up = H >= 26 ? 2 : 1;
+  for (const p of m.pois) {
+    const known = p.known !== false;
+    const ic = hudArt(known ? glyph[p.type] : 'mSecret');
+    const iw = ic.width * up, ih = ic.height * up;
+    const gx = Math.max(0, Math.min(W - iw, X(p.x) - Math.floor(iw / 2)));
+    const gy = Math.max(0, Math.min(H - ih, Math.round(clamp01(p.y ?? defY[p.type]) * (H - 1)) - Math.floor(ih / 2)));
+    if (p.type === 'boss') f(X(p.x), 0, 1, H, '#9a2a24', 0.8);
+    x.globalAlpha = !known ? 0.5 : p.done ? 0.4 : 1; x.drawImage(ic, gx, gy, iw, ih); x.globalAlpha = 1;
+  }
+  // you: a coral pin with a pulse ring
+  const plx = X(m.player), ply = Math.max(2, Math.min(H - 3, Math.round(clamp01(m.playerY ?? 0.5) * (H - 1))));
+  const pr = Math.round(2 + (Math.sin(t * 5) * 0.5 + 0.5) * 2) * up;
+  x.strokeStyle = PAL.coral; x.lineWidth = 1; x.globalAlpha = 0.6; x.beginPath(); x.arc(plx + 0.5, ply + 0.5, pr, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 1;
+  const s = 1 + up;
+  f(plx - s, ply - s, s * 2 + 1, s * 2 + 1, PAL.ink2); f(plx - s + 1, ply - s + 1, s * 2 - 1, s * 2 - 1, PAL.coral); f(plx - s + 1, ply - s + 1, up, up, '#ffc0b0');
+}
+
+// ------------------------------------------------------------------ pickup cards / title toasts
+interface PickCard { id: string; title: string; sub: string; kind: string; color: string; t: number; life: number; y: number; model: THREE.Object3D }
+interface Toast { title: string; sub: string; color: string; t: number; life: number; area?: boolean }
+interface Roll { v: number; old: number; t: number; flash: number; delta: { n: number; t: number }[] }
+
+// layout (D)
+const M = 8;
+const PR = 24;
+
 export class Hud {
   private pixT = 0;
   ui = new PixelUI();
   get layer(): { scene: THREE.Scene; camera: THREE.Camera } { return this.ui.layer; }
   stage = new UiStage();
+  /** painted plates behind the 3D pieces (in UI px): DungeonHud draws its panels here too */
+  planes = new PlanePool(this.stage);
   private t = 0;
   private prev: HudData | null = null;
   private avatar = new BlobAvatar();
-  private avatarShadow = contactShadow(40, 9, 0.4);
+  private port = new Porthole3D(PR);
   private hearts: Heart3D[] = [];
   private heartBump: number[] = [];
-  private stamina = new Tube3D(64, 3.6, '#18c8a0');
-  private mana = new Tube3D(48, 3, '#4a5aff', true);
   private flasks: Flask3D[] = [];
-  private counters: Record<'pearls' | 'keys' | 'bombs', { m: THREE.Object3D; p: THREE.Group }>;
-  private pouch = itemModel('cutpursePouch');
-  private scroll = new ScrollMap();
-  private boss = new BossPlaque();
-  private gauge = new DepthGauge();
-  private gaugePlaque = plaque(40, 14);
-  private farPlaque = plaque(46, 14);
+  private models: Record<'pearls' | 'keys' | 'bombs' | 'pack', THREE.Object3D>;
+  private gauge = new DepthGauge(PR);
+  private gems: THREE.Mesh[] = [];
+  private gemMat = new THREE.MeshStandardMaterial({ color: '#ff5a4a', roughness: 0.12, flatShading: true, emissive: '#ff2a1a', emissiveIntensity: 0.9 });
   private cards: SkillCard3D[] = [];
   private cardIds: string[] = [];
-  private ribbon = new THREE.Group();
-  private stamShown = 1; private stamChip = 1; private stamChipHold = 0;
-  private manaShown = 0;
-  private bossShown = 1; private bossChip = 1; private bossChipHold = 0; private bossFlash = 0; private bossIn = 0; private bossName = '';
+  private stripCv = document.createElement('canvas');
+  private stamShown = 1; private stamChip = 1; private stamChipHold = 0; private stamFlash = 0;
+  private manaShown = 0; private manaChip = 0;
+  private bossShown = 1; private bossChip = 1; private bossChipHold = 0; private bossFlash = 0; private bossIn = 0; private bossName = ''; private bossShake = 0;
   private pop: Record<Counter, number> = { pearls: 0, keys: 0, bombs: 0, pack: 0, hp: 0 };
+  private rolls: Record<'pearls' | 'keys' | 'bombs' | 'pack', Roll> = { pearls: this.roll(), keys: this.roll(), bombs: this.roll(), pack: this.roll() };
+  private hurtT = 0; private healT = 0;
   private parryFlash = 0;
-  private cardsT: Card[] = [];
+  private picks: PickCard[] = [];
+  private toasts: Toast[] = [];
+  private lastK = 0;
 
   constructor() {
     const S = this.stage;
-    S.ui.add(this.avatar.root, this.avatarShadow);
-    this.avatar.root.scale.setScalar(28);
+    S.ui.add(this.port.root, this.avatar.root, this.gauge.root);
     this.avatar.root.userData.noPixel = true; // the blobfish keeps its own soft skin shading
-    this.avatarShadow.rotation.x = -1.2;
-    S.ui.add(this.stamina.root, this.mana.root, this.pouch, this.scroll.root, this.boss.root, this.ribbon, this.gauge.root, this.gaugePlaque, this.farPlaque);
-    this.pouch.scale.multiplyScalar(13);
-    const mk = (name: string, s: number) => { const m = hudModel(name); m.scale.setScalar(s); S.ui.add(m); const p = plaque(22, 11); S.ui.add(p); return { m, p }; };
-    this.counters = { pearls: mk('pearlCoin', 11), keys: mk('key', 13), bombs: mk('bomb', 13) };
-    // the pickup streak ribbon: a dark band with gold edges (3D so the item model sits on it)
-    const band = new THREE.Mesh(new THREE.PlaneGeometry(1, 40), new THREE.MeshBasicMaterial({ color: '#06080e', transparent: true, opacity: 0.78, toneMapped: false }));
-    const edgeT = new THREE.Mesh(new THREE.BoxGeometry(1, 1.4, 1), brassMat); edgeT.position.y = 20;
-    const edgeB = new THREE.Mesh(new THREE.BoxGeometry(1, 1.4, 1), brassMat); edgeB.position.y = -20;
-    this.ribbon.add(band, edgeT, edgeB); this.ribbon.visible = false; this.ribbon.position.z = -20;
+    this.port.root.userData.noPixel = false;
+    this.models = { pearls: hudModel('pearlCoin'), keys: hudModel('key'), bombs: hudModel('bomb'), pack: itemModel('cutpursePouch') };
+    for (const m of Object.values(this.models)) S.ui.add(m);
+    for (let i = 0; i < 2; i++) { const g = new THREE.Mesh(new THREE.OctahedronGeometry(4, 0), this.gemMat); g.scale.z = 0.6; S.ui.add(g); this.gems.push(g); }
   }
+  private roll(): Roll { return { v: -1, old: -1, t: 1, flash: 0, delta: [] }; }
 
   resize(w: number, h: number, pr: number) { this.ui.resize(w, h, pr); }
 
-  /** a centred title card (floor / area names) */
-  title(title: string, sub = '', color = C.white, life = 3) { this.cardsT = this.cardsT.filter((c) => c.icon); this.cardsT.push({ title, sub, t: 0, life, color }); }
-  /** an item pickup streak: the item's model turning on a ribbon, name + one line (defaults from ITEMS) */
+  /** a title toast at the top centre (area changes, secrets, "SENT HOME") */
+  title(title: string, sub = '', color = PAL.cream, life = 3) {
+    this.toasts = this.toasts.filter((c) => c.area);
+    this.toasts.push({ title: clean(title), sub: clean(sub), t: 0, life, color });
+  }
+  /** the big card for a new floor: the area's name stamped across the upper screen, a sub line under it */
+  areaCard(name: string, sub = '', color = PAL.cream, life = 4.2) {
+    this.toasts = this.toasts.filter((c) => !c.area);
+    this.toasts.push({ title: clean(name).toUpperCase(), sub: clean(sub).toUpperCase(), t: 0, life, color, area: true });
+    audio.play('thud_heavy1', { vol: 0.35, dry: true });
+  }
   /**
-   * v4 item pickup card: a parchment card with a rarity-metal border slides in on the right, the item's model turning
-   * in front of it, the name in its rarity colour, the kind and the first stat line. Up to three stack; the oldest
-   * leaves first.
+   * an item pickup card: slides in on the right, fully on screen: the item's model turning in a display well, the
+   * name in its rarity colour, the kind and the first stat line. Up to three stack; the oldest leaves first.
    */
   pickup(itemId: string, name?: string, sub?: string) {
     const d = ITEMS[itemId];
-    const icons = this.cardsT.filter((c) => c.icon);
-    if (icons.length >= 3) { const old = icons[0]; old.model?.removeFromParent(); old.board?.removeFromParent(); this.cardsT = this.cardsT.filter((c) => c !== old); }
+    if (this.picks.length >= 3) { const old = this.picks.shift()!; old.model.removeFromParent(); }
     const model = itemModel(itemId);
-    const col = d ? RARITY_COLOR[d.rarity] : '#fff2c8';
-    const board = canvasPlane(itemCardArt(col), 132, 38);
-    this.stage.ui.add(model, board);
+    this.stage.ui.add(model);
+    const col = d ? RARITY_COLOR[d.rarity] : PAL.cream;
     const line = sub ?? (d ? (statLines(itemId, 1)[0]?.text ?? d.desc) : '');
-    this.cardsT.push({ title: name ?? d?.name ?? itemId, sub: line, icon: itemId, t: 0, life: 3.6, color: col, model, board, kind: d ? `${d.rarity} ${d.kind}`.toUpperCase() : '' });
+    const y0 = this.picks.length ? this.picks[this.picks.length - 1].y + 40 : 70;
+    this.picks.push({ id: itemId, title: clean(name ?? d?.name ?? itemId), sub: clean(line), kind: d ? `${d.rarity} ${d.kind}`.toUpperCase() : '', t: 0, life: 3.8, color: col, y: y0, model });
   }
   /** bounce / flash a counter */
-  flash(what: Counter) { this.pop[what] = 1; }
+  flash(what: Counter) { this.pop[what] = 1; if (what !== 'hp') this.rolls[what].flash = 1; }
 
   /** begin + draw + end on the HUD's own PixelUI */
   draw(dt: number, s: HudData, input: Input | null = null) {
@@ -592,30 +471,32 @@ export class Hud {
     this.ui.end();
   }
 
-  /** draw into any PixelUI between its begin() and end() */
+  /** draw into any PixelUI between its begin() and end() (the plates pool restarts here: add panels after it) */
   private d: DUi | null = null;
   drawInto(pui: PixelUI, dt: number, s: HudData) {
     this.t += dt;
     this.stage.attach(pui);
+    this.planes.begin();
     if (!this.d || this.d.ui !== pui) this.d = new DUi(pui);
     const ui = this.d;
-    ui.k = Math.max(1, pui.h / 360);
+    ui.k = Math.max(0.75, pui.h / 360);
+    if (ui.k !== this.lastK) { this.lastK = ui.k; }
     this.stage.ui.scale.setScalar(ui.k);
-    // v4: the pixel treatment (painted pages + banded ramp light) on every HUD object, new children included
+    // the pixel treatment (painted pages + banded ramp light) on every HUD object, new children included
     if ((this.pixT -= dt) <= 0) { this.pixT = 0.5; pixelize(this.stage.ui); }
     this.animate(dt, s);
     const on = !s.hidden;
-    for (const o of this.stage.ui.children) o.visible = on || o === this.ribbon;
+    for (const o of this.stage.ui.children) o.visible = on;
     if (on) {
-      this.healthRow(ui, dt, s);
-      const y = this.bars(ui, dt, s);
-      this.counterCol(ui, dt, s, y);
-      this.strip(ui, s.strip ?? null);
-      this.depthGauge(ui, dt, s.depth ?? null, !!s.strip, s.far ?? (s.strip as { far?: number } | null | undefined)?.far);
+      const vit = this.vitals(ui, dt, s);
+      this.resources(ui, s, vit);
+      const navL = this.nav(ui, dt, s, vit.right);
+      void navL;
       this.bossBar(ui, dt, s.boss && s.boss.visible !== false ? s.boss : null);
       this.hand(ui, dt, s.skills ?? null);
-    }
-    this.drawCards(ui, dt);
+      this.pickups(ui, dt);
+    } else for (const p of this.picks) p.t += dt;
+    if (s.menu) { for (const c of this.toasts) if (c.area) c.t = Math.min(c.t, 0.05); } else this.toastsDraw(ui, dt, !on);
     this.prev = { ...s, combat: s.combat ? { ...s.combat } : s.combat };
   }
 
@@ -624,44 +505,77 @@ export class Hud {
     const p = this.prev;
     if (p) {
       const tot = s.hp + (s.soul ?? 0), ptot = p.hp + (p.soul ?? 0);
-      if (tot < ptot) { this.avatar.hurt(); const i = Math.floor(Math.max(0, s.hp) / 2); this.heartBump[i] = 1; }
-      else if (s.hp > p.hp) { this.avatar.heal(); for (let i = Math.floor(p.hp / 2); i < Math.ceil(s.hp / 2); i++) this.heartBump[i] = 1; }
-      for (const k of ['pearls', 'keys', 'bombs'] as const) if (s[k] !== p[k]) this.pop[k] = 1;
-      if (s.pack && p.pack && s.pack.used !== p.pack.used) this.pop.pack = Math.max(this.pop.pack, 0.6);
+      if (tot < ptot) { this.avatar.hurt(); this.hurtT = 1; const i = Math.floor(Math.max(0, s.hp) / 2); this.heartBump[i] = 1; }
+      else if (s.hp > p.hp) { this.avatar.heal(); this.healT = 1; for (let i = Math.floor(p.hp / 2); i < Math.ceil(s.hp / 2); i++) this.heartBump[i] = 1; }
       if (s.combat?.lastParry && s.combat.lastParryAge < (p.combat?.lastParryAge ?? 99)) this.parryFlash = s.combat.lastParry === 'perfect' ? 1 : 0.5;
     }
+    this.hurtT = Math.max(0, this.hurtT - dt * 1.6); this.healT = Math.max(0, this.healT - dt * 1.2);
     for (let i = 0; i < this.heartBump.length; i++) this.heartBump[i] = Math.max(0, (this.heartBump[i] ?? 0) - dt * 3);
     for (const k of Object.keys(this.pop) as Counter[]) this.pop[k] = Math.max(0, this.pop[k] - dt * 3.5);
     this.parryFlash = Math.max(0, this.parryFlash - dt * 3);
+    // counters roll to their new value, flash and float a +n / -n
+    const vals = { pearls: s.pearls, keys: s.keys, bombs: s.bombs, pack: s.pack?.used ?? 0 };
+    for (const k of Object.keys(this.rolls) as (keyof typeof vals)[]) {
+      const r = this.rolls[k], v = vals[k];
+      if (r.v < 0) { r.v = r.old = v; continue; }
+      if (v !== r.v) { r.delta.push({ n: v - r.v, t: 0 }); r.old = r.v; r.v = v; r.t = 0; r.flash = 1; this.pop[k] = 1; }
+      r.t = Math.min(1, r.t + dt * 6); r.flash = Math.max(0, r.flash - dt * 2.2);
+      for (const d of r.delta) d.t += dt;
+      r.delta = r.delta.filter((d) => d.t < 1.1).slice(-3);
+    }
     const c = s.combat;
     const st = c && c.staminaMax > 0 ? clamp01(c.stamina / c.staminaMax) : 1;
     if (st < this.stamShown - 0.002) { this.stamChip = Math.max(this.stamChip, this.stamShown); this.stamChipHold = 0.4; this.stamShown = st; }
-    else this.stamShown = lerp(this.stamShown, st, 1 - Math.exp(-dt * 12));
+    else { if (st > this.stamShown + 0.15 && st >= 0.999) this.stamFlash = 0.6; this.stamShown = lerp(this.stamShown, st, 1 - Math.exp(-dt * 12)); }
     if (this.stamChipHold > 0) this.stamChipHold -= dt; else this.stamChip = Math.max(this.stamShown, this.stamChip - dt * 0.8);
+    this.stamFlash = Math.max(this.parryFlash, this.stamFlash - dt * 2.5);
     const mn = s.maxMana ? clamp01((s.mana ?? 0) / s.maxMana) : 0;
+    if (mn < this.manaShown - 0.01) this.manaChip = Math.max(this.manaChip, this.manaShown);
     this.manaShown = lerp(this.manaShown, mn, 1 - Math.exp(-dt * 10));
+    this.manaChip = Math.max(this.manaShown, this.manaChip - dt * 0.6);
     const b = s.boss && s.boss.visible !== false ? s.boss : null;
     if (b) {
       if (b.name !== this.bossName) { this.bossName = b.name; this.bossIn = 0; this.bossShown = this.bossChip = 1; }
-      this.bossIn = Math.min(1, this.bossIn + dt * 1.4);
+      this.bossIn = Math.min(1, this.bossIn + dt * 1.2);
       const v = b.max > 0 ? clamp01(b.hp / b.max) : 0;
-      if (v < this.bossShown - 0.0005) { this.bossChip = Math.max(this.bossChip, this.bossShown); this.bossChipHold = 0.6; this.bossFlash = Math.min(1, this.bossFlash + (this.bossShown - v) * 12); this.bossShown = v; }
+      if (v < this.bossShown - 0.0005) { const hit = this.bossShown - v; this.bossChip = Math.max(this.bossChip, this.bossShown); this.bossChipHold = 0.6; this.bossFlash = Math.min(1, this.bossFlash + hit * 12); this.bossShake = Math.min(1, this.bossShake + hit * 20); this.bossShown = v; }
       else this.bossShown = lerp(this.bossShown, v, 1 - Math.exp(-dt * 6));
       if (this.bossChipHold > 0) this.bossChipHold -= dt; else this.bossChip = Math.max(this.bossShown, this.bossChip - dt * 0.3);
       this.bossFlash = Math.max(0, this.bossFlash - dt * 7);
+      this.bossShake = Math.max(0, this.bossShake - dt * 5);
     } else { this.bossName = ''; this.bossIn = 0; }
   }
 
-  // ---------------------------------------------------------------- top left: the blobfish + jelly hearts
-  private healthRow(_ui: DUi, dt: number, s: HudData) {
-    const S = this.stage;
+  // ---------------------------------------------------------------- top left: porthole + hearts + bars + flasks
+  private vitals(ui: DUi, dt: number, s: HudData): { right: number; bottom: number } {
+    const S = this.stage, c = s.combat;
+    const pc = { x: M + PR + 4, y: M + PR + 3 };
+    // the porthole and the blobfish looking out of it
     const frac = s.maxHp > 0 ? clamp01(s.hp / s.maxHp) : 0;
-    this.avatar.update(dt, frac, s.hp > 0 && s.hp <= 2);
-    S.put(this.avatar.root, 27, 30, 20);
-    S.put(this.avatarShadow, 26, 47, -5);
-    const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2), total = red + soul;
-    while (this.hearts.length < total) { const h = new Heart3D(); h.root.scale.setScalar(12); S.ui.add(h.root); this.hearts.push(h); }
     const low = s.hp > 0 && s.hp <= 2;
+    this.avatar.update(dt, frac, low);
+    this.port.update(this.t, this.hurtT, this.healT, low);
+    const shake = this.hurtT > 0.5 ? Math.sin(this.t * 60) * (this.hurtT - 0.5) * 3 : 0;
+    S.put(this.port.root, pc.x + shake, pc.y, 0);
+    this.avatar.root.scale.setScalar(23);
+    S.put(this.avatar.root, pc.x + shake + 1, pc.y + 5, 10);
+    // the hearts
+    const red = Math.ceil(Math.max(0, s.maxHp) / 2), soul = Math.ceil(Math.max(0, s.soul ?? 0) / 2), total = red + soul;
+    const perRow = 8, rows = Math.max(1, Math.ceil(total / perRow));
+    const x0 = pc.x + PR + 9, y0 = pc.y - 21;
+    const heartsW = Math.min(total, perRow) * 13;
+    // the bars and the flasks
+    const nF = c?.flasksMax ?? 0;
+    const barW = 104;
+    const hy = y0 + 10, by = y0 + 7 + rows * 13;
+    const hasStam = !!c && c.staminaMax > 0, hasMana = !!s.maxMana;
+    const flaskX = x0 + barW + 10;
+    const right = Math.max(x0 + heartsW + 4, nF ? flaskX + nF * 11 + 1 : x0 + barW + 4) + 7;
+    const bottom = Math.max(by + (hasStam ? 7 : 0) + (hasMana ? 7 : 0) + 4, y0 + 40);
+    // the lacquered plate (behind everything; the porthole covers its left end)
+    const px0 = pc.x, pw = right - px0, ph = bottom - y0;
+    this.planes.draw(plate(ui.p(pw), ui.p(ph), 'lacquer'), ui.p(px0), ui.p(y0), { shadow: 2 });
+    while (this.hearts.length < total) { const h = new Heart3D(); S.ui.add(h.root); this.hearts.push(h); }
     this.hearts.forEach((h, i) => {
       h.root.visible = i < total;
       if (i >= total) return;
@@ -672,120 +586,185 @@ export class Hud {
       const bump = this.heartBump[i] ?? 0;
       const beat = low && i === Math.ceil(s.hp / 2) - 1 ? Math.max(0, Math.sin(this.t * 7.5)) ** 8 * 0.25 : 0;
       const wob = Math.sin(this.t * 2.4 + i * 0.7);
-      h.root.scale.set(12 * (1 + beat + bump * 0.3), 12 * (1 + beat - bump * 0.15 + wob * 0.02), 12);
+      const sc = 11.5;
+      h.root.scale.set(sc * (1 + beat + bump * 0.3), sc * (1 + beat - bump * 0.15 + wob * 0.02), sc);
       h.root.rotation.set(0, Math.sin(this.t * 1.3 + i) * 0.25, wob * 0.06);
-      S.put(h.root, 58 + (i % 10) * 14, 14 + Math.floor(i / 10) * 14 - Math.sin(bump * Math.PI) * 4, 10);
+      S.put(h.root, x0 + 6 + (i % perRow) * 13, hy + Math.floor(i / perRow) * 13 - Math.sin(bump * Math.PI) * 4, 10);
     });
-  }
-
-  private bars(ui: DUi, dt: number, s: HudData): number {
-    const S = this.stage, c = s.combat;
-    let y = 32 + Math.floor(Math.max(0, Math.ceil(s.maxHp / 2) + Math.ceil((s.soul ?? 0) / 2) - 1) / 10) * 14;
-    this.stamina.root.visible = !!c && c.staminaMax > 0;
-    if (c && c.staminaMax > 0) {
+    // stamina: teal, amber while regen waits, red guard-broken, white on a parry; a pale chip of what you just spent
+    let yy = by;
+    if (hasStam && c) {
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
-      const col = broken ? '#ff3a2a' : c.staminaDelay > 0 ? '#e8a818' : this.parryFlash > 0 ? '#ffffff' : '#18c8a0';
-      this.stamina.update(this.t, this.stamShown, this.stamChip, col);
-      S.put(this.stamina.root, 56 + 32, y, 6);
-      if (c.guard === 'riposte') this.stamina.root.rotation.x = Math.sin(this.t * 18) * 0.2; else this.stamina.root.rotation.x = 0;
-      y += 10;
+      const col = broken ? PAL.coral : c.staminaDelay > 0 ? '#e8a818' : '#2ac8a0';
+      const jig = c.guard === 'riposte' ? Math.round(Math.sin(this.t * 30)) * 0.5 : 0;
+      bar(ui.ui, ui.p(x0), ui.p(yy + jig), ui.p(barW), Math.max(5, ui.p(6)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25 });
+      yy += 8;
     }
-    this.mana.root.visible = !!s.maxMana;
-    if (s.maxMana) { this.mana.update(this.t, this.manaShown, this.manaShown); S.put(this.mana.root, 56 + 24, y, 6); y += 10; }
-    const n = c?.flasksMax ?? 0;
-    while (this.flasks.length < n) { const f = new Flask3D(); f.root.scale.setScalar(16); S.ui.add(f.root); this.flasks.push(f); }
+    if (hasMana) {
+      bar(ui.ui, ui.p(x0), ui.p(yy), ui.p(barW), Math.max(4, ui.p(4.5)), this.manaShown, { col: '#5a7aff', chip: this.manaChip });
+      yy += 7;
+    }
+    while (this.flasks.length < nF) { const f = new Flask3D(); S.ui.add(f.root); this.flasks.push(f); }
     this.flasks.forEach((f, i) => {
-      f.root.visible = i < n;
-      if (i >= n || !c) return;
+      f.root.visible = i < nF;
+      if (i >= nF || !c) return;
       const drinking = c.drinking > 0 && i === c.flasks;
       f.update(dt, i < c.flasks ? 1 : drinking ? 1 - c.drinking : 0);
-      S.put(f.root, 61 + i * 14, y + 7, 8);
+      f.root.scale.setScalar(13);
+      S.put(f.root, flaskX + 5 + i * 11, by + (hasMana ? 6 : 3), 8);
     });
-    void ui;
-    return y + (n ? 20 : 4);
+    return { right, bottom: Math.max(bottom, pc.y + PR + 4) };
   }
 
-  private counterCol(ui: DUi, dt: number, s: HudData, y0: number) {
+  // ---------------------------------------------------------------- the resource strip: pearls, keys, bombs, the pack
+  private resources(ui: DUi, s: HudData, vit: { bottom: number }) {
     const S = this.stage;
-    let y = Math.max(y0, 66);
-    for (const k of ['pearls', 'keys', 'bombs'] as const) {
-      const { m, p } = this.counters[k];
-      const pop = this.pop[k];
-      m.rotation.y = Math.sin(this.t * 1.2 + y) * 0.6 + pop * Math.PI * 2;
-      m.rotation.x = 0.15;
-      S.put(m, 14, y - Math.sin(pop * Math.PI) * 3, 12);
-      S.put(p, 36, y, 0);
-      const v = String(Math.max(0, Math.min(99, s[k]))).padStart(2, '0');
-      ui.text(v, 36, y - 5 - Math.round(Math.sin(pop * Math.PI) * 2), { font: 'body', color: pop > 0.25 ? '#fff6b0' : '#fff0d0', outline: '#2a1606', align: 'center' });
-      y += 17;
-    }
-    this.pouch.visible = !!s.pack;
-    if (s.pack) {
-      this.pouch.rotation.set(0.15, Math.sin(this.t * 0.8) * 0.4, Math.sin(this.t * 60) * 0.1 * this.pop.pack);
-      S.put(this.pouch, 14, y, 12);
-      const full = s.pack.full || s.pack.used >= s.pack.total;
-      ui.text(`${s.pack.used}/${s.pack.total}`, 26, y - 3, { font: 'small', color: full ? '#ff6a5a' : '#f0e6d0', outline: '#140a04' });
-    }
-    void dt;
+    const y = vit.bottom + 3, h = 22, x0 = M + 2;
+    const cap = 9.5;
+    type Cell = { k: 'pearls' | 'keys' | 'bombs' | 'pack'; num: string; sub?: string; bad?: boolean; scale: number };
+    const cells: Cell[] = [
+      { k: 'pearls', num: String(Math.max(0, s.pearls)), scale: 13 },
+      { k: 'keys', num: String(Math.max(0, s.keys)), scale: 15 },
+      { k: 'bombs', num: String(Math.max(0, s.bombs)), scale: 15 },
+    ];
+    const full = !!s.pack && (s.pack.full || s.pack.used >= s.pack.total);
+    if (s.pack) cells.push({ k: 'pack', num: String(s.pack.used), sub: `/${s.pack.total}`, bad: full, scale: 15 });
+    this.models.pack.visible = !!s.pack;
+    // widths: a medallion for the model, then the numeral window sized for two digits (a number never jumps)
+    const digitW = ui.bigW('0', cap);
+    const ws = cells.map((c) => 20 + Math.max(2, c.num.length) * digitW + (c.sub ? ui.bigW(c.sub, 5.5) + 1 : 0) + 9);
+    const W = ws.reduce((a, b) => a + b, 0) + 4;
+    this.planes.draw(plate(ui.p(W), ui.p(h), 'brass'), ui.p(x0), ui.p(y), { shadow: 2 });
+    let cx = x0 + 2;
+    cells.forEach((c, i) => {
+      const w = ws[i], r = this.rolls[c.k], pop = this.pop[c.k];
+      // the model's medallion and the recessed numeral window
+      const md = h - 4;
+      this.planes.draw(plate(ui.p(md), ui.p(md), 'disc'), ui.p(cx + 1), ui.p(y + 2));
+      const wx = cx + md + 2, ww = w - md - 5;
+      this.planes.draw(plate(ui.p(ww), ui.p(h - 6), 'well'), ui.p(wx), ui.p(y + 3));
+      // the turning model (spins once on a change)
+      const m = this.models[c.k];
+      m.scale.setScalar(c.scale * (1 + Math.sin(pop * Math.PI) * 0.25));
+      m.rotation.set(0.18, Math.sin(this.t * 1.2 + i * 1.7) * 0.5 + pop * Math.PI * 2, c.k === 'pack' ? Math.sin(this.t * 60) * 0.1 * pop : 0);
+      S.put(m, cx + 1 + md / 2, y + h / 2 + (c.k === 'pearls' ? 0 : 0.5), 12);
+      // the number rolls to its new value inside the window, flashing brass
+      const col = c.bad ? PAL.coral : r.flash > 0 ? lerpHex(PAL.cream, PAL.brass2, r.flash) : PAL.cream;
+      const ny = y + (h - cap) / 2;
+      const subW = c.sub ? ui.bigW(c.sub, 5.5) + 1 : 0;
+      const ncx = wx + (ww - subW) / 2;
+      ui.ui.clip(ui.p(wx) + 1, ui.p(y + 3) + 1, ui.p(ww) - 2, ui.p(h - 6) - 2);
+      const e = easeOut(r.t);
+      if (r.t < 1 && r.old !== r.v) {
+        const dir = r.v > r.old ? 1 : -1;
+        ui.big(String(Math.max(0, r.old)), ncx, ny - dir * e * (h - 4), cap, { color: PAL.cream, alpha: 1 - e, align: 'center' });
+        ui.big(c.num, ncx, ny + dir * (1 - e) * (h - 4), cap, { color: col, align: 'center' });
+      } else ui.big(c.num, ncx, ny, cap, { color: col, align: 'center' });
+      ui.ui.unclip();
+      if (c.sub) ui.big(c.sub, ncx + ui.bigW(c.num, cap) / 2 + 1, ny + cap - 5.5, 5.5, { color: c.bad ? PAL.coral2 : PAL.dim });
+      if (c.bad && Math.sin(this.t * 6) > -0.2) ui.big('PACK FULL', wx + ww / 2, y + h + 2, 5, { color: PAL.coral, align: 'center' });
+      // floating deltas rise off the window
+      for (const d of r.delta) {
+        const a = 1 - clamp01((d.t - 0.6) / 0.5);
+        ui.big((d.n > 0 ? '+' : '') + d.n, wx + ww / 2, y - 3 - d.t * 10, 6, { color: d.n > 0 ? PAL.kelp2 : PAL.coral2, alpha: a, align: 'center' });
+      }
+      cx += w;
+    });
   }
 
-  // ---------------------------------------------------------------- top right: the parchment strip map
-  private strip(ui: DUi, m: StripMap | null) {
-    this.scroll.root.visible = !!m;
-    if (!m) return;
-    const W = Math.max(150, Math.min(240, Math.round(ui.w * 0.3))), H = 30;
-    this.scroll.layout(W, H, ui.k);
-    this.scroll.setName((m.name ?? '').toUpperCase(), ui.k);
-    this.scroll.draw(m, this.t);
-    const cx = ui.w - W / 2 - 14, cy = 26 + H / 2;
-    this.stage.put(this.scroll.root, cx, cy, 0);
-    this.scroll.root.rotation.x = -0.12;
-    const fl = `FLOOR ${m.floor}/${m.floors}`;
-    const tw = ui.measure(fl, 'small');
-    ui.text(fl, cx + W / 2, cy + H / 2 + 6, { font: 'small', color: '#f0e6d0', outline: C.ink, align: 'right' });
-    for (let i = 0; i < m.floors; i++) ui.img(hudArt(i < m.floor ? 'pip' : 'pipOff'), cx + W / 2 - tw - 8 - (m.floors - i) * 7, cy + H / 2 + 6);
-  }
-
-  // ---------------------------------------------------------------- the depth gauge (under the strip map)
-  private depthGauge(ui: DUi, dt: number, d: HudData['depth'], hasStrip: boolean, far?: number) {
-    this.gauge.root.visible = this.gaugePlaque.visible = !!d;
-    this.farPlaque.visible = !!d && far !== undefined;
-    if (!d) return;
-    const x = ui.w - 40, y = hasStrip ? 102 : 40;
-    this.gauge.update(dt, this.t, d, ui.k);
-    this.gauge.root.rotation.set(-0.08, -0.12 + Math.sin(this.t * 0.6) * 0.03, Math.sin(this.t * 1.1) * 0.02);
-    this.stage.put(this.gauge.root, x, y, 10);
-    this.stage.put(this.gaugePlaque, x, y + 37, 6);
-    // the depth, once: on the plaque under the gauge
-    ui.text(Math.round(d.m) > 0 ? `-${Math.round(d.m)} M` : '0 M', x, y + 32, { font: 'body', color: d.descending ? '#bff4ff' : '#fff0d0', outline: '#2a1606', align: 'center' });
-    // the journey: how far from home, on a second plaque left of the gauge (a little house glyph + metres)
+  // ---------------------------------------------------------------- top right: the navigation instrument
+  private nav(ui: DUi, dt: number, s: HudData, leftLimit: number): number {
+    const m = s.strip ?? null, d = s.depth ?? null;
+    const far = s.far ?? (s.strip as { far?: number } | null | undefined)?.far;
+    this.gauge.root.visible = !!d;
+    if (!m && !d) return ui.w;
+    const gc = { x: ui.w - M - PR - 4, y: M + PR + 3 };
+    const x1 = d ? gc.x : ui.w - M;
+    const NW = Math.max(150, Math.min(Math.round(ui.w * 0.34), 250, x1 - leftLimit - 24));
+    const x0 = x1 - NW, y0 = gc.y - 21, h = 46;
+    this.planes.draw(plate(ui.p(NW), ui.p(h), 'lacquer'), ui.p(x0), ui.p(y0), { shadow: 2 });
+    const cr = (d ? gc.x - PR - 9 : x1 - 8);
+    const cl = x0 + 8;
+    // the area name and the stage pips
+    if (m) {
+      const nm = (m.name ?? '').toUpperCase();
+      ui.big(nm, cl, y0 + 5, 6, { color: PAL.brass2 });
+      const st = `${m.floor}/${m.floors}`;
+      const sw = ui.bigW(st, 6);
+      ui.big(st, cr, y0 + 5, 6, { color: PAL.cream, align: 'right' });
+      for (let i = 0; i < m.floors; i++) {
+        const px = cr - sw - 6 - (m.floors - 1 - i) * 7, py = y0 + 8;
+        const on = i < m.floor, cur = i === m.floor - 1;
+        diamond(ui, px, py, 3, on ? (cur ? PAL.brass2 : PAL.brass) : PAL.teal1, PAL.ink2);
+        if (cur) diamond(ui, px, py, 1, PAL.glint, PAL.glint);
+      }
+      // the strip map in a recessed window
+      const mx = cl - 2, my = y0 + 14, mw = cr - cl + 4, mh = 18;
+      this.planes.draw(plate(ui.p(mw), ui.p(mh), 'well'), ui.p(mx), ui.p(my));
+      const cw = ui.p(mw) - 4, ch = ui.p(mh) - 4;
+      if (this.stripCv.width !== cw || this.stripCv.height !== ch) { this.stripCv.width = Math.max(4, cw); this.stripCv.height = Math.max(4, ch); }
+      paintStrip(this.stripCv, m, this.t);
+      this.planes.draw(this.stripCv, ui.p(mx) + 2, ui.p(my) + 2, { dirty: true });
+    }
+    // the readouts: metres from home (left) and the depth (right, next to the gauge)
+    const ry = y0 + h - 12;
     if (far !== undefined) {
-      const fx = x - 64, fy = y + 37;
-      this.stage.put(this.farPlaque, fx, fy, 6);
-      const k = ui.k, F = (px: number, py: number, w: number, h: number, c: string) => ui.ui.fill(Math.round((fx + px) * k), Math.round((fy + py) * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), c);
-      F(-19, -6, 7, 1, '#2a1606'); F(-18, -7, 5, 1, '#2a1606'); F(-17, -8, 3, 1, '#2a1606');
-      F(-18, -5, 5, 4, '#2a1606'); F(-17, -4, 3, 3, '#e8c890'); F(-16, -3, 1, 2, '#2a1606');
-      ui.text(`${Math.round(far)} M`, fx + 4, fy - 5, { font: 'body', color: '#fff0d0', outline: '#2a1606', align: 'center' });
+      const g = GLYPH.house(), gs = Math.max(1, Math.round(ui.k));
+      ui.ui.img(g, ui.p(cl), ui.p(ry + 1), { w: g.width * gs, h: g.height * gs });
+      const fw = ui.big(`${Math.round(far)}`, cl + g.width * gs / ui.k + 3, ry, 7.5, { color: PAL.cream });
+      ui.big('M FROM HOME', cl + g.width * gs / ui.k + 5 + fw, ry + 2, 5, { color: PAL.dim });
     }
+    if (d) {
+      const dm = Math.round(d.m);
+      const txt = dm > 0 ? `-${dm}` : '0';
+      const col = d.descending ? PAL.sea2 : PAL.cream;
+      const uw = ui.bigW('M', 5);
+      const tw = ui.big(txt, cr - uw - 2, ry - 1, 9, { color: col, align: 'right' });
+      ui.big('M', cr, ry + 3, 5, { color: PAL.dim, align: 'right' });
+      const g = GLYPH.down(), gs = Math.max(1, Math.round(ui.k));
+      ui.ui.img(g, ui.p(cr - uw - 4 - tw) - g.width * gs - 2, ui.p(ry + 2), { w: g.width * gs, h: g.height * gs });
+      this.gauge.update(dt, this.t, d, ui.k * ui.ui.hd);
+      this.gauge.root.rotation.set(-0.08, -0.12 + Math.sin(this.t * 0.6) * 0.03, Math.sin(this.t * 1.1) * 0.02);
+      this.stage.put(this.gauge.root, gc.x, gc.y, 0);
+    }
+    return x0;
   }
 
-  // ---------------------------------------------------------------- bottom centre: the boss plaque
+  // ---------------------------------------------------------------- bottom centre: the boss
   private bossBar(ui: DUi, dt: number, b: BossBar | null) {
-    this.boss.root.visible = !!b;
+    for (const g of this.gems) g.visible = !!b;
     if (!b) return;
-    const ease = 1 - (1 - this.bossIn) ** 3;
-    const W = Math.min(260, Math.round(ui.w * 0.5));
-    this.boss.layout(W);
-    this.boss.update(dt, this.bossShown, this.bossChip, this.bossFlash, b);
-    const y = ui.h - 26 + (1 - ease) * 40;
-    this.stage.put(this.boss.root, ui.w / 2, y, 0);
-    this.boss.root.rotation.x = -0.25 + Math.sin(this.t * 0.7) * 0.02;
-    // the name sits on the plaque's top edge; on a tall logical canvas it gets the 32px Alagard
-    const nf: FontName = ui.k >= 1.75 ? 'big' : 'title';
-    const ny = y - 13 - ui.cap(nf);
-    ui.text(b.name.toUpperCase(), ui.w / 2, ny, { font: nf, color: '#ffe8d0', color2: '#ff9a7a', outline: '#1a0606', align: 'center', alpha: ease });
-    if (b.title) ui.text(b.title, ui.w / 2, ny - 3 - ui.cap('small'), { font: 'small', color: '#c8b8a8', outline: '#1a0606', align: 'center', alpha: ease });
+    const ease = easeOutBack(this.bossIn * 1.6), fade = clamp01(this.bossIn * 3);
+    const BW = Math.max(180, Math.min(320, ui.w - 2 * 184));
+    const shake = Math.sin(this.t * 70) * this.bossShake * 2;
+    const bx = (ui.w - BW) / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
+    // the dark plate with the bar
+    this.planes.draw(plate(ui.p(BW + 24), ui.p(24), 'lacquer', { rim: '#b04a3a', face: '#1a2a30' }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
+    const v = this.bossShown;
+    bar(ui.ui, ui.p(bx), ui.p(py + 6), ui.p(BW), Math.max(7, ui.p(9)), v, { col: '#d8303a', chip: this.bossChip, flash: this.bossFlash, ticks: 0.1, back: '#160a0e' });
+    const po = clamp01(b.poise ?? 1);
+    if (po < 0.999) bar(ui.ui, ui.p(bx), ui.p(py + 16.5), ui.p(BW), Math.max(3, ui.p(3)), po, { col: '#f2c66d', back: '#160a0e' });
+    // the phase pips, centred on the plate's bottom rim
+    const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
+    if (n > 1) for (let i = 0; i < n; i++) { const px = ui.w / 2 + (i - (n - 1) / 2) * 10, pyy = py + 23; diamond(ui, px, pyy, 3.5, i < ph ? PAL.coral : '#3a2228', PAL.ink2); if (i < ph) diamond(ui, px - 0.5, pyy - 0.5, 1, '#ffd0c0', '#ffd0c0'); }
+    // the gems at the bar's ends flare on hits
+    this.gemMat.emissiveIntensity = 0.7 + this.bossFlash * 2 + Math.sin(this.t * 4) * 0.15;
+    this.gems.forEach((g, i) => { g.rotation.y += dt * (1.2 + this.bossFlash * 8); this.stage.put(g, i ? bx + BW + 6 : bx - 6, py + 10.5, 30); });
+    // the name ribbon stamps down onto the plate
+    const name = b.name.toUpperCase();
+    const st = clamp01((this.bossIn - 0.15) * 4), sEase = easeOutBack(st);
+    const nw = ui.bigW(name, 9);
+    const rw = nw + 46, rh = 19;
+    const ry = py - 15 - (1 - sEase) * 10;
+    if (st > 0) {
+      this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#a8323a' }), ui.p(ui.w / 2 - rw / 2 + shake), ui.p(ry), { alpha: st });
+      ui.big(name, ui.w / 2 + shake, ry + 5, 9, { color: PAL.cream, color2: '#ffd8c8', align: 'center', alpha: st });
+      if (b.title) ui.big(clean(b.title).toUpperCase(), ui.w / 2, ry - 8, 5, { color: '#e8c0b0', align: 'center', alpha: st });
+      if (this.bossIn < 0.4 && st >= 1 && !this.bossStamped) { this.bossStamped = true; audio.play('thud_heavy1', { vol: 0.4, dry: true }); }
+    }
+    if (this.bossIn < 0.1) this.bossStamped = false;
   }
+  private bossStamped = false;
 
   // ---------------------------------------------------------------- bottom left: the hand of skill cards
   private hand(ui: DUi, dt: number, sk: SkillHudState | null) {
@@ -801,53 +780,125 @@ export class Hud {
     sk.slots.forEach((sl, i) => {
       if (!sl) return;
       const c = this.cards[k++]; if (!c) return;
-      const x = 26 + i * 40, y = ui.h - 34;
+      const x = M + 20 + i * 41, y = ui.h - 36;
       const hov = ui.hover(x - c.w / 2, y - c.h / 2, c.w, c.h) ? 1 : 0;
       const cd = sl.cdMax > 0 ? clamp01(sl.cd / sl.cdMax) : 0;
-      c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / (c.w / 2) : 0, my: hov ? (ui.my - y) / (c.h / 2) : 0, cd, ready: cd <= 0 && sl.mana <= sk.mana, selected: i === sk.sel });
+      const ready = cd <= 0 && sl.mana <= sk.mana;
+      c.update(dt, { hover: hov, mx: hov ? (ui.mx - x) / (c.w / 2) : 0, my: hov ? (ui.my - y) / (c.h / 2) : 0, cd, ready, selected: i === sk.sel });
       this.stage.put(c.root, x, y, 30);
-      c.root.rotation.z = (i - 1.5) * -0.06;
-      // the key number on the frame, the cooldown seconds over the art
-      ui.text(String(i + 1), x - c.w / 2 + 4, y - c.h / 2 + 1 - (i === sk.sel ? 5 : 0), { font: 'body', color: '#fff2c8', outline: '#1a0c04' });
-      if (cd > 0) ui.text(String(Math.ceil(sl.cd)), x, y - 8, { font: 'title', color: '#ffffff', outline: '#06080e', align: 'center' });
+      c.root.rotation.z = (i - 1.5) * -0.05;
+      // the key on a little brass disc on the frame, the cooldown seconds big over the art
+      const lift = i === sk.sel ? 5 : 0;
+      const kx = x - c.w / 2 + 2, ky = y - c.h / 2 - 3 - lift;
+      diamond(ui, kx + 3, ky + 4, 5.5, i === sk.sel ? PAL.brass2 : PAL.brass, PAL.ink2);
+      ui.big(String(i + 1), kx + 3, ky + 1, 6, { color: PAL.ink, outline: null, shadow: null, align: 'center' });
+      if (cd > 0) ui.big(String(Math.ceil(sl.cd)), x, y - 9, 11, { color: '#ffffff', align: 'center' });
+      else if (!ready) ui.big('MANA', x, y - 4, 4.5, { color: PAL.sea2, align: 'center' });
     });
   }
 
-  // ---------------------------------------------------------------- title cards / pickup streaks
-  private drawCards(ui: DUi, dt: number) {
-    for (const c of this.cardsT) c.t += dt;
-    for (const c of this.cardsT) if (c.t >= c.life) { c.model?.removeFromParent(); c.board?.removeFromParent(); }
-    this.cardsT = this.cardsT.filter((c) => c.t < c.life);
-    this.ribbon.visible = false;
-    for (const c of this.cardsT) {
-      const a = clamp01(Math.min(c.t * 5, (c.life - c.t) * 2.5));
-      const slide = Math.round((1 - Math.min(1, c.t * 5)) ** 2 * 14);
-      if (c.icon) {
-        // right edge, under the depth gauge, newest at the bottom; slides in from the right and back out
-        const idx = this.cardsT.filter((q) => q.icon).indexOf(c);
-        const cw = 132, ch = 38;
-        const inK = Math.min(1, c.t * 4), outK = clamp01((c.t - c.life + 0.35) / 0.35);
-        const slideX = Math.round((1 - inK) ** 3 * (cw + 20) + outK ** 2 * (cw + 20));
-        const x = ui.w - cw - 8 + slideX, y = 158 + idx * (ch + 4);
-        if (c.board) { c.board.visible = true; this.stage.put(c.board, x + cw / 2, y + ch / 2, -20); c.board.rotation.set(0, -0.12 * (1 - inK), 0); }
-        if (c.model) {
-          const fitK = 26 / Math.max(1, ...((c.model.userData.cells as number[] | undefined) ?? [1]));
-          c.model.scale.setScalar(fitK * (0.6 + 0.4 * Math.min(1, c.t * 3)) * (1 + Math.max(0, 0.25 - c.t) * 1.6));
-          c.model.rotation.set(0.3, -0.6 + Math.sin(this.t * 1.6) * 0.5, 0);
-          this.stage.put(c.model, x + 20, y + ch / 2, 30);
+  // ---------------------------------------------------------------- right: pickup cards
+  private pickups(ui: DUi, dt: number) {
+    for (const c of this.picks) c.t += dt;
+    for (const c of this.picks) if (c.t >= c.life) c.model.removeFromParent();
+    this.picks = this.picks.filter((c) => c.t < c.life);
+    let ty = 70;
+    for (const c of this.picks) {
+      c.y = lerp(c.y, ty, 1 - Math.exp(-dt * 10));
+      const nw = ui.bigW(c.title, 7), kw = ui.bigW(c.kind, 4.5);
+      const maxW = Math.min(220, ui.w * 0.36);
+      let sub = c.sub;
+      const subMax = maxW - 44;
+      while (sub.length > 4 && ui.bigW(sub, 4.5) > subMax) sub = sub.slice(0, -2).trimEnd() + '…'.replace('…', '');
+      if (sub !== c.sub && !sub.endsWith('.')) sub = sub.replace(/[ .,]*$/, '') + '...';
+      const cw = Math.round(Math.max(136, Math.min(maxW, Math.max(nw, kw, ui.bigW(sub, 4.5)) + 46))), ch = 34;
+      const inK = easeOutBack(c.t * 3.2), outK = clamp01((c.t - c.life + 0.35) / 0.35) ** 2;
+      const x = ui.w - M - cw + (1 - inK) * (cw + 24) + outK * (cw + 24);
+      const y = c.y;
+      const a = 1 - outK;
+      const R = ramp(c.color);
+      this.planes.draw(plate(ui.p(cw), ui.p(ch), 'lacquer', { rim: c.color }), ui.p(x), ui.p(y), { alpha: a });
+      this.planes.draw(plate(ui.p(26), ui.p(26), 'well', { face: '#1d3a44' }), ui.p(x + 4), ui.p(y + 4), { alpha: a });
+      // a fresh card glows with its rarity for a moment
+      if (c.t < 0.5) ui.fill(x + 1, y + 1, cw - 2, ch - 2, R[5], (0.5 - c.t) * 0.6);
+      const cells = (c.model.userData.cells as number[] | undefined) ?? [1];
+      c.model.scale.setScalar((20 / Math.max(1, ...cells)) * (1 + Math.max(0, 0.3 - c.t) * 1.4));
+      c.model.rotation.set(0.3, -0.6 + Math.sin(this.t * 1.6 + c.y) * 0.6, 0);
+      c.model.visible = a > 0.05;
+      this.stage.put(c.model, x + 17, y + 17, 40);
+      const tx = x + 35;
+      ui.big(c.title, tx, y + 5, 7, { color: R[4], alpha: a });
+      if (c.kind) ui.big(c.kind, tx, y + 15, 4.5, { color: PAL.dim, alpha: a });
+      if (sub) ui.big(sub, tx, y + 23, 4.5, { color: PAL.kelp2, alpha: a });
+      ty += ch + 5;
+    }
+  }
+
+  // ---------------------------------------------------------------- title toasts and the floor's area card
+  private toastsDraw(ui: DUi, dt: number, hidden: boolean) {
+    for (const c of this.toasts) c.t += dt;
+    this.toasts = this.toasts.filter((c) => c.t < c.life);
+    for (const c of this.toasts) {
+      const outK = clamp01((c.t - c.life + 0.45) / 0.45);
+      if (c.area) {
+        // a cinematic band across the upper screen, the name stamped in letter by letter, brass rules, the sub line
+        const cy = ui.h * 0.25, cap = 20;
+        const bandA = clamp01(c.t * 4) * (1 - outK) * 0.38;
+        ui.fill(0, cy - 9, ui.w, cap + 29, PAL.ink2, bandA);
+        ui.fill(0, cy - 9, ui.w, 1, PAL.brass, bandA * 1.6);
+        ui.fill(0, cy + cap + 19, ui.w, 1, PAL.brass, bandA * 1.6);
+        const tw = ui.bigW(c.title, cap);
+        let lx = ui.w / 2 - tw / 2;
+        const chars = [...c.title];
+        chars.forEach((ch, i) => {
+          const lt = c.t - 0.1 - i * 0.045;
+          const k = clamp01(lt * 6);
+          const w = ui.bigW(ch === ' ' ? 'I' : ch, cap) - 1 / ui.k;
+          if (k > 0 && ch !== ' ') ui.big(ch, lx, cy - (1 - easeOutBack(k)) * 14 - outK * 6, cap, { color: c.color, color2: PAL.brass2, alpha: k * (1 - outK) });
+          lx += ch === ' ' ? w * 0.7 : w;
+        });
+        const rk = easeOut((c.t - 0.3) * 2.5);
+        const rw = Math.min(ui.w * 0.4, tw * 0.5 + 40) * rk;
+        if (rk > 0) {
+          for (const sx of [-1, 1]) {
+            const x0 = sx < 0 ? ui.w / 2 - tw / 2 - 10 - rw : ui.w / 2 + tw / 2 + 10;
+            ui.fill(x0, cy + cap / 2 - 1, rw, 2, PAL.brass, 1 - outK); ui.fill(x0, cy + cap / 2 - 1, rw, 1, PAL.brass2, 1 - outK);
+            diamond(ui, sx < 0 ? x0 + rw + 4 : x0 - 4, cy + cap / 2, 3, PAL.brass2, PAL.ink2);
+          }
         }
-        const tx = x + 40;
-        ui.text(c.title, tx, y + 5, { font: 'title', color: c.color, outline: '#1a0e04', alpha: 1 - outK });
-        if (c.kind) ui.text(c.kind, tx, y + 7 + ui.cap('title'), { font: 'small', color: '#7a5a3a', shadow: null, alpha: 1 - outK });
-        const sub = c.sub.length > 34 ? c.sub.slice(0, 33) + '…' : c.sub;
-        if (sub) ui.text(sub, tx, y + 18 + ui.cap('title'), { font: 'small', color: '#2a6a1a', shadow: null, alpha: 1 - outK });
-      } else {
-        // top centre, between the health corner and the strip map: never over the play area
-        const y = 10;
-        const big = ui.measure(c.title, 'big') < ui.w * 0.42;
-        ui.text(c.title, ui.w / 2, y - slide, { font: big ? 'big' : 'title', color: c.color, color2: '#ffc860', outline: '#140a04', align: 'center', alpha: a });
-        if (c.sub) ui.text(c.sub, ui.w / 2, y + ui.cap(big ? 'big' : 'title') + 5 + slide, { font: 'small', color: '#e8e0d0', outline: '#06080e', align: 'center', alpha: a });
+        const sa = clamp01((c.t - 0.7) * 3) * (1 - outK);
+        if (c.sub && sa > 0) ui.big(c.sub, ui.w / 2, cy + cap + 7, 6.5, { color: PAL.cream, align: 'center', alpha: sa });
+        continue;
+      }
+      // the toast: a ribbon drops in at the top centre
+      const inK = easeOutBack(c.t * 3.5);
+      const cap = 9, tw = ui.bigW(c.title, cap), sw = c.sub ? ui.bigW(c.sub, 5.5) : 0;
+      const rw = Math.max(tw + 50, sw + 30), rh = 21;
+      const x = ui.w / 2 - rw / 2, y = (hidden ? 14 : 12) - (1 - inK) * 30 - outK * 20;
+      const a = clamp01(c.t * 5) * (1 - outK);
+      this.planes.draw(plate(ui.p(rw), ui.p(rh), 'ribbon', { rim: '#2c6b70' }), ui.p(x), ui.p(y), { alpha: a });
+      ui.big(c.title, ui.w / 2, y + 5, cap, { color: c.color, align: 'center', alpha: a });
+      if (c.sub) {
+        const sy = y + rh + 3;
+        const pw = sw + 14;
+        this.planes.draw(plate(ui.p(pw), ui.p(11), 'well', { face: PAL.ink }), ui.p(ui.w / 2 - pw / 2), ui.p(sy), { alpha: a * 0.92 });
+        ui.big(c.sub, ui.w / 2, sy + 2.5, 5.5, { color: PAL.cream, align: 'center', alpha: a });
       }
     }
   }
+}
+
+/** a small pixel diamond (pips, gems), centre (x, y) and radius r in D */
+function diamond(ui: DUi, x: number, y: number, r: number, col: string, out: string) {
+  const R = Math.max(1, Math.round(r * ui.k)), cx = Math.round(x * ui.k), cy = Math.round(y * ui.k);
+  for (let i = -R; i <= R; i++) {
+    const w = R - Math.abs(i);
+    ui.ui.fill(cx - w - 1, cy + i, w * 2 + 3, 1, out);
+  }
+  ui.ui.fill(cx, cy - R - 1, 1, 1, out); ui.ui.fill(cx, cy + R + 1, 1, 1, out);
+  for (let i = -R + 1; i <= R - 1; i++) { const w = R - 1 - Math.abs(i); ui.ui.fill(cx - w, cy + i, w * 2 + 1, 1, col); }
+}
+function lerpHex(a: string, b: string, t: number) {
+  const A = new THREE.Color(a), B = new THREE.Color(b);
+  return '#' + A.lerp(B, clamp01(t)).getHexString();
 }

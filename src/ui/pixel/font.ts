@@ -24,8 +24,6 @@ export interface PxFont {
   lh: number;
   /** extra letter spacing (px) */
   track: number;
-  /** a screen font drawn at this many canvas px per UI px (PixelUI's `hd`): its glyphs are blitted untransformed */
-  dev?: number;
 }
 
 const def = (family: string, px: number, track = 0): PxFont => ({ family, px, capTop: 0, cap: Math.round(px * 0.6), desc: 2, lh: px, track });
@@ -34,18 +32,23 @@ const def = (family: string, px: number, track = 0): PxFont => ({ family, px, ca
  * The bundled pixel fonts at their TRUE native sizes: the px size where one font pixel lands on exactly one canvas
  * pixel (measured: zero partially-covered pixels when rasterised). Any other size makes the thresholding below
  * drop or double whole columns, which is what made v2 text look smushed (m6x11plus was drawn at 16 px; its grid
- * is 18 px). Pick by role:
- *   body   m6x11plus 18   bold 2-px-feel workhorse (buttons, dialogue, tooltips)   cap 11
- *   small  m5x7 16        light labels, secondary lines, numbers on chips          cap 7
- *   tiny   m5x7 16        (alias of small: nothing smaller than m5x7 for words)
- *   title  Alagard 16     headings, names, big numbers                             cap 11
- *   fancy  Alagard 16     (alias; Jacquard 24 has no integer native size)
- *   big    Alagard 32     splash titles (exact 2x)
+ * is 18 px). These CLASSIC faces are what unregistered canvases (3D textures, sprites, signs) get:
+ *   body   m6x11plus 18   cap 11        small / tiny   m5x7 16   cap 7
+ *   title  Alagard 16     cap 11        big            Alagard 32 (exact 2x)
  *
- * v4 SCREEN fonts: a PixelUI draws body / small text in Jersey (OFL) instead, at twice the pixels per glyph when its
- * canvas is 2 px per UI px (1080p, 4K): body -> Jersey 20 (cap 20 canvas px = 10 UI px), small -> Jersey 15; at
- * 1 px per UI px (720p) body -> Jersey 10. Same footprints as m6x11 / m5x7, so layouts hold. Textures and sprites
- * (unregistered canvases) keep the classic fonts. Titles stay Alagard everywhere.
+ * v5 SCREEN fonts (the "diver's kit"): a PixelUI canvas draws every role in Jersey (OFL) -- never Alagard -- at an
+ * INTEGER glyph scale chosen per canvas density (`hd`, canvas px per UI px), so the glyphs are always crisp and each
+ * role keeps (almost) the same footprint in UI px at every window size. The UI is ~360 UI px tall (UI_TARGET_H):
+ *
+ *   role    cap (UI px)  line (UI px)  hd 1 (tiny window)  hd 2 (720p, 1440p)   hd 3 (1080p, 4K)
+ *   small   7.5          11            Jersey10 x1 (7)     Jersey15 x1 (7.5)    Jersey20 x1 (6.7)
+ *   tiny    = small
+ *   body    10           14            Jersey10 x1 (7)     Jersey20 x1 (10)     Jersey15 x2 (10)
+ *   title   15           20            Jersey15, one font px = one UI px at every density (chunky headings, numbers)
+ *   big     20           26            Jersey20, one font px = one UI px (splash words, the biggest numbers)
+ *
+ * Line heights are FIXED per role in UI px so layouts are identical everywhere; widths vary by up to ~12% between
+ * densities (1080p is the narrowest), so lay out against 1280x720 and test both.
  */
 export const FONTS: Record<FontName, PxFont> = {
   body: def('M6x11', 18),
@@ -54,13 +57,37 @@ export const FONTS: Record<FontName, PxFont> = {
   title: def('Alagard', 16),
   fancy: def('Alagard', 16),
   big: def('Alagard', 32),
-  // v4 screen fonts: Jersey 10 / 15 / 20 (Sarah Cadigan-Fried, OFL) at their exact native sizes. A PixelUI swaps
-  // body / small text to these (see screenFont): at 2 canvas px per UI px Jersey 20 has m6x11's footprint (cap 10
-  // UI px, ~6.8 px a letter) with twice the pixels per glyph; Jersey 15 replaces m5x7 the same way.
+  // Jersey 10 / 15 / 20 (Sarah Cadigan-Fried, OFL) at their exact native sizes (cap 7 / 15 / 20 px)
   hd10: def('Jersey10', 56 / 3),
-  hd15: { ...def('Jersey15', 27), dev: 2 },
-  hd20: { ...def('Jersey20', 34), dev: 2 },
+  hd15: def('Jersey15', 27),
+  hd20: def('Jersey20', 34),
 };
+
+type Face = 'hd10' | 'hd15' | 'hd20';
+/** role -> [face, glyph scale in canvas px] per canvas density (index = hd, 1..6) */
+const SCREEN: Record<'small' | 'body' | 'title' | 'big', [Face, number][]> = {
+  //        hd0 (unused) hd1          hd2           hd3           hd4           hd5           hd6
+  small: [['hd10', 1], ['hd10', 1], ['hd15', 1], ['hd20', 1], ['hd15', 2], ['hd15', 2], ['hd15', 3]],
+  body: [['hd10', 1], ['hd10', 1], ['hd20', 1], ['hd15', 2], ['hd20', 2], ['hd20', 2], ['hd20', 3]],
+  title: [['hd15', 1], ['hd15', 1], ['hd15', 2], ['hd15', 3], ['hd15', 4], ['hd15', 5], ['hd15', 6]],
+  big: [['hd20', 1], ['hd20', 1], ['hd20', 2], ['hd20', 3], ['hd20', 4], ['hd20', 5], ['hd20', 6]],
+};
+/** fixed line heights per role on a PixelUI canvas (UI px) */
+const ROLE_LH: Record<'small' | 'body' | 'title' | 'big', number> = { small: 11, body: 14, title: 20, big: 26 };
+function roleOf(font: FontName): 'small' | 'body' | 'title' | 'big' {
+  switch (font) {
+    case 'small': case 'tiny': case 'hd10': case 'hd15': return 'small';
+    case 'title': case 'fancy': return 'title';
+    case 'big': return 'big';
+    default: return 'body';
+  }
+}
+/** the face and integer glyph scale a role is drawn with on a canvas of this density (hd 0 = unregistered) */
+function spec(font: FontName, hd: number): { face: FontName; k: number } {
+  if (!hd) return { face: font, k: 1 };
+  const r = SCREEN[roleOf(font)][Math.min(6, Math.max(1, Math.round(hd)))];
+  return { face: r[0], k: r[1] };
+}
 
 /**
  * Text density per canvas: PixelUI registers its context with its `hd` (canvas px per UI px). Unregistered canvases
@@ -68,14 +95,8 @@ export const FONTS: Record<FontName, PxFont> = {
  */
 const density = new WeakMap<CanvasRenderingContext2D, number>();
 export function setTextDensity(ctx: CanvasRenderingContext2D, hd: number) { density.set(ctx, hd); }
-/** the font actually used for a role on a canvas of this density (0 = unregistered) */
-export function screenFont(font: FontName = 'body', hd = 0): FontName {
-  if (!hd) return font;
-  if (hd >= 2) return font === 'body' ? 'hd20' : font === 'small' || font === 'tiny' ? 'hd15' : font;
-  return font === 'body' ? 'hd10' : font;
-}
-/** UI px per font px for a role at a density (hd fonts are measured in canvas px) */
-function devDiv(f: FontName, hd: number) { const d = FONTS[f].dev; return d && hd >= d ? hd : 1; }
+/** the face actually used for a role on a canvas of this density (0 = unregistered) */
+export function screenFont(font: FontName = 'body', hd = 0): FontName { return spec(font, hd).face; }
 
 let calibrated = false;
 const meas = (() => { const c = document.createElement('canvas'); c.width = c.height = 4; return c.getContext('2d')!; })();
@@ -126,13 +147,13 @@ function fontOf(n: FontName | undefined) { return FONTS[n ?? 'body']; }
 
 export function measure(str: string, font: FontName = 'body', hd = 0): number {
   if (!str) return 0;
-  if (hd) { const f2 = screenFont(font, hd); if (f2 !== font) return measure(str, f2) / devDiv(f2, hd); }
+  if (hd) { const sp = spec(font, hd); return (measure(str, sp.face) * sp.k) / hd; }
   const f = fontOf(font);
   meas.font = `${f.px}px '${f.family}'`;
   return Math.ceil(meas.measureText(str).width) + f.track * Math.max(0, str.length - 1);
 }
-export function lineH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); const f2 = screenFont(font, hd); return fontOf(f2).lh / devDiv(f2, hd); }
-export function capH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); const f2 = screenFont(font, hd); return fontOf(f2).cap / devDiv(f2, hd); }
+export function lineH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); return hd ? ROLE_LH[roleOf(font)] : fontOf(font).lh; }
+export function capH(font: FontName = 'body', hd = 0) { if (!calibrated) calibrateFonts(); if (!hd) return fontOf(font).cap; const sp = spec(font, hd); return (fontOf(sp.face).cap * sp.k) / hd; }
 
 /** hard-pixel glyph mask for a string; row 0 is the cap top */
 function mask(str: string, font: FontName) {
@@ -166,14 +187,14 @@ function rgba(c: string): [number, number, number, number] {
 }
 
 /** a coloured, outlined, shadowed text canvas (cached) */
-export function glyphs(str: string, o: TextOpts = {}): Glyphs {
+export function glyphs(str: string, o: TextOpts = {}, sd = 1): Glyphs {
   const font = o.font ?? 'body';
-  const key = [str, font, o.color, o.color2, o.shadow, o.outline].join('|');
+  const key = [str, font, o.color, o.color2, o.shadow, o.outline, sd].join('|');
   const hit = cache.get(key);
   if (hit) return hit;
   const mk = mask(str, font);
   const pad = o.outline ? 1 : 0;
-  const sh = o.shadow ? 1 : 0;
+  const sh = o.shadow ? sd : 0;
   const w = mk.w + pad * 2 + sh, h = mk.h + pad * 2 + sh;
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d')!;
@@ -189,7 +210,7 @@ export function glyphs(str: string, o: TextOpts = {}): Glyphs {
     if (on(gx, gy)) { put(x, y, gy >= half ? col2 : col); continue; }
     if (oc && (on(gx - 1, gy) || on(gx + 1, gy) || on(gx, gy - 1) || on(gx, gy + 1) || on(gx - 1, gy - 1) || on(gx + 1, gy - 1) || on(gx - 1, gy + 1) || on(gx + 1, gy + 1))) { put(x, y, oc); continue; }
     if (sc) {
-      const sx = gx - 1, sy = gy - 1;
+      const sx = gx - sd, sy = gy - sd;
       const hitS = on(sx, sy) || (oc && (on(sx - 1, sy) || on(sx + 1, sy) || on(sx, sy - 1) || on(sx, sy + 1) || on(sx - 1, sy - 1) || on(sx + 1, sy - 1) || on(sx - 1, sy + 1) || on(sx + 1, sy + 1)));
       if (hitS) put(x, y, sc);
     }
@@ -214,23 +235,29 @@ function withAutoShadow(o: TextOpts): TextOpts {
   return { ...o, shadow: sh };
 }
 
-/** draw text with its cap top at y; returns the drawn width */
+/** draw text with its cap top at y; returns the drawn width (UI px on a PixelUI canvas) */
 export function drawText(ctx: CanvasRenderingContext2D, str: string, x: number, y: number, o: TextOpts = {}): number {
   if (!str) return 0;
   const hd = density.get(ctx);
   if (hd) {
-    const f2 = screenFont(o.font ?? 'body', hd);
-    if (f2 !== (o.font ?? 'body')) {
-      const div = devDiv(f2, hd);
-      if (div === 1) return drawText1(ctx, str, x, y, { ...o, font: f2 });
-      // a high-density screen font: blit its glyphs 1:1 onto the canvas (map the UI position through the current
-      // transform, then draw untransformed), so each glyph pixel is one canvas pixel
-      const m = ctx.getTransform();
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const w = drawText1(ctx, str, Math.round(m.a * x + m.e), Math.round(m.d * y + m.f), { ...o, font: f2 });
-      ctx.restore();
-      return w / div;
-    }
+    // a screen font: rasterise at the face's native size, then blit at an integer glyph scale k onto the canvas
+    // (map the UI position through the current transform, draw untransformed), so every glyph pixel is k x k
+    // canvas pixels. The drop shadow is ~1 UI px whatever k is.
+    const sp = spec(o.font ?? 'body', hd);
+    const o2 = withAutoShadow({ ...o, font: sp.face });
+    const sd = o2.shadow ? Math.max(1, Math.floor(hd / sp.k)) : 1;
+    const g = glyphs(str, o2, sd);
+    const twF = g.w - (o2.outline ? 2 : 0) - (o2.shadow ? sd : 0);
+    const tw = (twF * sp.k) / hd;
+    let ux = x;
+    if (o.align === 'center') ux = x - tw / 2; else if (o.align === 'right') ux = x - tw;
+    const m = ctx.getTransform();
+    const X = Math.round(m.a * Math.round(ux) + m.e) + g.ox * sp.k, Y = Math.round(m.d * Math.round(y) + m.f) + g.oy * sp.k;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false;
+    if (o.alpha !== undefined && o.alpha < 1) ctx.globalAlpha *= Math.max(0, o.alpha);
+    ctx.drawImage(g.cv, X, Y, g.w * sp.k, g.h * sp.k);
+    ctx.restore();
+    return tw;
   }
   return drawText1(ctx, str, x, y, o);
 }

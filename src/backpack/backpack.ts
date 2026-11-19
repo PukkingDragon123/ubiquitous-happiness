@@ -1,33 +1,40 @@
-// The backpack screen (v3): a crisp 2D pixel-art leather pack drawn over the frozen world (the screen beneath
-// keeps rendering its last frame). Every icon is shown 1:1 (32 px per cell) on the shared PixelUI density.
+// The backpack screen (v5, "the diver's kit"): the bag as a real object over the dimmed, frozen world (the screen
+// beneath keeps rendering its last frame):
 //
 //   game.openModal('backpack', { run, onClose })        (closing calls installItemSystem(run), then onClose)
 //
-//   the pack      a stitched leather backpack, flap thrown open; its 5x5 canvas pockets hold the packed items
-//                 (only those count). Items sit in their pockets with a drop shadow, stack counts on materials.
-//   the seabed    a sandy patch beside it: loose finds (run.items with gx < 0). Whatever is left there when the
-//                 bag closes is dropped back into the water by the run screen.
-//   the card      the hovered / held item: name, rarity, kind, stack, stats, set tags, what it fuses with; with
-//                 nothing hovered, the BUILD: set bonuses with their 2 / 4 / 6 tier pips.
+//   the bag       a stitched leather satchel, flap thrown back with its buckled straps and a brass name plate; its
+//                 8 x 6 oilcloth pockets hold the packed items (only those count), each a lit 3D miniature with a
+//                 hairline in its rarity colour around its footprint and a paper tag on stacks
+//   the seabed    a compact sand tray under the bag: loose finds (run.items with gx < 0). Whatever is left there when
+//                 the bag closes is dropped back into the water by the run screen (the tray says so)
+//   the card      the hovered / held item up close: a big turning model in a brass display window, its name in its
+//                 rarity colour, kind / footprint / stack, stats, flavour, set chips with progress and what it fuses
+//                 with. With nothing hovered: what the packed gear adds up to (hearts, crit, skills ...)
+//   the sets      every set bonus in play: pips to the next tier, the active bonus; the hovered item's sets light up
 //
 // Drag (LMB) to move; R or RMB rotates the held / hovered item; pockets light green where it fits, red where it
-// doesn't, gold over a stack it tops up or a partner it fuses with. Tab / Esc / the X closes.
+// doesn't, gold over a stack it tops up or a partner it fuses with. Tab / Esc / the big X closes.
+// Test hooks (CSS px): bp.cellPoint(gx, gy), bp.trayPoint(bx, by), bp.itemPoint(uid), bp.closePoint()
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import type { Run, ItemInst } from '../game/run';
 import {
-  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, recipesWith, GRID_W, GRID_H, GRID_CELLS, packCells, ITEMS, RARITY_COLOR,
-  setBonuses, statLines, stackCap, stackOnto, itemIcon, type ItemDef,
+  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, GRID_W, GRID_H, GRID_CELLS, packCells, ITEMS, RARITY_COLOR,
+  setBonuses, setCounts, stackCap, stackOnto, SETS, SET_ORDER, type ItemDef, type SetState,
 } from '../game/items';
 import { PixelUI } from '../ui/pixel/ui';
 import { UiStage, contactShadow } from '../ui/obj/stage';
 import { itemModel } from './models';
 import { audio } from '../audio/audio';
+import { easeOutBack } from '../core/math';
+import { K, modelWindow, itemHead, itemBody, buildLines, setRow, CloseX, footprint } from '../hideout/itemCard';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
-/** UI px per cell: 32 at the old density, 48-64 on the finer (~540 row) UI so the miniatures are big and detailed */
-let C = 32;
+/** UI px per pocket (chosen per frame from the canvas size: 24 .. 64) and per seabed slot (about 3/4 of it: the
+ *  seabed is further down, its finds look smaller) */
+let C = 36, T = 26;
 
 function sfx(ids: string | string[], o: { vol?: number; rate?: number; delay?: number } = {}) {
   for (const id of Array.isArray(ids) ? ids : [ids]) if (audio.has(id)) { audio.play(id, { vol: o.vol ?? 0.6, rate: o.rate, delay: o.delay, dry: true, jitter: 0.06 }); return; }
@@ -35,150 +42,142 @@ function sfx(ids: string | string[], o: { vol?: number; rate?: number; delay?: n
 
 // ------------------------------------------------------------------ cached art
 const artCache = new Map<string, HTMLCanvasElement>();
-function cached(key: string, f: () => HTMLCanvasElement) { let c = artCache.get(key); if (!c) { c = f(); artCache.set(key, c); if (artCache.size > 600) artCache.clear(); } return c; }
+function cached(key: string, f: () => HTMLCanvasElement) { let c = artCache.get(key); if (!c) { c = f(); artCache.set(key, c); if (artCache.size > 200) artCache.clear(); } return c; }
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; return [c, x]; }
 
-/** an item's icon turned by rot quarter turns (clockwise, matching rotCells) */
-function rotIcon(id: string, level: number, rot: number): HTMLCanvasElement {
-  rot = ((rot % 4) + 4) % 4;
-  const src = itemIcon(id, level);
-  if (!rot) return src;
-  return cached(`rot|${id}|${level}|${rot}`, () => {
-    const sw = src.width, sh = src.height, odd = rot % 2 === 1;
-    const [c, x] = canvas(odd ? sh : sw, odd ? sw : sh);
-    x.translate(c.width / 2, c.height / 2); x.rotate((rot * Math.PI) / 2); x.drawImage(src, -sw / 2, -sh / 2);
-    return c;
-  });
-}
-/** a flat-colour silhouette of a canvas (shadows, hover rims) */
-function silhouette(src: HTMLCanvasElement, col: string, key: string): HTMLCanvasElement {
-  return cached(`sil|${key}|${col}`, () => {
-    const [c, x] = canvas(src.width, src.height);
-    x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = col; x.fillRect(0, 0, c.width, c.height);
-    return c;
-  });
-}
-/** a 1 px rim around a canvas's silhouette, in col */
-function rim(src: HTMLCanvasElement, col: string, key: string): HTMLCanvasElement {
-  return cached(`rim|${key}|${col}`, () => {
-    const s = silhouette(src, col, key);
-    const [c, x] = canvas(src.width + 2, src.height + 2);
-    for (const [dx, dy] of [[0, 1], [2, 1], [1, 0], [1, 2]]) x.drawImage(s, dx, dy);
-    x.globalCompositeOperation = 'destination-out'; x.drawImage(src, 1, 1);
-    return c;
-  });
-}
-
-// the pack: hue-shifted leather, canvas pockets, brass
-const LE = { out: '#1c0c06', d2: '#3e1e10', d1: '#56301a', b: '#7a4528', l1: '#94583a', l2: '#b47448', st: '#e8c084', stD: '#8a5a30' };
-const PK = { out: '#140a06', base: '#3c2c1e', sh: '#2a1c12', lit: '#56422e', st: '#9a7448', fl: '#4a3826' };
+// leather, oilcloth lining, brass (flat tones; every detail is a placed shape, never noise)
+const LE = { out: '#1a0c06', d2: '#3c1d0e', d1: '#55301a', b: '#784428', l1: '#94583a', l2: '#b47448', st: '#e6c28a', stD: '#2a140a' };
+const LN = { out: '#061216', frame: '#0b1d22', base: '#173a40', sh: '#0f2a30', lit: '#235058', seam: '#6f9a8e', seamD: '#0c2228', occ: '#1d4850' };
 const BR = { out: '#2e1404', d: '#8a5a14', b: '#d8a038', l: '#f8d878', w: '#fffbe0' };
 
-/** the whole backpack art for a grid of nw x nh cells of size c; the pocket area starts at PACK_IN */
-const PACK_IN = { x: 16, y: 38 };
+/** bag frame insets around the grid: side border, the flap band + top border, the bottom border, strap overhang */
+const SIDE = 8, TOP = 26, BOT = 9, EXT = 4;
+
+function inRound(px: number, py: number, x0: number, y0: number, x1: number, y1: number, r: number) {
+  if (px < x0 || py < y0 || px > x1 || py > y1) return false;
+  const qx = Math.max(x0 + r - px, 0, px - (x1 - r)), qy = Math.max(y0 + r - py, 0, py - (y1 - r));
+  return qx * qx + qy * qy <= r * r;
+}
+
+/** the satchel for an nw x nh grid of c px cells; the grid's top-left is at (EXT + SIDE, TOP) */
 function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
   return cached(`pack|${nw}x${nh}|${c}`, () => {
-    const gw = nw * c, gh = nh * c, W = gw + PACK_IN.x * 2, H = gh + PACK_IN.y + 18;
-    const [cv, x] = canvas(W + 16, H + 4);
+    const gw = nw * c, gh = nh * c, bw = gw + SIDE * 2, H = TOP + gh + BOT;
+    const W = bw + EXT * 2;
+    const [cv, x] = canvas(W, H + 1);
     const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
-    const ox = 8; // room for the side straps
-    // side straps (behind the body)
-    for (const sx of [ox - 7, ox + W - 1]) {
-      f(sx, 44, 8, H - 50, LE.out); f(sx + 1, 45, 6, H - 52, LE.d1); f(sx + 1, 45, 1, H - 52, LE.l1);
-      for (let yy = 52; yy < H - 12; yy += 26) { f(sx + 2, yy, 4, 4, BR.out); f(sx + 3, yy + 1, 2, 2, BR.b); f(sx + 3, yy + 1, 1, 1, BR.w); }
-    }
-    // top handle loop
-    for (let i = 0; i <= 40; i++) { const a = Math.PI * (i / 40); const hx = ox + W / 2 + Math.cos(a) * 22, hy = 16 - Math.sin(a) * 14; f(Math.round(hx) - 2, Math.round(hy) - 2, 5, 5, LE.out); }
-    for (let i = 0; i <= 40; i++) { const a = Math.PI * (i / 40); const hx = ox + W / 2 + Math.cos(a) * 22, hy = 16 - Math.sin(a) * 14; f(Math.round(hx) - 1, Math.round(hy) - 1, 3, 3, i < 20 ? LE.d1 : LE.b); }
-    // body: rounded rect with an outline, lit top-left, shaded bottom-right
-    const R0 = 12, by = 12;
-    const inBody = (px: number, py: number, inset = 0) => {
-      const x0 = ox + inset, y0 = by + inset, x1 = ox + W - 1 - inset, y1 = by + H - 13 - inset, r = Math.max(1, R0 - inset);
-      if (px < x0 || py < y0 || px > x1 || py > y1) return false;
-      const qx = Math.max(x0 + r - px, 0, px - (x1 - r)), qy = Math.max(y0 + r - py, 0, py - (y1 - r));
-      return qx * qx + qy * qy <= r * r;
-    };
-    for (let py = 0; py < cv.height; py++) for (let px = 0; px < cv.width; px++) {
-      if (!inBody(px, py)) continue;
+    const bx0 = EXT, by0 = 7, bx1 = EXT + bw - 1, by1 = H - 1;
+    // ---- the body: outline, a lit top-left lip, a shaded bottom-right lip
+    for (let py = by0; py <= by1; py++) for (let px = bx0; px <= bx1; px++) {
+      if (!inRound(px, py, bx0, by0, bx1, by1, 7)) continue;
       let col = LE.b;
-      if (!inBody(px, py, 1)) col = LE.out;
-      else if (!inBody(px, py, 2)) col = px - ox < W / 2 && py - by < H / 3 ? LE.l2 : px - ox > W * 0.6 || py - by > H * 0.7 ? LE.d2 : LE.l1;
-      else if (!inBody(px, py, 4)) col = py - by > H * 0.75 || px - ox > W - 6 ? LE.d1 : LE.b;
-      else if (!inBody(px, py, 5)) col = ((px + py) >> 1) % 2 ? LE.st : LE.b; // stitching
+      if (!inRound(px, py, bx0 + 1, by0 + 1, bx1 - 1, by1 - 1, 6)) col = LE.out;
+      else if (!inRound(px, py, bx0 + 2, by0 + 2, bx1 - 2, by1 - 2, 5)) col = px - bx0 < bw * 0.55 && py - by0 < (by1 - by0) * 0.45 ? LE.l2 : LE.d2;
+      else if (py > by1 - 4 || px > bx1 - 4) col = LE.d1;
       f(px, py, 1, 1, col);
     }
-    // creases (a dark fold with a lit lip beside it), scuffs and stitch holes: deliberate, not noise
-    for (const [cx0, cy0, len, dir] of [[ox + 9, by + 60, 14, 1], [ox + W - 14, by + 90, 10, -1], [ox + 12, by + H - 40, 12, 1], [ox + W - 12, by + 40, 9, -1]]) for (let i = 0; i < len; i++) { const xx = cx0 + Math.round(Math.sin(i * 0.5) * 1.5) * dir; f(xx, cy0 + i, 1, 1, LE.d1); f(xx + dir, cy0 + i, 1, 1, LE.l1); }
-    for (const [sx, sy, sw] of [[ox + 24, by + 18, 10], [ox + W - 40, by + H - 30, 14], [ox + W / 2 - 30, by + H - 22, 8]]) { f(sx, sy, sw, 1, LE.l2); f(sx + 2, sy + 1, sw - 4, 1, LE.l1); }
-    for (let py = 0; py < cv.height; py++) for (let px = 0; px < cv.width; px++) if (inBody(px, py, 4) && !inBody(px, py, 5) && ((px + py) >> 1) % 2 === 1 && ((px + py) % 4 === 3)) f(px, py, 1, 1, LE.out);
-    // the pocket panel (canvas) with stitched cells
-    const gx0 = ox + PACK_IN.x, gy0 = PACK_IN.y;
-    f(gx0 - 5, gy0 - 5, gw + 10, gh + 10, LE.out);
-    f(gx0 - 4, gy0 - 4, gw + 8, gh + 8, PK.fl);
-    f(gx0 - 4, gy0 - 4, gw + 8, 1, LE.d2);
+    // the stitched seam 3 px in: cream dashes with a dark hole after each
+    const seam = (px: number, py: number, i: number) => { const k = i % 4; if (k < 2) f(px, py, 1, 1, LE.st); else if (k === 2) f(px, py, 1, 1, LE.stD); };
+    { const sx0 = bx0 + 3, sx1 = bx1 - 3, sy1 = by1 - 3; let i = 0;
+      for (let px = sx0 + 3; px <= sx1 - 3; px++) seam(px, sy1, i++);
+      i = 0; for (let py = by0 + 12; py <= sy1 - 3; py++) { seam(sx0, py, i); seam(sx1, py, i); i++; } }
+    // ---- the lining: an inset oilcloth panel of pockets
+    const gx0 = EXT + SIDE, gy0 = TOP;
+    f(gx0 - 3, gy0 - 3, gw + 6, gh + 6, LE.out);
+    f(gx0 - 2, gy0 - 2, gw + 4, gh + 4, LN.out);
+    f(gx0 - 1, gy0 - 1, gw + 2, gh + 2, LN.frame);
+    f(gx0 - 2, gy0 + gh + 3, gw + 4, 1, LE.l1); // the leather lip catching light under the lining
     for (let cy = 0; cy < nh; cy++) for (let cx = 0; cx < nw; cx++) {
       const X = gx0 + cx * c, Y = gy0 + cy * c;
-      f(X + 1, Y + 1, c - 2, c - 2, PK.base);
-      f(X + 1, Y + 1, c - 2, 2, PK.sh); f(X + 1, Y + 1, 2, c - 2, PK.sh);
-      f(X + 1, Y + c - 2, c - 2, 1, PK.lit); f(X + c - 2, Y + 1, 1, c - 2, PK.lit);
-      // stitched seams between pockets
-      for (let i = 2; i < c - 2; i += 3) { f(X + i, Y, 2, 1, PK.st); f(X, Y + i, 1, 2, PK.st); }
-      // the canvas weave: short warp / weft threads on a lattice, darker in the pocket's bottom corner
-      for (let yy = 4; yy < c - 3; yy += 3) for (let xx = 4 + ((yy / 3) % 2) * 2; xx < c - 4; xx += 4) { f(X + xx, Y + yy, 2, 1, PK.fl); if (xx + yy > c * 1.3) f(X + xx, Y + yy + 1, 1, 1, PK.sh); }
-      // a worn patch in some pockets
-      if ((cx * 7 + cy * 3) % 5 === 0) { f(X + c - 10, Y + c - 9, 5, 1, PK.lit); f(X + c - 9, Y + c - 8, 3, 1, PK.lit); }
+      f(X, Y, c, c, LN.base);
+      f(X, Y, c, 2, LN.sh); f(X, Y, 2, c, LN.sh);
+      f(X + 2, Y + c - 2, c - 2, 1, LN.lit); f(X + c - 2, Y + 2, 1, c - 3, LN.lit);
     }
-    for (let i = 2; i < gw; i += 3) f(gx0 + i, gy0 + gh - 1, 2, 1, PK.st);
-    for (let i = 2; i < gh; i += 3) f(gx0 + gw - 1, gy0 + i, 1, 2, PK.st);
-    // the flap thrown open over the top, with a brass buckle
-    const fy = 2, fh = 28, fx0 = ox + 4, fw = W - 8;
-    for (let py = fy; py < fy + fh; py++) for (let px = fx0; px < fx0 + fw; px++) {
-      const r = 10, ly = py - fy, lx = px - fx0;
-      const qx = Math.max(r - lx, 0, lx - (fw - 1 - r)), qy = Math.max(0, ly - (fh - 1 - r));
-      const d = Math.sqrt(qx * qx + qy * qy);
-      if (d > r) continue;
-      let col = LE.d1;
-      if (d > r - 1 || ly === 0 || lx === 0 || lx === fw - 1) col = LE.out;
-      else if (ly <= 2) col = LE.l1;
-      else if (d > r - 3 && ly > fh - 8) col = LE.d2;
-      else if (d > r - 5 && d <= r - 4 && ly > 6) col = ((px + py) >> 1) % 2 ? LE.st : LE.d1;
+    // the stitched seams between pockets: light dashes on a dark channel
+    for (let i = 1; i < nw; i++) { const X = gx0 + i * c; f(X - 1, gy0, 2, gh, LN.seamD); for (let yy = 2; yy < gh - 1; yy += 4) f(X - 1 + ((yy >> 2) & 1), gy0 + yy, 1, 2, LN.seam); }
+    for (let j = 1; j < nh; j++) { const Y = gy0 + j * c; f(gx0, Y - 1, gw, 2, LN.seamD); for (let xx = 2; xx < gw - 1; xx += 4) f(gx0 + xx, Y - 1 + ((xx >> 2) & 1), 2, 1, LN.seam); }
+    // ---- the flap thrown back over the top: a darker band with a stitched, rounded top edge
+    const fx0 = EXT + 2, fx1 = EXT + bw - 3, fy1 = 12;
+    for (let py = 0; py <= fy1 + 1; py++) for (let px = fx0; px <= fx1; px++) {
+      if (!inRound(px, py, fx0, 0, fx1, fy1 + 10, 8)) continue;
+      let col = py > fy1 - 1 ? LE.out : LE.d1;
+      if (!inRound(px, py, fx0 + 1, 1, fx1 - 1, fy1 + 9, 7)) col = LE.out;
+      else if (py === 1 || py === 2) col = LE.l1;
       f(px, py, 1, 1, col);
     }
-    const bx = ox + W / 2 - 8, byk = fy + fh - 10;
-    f(bx + 5, byk - 6, 6, 12, LE.out); f(bx + 6, byk - 6, 4, 11, LE.d2);
-    f(bx, byk, 16, 12, BR.out); f(bx + 1, byk + 1, 14, 10, BR.b); f(bx + 1, byk + 1, 14, 1, BR.l); f(bx + 1, byk + 1, 1, 10, BR.l);
-    f(bx + 4, byk + 4, 8, 4, LE.d2); f(bx + 7, byk + 3, 2, 6, BR.d); f(bx + 2, byk + 2, 1, 1, BR.w);
+    for (let px = fx0 + 7, i = 0; px <= fx1 - 7; px++, i++) seam(px, 4, i);
+    f(fx0 + 2, fy1 + 1, fx1 - fx0 - 3, 1, LE.d2); // the flap's shadow on the body
+    // ---- two straps hang from the flap over the top border, each ending in a brass buckle
+    for (const sx of [EXT + Math.round(bw * 0.16), EXT + Math.round(bw * 0.84)]) {
+      const s0 = sx - 4;
+      f(s0 - 1, 6, 10, TOP - 9, LE.out); f(s0, 6, 8, TOP - 10, LE.d1); f(s0, 6, 1, TOP - 10, LE.l1);
+      for (let yy = 8; yy < TOP - 9; yy += 3) { f(s0 + 2, yy, 1, 1, LE.st); f(s0 + 5, yy, 1, 1, LE.st); }
+      const by = TOP - 11;
+      f(s0 - 2, by, 12, 8, BR.out); f(s0 - 1, by + 1, 10, 6, BR.b); f(s0 - 1, by + 1, 10, 1, BR.l); f(s0 - 1, by + 1, 1, 6, BR.l);
+      f(s0 + 1, by + 3, 6, 2, LE.d2); f(s0 + 3, by + 2, 2, 4, BR.d); f(s0 + 3, by + 2, 1, 1, BR.w);
+    }
+    // ---- brass D-rings on the sides, brass corner caps at the bottom
+    for (const [rx, dir] of [[EXT - 4, -1], [EXT + bw, 1]] as [number, number][]) {
+      const ry = Math.round(H * 0.4);
+      f(rx, ry, 4, 10, BR.out); f(rx + (dir < 0 ? 1 : 0), ry + 1, 3, 8, BR.b); f(rx + (dir < 0 ? 2 : 0), ry + 3, 1, 4, BR.out); f(rx + 1, ry + 1, 1, 2, BR.l);
+    }
+    for (const [cx0, flip] of [[bx0, 1], [bx1, -1]] as [number, number][]) {
+      for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) {
+        if (i > 2 && j < 4) continue;
+        const px = cx0 + (flip > 0 ? i : -i), py = by1 - j;
+        if (!inRound(px, py, bx0, by0, bx1, by1, 7)) continue;
+        const edge = i === 0 || j === 0 || (i === 2 && j < 4) || (j === 3 && i > 2) || i === 6 || j === 6;
+        f(px, py, 1, 1, edge ? BR.out : i + j < 5 ? BR.l : BR.b);
+      }
+      f(cx0 + flip * 3 - (flip < 0 ? 1 : 0), by1 - 3, 2, 2, BR.w);
+    }
     return cv;
   });
 }
 
-/** the seabed patch the loose items lie on */
-function seabedArt(w: number, h: number): HTMLCanvasElement {
-  return cached(`sea|${w}|${h}`, () => {
+/** the seabed tray: a driftwood frame around flat sand with ripple bands, a pebble and a shell */
+function trayArt(w: number, h: number): HTMLCanvasElement {
+  return cached(`tray|${w}|${h}`, () => {
     const [cv, x] = canvas(w, h);
     const f = (px: number, py: number, ww: number, hh: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, ww, hh); };
-    const r = 8;
+    const W0 = { out: '#1a0e06', d: '#4a3018', b: '#7a5230', l: '#a87a48', hl: '#cfa268' };
+    const SA = { b: '#c4a06a', d: '#a9844f', l: '#dcbf8a', dd: '#8a6a3e' };
+    // frame
     for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
-      const qx = Math.max(r - px, 0, px - (w - 1 - r)), qy = Math.max(r - py, 0, py - (h - 1 - r));
-      const d = Math.sqrt(qx * qx + qy * qy);
-      if (d > r) continue;
-      let col = '#b8955e';
-      if (d > r - 1 || px === 0 || py === 0 || px === w - 1 || py === h - 1) col = '#2a1a0c';
-      else if (d > r - 2 || px === 1 || py === 1) col = py < h / 2 ? '#e8cc94' : '#8a6a3c';
-      // ripples: gentle sine bands
-      else if (Math.abs(((py + Math.sin(px * 0.18) * 2.2) % 9) - 4) < 0.6) col = '#a4824e';
-      else if (Math.abs(((py + Math.sin(px * 0.18) * 2.2 + 1) % 9) - 4) < 0.6) col = '#d4b47c';
+      if (!inRound(px, py, 0, 0, w - 1, h - 1, 5)) continue;
+      let col = W0.b;
+      if (!inRound(px, py, 1, 1, w - 2, h - 2, 4)) col = W0.out;
+      else if (py <= 2) col = W0.hl;
+      else if (py >= h - 3 || px >= w - 3) col = W0.d;
+      else if (px <= 2) col = W0.l;
       f(px, py, 1, 1, col);
     }
-    // a pebble and a little shell in the corners
-    f(w - 14, h - 9, 6, 4, '#3a3440'); f(w - 13, h - 10, 4, 1, '#3a3440'); f(w - 13, h - 9, 4, 2, '#7e7880'); f(w - 13, h - 9, 1, 1, '#d8d2cc');
-    f(6, h - 10, 5, 4, '#6e4446'); f(7, h - 11, 3, 1, '#6e4446'); f(7, h - 10, 3, 3, '#e2b4a2'); f(8, h - 10, 1, 3, '#b07c74');
+    // mitred corners and plank ends
+    for (const [cx, cy, dx, dy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]]) for (let i = 0; i < 6; i++) f(cx + dx * i, cy + dy * i, 1, 1, W0.d);
+    // sand
+    const ix = 6, iy = 6, iw = w - 12, ih = h - 12;
+    f(ix - 1, iy - 1, iw + 2, ih + 2, W0.out);
+    f(ix, iy, iw, ih, SA.b);
+    f(ix, iy, iw, 2, SA.dd); f(ix, iy, 2, ih, SA.d);
+    for (let band = 0; band * 9 + 7 < ih; band++) {
+      const by = iy + band * 9 + 7;
+      for (let px = ix + 3; px < ix + iw - 3; px++) {
+        const off = Math.round(Math.sin((px + band * 17) * 0.11) * 1.6);
+        const yy = by + off;
+        if (yy > iy + 2 && yy < iy + ih - 2) { f(px, yy, 1, 1, SA.d); if (yy - 1 > iy + 2) f(px, yy - 1, 1, 1, SA.l); }
+      }
+    }
+    // a pebble and a shell tucked in the corners
+    const pb = (px: number, py: number) => { f(px, py + 1, 7, 4, '#2e2a34'); f(px + 1, py, 5, 6, '#2e2a34'); f(px + 1, py + 1, 5, 3, '#6e6878'); f(px + 1, py + 1, 2, 1, '#bdb6c4'); };
+    pb(ix + iw - 12, iy + ih - 8);
+    const sx = ix + 4, sy = iy + ih - 9;
+    f(sx, sy + 1, 7, 5, '#6e3e3a'); f(sx + 1, sy, 5, 7, '#6e3e3a'); f(sx + 1, sy + 1, 5, 4, '#e8b4a0'); f(sx + 3, sy + 1, 1, 5, '#b8786c'); f(sx + 1, sy + 1, 1, 1, '#fff0e0');
     return cv;
   });
 }
 
 // ------------------------------------------------------------------ the screen
-interface Vis { x: number; y: number; vx: number; vy: number; lift: number; pop: number; shake: number }
+interface Vis { x: number; y: number; vx: number; vy: number; lift: number; pop: number; shake: number; bump: number; cs: number }
 type Plan =
   | { kind: 'grid'; gx: number; gy: number; ok: boolean; cells: [number, number][] }
   | { kind: 'board'; bx: number; by: number; ok: boolean }
@@ -186,7 +185,13 @@ type Plan =
   | { kind: 'fuse'; target: ItemInst; id: string; level: number }
   | { kind: 'none' };
 
-interface Layout { packX: number; packY: number; gridX: number; gridY: number; boardX: number; boardY: number; boardW: number; boardH: number; bCols: number; bRows: number; infoX: number; infoY: number; infoW: number; card: boolean; closeX: number; closeY: number }
+interface Layout {
+  packX: number; packY: number; gridX: number; gridY: number;
+  /** the tray box, its label row, and the origin of its cells */
+  trayX: number; trayY: number; trayW: number; trayH: number; labY: number; boardX: number; boardY: number; bCols: number; bRows: number;
+  colX: number; colY: number; colW: number; cardH: number; setsY: number; setsH: number; colBot: number;
+  close: number; closeX: number; closeY: number; hintY: number; M: number;
+}
 
 export class BackpackScreen implements Screen {
   name = 'backpack';
@@ -197,14 +202,14 @@ export class BackpackScreen implements Screen {
   get scene(): THREE.Scene { return this.under?.scene ?? this.bg; }
   get camera(): THREE.PerspectiveCamera { return this.under?.camera ?? this.bgCam; }
   get underwater() { return this.under?.underwater ?? false; }
+  /** art under the miniatures: the dim, the bag, the tray, the card frames, drag footprints */
   ui = new PixelUI();
-  /** the item miniatures (lit 3D models) between the pack art and the text */
+  /** the item miniatures (lit 3D models) between the art and the words */
   stage = new UiStage();
-  /** text, stamped stack tags, the cursor: over the models */
+  /** words, stack tags, hints, the close X, the cursor: over the models */
   fg = new PixelUI();
   overlays = [this.ui.layer, this.stage.layer, this.fg.layer];
   private models = new Map<number, { o: THREE.Object3D; sh: THREE.Mesh; key: string }>();
-  private cardBoard: THREE.Mesh | null = null;
 
   private run: Run | null = null;
   private onClose?: () => void;
@@ -219,10 +224,18 @@ export class BackpackScreen implements Screen {
   private grab = { x: 0, y: 0 };
   private plan: Plan = { kind: 'none' };
   private hover: ItemInst | null = null;
-  private sparks: { x: number; y: number; vx: number; vy: number; t: number; life: number; col: string }[] = [];
+  /** the item the card shows (lingers a moment after the mouse leaves an item, so the card doesn't flicker) */
+  private shown: { it: ItemInst; t: number } | null = null;
+  private sparks: { x: number; y: number; vx: number; vy: number; t: number; life: number; col: string; g?: number }[] = [];
   private toasts: { text: string; sub: string; x: number; y: number; t: number; col: string }[] = [];
   private L!: Layout;
   private prevCursor: Game['cursor'] | null = null;
+  private closeBtn = new CloseX();
+  private overClose = false;
+  private cardItem: { uid: number; key: string; o: THREE.Object3D; sh: THREE.Mesh } | null = null;
+  private cardPop = 0;
+  /** rows the seabed tray keeps room for (the tallest thing that might be dropped on it) */
+  private reserve = 2;
 
   constructor(private game: Game) {
     this.bg.background = new THREE.Color('#06121c');
@@ -235,7 +248,7 @@ export class BackpackScreen implements Screen {
     // the pack draws its own pixel cursor (arrow / point / grab); hide the game's
     this.prevCursor = this.game.cursor; this.game.cursor = 'none';
     this.run = d.run; this.onClose = d.onClose;
-    this.held = null; this.hover = null; this.plan = { kind: 'none' };
+    this.held = null; this.hover = null; this.shown = null; this.plan = { kind: 'none' };
     this.closing = false; this.open = 0;
     this.vis.clear(); this.sparks = []; this.toasts = [];
     // anything sitting in an invalid spot falls out onto the seabed
@@ -246,13 +259,17 @@ export class BackpackScreen implements Screen {
       if (it.gx >= 0) ok.push(it);
     }
     for (const uid of [...this.slot.keys()]) if (!this.run.items.some((i) => i.uid === uid && i.gx < 0)) this.slot.delete(uid);
+    this.reserve = this.trayReserve();
     this.layout();
     this.layoutBoard();
     let k = 0;
-    for (const it of this.run.items) { if (!ITEMS[it.id]) continue; const [tx, ty] = this.targetOf(it); this.vis.set(it.uid, { x: tx, y: ty + 10 + (k % 5) * 3, vx: 0, vy: 0, lift: 0, pop: -0.04 * k++, shake: 0 }); }
+    for (const it of this.run.items) { if (!ITEMS[it.id]) continue; const [tx, ty] = this.targetOf(it); this.vis.set(it.uid, { x: tx, y: ty - 14 - (k % 5) * 4, vx: 0, vy: 0, lift: 0, pop: -0.035 * k++, shake: 0, bump: 0, cs: this.cellOf(it) }); }
     sfx(['bag_zip1', 'cloth1'], { vol: 0.5 });
   }
-  exit() { this.under = null; if (this.prevCursor !== null) this.game.cursor = this.prevCursor; this.prevCursor = null; }
+  exit() {
+    this.under = null; if (this.prevCursor !== null) this.game.cursor = this.prevCursor; this.prevCursor = null;
+    this.cardItem?.o.removeFromParent(); this.cardItem?.sh.removeFromParent(); this.cardItem = null;
+  }
   resize(w: number, h: number) { this.ui.resize(w, h, this.game.renderer.getPixelRatio()); this.fg.resize(w, h, this.game.renderer.getPixelRatio()); this.bgCam.aspect = w / h; this.bgCam.updateProjectionMatrix(); }
 
   close() {
@@ -263,32 +280,40 @@ export class BackpackScreen implements Screen {
   }
 
   // ---------------------------------------------------------------- layout
+  /** the tray keeps room for 2 rows, or for the tallest item in the run (a 3 x 3 clam can't lie in 2 rows) */
+  private trayReserve() {
+    let r = 2;
+    for (const it of this.run?.items ?? []) { if (!ITEMS[it.id]) continue; const f = footprint(it.id); r = Math.max(r, Math.min(4, Math.min(f.w, f.h))); }
+    return r;
+  }
   private layout() {
     const ui = this.ui;
-    // cell size follows the logical height: 720p / 1440p run at 1x / 2x of a 720-row canvas, 1080p / 4K of a 540-row one
-    // the largest cell size whose pack (8 x 6) + seabed (4 wide) + info card fit the canvas
-    const infoW = ui.w >= 1200 ? 216 : 176, gap = ui.w >= 1200 ? 20 : 12;
-    C = 24;
-    for (const c of [72, 64, 56, 52, 48, 44, 40, 36, 32, 28]) {
-      const w = GRID_W * c + PACK_IN.x * 2 + 16 + gap + 4 * c + 16 + gap + infoW + 12, h = GRID_H * c + PACK_IN.y + 22 + 60;
-      if (w <= ui.w && h <= ui.h) { C = c; break; }
+    const M = ui.h >= 400 ? 12 : 8, G = ui.h >= 400 ? 12 : 10;
+    const labH = ui.lh('body') + 3, TP = 6, colMin = 250;
+    C = 24; T = 18;
+    for (const c of [64, 60, 56, 52, 48, 44, 40, 38, 36, 34, 32, 30, 28, 26]) {
+      const t = Math.max(16, Math.min(c, Math.round(c * 0.72)));
+      const w = M + EXT * 2 + SIDE * 2 + GRID_W * c + G + colMin + M;
+      const h = M + TOP + GRID_H * c + BOT + 8 + labH + TP * 2 + this.reserve * t + M;
+      if (w <= ui.w && h <= ui.h) { C = c; T = t; break; }
     }
-    const packW = GRID_W * C + PACK_IN.x * 2 + 16, packH = GRID_H * C + PACK_IN.y + 22;
-    let bCols = 4;
-    let card = ui.w >= packW + gap + bCols * C + 16 + gap + infoW + 12;
-    if (!card) bCols = Math.max(2, Math.min(4, Math.floor((ui.w - packW - gap - 28) / C)));
-    else bCols = Math.max(4, Math.min(5, Math.floor((ui.w - packW - gap * 2 - infoW - 28) / C)));
-    if (ui.w < packW + gap + bCols * C + 16) card = false;
-    const bRows = Math.max(3, Math.min(GRID_H, Math.floor((packH - 30) / C)));
-    const boardW = bCols * C + 16, boardH = bRows * C + 16;
-    const total = packW + gap + boardW + (card ? gap + infoW : 0);
-    const x0 = Math.max(4, Math.round((ui.w - total) / 2));
-    const y0 = Math.max(20, Math.round((ui.h - packH) / 2) + 6);
-    const packX = x0, packY = y0;
-    const boardX = packX + packW + gap, boardY = packY + PACK_IN.y - 8;
+    const bagW = GRID_W * C + SIDE * 2 + EXT * 2, bagH = TOP + GRID_H * C + BOT;
+    const trayW = GRID_W * C + SIDE * 2, trayH = TP * 2 + this.reserve * T;
+    const colW = Math.max(colMin, Math.min(380, ui.w - M * 2 - bagW - G));
+    const totalW = bagW + G + colW, totalH = bagH + 8 + labH + trayH;
+    const x0 = Math.max(M, Math.round((ui.w - totalW) / 2)), y0 = Math.max(M, Math.round((ui.h - totalH) / 2));
+    const bCols = Math.floor((trayW - TP * 2) / T);
+    const labY = y0 + bagH + 8, trayY = labY + labH;
+    const close = ui.h >= 400 ? 20 : 18;
+    const colX = x0 + bagW + G, colY = y0 + 4, colBot = trayY + trayH;
+    const hintH = ui.lh('small') + 8, hintY = colBot - hintH + 4;
+    const cardH = Math.round((hintY - 6 - colY) * 0.62);
+    const setsY = colY + cardH + 6;
     this.L = {
-      packX, packY, gridX: packX + 8 + PACK_IN.x, gridY: packY + PACK_IN.y, boardX, boardY, boardW, boardH, bCols, bRows,
-      infoX: boardX + boardW + gap, infoY: packY + 8, infoW, card, closeX: (card ? boardX + boardW + gap + infoW : boardX + boardW) - 14, closeY: Math.max(4, packY - 14),
+      packX: x0, packY: y0, gridX: x0 + EXT + SIDE, gridY: y0 + TOP,
+      trayX: x0 + EXT, trayY, trayW, trayH, labY, boardX: x0 + EXT + Math.round((trayW - bCols * T) / 2), boardY: trayY + TP, bCols, bRows: this.reserve,
+      colX, colY, colW, cardH, setsY, setsH: hintY - 6 - setsY, colBot,
+      close, closeX: colX + colW - close + 5, closeY: colY - 5, hintY, M,
     };
   }
 
@@ -312,7 +337,7 @@ export class BackpackScreen implements Screen {
   private freeBoardSlot(it: ItemInst): { bx: number; by: number } | null {
     const { bCols, bRows } = this.L;
     for (let rows = bRows; rows <= bRows + 5; rows++) for (let by = 0; by < rows; by++) for (let bx = 0; bx < bCols; bx++) {
-      const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
+      const { h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
       if (by + h > rows) continue;
       if (this.boardFits(it, bx, by, it.rot)) return { bx, by };
     }
@@ -329,98 +354,156 @@ export class BackpackScreen implements Screen {
       this.slot.set(it.uid, sp ?? { bx: 0, by: this.L.bRows + 4 });
     }
   }
-  /** where an item rests (top-left of its rotated icon, UI px) */
+  /** where an item rests (top-left of its rotated footprint, UI px) */
   private targetOf(it: ItemInst): [number, number] {
     const L = this.L;
     if (it.gx >= 0) return [L.gridX + it.gx * C, L.gridY + it.gy * C];
     const s = this.slot.get(it.uid) ?? { bx: 0, by: 0 };
-    return [L.boardX + 8 + s.bx * C, L.boardY + 8 + s.by * C];
+    return [L.boardX + s.bx * T, L.boardY + s.by * T];
   }
+  /** px per cell where the item is: a pocket, a seabed slot, or (held) a pocket */
+  private cellOf(it: ItemInst) { return it === this.held || it.gx >= 0 ? C : T; }
+  /** the rotated footprint in px at a cell size */
+  private footOf(it: ItemInst, cell = this.cellOf(it)) { const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot)); return { w: w * cell, h: h * cell }; }
 
   // ---------------------------------------------------------------- frame
   update(dt: number) {
     const run = this.run;
-    const ui = this.ui;
+    const ui = this.ui, fg = this.fg;
     this.t += dt;
     ui.drawCursor = false;
     ui.begin(this.game.input, dt);
-    this.fg.drawCursor = true;
-    this.fg.begin(this.game.input, dt);
+    fg.drawCursor = true;
+    fg.begin(this.game.input, dt);
     this.stage.follow(ui);
-    if (!run) { ui.end(); this.fg.end(); return; }
+    if (!run) { ui.end(); fg.end(); return; }
     this.layout();
-    this.open = this.closing ? Math.max(0, this.open - dt * 6) : Math.min(1, this.open + dt * 5);
+    this.open = this.closing ? Math.max(0, this.open - dt * 6) : Math.min(1, this.open + dt * 4.2);
     if (this.closing && this.open <= 0) {
-      ui.end(); this.fg.end();
+      ui.end(); fg.end();
       for (const m of this.models.values()) { m.o.removeFromParent(); m.sh.removeFromParent(); }
       this.models.clear();
+      this.cardItem?.o.removeFromParent(); this.cardItem?.sh.removeFromParent(); this.cardItem = null;
       this.closing = false;
       installItemSystem(run);
       const cb = this.onClose; this.run = null;
       if (cb) cb(); else this.game.closeModal();
       return;
     }
-    const k = 1 - (1 - this.open) ** 3;
-    const slide = Math.round((1 - k) * 24);
-    // dim the frozen world
-    ui.fill(0, 0, ui.w, ui.h, '#03060c', 0.72 * k);
+    // the bag rises in with a little overshoot; the card column slides in from the right a beat later
+    const kb = this.closing ? 1 - (1 - this.open) ** 2 : easeOutBack(Math.min(1, this.open), 1.4);
+    const kc = this.closing ? kb : easeOutBack(Math.max(0, Math.min(1, this.open * 1.25 - 0.25)), 1.3);
+    const slide = Math.round((1 - kb) * 36), cslide = Math.round((1 - kc) * 48);
+    // dim the frozen world, darker toward the edges
+    const fade = Math.min(1, this.open * 1.6);
+    ui.fill(0, 0, ui.w, ui.h, '#030a12', 0.74 * fade);
+    const vg = Math.round(ui.h * 0.08);
+    for (let i = 0; i < 4; i++) { const a = 0.1 * fade; ui.fill(0, i * vg / 4, ui.w, vg / 4, '#000000', a * (4 - i) / 2); ui.fill(0, ui.h - (i + 1) * vg / 4, ui.w, vg / 4, '#000000', a * (4 - i) / 2); }
     ui.block(0, 0, ui.w, ui.h);
-    this.drawHeader(slide);
     this.drawPack(slide);
-    this.drawBoard(slide);
+    this.drawTray(slide);
     this.interact();
+    this.drawFootprints(slide);
     this.drawItems(dt, slide);
-    this.drawPreview();
+    this.drawPreview(slide);
     this.drawHeld(dt);
+    this.drawCard(dt, cslide);
+    this.drawSets(cslide);
+    this.drawHints(cslide);
+    this.drawPlanLabel();
     this.drawFx(dt);
-    if (this.L.card) this.drawCard(slide);
-    else if (this.hover || this.held) this.fg.tooltip(this.tipLines(this.held ?? this.hover!), { kind: 'dark', maxW: 170 });
-    this.drawHints();
     this.syncModels();
-    this.fg.cursor = ui.cursor;
+    if (this.closeBtn.draw(fg, 'bp:close', this.L.closeX + cslide, this.L.closeY, this.L.close)) this.close();
+    fg.cursor = this.overClose ? 'point' : ui.cursor;
     ui.end();
-    this.fg.end();
+    fg.end();
     const inp = this.game.input;
     if (inp.keyHit('Tab') || inp.keyHit('Escape')) this.close();
   }
 
   // ---------------------------------------------------------------- drawing
-  private drawHeader(slide: number) {
-    const ui = this.ui, L = this.L, run = this.run!;
-    const used = packCells(run.items).used;
-    const pw = ui.measure('BACKPACK', 'title') + 22, px = L.packX + 8 + Math.round((GRID_W * C + PACK_IN.x * 2 - pw) / 2), py = L.packY - 18 - slide;
-    ui.frame('plaque', px, py, pw, 18);
-    ui.text('BACKPACK', px + pw / 2, py + 4, { font: 'title', color: '#3a2408', shadow: '#f8e0a0', align: 'center' });
-    const full = used >= GRID_CELLS;
-    ui.text(`${used}/${GRID_CELLS}`, L.packX + 8 + GRID_W * C + PACK_IN.x * 2 - 4, py + 5, { font: 'body', color: full ? '#ff7a6a' : '#e8dcc4', outline: '#0a0604', align: 'right' });
-    // the close button
-    if (ui.button('bp:close', '', L.closeX, L.closeY - slide, 14, 15, { style: 'red', icon: 'close', sfx: '' })) this.close();
-  }
-
   private drawPack(slide: number) {
-    const ui = this.ui, L = this.L;
+    const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
     const art = packArt(GRID_W, GRID_H, C);
-    ui.img(silhouette(art, '#00000080', `pack${GRID_W}x${GRID_H}|${C}`), L.packX + 3, L.packY + 4 + slide);
-    ui.img(art, L.packX, L.packY + slide);
+    const x = L.packX, y = L.packY + slide;
+    // a soft drop shadow (two flat steps), then the satchel
+    ui.fill(x + EXT + 4, y + 11, art.width - EXT * 2, art.height - 8, '#000000', 0.28);
+    ui.fill(x + EXT + 2, y + 9, art.width - EXT * 2, art.height - 8, '#000000', 0.22);
+    ui.img(art, x, y);
+    // the name plate on the flap, the capacity counter riveted into its right end
+    const used = packCells(run.items).used, full = used >= GRID_CELLS;
+    const cap = `${used}/${GRID_CELLS}`;
+    const tw = fg.measure('BACKPACK', 'title'), cw = fg.measure(cap, 'body') + 10, ph = fg.cap('title') + 9;
+    const pw = tw + 20 + cw + 4, px = Math.round(x + art.width / 2 - pw / 2), py = y - 4;
+    fg.fill(px + 1, py + 2, pw, ph, '#000000', 0.45);
+    fg.fill(px, py, pw, ph, K.brassD);
+    fg.fill(px + 1, py + 1, pw - 2, ph - 2, K.brass1);
+    fg.fill(px + 1, py + 1, pw - 2, 1, K.brass2); fg.fill(px + 1, py + 1, 1, ph - 2, K.brass2);
+    fg.fill(px + 1, py + ph - 2, pw - 2, 1, K.brass0);
+    fg.fill(px + 3, py + Math.round(ph / 2) - 1, 2, 2, K.brassW);
+    fg.text('BACKPACK', px + 9, py + Math.round((ph - fg.cap('title')) / 2), { font: 'title', color: '#3a2008', shadow: '#f8dc90' });
+    const cx0 = px + pw - cw - 3;
+    fg.fill(cx0, py + 3, cw, ph - 6, K.ink2);
+    fg.fill(cx0 + 1, py + 4, cw - 2, ph - 8, full ? '#5a1810' : K.teal1);
+    fg.text(cap, cx0 + cw / 2, py + Math.round((ph - fg.cap('body')) / 2), { font: 'body', color: full ? K.coralL : K.cream, shadow: K.ink2, align: 'center' });
+    // an empty bag says what it is for
+    if (!run.items.some((i) => i.gx >= 0) && !this.held) {
+      fg.text('Drag your finds into the pockets', L.gridX + (GRID_W * C) / 2, y + TOP + (GRID_H * C) / 2 - fg.cap('body') / 2, { font: 'body', color: LN.seam, shadow: LN.out, align: 'center' });
+    }
   }
 
-  private drawBoard(slide: number) {
-    const ui = this.ui, L = this.L;
-    const art = seabedArt(L.boardW, L.boardH);
-    ui.img(silhouette(art, '#00000070', `sea${L.boardW}x${L.boardH}`), L.boardX + 2, L.boardY + 3 + slide);
-    ui.img(art, L.boardX, L.boardY + slide);
-    ui.text('ON THE SEABED', L.boardX + L.boardW / 2, L.boardY - 11 + slide, { font: 'small', color: '#f0e2c0', outline: '#140a04', align: 'center' });
-    const loose = this.run!.items.filter((i) => i.gx < 0).length;
-    if (!loose) ui.textBox('Loose finds wait here. Whatever is left when you close the bag stays behind.', L.boardX + 12, L.boardY + 16 + slide, L.boardW - 24, { font: 'small', color: '#6a4a26', shadow: null, align: 'center' });
-    // faint slot marks
+  private drawTray(slide: number) {
+    const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
+    const y = L.trayY + slide;
+    ui.fill(L.trayX + 3, y + 4, L.trayW, L.trayH, '#000000', 0.3);
+    ui.img(trayArt(L.trayW, L.trayH), L.trayX, y);
+    // the label row: ON THE SEABED, and what that means
+    const loose = run.items.filter((i) => i.gx < 0 && ITEMS[i.id]).length;
+    const ly = L.labY + slide;
+    fg.text('ON THE SEABED', L.trayX + 2, ly + 1, { font: 'body', color: K.brass2, outline: K.ink2 });
+    let note = loose ? `${loose} loose · left behind when you close the bag` : 'left behind when you close the bag';
+    if (fg.measure('ON THE SEABED', 'body') + fg.measure(note, 'small') + 16 > L.trayW) note = loose ? `${loose} loose · left behind` : 'left behind on close';
+    fg.text(note, L.trayX + L.trayW - 2, ly + 1 + Math.max(0, fg.cap('body') - fg.cap('small')), { font: 'small', color: loose ? K.cream : K.dim, shadow: K.ink2, align: 'right' });
+    // faint corner ticks mark the slots
     for (let by = 0; by < L.bRows; by++) for (let bx = 0; bx < L.bCols; bx++) {
-      const X = L.boardX + 8 + bx * C, Y = L.boardY + 8 + by * C + slide;
-      ui.fill(X + 1, Y + 1, 2, 1, '#a4824e'); ui.fill(X + 1, Y + 1, 1, 2, '#a4824e');
+      const X = L.boardX + bx * T, Y = L.boardY + by * T + slide;
+      ui.fill(X + 1, Y + 1, 3, 1, '#a9844f'); ui.fill(X + 1, Y + 1, 1, 3, '#a9844f');
+    }
+    if (!loose && !(this.held && this.plan.kind === 'board')) {
+      const cy = y + L.trayH / 2;
+      fg.text('Nothing down here', L.trayX + L.trayW / 2, cy - fg.lh('body') + 1, { font: 'body', color: '#6a4a26', shadow: null, align: 'center' });
+      fg.text('drag things out of the bag to leave them', L.trayX + L.trayW / 2, cy + 3, { font: 'small', color: '#8a6a3e', shadow: null, align: 'center' });
+    }
+  }
+
+  /** the rarity hairline around each packed item's footprint (and a lift glow under the hovered one) */
+  private drawFootprints(slide: number) {
+    const ui = this.ui, L = this.L, run = this.run!;
+    for (const it of run.items) {
+      if (it.gx < 0 || it === this.held || !ITEMS[it.id]) continue;
+      const d = getItem(it.id), cells = rotCells(d.shape, it.rot), set = new Set(cells.map(([x, y]) => x + ',' + y));
+      const hov = this.hover === it, target = (this.plan.kind === 'stack' || this.plan.kind === 'fuse') && this.plan.target === it;
+      const col = target ? '#ffd860' : RARITY_COLOR[d.rarity];
+      for (const [cx, cy] of cells) {
+        const X = L.gridX + (it.gx + cx) * C, Y = L.gridY + (it.gy + cy) * C + slide;
+        ui.fill(X + 1, Y + 1, C - 2, C - 2, LN.occ, 1);
+        if (hov || target) ui.fill(X + 1, Y + 1, C - 2, C - 2, col, target ? 0.2 + 0.12 * Math.sin(this.t * 10) : 0.14);
+        const a = hov || target ? 1 : 0.45, i = 2;
+        if (!set.has(cx + ',' + (cy - 1))) ui.fill(X + i, Y + i, C - i * 2, 1, col, a);
+        if (!set.has(cx + ',' + (cy + 1))) ui.fill(X + i, Y + C - i - 1, C - i * 2, 1, col, a);
+        if (!set.has(cx - 1 + ',' + cy)) ui.fill(X + i, Y + i, 1, C - i * 2, col, a);
+        if (!set.has(cx + 1 + ',' + cy)) ui.fill(X + C - i - 1, Y + i, 1, C - i * 2, col, a);
+      }
+    }
+    // the free pocket under the mouse
+    if (!this.held && !this.hover) {
+      const gx = Math.floor((ui.mx - L.gridX) / C), gy = Math.floor((ui.my - L.gridY) / C);
+      if (gx >= 0 && gy >= 0 && gx < GRID_W && gy < GRID_H) ui.fill(L.gridX + gx * C + 2, L.gridY + gy * C + 2 + slide, C - 4, C - 4, '#ffffff', 0.04);
     }
   }
 
   private drawItems(dt: number, slide: number) {
-    const ui = this.ui, run = this.run!;
+    const run = this.run!;
     const order = [...run.items].filter((i) => ITEMS[i.id] && i !== this.held).sort((a, b) => (a.gx >= 0 ? 0 : 1) - (b.gx >= 0 ? 0 : 1));
     for (const it of order) {
       const v = this.visOf(it);
@@ -428,44 +511,45 @@ export class BackpackScreen implements Screen {
       this.spring(v, tx, ty, dt);
       v.pop = Math.min(1, v.pop + dt * 4);
       const hov = this.hover === it && !this.held;
-      v.lift += ((hov ? 3 : 0) - v.lift) * Math.min(1, dt * 18);
+      v.lift += ((hov ? 4 : 0) - v.lift) * Math.min(1, dt * 18);
       v.shake = Math.max(0, v.shake - dt * 3);
+      v.bump = Math.max(0, v.bump - dt * 3.2);
+      v.cs += (this.cellOf(it) - v.cs) * Math.min(1, dt * 14);
       const sx = Math.sin(this.t * 60) * v.shake * 3;
       const a = Math.max(0, Math.min(1, v.pop * 1.6));
-      // a rarity tint in the pockets it fills (on the pack art, under the miniature)
-      if (it.gx >= 0) for (const [cx, cy] of rotCells(getItem(it.id).shape, it.rot)) ui.fill(this.L.gridX + (it.gx + cx) * C + 3, this.L.gridY + (it.gy + cy) * C + 3 + slide, C - 5, C - 5, RARITY_COLOR[getItem(it.id).rarity], hov ? 0.22 : 0.09);
       const target = (this.plan.kind === 'stack' || this.plan.kind === 'fuse') && this.plan.target === it;
-      this.placeModel(it, v.x + sx, v.y + slide, v.lift, a, hov ? 1 : target ? 0.6 : 0, false);
-      const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
-      this.stackBadge(it, Math.round(v.x), Math.round(v.y + slide - v.lift), w * C, h * C);
+      this.placeModel(it, v.x + sx, v.y + slide, v.lift, a, hov ? 1 : target ? 0.6 : 0, false, Math.sin(v.bump * Math.PI) * 0.16, v.cs);
+      const f = this.footOf(it, v.cs);
+      this.stackBadge(it, Math.round(v.x), Math.round(v.y + slide - v.lift), f.w, f.h);
     }
   }
 
   /** put an item's miniature on the stage: (x, y) = the top-left of its rotated footprint in UI px */
-  private placeModel(it: ItemInst, x: number, y: number, lift: number, alpha: number, hot: number, held: boolean) {
+  private placeModel(it: ItemInst, x: number, y: number, lift: number, alpha: number, hot: number, held: boolean, squash = 0, cell = C) {
     const key = `${it.id}|${it.level ?? 1}`;
     let m = this.models.get(it.uid);
     if (!m || m.key !== key) {
       if (m) { m.o.removeFromParent(); m.sh.removeFromParent(); }
       const o = itemModel(it.id);
-      const d = getItem(it.id);
-      const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
-      const sh = contactShadow(cw * C * 0.95, ch * C * 0.95, 0.5);
+      const fp = footprint(it.id);
+      const sh = contactShadow(fp.w * 0.95, fp.h * 0.95, 0.5);
       m = { o, sh, key };
       this.models.set(it.uid, m);
     }
     m.o.userData.seen = this.t;
-    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
-    const cx = x + (w * C) / 2, cy = y + (h * C) / 2;
-    const sc = C * (0.94 + hot * 0.05) * (held ? 1.08 : 1) * Math.max(0.01, alpha);
+    const f = this.footOf(it, cell);
+    const cx = x + f.w / 2, cy = y + f.h / 2;
+    // grows in on arrival; a squash-and-settle bump when dropped
+    const sc = cell * (0.92 + hot * 0.06) * (held ? 1.1 : 1) * Math.max(0.01, alpha) * (1 + squash);
     m.o.scale.setScalar(sc);
-    // lying in the pocket, tilted a touch toward the light; a slow turn when hovered / held
+    // lying in the pocket, tilted a touch toward the light; a slow sway when hovered / held
     const turn = hot > 0 || held ? Math.sin(this.t * 2.6) * 0.35 : 0;
-    m.o.rotation.set(0.32 - lift * 0.04, -0.28 + turn, -it.rot * (Math.PI / 2));
-    this.stage.put(m.o, cx, cy - lift, 20 + lift * 6 + (held ? 120 : 0));
+    m.o.rotation.set(0.32 - lift * 0.03, -0.28 + turn, -it.rot * (Math.PI / 2));
+    this.stage.put(m.o, cx, cy - lift, 20 + lift * 6 + (held ? 600 : 0));
     m.sh.rotation.z = -it.rot * (Math.PI / 2);
-    (m.sh.material as THREE.MeshBasicMaterial).opacity = (held ? 0.35 : 0.5) * alpha;
-    this.stage.put(m.sh, cx + 2 + lift * 0.8, cy + 3 + lift * 0.6, -10);
+    m.sh.scale.setScalar(cell * (held ? 1.05 : 1));
+    (m.sh.material as THREE.MeshBasicMaterial).opacity = (held ? 0.32 : it.gx >= 0 ? 0.5 : 0.36) * alpha;
+    this.stage.put(m.sh, cx + 2 + lift * 1.2, cy + 3 + lift * 1.0, held ? 300 : -10);
   }
 
   /** drop the miniatures of items that are gone */
@@ -473,41 +557,43 @@ export class BackpackScreen implements Screen {
     for (const [uid, m] of this.models) if (m.o.userData.seen !== this.t || !this.run?.items.some((i) => i.uid === uid)) { m.o.removeFromParent(); m.sh.removeFromParent(); this.models.delete(uid); }
   }
 
-  /** the stack count as a stamped paper tag tied to the item's corner (drawn over the miniature) */
+  /** the stack count as a cream tag tied to the item's corner (drawn over the miniature) */
   private stackBadge(it: ItemInst, px: number, py: number, w: number, h: number) {
     const cap = stackCap(it.id);
     const n = it.n ?? 1;
     if (cap <= 1 || n <= 1) return;
-    const f = this.fg;
+    const f = this.fg, full = n >= cap;
     const s = `x${n}`;
-    const tw = f.measure(s, 'small');
-    const bx = px + w - tw - 7, by = py + h - 12;
-    f.fill(bx - 6, by - 4, 6, 1, '#c8a060');
-    f.fill(bx - 3, by - 3, tw + 7, 12, '#3a2410');
-    f.fill(bx - 2, by - 2, tw + 5, 10, n >= cap ? '#f8d878' : '#f0e2c0');
-    f.fill(bx - 2, by + 7, tw + 5, 1, n >= cap ? '#b08a28' : '#b8a07a');
-    f.fill(bx, by + 2, 1, 1, '#3a2410');
-    f.text(s, bx + 2, by, { font: 'small', color: n >= cap ? '#6a2a04' : '#a01818', shadow: null });
+    const tw = f.measure(s, 'body'), th = f.cap('body') + 6;
+    const bx = px + w - tw - 9, by = py + h - th - 3;
+    f.fill(bx - 5, by + 2, 5, 1, '#c8a060');
+    f.fill(bx - 1, by - 1, tw + 8, th + 2, '#2a1606');
+    f.fill(bx, by, tw + 6, th, full ? '#f8d878' : '#f3e7c9');
+    f.fill(bx, by + th - 1, tw + 6, 1, full ? '#b08a28' : '#c8b088');
+    f.text(s, bx + 3, by + 3, { font: 'body', color: full ? '#6a2a04' : '#8a1a10', shadow: null });
   }
 
-  private drawPreview() {
+  /** the drag preview: the cells it would take (green fits, red doesn't), gold over a stack / fuse partner */
+  private drawPreview(slide: number) {
     const ui = this.ui, L = this.L, p = this.plan;
     if (!this.held) return;
+    const pulse = 0.5 + 0.5 * Math.sin(this.t * 9);
     if (p.kind === 'grid') {
       for (const [x, y] of p.cells) {
         if (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) continue;
-        const X = L.gridX + x * C, Y = L.gridY + y * C;
-        const col = p.ok ? '#5ae04a' : '#ff4a3a';
-        ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.28);
-        ui.rect(X + 1, Y + 1, C - 2, C - 2, col);
-        if (p.ok) ui.fill(X + 2, Y + 2, C - 4, 1, '#d8ffc8', 0.8);
+        const X = L.gridX + x * C, Y = L.gridY + y * C + slide;
+        const col = p.ok ? K.kelp : K.coral, hi = p.ok ? K.kelpL : K.coralL;
+        ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.3 + 0.08 * pulse);
+        ui.rect(X + 1, Y + 1, C - 2, C - 2, hi);
+        ui.rect(X + 2, Y + 2, C - 4, C - 4, col);
+        if (!p.ok) { const k = Math.round(C * 0.18); for (let i = -k; i <= k; i++) { ui.fill(X + C / 2 + i, Y + C / 2 + i, 2, 2, K.coralL, 0.8); ui.fill(X + C / 2 + i, Y + C / 2 - i, 2, 2, K.coralL, 0.8); } }
       }
     } else if (p.kind === 'board') {
       const it = this.held;
       for (const [x, y] of rotCells(getItem(it.id).shape, it.rot)) {
-        const X = L.boardX + 8 + (p.bx + x) * C, Y = L.boardY + 8 + (p.by + y) * C;
-        if (Y + C > L.boardY + L.boardH) continue;
-        ui.rect(X + 1, Y + 1, C - 2, C - 2, p.ok ? '#fff2c8' : '#ff4a3a');
+        const X = L.boardX + (p.bx + x) * T, Y = L.boardY + (p.by + y) * T + slide;
+        ui.fill(X + 2, Y + 2, T - 4, T - 4, p.ok ? '#fff2c8' : K.coral, 0.3);
+        ui.rect(X + 1, Y + 1, T - 2, T - 2, p.ok ? '#fff8e0' : K.coralL);
       }
     }
   }
@@ -520,24 +606,32 @@ export class BackpackScreen implements Screen {
     const px0 = v.x;
     v.x += (tx - v.x) * Math.min(1, dt * 30); v.y += (ty - v.y) * Math.min(1, dt * 30);
     v.pop = Math.max(0, v.pop - dt * 6);
-    this.placeModel(it, v.x, v.y, 6, 1, 1, true);
+    v.cs = C;
+    this.placeModel(it, v.x, v.y, 7, 1, 1, true);
     const m = this.models.get(it.uid);
     if (m) m.o.rotation.z += Math.max(-0.4, Math.min(0.4, (v.x - px0) * -0.03));
-    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
-    this.stackBadge(it, Math.round(v.x), Math.round(v.y - 6), w * C, h * C);
-    const p = this.plan;
+    const f = this.footOf(it);
+    this.stackBadge(it, Math.round(v.x), Math.round(v.y - 7), f.w, f.h);
+  }
+  /** the STACK / FUSE label by the cursor (drawn last, over the card) */
+  private drawPlanLabel() {
+    const ui = this.ui, it = this.held, p = this.plan;
+    if (!it) return;
     if (p.kind === 'stack' || p.kind === 'fuse') {
-      const f = this.fg;
-      const label = p.kind === 'stack' ? `STACK +${p.k}` : `FUSE: ${getItem(p.id).name}${p.id === it.id ? ` +${p.level - 1}` : ''}`;
-      const lw = f.measure(label, 'small');
-      f.fill(ui.mx + 10, ui.my - 16, lw + 8, 12, '#1a0e02', 0.85);
-      f.text(label, ui.mx + 14, ui.my - 14, { font: 'small', color: '#ffe070', outline: '#1a0e02' });
+      const g = this.fg;
+      const label = p.kind === 'stack' ? `STACK +${p.k}` : `FUSE INTO ${getItem(p.id).name.toUpperCase()}${p.id === it.id ? ` +${p.level - 1}` : ''}`;
+      const lw = g.measure(label, 'body') + 14, lh = g.lh('body') + 6;
+      const lx = Math.min(g.w - lw - 4, ui.mx + 14), ly = Math.max(4, ui.my - lh - 10);
+      g.fill(lx - 1, ly - 1, lw + 2, lh + 2, K.ink2);
+      g.fill(lx, ly, lw, lh, '#2a1a04');
+      g.fill(lx, ly, lw, 1, K.brass1);
+      g.text(label, lx + 7, ly + 4, { font: 'body', color: '#ffe070', shadow: K.ink2 });
     }
   }
 
   private drawFx(dt: number) {
     const ui = this.fg;
-    for (const s of this.sparks) { s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 160 * dt; s.vx *= Math.exp(-dt * 2); }
+    for (const s of this.sparks) { s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += (s.g ?? 160) * dt; s.vx *= Math.exp(-dt * 2); }
     this.sparks = this.sparks.filter((s) => s.t < s.life);
     for (const s of this.sparks) { const a = 1 - s.t / s.life; ui.fill(Math.round(s.x), Math.round(s.y), 2, 2, s.col, a); if (a > 0.6) ui.fill(Math.round(s.x) - 1, Math.round(s.y), 4, 1, s.col, a * 0.5); }
     for (const t of this.toasts) t.t += dt;
@@ -545,163 +639,172 @@ export class BackpackScreen implements Screen {
     for (const t of this.toasts) {
       const a = Math.min(1, (1.8 - t.t) * 2), dy = Math.round(-t.t * 16);
       ui.text(t.text, t.x, t.y + dy, { font: 'title', color: t.col, outline: '#140a04', align: 'center', alpha: a });
-      if (t.sub) ui.text(t.sub, t.x, t.y + dy + 14, { font: 'small', color: '#fff2c8', outline: '#140a04', align: 'center', alpha: a });
+      if (t.sub) ui.text(t.sub, t.x, t.y + dy + ui.lh('title') + 1, { font: 'body', color: '#fff2c8', outline: '#140a04', align: 'center', alpha: a });
     }
   }
 
-  /** the item's lines; paper = dark inks for the parchment card, else light text for the dark tooltip */
-  private tipLines(it: ItemInst, paper = false) {
-    const d = getItem(it.id), lv = it.level ?? 1;
-    const dim = paper ? '#7a5a3a' : '#9aa4b8';
-    const rar = paper ? ({ common: '#4a3a2a', uncommon: '#2a6a1a', rare: '#1a4a8a', epic: '#6a2a9a', legendary: '#9a5a00' } as Record<string, string>)[d.rarity] : RARITY_COLOR[d.rarity];
-    const out: { text: string; color?: string; font?: 'body' | 'small' | 'title'; gap?: number }[] = [
-      { text: d.name + (lv > 1 ? ` +${lv - 1}` : ''), font: 'title', color: rar },
-      { text: `${d.rarity} ${d.kind}`.toUpperCase(), font: 'small', color: dim, gap: 1 },
-    ];
-    const cap = stackCap(it.id);
-    out.push({ text: `${d.shape.length} cell${d.shape.length > 1 ? 's' : ''}` + (cap > 1 ? `  ·  stack ${it.n ?? 1}/${cap}` : ''), font: 'small', color: cap > 1 ? (paper ? '#9a5a00' : '#ffd860') : dim });
-    for (const l of statLines(it.id, lv)) out.push({ text: l.text, font: 'small', color: l.key === 'note' ? (paper ? '#1a4a7a' : '#8ae8ff') : l.good ? (paper ? '#2a6a1a' : '#8af07a') : (paper ? '#a01818' : '#ff8a7a') });
-    out.push({ text: d.desc, font: 'small', color: paper ? '#3a2810' : '#d8d0c0', gap: 2 });
-    return out;
+  // ---- the card column
+  private drawCard(dt: number, cs: number) {
+    const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
+    const x = L.colX + cs, y = L.colY, w = L.colW, h = L.cardH;
+    // the item on show: held > hovered > the last one for a moment
+    const live = this.held ?? this.hover;
+    if (live) this.shown = { it: live, t: 0.3 };
+    else if (this.shown) { this.shown.t -= dt; if (this.shown.t <= 0 || !run.items.includes(this.shown.it)) this.shown = null; }
+    const it = this.shown?.it ?? null;
+    ui.panel('dark', x, y, w, h);
+    const pad = 8;
+    const ix = x + pad, iw = w - pad * 2;
+    fg.clip(x + 3, y + 3, w - 6, h - 6);
+    if (it) {
+      this.cardPop = Math.min(1, this.cardPop + dt * 6);
+      const d = getItem(it.id);
+      const MW = Math.round(Math.max(56, Math.min(110, Math.min(w * 0.32, h * 0.5))));
+      modelWindow(ui, ix, y + pad, MW, d.rarity, this.held ? 1 : 0);
+      this.cardModel(it, ix + MW / 2, y + pad + MW / 2, MW);
+      const hx = ix + MW + 8, hw = x + w - pad - hx;
+      const hh = itemHead(fg, it.id, hx, y + pad + 1, hw, { level: it.level ?? 1, n: it.n ?? 1 });
+      // the rest flows beside the window, then under it at full width
+      const yy = y + pad + 1 + hh + 4;
+      fg.fill(hx, yy - 3, x + w - pad - hx, 1, K.teal2);
+      itemBody(fg, it.id, ix, yy, iw, { level: it.level ?? 1, counts: setCounts(run.items), loose: it.gx < 0, maxFuse: 2, flow: { y: y + pad + MW + 3, x: hx, w: hw } });
+    } else {
+      this.hideCardModel();
+      this.cardPop = 0;
+      // nothing hovered: what the packed gear adds up to
+      const used = packCells(run.items).used;
+      let yy = y + pad;
+      fg.text('YOUR BAG', ix, yy, { font: 'title', color: K.brass2, outline: K.ink2 });
+      const cnt = `${used}/${GRID_CELLS} pockets`;
+      fg.text(cnt, x + w - pad, yy + fg.cap('title') - fg.cap('body'), { font: 'body', color: used >= GRID_CELLS ? K.coralL : K.cream, shadow: K.ink2, align: 'right' });
+      yy += fg.lh('title') + 1;
+      // the capacity bar
+      const fw = Math.round((iw - 2) * used / GRID_CELLS);
+      ui.fill(ix, yy, iw, 5, K.ink2); ui.fill(ix + 1, yy + 1, iw - 2, 3, K.teal0);
+      if (fw > 0) { ui.fill(ix + 1, yy + 1, fw, 3, used >= GRID_CELLS ? K.coral : K.brass1); ui.fill(ix + 1, yy + 1, fw, 1, used >= GRID_CELLS ? K.coralL : K.brass2); }
+      yy += 11;
+      const b = buildLines(run.items);
+      const bottom = y + h - 4;
+      if (!b.stats.length && !b.skills.length) {
+        // an empty bag: how packing works, three steps with their keys
+        yy += fg.textBox('Gear in the pockets changes your stats and deals you skills.', ix, yy, iw, { font: 'body', color: K.cream2, shadow: K.ink2 }) + 8;
+        const steps: [string, string][] = [['LMB', 'drag finds into the pockets'], ['R', 'turn things to make them fit'], ['LMB', 'drop a twin on a twin: they stack'], ['LMB', 'drop a partner on it: they fuse']];
+        for (const [k, t] of steps) {
+          if (yy + 16 > bottom) break;
+          fg.fill(ix, yy - 2, iw, 16, K.ink2, 0.5);
+          fg.hint(k, '', ix + 4, yy);
+          fg.text(t, ix + 28, yy + 1, { font: 'body', color: K.cream, shadow: K.ink2 });
+          yy += 19;
+        }
+      } else {
+        // the stat changes in two columns when they fit side by side, else one
+        const lh = fg.lh('body');
+        const half = Math.ceil(b.stats.length / 2);
+        const w1 = Math.max(0, ...b.stats.slice(0, half).map((q) => fg.measure(q.text, 'body')));
+        const w2 = Math.max(0, ...b.stats.slice(half).map((q) => fg.measure(q.text, 'body')));
+        const two = b.stats.length > 3 && w1 + 12 + w2 <= iw;
+        const rows = two ? half : b.stats.length;
+        const c2 = ix + Math.max(w1 + 12, Math.round(iw / 2));
+        b.stats.forEach((q, i) => {
+          const cx = two && i >= half ? c2 : ix, cy = yy + (two ? i % half : i) * lh;
+          if (cy + lh > bottom) return;
+          fg.text(q.text, cx, cy, { font: 'body', color: q.good ? K.kelpL : K.coralL, shadow: K.ink2 });
+        });
+        yy += rows * lh + 4;
+        if (b.skills.length && yy + 20 < bottom) {
+          fg.text('SKILLS', ix, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += fg.lh('small');
+          fg.textBox(b.skills.join(' · '), ix, yy, iw, { font: 'body', color: K.seaL, shadow: K.ink2 });
+        }
+      }
+    }
+    fg.unclip();
   }
 
-  private drawCard(slide: number) {
-    const ui = this.ui, L = this.L, run = this.run!;
-    const it = this.held ?? this.hover;
-    const x = L.infoX, y = L.infoY + slide, w = L.infoW;
-    if (it) {
-      // a physical card: a leather-bound parchment board swaying on the stage, the item's miniature turning in
-      // its window, the words printed over it
-      const h = this.cardBody(it, x, y, w, false);
-      this.cardModel(it, x, y, w, h);
-      this.cardBody(it, x, y, w, true);
+  /** the card's big turning model on its pedestal */
+  private cardModel(it: ItemInst, cx: number, cy: number, s: number) {
+    const key = `${it.uid}|${it.id}|${it.level ?? 1}`;
+    if (!this.cardItem || this.cardItem.key !== key) {
+      this.cardItem?.o.removeFromParent(); this.cardItem?.sh.removeFromParent();
+      this.cardItem = { uid: it.uid, key, o: itemModel(it.id), sh: contactShadow(1, 0.35, 0.55) };
+      this.cardPop = 0;
+    }
+    const { o, sh } = this.cardItem;
+    const fp = footprint(it.id);
+    const pop = easeOutBack(Math.min(1, this.cardPop), 2);
+    o.scale.setScalar((s * 0.8 / Math.max(fp.w, fp.h, 1.3)) * Math.max(0.05, pop));
+    // standing up to face you, swaying slowly so its shape reads (flat things never turn edge-on)
+    o.rotation.set(0.42 + Math.sin(this.t * 0.8) * 0.08, Math.sin(this.t * 1.1) * 0.75, 0);
+    o.visible = true; sh.visible = true;
+    const bob = Math.sin(this.t * 2) * 1.2;
+    this.stage.put(o, cx, cy - s * 0.06 + bob, 60);
+    sh.scale.set(s * 0.6, s * 0.6, 1);
+    this.stage.put(sh, cx, cy + s * 0.24, 40);
+  }
+  private hideCardModel() { if (this.cardItem) { this.cardItem.o.visible = false; this.cardItem.sh.visible = false; } }
+
+  /** the set bonuses in play; the shown item's sets light up (and a loose item's would-be +1 blinks) */
+  private drawSets(cs: number) {
+    const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
+    if (L.setsH < 30) return;
+    const x = L.colX + cs, y = L.setsY, w = L.colW, h = L.setsH;
+    ui.panel('dark', x, y, w, h);
+    const pad = 8;
+    fg.text('SET BONUSES', x + pad, y + pad - 1, { font: 'body', color: K.brass2, outline: K.ink2 });
+    let yy = y + pad + fg.lh('body') + 1;
+    const it = this.shown?.it ?? null;
+    const tags = new Set((it ? getItem(it.id).tags ?? [] : []).filter((t) => SETS[t]));
+    const sets: SetState[] = setBonuses(run);
+    // a loose item's sets that aren't in play yet still get a row (at 0, the +1 blinking)
+    for (const t of tags) if (!sets.some((q) => q.tag === t)) { const d = SETS[t]; sets.push({ tag: t, name: d.name, color: d.color, kind: d.kind, count: 0, tier: 0, next: d.tiers[0]?.n ?? null, tiers: d.tiers.map((q) => ({ ...q, active: false })) }); }
+    sets.sort((a, b) => Number(tags.has(b.tag)) - Number(tags.has(a.tag)) || b.count - a.count);
+    if (!sets.length) {
+      // none in play: the sets there are, as chips in their colours
+      yy += fg.textBox('Pack 2, 4 or 6 things that share a tag to switch its bonus on:', x + pad, yy, w - pad * 2, { font: 'small', color: K.cream2, shadow: K.ink2 }) + 4;
+      let cx = x + pad;
+      const ch = fg.lh('small') + 3;
+      for (const t of SET_ORDER) {
+        const d = SETS[t]; if (!d) continue;
+        const cw = fg.measure(d.name.toUpperCase(), 'small') + 16;
+        if (cx + cw > x + w - pad) { cx = x + pad; yy += ch + 3; }
+        if (yy + ch > y + h - 4) break;
+        fg.fill(cx, yy, cw, ch, K.ink2); fg.rect(cx, yy, cw, ch, d.color);
+        fg.fill(cx + 3, yy + Math.round(ch / 2) - 2, 4, 4, d.color);
+        fg.text(d.name.toUpperCase(), cx + 10, yy + 2, { font: 'small', color: d.color, shadow: null });
+        cx += cw + 4;
+      }
       return;
     }
-    this.hideCard();
-    // nothing hovered: the build
-    const sets = setBonuses(run).slice(0, 6);
-    const h = 26 + Math.max(1, sets.length) * 24;
-    ui.panel('dark', x, y, w, h, 'BUILD');
-    let yy = y + 22;
-    if (!sets.length) ui.textBox('Pack tagged gear (mage, warrior, toymaker...) to unlock set bonuses at 2, 4 and 6.', x + 7, yy, w - 14, { font: 'small', color: '#a8b0c8' });
-    for (const s of sets) {
-      ui.fill(x + 7, yy + 1, 6, 6, s.color);
-      ui.text(s.name.toUpperCase(), x + 17, yy, { font: 'small', color: s.tier ? s.color : '#c8c8d0' });
-      for (let i = 0; i < 6; i++) ui.fill(x + w - 46 + i * 6, yy + 1, 5, 5, i < s.count ? s.color : '#2a3040');
-      const act = [...s.tiers].reverse().find((t) => t.active);
-      const nxt = s.tiers.find((t) => !t.active);
-      ui.text(act ? act.text : nxt ? `${s.count}/${nxt.n}: ${nxt.text}` : '', x + 17, yy + 10, { font: 'small', color: act ? '#e8e8f0' : '#7a8498' });
-      yy += 24;
+    fg.clip(x + 3, yy - 2, w - 6, y + h - yy - 1);
+    let n = 0;
+    for (const q of sets) {
+      const rh = setRow(fg, q, x + pad, yy, w - pad * 2, { draw: false });
+      if (yy + rh > y + h - 3) break;
+      setRow(fg, q, x + pad, yy, w - pad * 2, { hot: tags.has(q.tag), plus: tags.has(q.tag) && !!it && it.gx < 0 });
+      yy += rh + 2; n++;
     }
+    fg.unclip();
+    if (n < sets.length) fg.text(`+${sets.length - n} more`, x + w - pad, y + pad, { font: 'small', color: K.dim, shadow: null, align: 'right' });
   }
 
-  /** the item card; draw=false only measures. Returns its height */
-  private cardItem: { uid: number; o: THREE.Object3D } | null = null;
-  private cardModel(it: ItemInst, x: number, y: number, w: number, h: number) {
-    if (!this.cardBoard) {
-      // parchment: laid lines, fibres, a foxing stain and a darker margin
-      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-      const g = c.getContext('2d')!;
-      g.fillStyle = '#e8d6ae'; g.fillRect(0, 0, 64, 64);
-      for (let yy = 0; yy < 64; yy += 3) { g.fillStyle = yy % 9 === 0 ? '#d8c49a' : '#e2d0a6'; g.fillRect(0, yy, 64, 1); }
-      for (let i = 0; i < 46; i++) { g.fillStyle = i % 2 ? '#d4bc8c' : '#f4e6c4'; g.fillRect((i * 29) % 62, (i * 43) % 62, 2 + (i % 3), 1); }
-      g.globalAlpha = 0.25; g.fillStyle = '#b08a50'; g.beginPath(); g.ellipse(48, 46, 8, 5, 0.4, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
-      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      const board = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 3), [
-        new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ color: '#5a3418', roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: '#3a2010', roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 }), new THREE.MeshStandardMaterial({ color: '#3a2010', roughness: 0.8 }),
-      ]);
-      const rim = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 2), new THREE.MeshStandardMaterial({ color: '#6a3a1c', roughness: 0.7, flatShading: true }));
-      rim.position.z = -1.2; rim.name = 'rim';
-      board.add(rim);
-      this.cardBoard = board;
-    }
-    const b = this.cardBoard;
-    b.scale.set(w, h, 1);
-    (b.getObjectByName('rim') as THREE.Mesh).scale.set(1 + 6 / w, 1 + 6 / h, 1);
-    b.rotation.set(0.05 + Math.sin(this.t * 1.1) * 0.02, -0.08 + Math.sin(this.t * 0.8) * 0.03, Math.sin(this.t * 0.9) * 0.008);
-    this.stage.put(b, x + w / 2, y + h / 2, -40);
-    b.visible = true;
-    if (!this.cardItem || this.cardItem.uid !== it.uid) {
-      this.cardItem?.o.removeFromParent();
-      this.cardItem = { uid: it.uid, o: itemModel(it.id) };
-    }
-    const o = this.cardItem.o;
-    const d = getItem(it.id);
-    const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
-    o.scale.setScalar(30 / Math.max(cw, ch));
-    o.rotation.set(0.3, this.t * 1.4, 0);
-    o.visible = true;
-    this.stage.put(o, x + 6 + 17, y + 6 + 17, 30);
-  }
-  private hideCard() { if (this.cardBoard) this.cardBoard.visible = false; if (this.cardItem) this.cardItem.o.visible = false; }
-
-  private cardBody(it: ItemInst, x: number, y: number, w: number, draw: boolean): number {
-    const ui = this.fg;
-    const d = getItem(it.id), lv = it.level ?? 1;
-    const lines = this.tipLines(it, true);
-    const tw = w - 12, bw = 34;
-    const tb = (str: string, tx: number, ty: number, ww: number, o: { font: 'body' | 'small' | 'title'; color?: string }) => (draw ? ui.textBox(str, tx, ty, ww, o) : ui.textBox(str, -9999, -9999, ww, o));
-    if (draw) {
-      ui.rect(x + 6, y + 6, bw, bw, RARITY_COLOR[d.rarity]);
-      ui.rect(x + 7, y + 7, bw - 2, bw - 2, '#5a3a1c');
-    }
-    void lv;
-    const nh = tb(lines[0].text, x + bw + 12, y + 7, w - bw - 18, { font: 'title', color: lines[0].color });
-    tb(lines[1].text, x + bw + 12, y + 9 + nh, w - bw - 18, { font: 'small', color: '#7a5a3a' });
-    let yy = y + Math.max(46, 12 + nh + 12);
-    for (const l of lines.slice(2)) { yy += l.gap ?? 0; yy += tb(l.text, x + 6, yy, tw, { font: l.font ?? 'small', color: l.color }) + 1; }
-    const tags = (d.tags ?? []).filter((t) => t !== 'gem' && t !== 'metal');
-    if (tags.length) {
-      let tx = x + 6; yy += 3;
-      for (const t of tags) {
-        const tw2 = ui.measure(t.toUpperCase(), 'small') + 8;
-        if (tx + tw2 > x + w - 6) { tx = x + 6; yy += 13; }
-        const col = SET_COL[t] ?? '#8a94a8';
-        if (draw) { ui.fill(tx, yy, tw2, 11, col, 0.9); ui.rect(tx, yy, tw2, 11, '#3a2410'); ui.text(t.toUpperCase(), tx + 4, yy + 2, { font: 'small', color: '#1a0c04', shadow: null }); }
-        tx += tw2 + 3;
-      }
-      yy += 14;
-    }
-    const recipes = recipesWith(it.id).slice(0, 3);
-    if (recipes.length) {
-      yy += 2;
-      if (draw) ui.text('FUSES WITH', x + 6, yy, { font: 'small', color: '#9a5a00', shadow: null });
-      yy += 11;
-      for (const r of recipes) {
-        const other = r.a === it.id ? r.b : r.a;
-        if (draw) {
-          ui.item(other, x + 6, yy - 2, 16, 16);
-          ui.text('>', x + 25, yy + 2, { font: 'small', color: '#7a5a3a', shadow: null });
-          ui.item(r.out, x + 33, yy - 2, 16, 16);
-          let name = getItem(r.out).name;
-          while (name.length > 3 && ui.measure(name, 'small') > w - 60) name = name.slice(0, -2) + '…';
-          ui.text(name, x + 52, yy + 2, { font: 'small', color: '#3a2810', shadow: null });
-        }
-        yy += 17;
-      }
-    }
-    return yy - y + 4;
-  }
-
-  private drawHints() {
-    const ui = this.ui, L = this.L;
-    let x = L.packX + 8, y = Math.min(ui.h - 16, L.packY + GRID_H * C + PACK_IN.y + 30);
-    x += ui.hint('LMB', 'drag', x, y);
-    x += ui.hint('R', 'turn', x, y);
-    x += ui.hint('RMB', 'turn', x, y);
-    x += ui.hint('TAB', 'close', x, y);
+  /** keycaps along the bottom of the card column */
+  private drawHints(cs: number) {
+    const fg = this.fg, L = this.L;
+    let x = L.colX + cs + 2;
+    const y = L.hintY;
+    x += fg.hint('LMB', 'drag', x, y);
+    x += fg.keycap('R', x, y) + 3;
+    x += fg.hint('RMB', 'turn', x, y);
+    fg.hint('TAB', 'close', x, y);
   }
 
   // ---------------------------------------------------------------- interaction
   private visOf(it: ItemInst): Vis {
     let v = this.vis.get(it.uid);
-    if (!v) { const [x, y] = this.targetOf(it); v = { x, y, vx: 0, vy: 0, lift: 0, pop: 1, shake: 0 }; this.vis.set(it.uid, v); }
+    if (!v) { const [x, y] = this.targetOf(it); v = { x, y, vx: 0, vy: 0, lift: 0, pop: 1, shake: 0, bump: 0, cs: this.cellOf(it) }; this.vis.set(it.uid, v); }
     return v;
   }
   private spring(v: Vis, tx: number, ty: number, dt: number) {
-    const k = 260, damp = 24;
+    const k = 260, damp = 22;
     v.vx += ((tx - v.x) * k - v.vx * damp) * dt; v.vy += ((ty - v.y) * k - v.vy * damp) * dt;
     v.x += v.vx * dt; v.y += v.vy * dt;
     if (Math.abs(tx - v.x) < 0.3 && Math.abs(v.vx) < 2) { v.x = tx; v.vx = 0; }
@@ -718,7 +821,7 @@ export class BackpackScreen implements Screen {
       if (it.gx >= 0) { if (cells.some(([x, y]) => it.gx + x === gx && it.gy + y === gy)) return it; }
       else {
         const s = this.slot.get(it.uid); if (!s) continue;
-        const bx = Math.floor((mx - L.boardX - 8) / C), by = Math.floor((my - L.boardY - 8) / C);
+        const bx = Math.floor((mx - L.boardX) / T), by = Math.floor((my - L.boardY) / T);
         if (cells.some(([x, y]) => s.bx + x === bx && s.by + y === by)) return it;
       }
     }
@@ -726,24 +829,24 @@ export class BackpackScreen implements Screen {
   }
 
   private interact() {
-    const ui = this.ui, run = this.run!, L = this.L, inp = this.game.input;
+    const ui = this.ui, L = this.L, inp = this.game.input;
     if (this.closing) return;
-    const overClose = ui.hover(L.closeX, L.closeY, 14, 15);
-    this.hover = this.held || overClose ? null : this.itemAt(ui.mx, ui.my);
+    this.overClose = ui.hover(L.closeX - 2, L.closeY - 2, L.close + 4, L.close + 4);
+    this.hover = this.held || this.overClose ? null : this.itemAt(ui.mx, ui.my);
     if (this.hover || this.held) ui.cursor = this.held ? 'grab' : 'point';
     const rotate = inp.keyHit('KeyR') || ui.rpressed;
     if (!this.held) {
-      if (this.hover && ui.pressed && !overClose) this.pickUp(this.hover);
+      if (this.hover && ui.pressed && !this.overClose) this.pickUp(this.hover);
       else if (this.hover && rotate) this.rotateInPlace(this.hover);
       return;
     }
     const it = this.held;
     if (rotate) {
-      // turn about the grabbed point
-      const ic = rotIcon(it.id, it.level ?? 1, it.rot);
+      // turn about the grabbed point (the footprint turns clockwise: its old height becomes its width)
+      const f = this.footOf(it);
       const ox = this.grab.x, oy = this.grab.y;
       it.rot = (it.rot + 1) % 4;
-      this.grab = { x: ic.height - oy, y: ox };
+      this.grab = { x: f.h - oy, y: ox };
       const v = this.visOf(it); v.x = ui.mx - this.grab.x; v.y = ui.my - this.grab.y; v.pop = 1;
       sfx(['k_tick4', 'cloth1'], { vol: 0.4, rate: 1.2 });
     }
@@ -752,10 +855,11 @@ export class BackpackScreen implements Screen {
   }
 
   private pickUp(it: ItemInst) {
-    const v = this.visOf(it);
+    const v = this.visOf(it), f = this.footOf(it), k = C / this.cellOf(it);
     this.held = it;
     this.heldFrom = { gx: it.gx, gy: it.gy, rot: it.rot, slot: it.gx < 0 ? this.slot.get(it.uid) : undefined };
-    this.grab = { x: Math.max(2, Math.min(rotIcon(it.id, it.level ?? 1, it.rot).width - 2, this.ui.mx - v.x)), y: Math.max(2, this.ui.my - v.y) };
+    // the grab point in pocket px (a seabed find grows to pocket size around the cursor)
+    this.grab = { x: Math.max(2, Math.min(f.w * k - 2, (this.ui.mx - v.x) * k)), y: Math.max(2, Math.min(f.h * k - 2, (this.ui.my - v.y) * k)) };
     v.pop = 1;
     sfx(['k_pick1', 'cloth1', 'k_tick1'], { vol: 0.45 });
   }
@@ -777,9 +881,10 @@ export class BackpackScreen implements Screen {
     const gx = Math.round((tlx - L.gridX) / C), gy = Math.round((tly - L.gridY) / C);
     const inGrid = ui.mx >= L.gridX - C / 2 && ui.my >= L.gridY - C / 2 && ui.mx < L.gridX + GRID_W * C + C / 2 && ui.my < L.gridY + GRID_H * C + C / 2;
     if (inGrid) return { kind: 'grid', gx, gy, ok: fits(run.items, it, gx, gy, it.rot), cells: cells.map(([x, y]) => [gx + x, gy + y]) };
-    const inBoard = ui.mx >= L.boardX && ui.my >= L.boardY && ui.mx < L.boardX + L.boardW && ui.my < L.boardY + L.boardH + C;
+    const inBoard = ui.mx >= L.trayX - C / 2 && ui.my >= L.labY && ui.mx < L.trayX + L.trayW + C / 2 && ui.my < L.trayY + L.trayH + T;
     if (inBoard) {
-      const bx = Math.round((tlx - L.boardX - 8) / C), by = Math.round((tly - L.boardY - 8) / C);
+      // the same grab point on a seabed-sized footprint
+      const k = T / C, bx = Math.round((ui.mx - this.grab.x * k - L.boardX) / T), by = Math.round((ui.my - this.grab.y * k - L.boardY) / T);
       return { kind: 'board', bx, by, ok: this.boardFits(it, bx, by, it.rot) };
     }
     return { kind: 'none' };
@@ -792,9 +897,9 @@ export class BackpackScreen implements Screen {
     if (p.kind === 'stack') {
       const moved = stackOnto(p.target, it);
       if (moved > 0) {
-        this.burst(p.target, '#ffe070', 8);
+        this.burst(p.target, '#ffe070', 10);
         sfx(['coin1', 'k_drop2', 'pickup1'], { vol: 0.5 });
-        this.visOf(p.target).pop = 0.6;
+        this.visOf(p.target).bump = 1;
         if ((it.n ?? 1) <= 0) { run.removeItem(it.uid); this.vis.delete(it.uid); this.slot.delete(it.uid); return; }
       }
       this.returnHome(it, from);
@@ -803,7 +908,8 @@ export class BackpackScreen implements Screen {
     if (p.kind === 'fuse') { this.fuse(p.target, it); return; }
     if (p.kind === 'grid' && p.ok) {
       it.gx = p.gx; it.gy = p.gy; this.slot.delete(it.uid);
-      v.vy = 60;
+      v.vy = 70; v.bump = 1;
+      this.dust(it, '#cfe8e0');
       sfx(['k_drop2', 'k_drop3', 'cloth1'], { vol: 0.55 });
       return;
     }
@@ -812,6 +918,8 @@ export class BackpackScreen implements Screen {
       it.gx = -1; it.gy = -1;
       if (p.ok) this.slot.set(it.uid, { bx: p.bx, by: p.by });
       else { this.slot.delete(it.uid); this.slot.set(it.uid, this.freeBoardSlot(it) ?? { bx: 0, by: this.L.bRows }); }
+      v.vy = 50; v.bump = 1;
+      this.dust(it, '#e8d0a0');
       sfx(['sand_step1', 'k_drop2'], { vol: 0.45 });
       return;
     }
@@ -866,7 +974,8 @@ export class BackpackScreen implements Screen {
     const d = getItem(res.id);
     const isLevel = res.id === it.id && res.id === target.id;
     const [tx, ty] = this.targetOf(out);
-    this.toasts.push({ text: isLevel ? `LEVEL ${res.level}` : 'FUSED!', sub: d.name, x: tx + 16, y: ty - 18, t: 0, col: isLevel ? '#ffe070' : '#d8b0ff' });
+    const f = this.footOf(out);
+    this.toasts.push({ text: isLevel ? `LEVEL ${res.level}` : 'FUSED!', sub: d.name, x: tx + f.w / 2, y: ty - 22, t: 0, col: isLevel ? '#ffe070' : '#d8b0ff' });
     this.game.flash?.('#fff2c8', 0.12);
     sfx(['magic1', 'magic2', 'powerup1'], { vol: 0.7 });
     sfx(['pickup_sparkle1', 'shimmer1'], { vol: 0.45, delay: 0.08 });
@@ -874,14 +983,26 @@ export class BackpackScreen implements Screen {
 
   private burst(it: ItemInst, col: string, n: number) {
     const [x, y] = this.targetOf(it);
-    const { w, h } = shapeSize(rotCells(getItem(it.id).shape, it.rot));
-    const cx = x + (w * C) / 2, cy = y + (h * C) / 2;
+    const f = this.footOf(it);
+    const cx = x + f.w / 2, cy = y + f.h / 2;
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 90; this.sparks.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, t: 0, life: 0.5 + Math.random() * 0.5, col }); }
   }
+  /** a puff of lint / sand out from under a dropped item */
+  private dust(it: ItemInst, col: string) {
+    const [x, y] = this.targetOf(it);
+    const f = this.footOf(it);
+    for (let i = 0; i < 8; i++) {
+      const side = i % 2 ? 1 : -1;
+      this.sparks.push({ x: x + f.w / 2 + side * f.w * 0.42, y: y + f.h - 4, vx: side * (30 + Math.random() * 50), vy: -20 - Math.random() * 40, t: 0, life: 0.35 + Math.random() * 0.25, col, g: 120 });
+    }
+  }
+
+  // ---------------------------------------------------------------- test hooks (CSS px)
+  private css(x: number, y: number): [number, number] { const k = this.ui.scale / this.game.renderer.getPixelRatio(); return [Math.round(x * k), Math.round(y * k)]; }
+  cellPoint(gx: number, gy: number) { return this.css(this.L.gridX + (gx + 0.5) * C, this.L.gridY + (gy + 0.5) * C); }
+  trayPoint(bx: number, by: number) { return this.css(this.L.boardX + (bx + 0.5) * T, this.L.boardY + (by + 0.5) * T); }
+  itemPoint(uid: number) { const it = this.run?.items.find((i) => i.uid === uid); if (!it) return null; const [x, y] = this.targetOf(it); const c = rotCells(getItem(it.id).shape, it.rot)[0], k = this.cellOf(it); return this.css(x + (c[0] + 0.5) * k, y + (c[1] + 0.5) * k); }
+  closePoint() { return this.css(this.L.closeX + this.L.close / 2, this.L.closeY + this.L.close / 2); }
 }
 
-const SET_COL: Record<string, string> = {
-  mage: '#a88aff', warrior: '#ff8a5a', summoner: '#ffc04a', tinkerer: '#5ac8ff', rogue: '#7ae07a',
-  fire: '#ff6a3a', frost: '#8ae8ff', shock: '#ffe04a', poison: '#8af04a', water: '#4a9aff',
-};
 export type { ItemDef };
