@@ -616,7 +616,7 @@ export class HideoutScreen implements Screen {
     if (!live) return;
     if (input.keyHit('Escape')) { this.openPanel('pause'); return; }
     const keyUse = input.keyHit('KeyE') || input.keyHit('Space') || input.keyHit('Enter');
-    if (near && keyUse && !(near.id === 'doorway' && (this.arriveT >= 0 || this.inT < 2))) { this.useThing(near); return; }
+    if (near && keyUse && this.arriveT < 0 && this.inT > 2) { this.useThing(near); return; }
     if (ui.pressed && !ui.mouseOnUI) {
       if (hov) this.walkUse(hov);
       else {
