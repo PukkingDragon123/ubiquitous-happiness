@@ -17,7 +17,7 @@ export interface KitAssetOpts {
   mode?: SwimFlags['mode']; vertical?: boolean;
   shape?: [number, number, number, number]; shape2?: [number, number, number, number]; jaw?: [number, number, number, number];
   amp?: number; freq?: number; freqK?: number;
-  uwo?: UwOpts; emissive?: number; clearcoat?: number; clearcoatRough?: number; normal?: number;
+  uwo?: UwOpts; emissive?: number; normal?: number;
   parts?: SpeciesAsset['parts']; animate?: SpeciesAsset['animate'];
   anchors?: Record<string, V3>;
   side?: THREE.Side;
@@ -43,7 +43,6 @@ export function kitAsset(name: string, geo: THREE.BufferGeometry, pg: Page, o: K
     length: o.length, mouth: v3(o.mouth), eye: v3(o.eye), eyeR: o.eyeR ?? 0.02, anchors,
     amp: o.amp ?? 0, freq: o.freq ?? 1, freqK: o.freqK ?? 0, jawIdle: o.jawIdle ?? 0, normalScale: 0.6,
     parts: o.parts, animate: o.animate, side: o.side,
-    clearcoat: o.clearcoat ?? 0.5, clearcoatRough: o.clearcoatRough ?? 0.3,
     palette: o.palette,
   });
 }

@@ -29,8 +29,6 @@ export interface SpeciesAsset {
   alphaTest?: number;
   transparent?: boolean;
   castShadow?: boolean;
-  /** wet clearcoat layer (0 = none) */
-  clearcoat?: number; clearcoatRough?: number;
   /** colours kept by the clean-pixel texture pass (default 14) */
   palette?: number;
 }
@@ -75,9 +73,8 @@ export class FishModel {
   makeMaterial(o: { map?: THREE.Texture; normalMap?: THREE.Texture | null; roughnessMap?: THREE.Texture | null; emissiveMap?: THREE.Texture | null; emissive?: number; flags?: SwimFlags } = {}): THREE.MeshStandardMaterial {
     const a = this.asset;
     const em = o.emissiveMap !== undefined ? o.emissiveMap : a.emissiveMap;
-    const cc = a.clearcoat ?? 0.5;
-    const P = cc > 0 ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
-    const m = new P({
+    // matte PS2 (v7): no wet clearcoat layer (its sharp highlight flashed white on the facets of small, wiggling fish)
+    const m = new THREE.MeshStandardMaterial({
       map: o.map ?? a.map, normalMap: o.normalMap !== undefined ? o.normalMap : a.normalMap, roughnessMap: o.roughnessMap !== undefined ? o.roughnessMap : a.roughnessMap,
       roughness: 1, metalness: 0, vertexColors: true, side: a.side ?? THREE.FrontSide,
       alphaToCoverage: !a.transparent, transparent: !!a.transparent, depthWrite: !a.transparent,
@@ -86,7 +83,6 @@ export class FishModel {
     // the game renders without MSAA, so alpha-to-coverage alone never cuts anything: cut fin notches, frays and
     // free rays with an alpha test (the clean-pixel pass leaves the map alpha at 0 or 1)
     m.alphaTest = a.alphaTest ?? (a.transparent ? 0 : 0.5);
-    if (m instanceof THREE.MeshPhysicalMaterial) { m.clearcoat = cc; m.clearcoatRoughness = a.clearcoatRough ?? 0.32; }
     if (m.normalMap) m.normalScale.set(a.normalScale, a.normalScale);
     swimMaterial(m, a.uni, this.inst, o.flags ?? a.flags, a.uwo);
     if (this.material) this.extraMats.push(m);

@@ -9,7 +9,8 @@
 //
 // Matte by default (the clean PS2 diffuse look; specular only as pixel glints painted into textures): roughness is
 // clamped to >= 0.6 and metalness to <= 0.2 in the shader (so roughness / metalness maps can't sneak gloss back),
-// clearcoat and sheen are capped at 0.15. Opt out with { glossy: true } / { metal: true }.
+// and clearcoat / sheen are switched off, on the material and again in the shader (a value set after the patch, like
+// a cosmetic skin's, can't bring a wet white glint back). Opt out with { glossy: true } / { metal: true }.
 //
 // Every material that goes through uw() (src/gfx/shaders/underwater.ts) gets this automatically. Above-water
 // and dry materials can call retro() directly. The patch is idempotent and composes with other
@@ -61,8 +62,21 @@ const VERT_SNAP = /* glsl */ `
 }
 `;
 const FRAG_DECL = /* glsl */ `
-uniform float uRetroAffine; uniform float uRetroMatAffine; uniform float uRetroMinRough; uniform float uRetroMaxMetal;
+uniform float uRetroAffine; uniform float uRetroMatAffine; uniform float uRetroMinRough; uniform float uRetroMaxMetal; uniform float uRetroMaxCoat;
 varying vec3 vRetroAff;
+`;
+// after the physical material is set up: no clearcoat / sheen / iridescence layer on matte materials
+const FRAG_COAT = /* glsl */ `
+#ifdef USE_CLEARCOAT
+  material.clearcoat = min(material.clearcoat, uRetroMaxCoat);
+  material.clearcoatRoughness = max(material.clearcoatRoughness, uRetroMinRough);
+#endif
+#ifdef USE_SHEEN
+  material.sheenColor *= uRetroMaxCoat;
+#endif
+#ifdef USE_IRIDESCENCE
+  material.iridescence *= uRetroMaxCoat;
+#endif
 `;
 
 /** patch a three.js built-in material (Standard / Physical / Lambert / Phong / Basic) for the PS1 look */
@@ -79,6 +93,7 @@ export function retro<T extends THREE.Material>(mat: T, o: RetroOpts = {}): T {
     const lm = l as unknown as { uRetroMinRough: { value: number }; uRetroMaxMetal: { value: number } };
     if (o.glossy !== undefined) lm.uRetroMinRough.value = o.glossy ? 0 : 0.6;
     if (o.metal !== undefined) lm.uRetroMaxMetal.value = o.metal ? 1 : 0.2;
+    if (o.glossy !== undefined) (l as unknown as { uRetroMaxCoat: { value: number } }).uRetroMaxCoat.value = o.glossy ? 1 : 0;
     matte(mat, o);
     return mat;
   }
@@ -87,6 +102,7 @@ export function retro<T extends THREE.Material>(mat: T, o: RetroOpts = {}): T {
     uRetroMatAffine: { value: o.affine ?? 0.35 },
     uRetroMinRough: { value: o.glossy ? 0 : 0.6 },
     uRetroMaxMetal: { value: o.metal ? 1 : 0.2 },
+    uRetroMaxCoat: { value: o.glossy ? 1 : 0 },
   };
   ud.retro = local;
   setFlat(!o.smooth);
@@ -112,20 +128,22 @@ export function retro<T extends THREE.Material>(mat: T, o: RetroOpts = {}): T {
         #endif
         ${uvFix(THREE.ShaderChunk.map_fragment, 'vMapUv', 'rUvMap')}`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n      roughnessFactor = max(roughnessFactor, uRetroMinRough);')
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n      metalnessFactor = min(metalnessFactor, uRetroMaxMetal);');
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n      metalnessFactor = min(metalnessFactor, uRetroMaxMetal);')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_COAT);
   };
   mat.customProgramCacheKey = chainKey(mat, prev, '|retro');
   mat.needsUpdate = true;
   return mat;
 }
 
-/** cap the shiny parameters on the material itself (clearcoat / sheen / roughness / metalness) */
+/** cap the shiny parameters on the material itself (clearcoat / sheen / iridescence off, roughness / metalness) */
 function matte(mat: THREE.Material, o: RetroOpts) {
-  const m = mat as unknown as { roughness?: number; metalness?: number; clearcoat?: number; sheen?: number };
+  const m = mat as unknown as { roughness?: number; metalness?: number; clearcoat?: number; sheen?: number; iridescence?: number };
   if (!o.glossy && typeof m.roughness === 'number') m.roughness = Math.max(0.6, m.roughness);
   if (!o.metal && typeof m.metalness === 'number') m.metalness = Math.min(0.2, m.metalness);
-  if (!o.glossy && typeof m.clearcoat === 'number') m.clearcoat = Math.min(0.15, m.clearcoat);
-  if (!o.glossy && typeof m.sheen === 'number') m.sheen = Math.min(0.15, m.sheen);
+  if (!o.glossy && typeof m.clearcoat === 'number') m.clearcoat = 0;
+  if (!o.glossy && typeof m.sheen === 'number') m.sheen = 0;
+  if (!o.glossy && typeof m.iridescence === 'number') m.iridescence = 0;
 }
 
 /**

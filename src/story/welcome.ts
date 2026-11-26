@@ -1,6 +1,7 @@
 // The arrival after the prologue: a modal over the live home (like the result card). The ruined room fades in,
-// Mr. Crab (off screen, in the doorway) points the kid at the rebuild, the kid answers, and HOME forms out of
-// bubbles in front of the camera, then pops.
+// Mr. Crab (off screen, in the doorway) speaks as a floating caption low in the frame, the kid answers over its own
+// head, and HOME floats up in big 2D pixel letters over the room (src/ui/text3d.ts, drawn on this modal's UI), a few
+// air bubbles letting go of it, then lifts away.
 // Then the home is yours (the goal board and the build-with-Mr.-Crab scenes take over: src/hideout).
 //
 //   game.register(new WelcomeHome(game, hideout)); game.go('hideout', {}); game.openModal('welcome');
@@ -66,8 +67,8 @@ export class WelcomeHome implements Screen {
       ]).then(() => {
         if (this.phase === 'out') return;
         this.phase = 'home';
-        // HOME in big bubble letters, floating up between the room and the camera (in front of everything), turned up
-        // to face the camera that looks down on the room
+        // HOME in big floating letters over the middle of the room (2D text projected from a point between the room
+        // and the camera)
         const p = this.sofa().lerp(this.hideout.camera.position, 0.3);
         this.t3d.add('HOME', p.x, p.y, p.z, T3D.title, { size: 0.85, stagger: 0.12, enter: 'drop', face: 1, angle: 0, tilt: 0.85, life: 3.6, bob: 0.08 });
         audio.play('jin_arrive', { vol: 0.5, dry: true });

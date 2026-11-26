@@ -54,7 +54,6 @@ const piranha: FishSpec = {
     { type: 'pelvic', t: 0.42, len: 0.07, angle: 62, col: ['#f26a3a', '#d84a22'], rays: 6, alpha: [0.9, 0.6], flutter: 0.03 },
   ],
   swim: { k: 0.85, a0: 0.035, pow: 2.3, amp: 0.11, freq: 1.4, freqK: 1.1, flutter: [7, 0.02], ripple: 0.012 },
-  clearcoat: 0.55,
 };
 
 // ------------------------------------------------------------------------------------------- cichlids
@@ -297,7 +296,55 @@ const sardine: FishSpec = {
     { type: 'pelvic', t: 0.45, len: 0.05, angle: 50, col: ['#e0e8ee', '#d0dce4'], rays: 5, alpha: [0.6, 0.3], flutter: 0.03 },
   ],
   swim: { k: 0.95, a0: 0.04, pow: 2.2, amp: 0.13, freq: 2.2, freqK: 1.4, flutter: [9, 0.02] },
-  clearcoat: 0.8, clearcoatRough: 0.18,
+};
+
+// ------------------------------------------------------------------------------------------- golden shiner
+// The prologue's minnow (Notemigonus crysoleucas, a golden shiner): a deep, slab-sided little minnow with a small
+// head, a big gold-ringed eye and a tiny upturned mouth; big rounded scales; a lateral line that dips in a deep
+// curve toward the belly. Olive-bronze back with a dark midline, brassy gold flanks, a thin teal-blue stripe
+// along the midline (it flashes when it turns), a creamy gold belly. A high dorsal set behind the pelvics, a long
+// low anal fin, a deeply forked tail; fins amber, tipped flame orange.
+const goldenShiner: FishSpec = {
+  name: 'golden_shiner', L: 0.14, body: 0.8, seg: 24, rings: 38,
+  top: [[0, 0.0], [0.02, 0.022], [0.07, 0.05], [0.16, 0.084], [0.28, 0.106], [0.4, 0.11], [0.52, 0.098], [0.68, 0.072], [0.84, 0.048], [1, 0.04]],
+  bot: [[0, 0.0], [0.02, 0.02], [0.08, 0.05], [0.2, 0.09], [0.36, 0.116], [0.5, 0.112], [0.62, 0.09], [0.78, 0.056], [0.9, 0.042], [1, 0.038]],
+  wid: [[0, 0.0], [0.03, 0.02], [0.12, 0.038], [0.3, 0.048], [0.55, 0.04], [0.8, 0.022], [1, 0.013]],
+  cy: [[0, 0.014], [0.15, 0.004], [1, 0.002]],
+  mouth: { t: 0.045, th: [[0, 0.33], [0.045, 0.4]], open: 0.55, interior: '#6a2420', crease: '#3a2a0e', lip: 0.04, lipCol: '#c89a3a' },
+  eye: { t: 0.118, y: 0.2, r: 0.062, fwd: 0.15, up: 0.05, lid: 'none', bulge: 0.62,
+    paint: { iris: ['#4a3006', '#9a7012', '#e0b42c', '#fff0a0'], pupil: 0.56, ring: '#fff6c8', sclera: '#e8d49a', irisR: 0.88 } },
+  gill: { t: 0.215, col: '#7a5410', curve: 0.04, hi: '#fff2b8', k: 0.5 },
+  lateral: { y: -0.12, col: '#fff2c0', t0: 0.24, t1: 0.96, dash: 3, arch: -0.03 },
+  scales: { w: 7, h: 5, k: 1.15, rim: 0.17, hi: 0.1, tMin: 0.2 },
+  sheen: 0.55, rough: 0.5,
+  paint: (c) => {
+    const y = c.yn;
+    let col: RGB;
+    // olive-bronze back -> brassy gold flank -> creamy gold belly, in clean steps
+    if (y > 0.42) col = grad(['#2e3210', '#46461a', '#5e5a20', '#786c26'])(1 - (y - 0.42) / 0.58, c.px, c.py);
+    else if (y > -0.5) col = grad(['#8a6a18', '#b88a20', '#d6a62c', '#ecc042', '#f6d466'])(0.42 - y, c.px, c.py);
+    else col = grad(['#f2d878', '#f6e6a8', '#fbf0cc'])((-0.5 - y) / 0.5, c.px, c.py);
+    // a dark olive line right down the middle of the back
+    if (y > 0.9 && c.t > 0.08) col = C('#232610');
+    // the midline stripe: thin teal-blue with a pale upper edge, from behind the gill cover into the tail stock
+    const sy = 0.1 - c.t * 0.08, sw = 0.05 + smoothstep(0.25, 0.9, c.t) * 0.035;
+    if (c.t > 0.23 && Math.abs(c.side) > 0.3) {
+      const d = y - sy;
+      if (Math.abs(d) < sw) col = mix(col, C(d > 0 ? '#2e9ad0' : '#1a5e94'), 0.85 * smoothstep(0.23, 0.32, c.t));
+      else if (d >= sw && d < sw + 0.05) col = mix(col, C('#fff4c8'), 0.35 * smoothstep(0.23, 0.32, c.t));
+    }
+    // a warm blush on the cheek and throat
+    if (c.t < 0.2 && y < 0.1 && y > -0.7) col = mix(col, C('#f0a040'), 0.3);
+    return col;
+  },
+  fins: [
+    { type: 'dorsal', t0: 0.44, t1: 0.56, h: [[0, 0.13], [0.35, 0.1], [1, 0.035]], sweep: 0.5, col: ['#b88a2a', '#dcae44'], rayCol: '#8a6012', edge: '#e0702a', edgeW: 0.16, rays: 9, alpha: [0.88, 0.6], px: [36, 32] },
+    { type: 'anal', t0: 0.64, t1: 0.84, h: [[0, 0.095], [0.3, 0.07], [1, 0.03]], sweep: 0.45, col: ['#e0a63a', '#f0bc54'], rayCol: '#a06a14', edge: '#e0602a', edgeW: 0.2, rays: 12, alpha: [0.85, 0.55], ripple: 0.3, px: [44, 28] },
+    { type: 'caudal', shape: 'fork', len: 0.22, span: 0.15, col: ['#a07418', '#cc9a30', '#e6b44a'], rays: 18, rayCol: '#7a5210', edge: '#e0602a', edgeW: 0.1, alpha: [0.92, 0.68], px: [56, 48] },
+    { type: 'pectoral', t: 0.205, y: -0.55, len: 0.11, angle: 25, col: ['#f0c458', '#f8d878'], rays: 10, alpha: [0.6, 0.32], flutter: 0.08 },
+    { type: 'pelvic', t: 0.42, len: 0.08, angle: 45, col: ['#eeb244', '#e89a38'], edge: '#e0602a', edgeW: 0.2, rays: 8, alpha: [0.75, 0.45], flutter: 0.04 },
+  ],
+  swim: { k: 0.9, a0: 0.04, pow: 2.2, amp: 0.12, freq: 2.4, freqK: 1.5, flutter: [10, 0.03] },
 };
 
 // ------------------------------------------------------------------------------------------- barracuda
@@ -338,7 +385,6 @@ const barracuda: FishSpec = {
     { type: 'pelvic', t: 0.42, len: 0.045, angle: 50, col: ['#c8d0d8', '#a8b4c0'], rays: 6, alpha: [0.75, 0.45], flutter: 0.03 },
   ],
   swim: { k: 0.9, a0: 0.02, pow: 2.6, amp: 0.08, freq: 1.0, freqK: 1.2, flutter: [6, 0.015] },
-  clearcoat: 0.7, clearcoatRough: 0.2,
 };
 
 // ------------------------------------------------------------------------------------------- cleaner wrasse
@@ -437,7 +483,6 @@ const pufferfish: FishSpec = {
     }
   },
   swim: { k: 0.6, a0: 0.02, pow: 3, amp: 0.05, freq: 1.0, freqK: 0.4, flutter: [12, 0.025], ripple: 0.02 },
-  clearcoat: 0.6,
 };
 
 // ------------------------------------------------------------------------------------------- moray eel
@@ -499,7 +544,6 @@ const moray: FishSpec = {
     }
   },
   swim: { k: 1.45, a0: 0.12, pow: 1.15, amp: 0.07, freq: 0.9, freqK: 0.9, ripple: 0.006 },
-  clearcoat: 0.45, clearcoatRough: 0.35,
 };
 
 // ------------------------------------------------------------------------------------------- anglerfish
@@ -558,7 +602,6 @@ const anglerfish: FishSpec = {
     for (const k of [-1, 0, 1]) b.cone([esca[0], esca[1] - 0.015 * L, 0], [k * 0.4, -1, k * 0.2], 0.03 * L, 0.003 * L, bulb, 4, { flutter: 1.0, phase: k });
   },
   swim: { k: 0.7, a0: 0.02, pow: 2.5, amp: 0.05, freq: 0.6, freqK: 0.6, flutter: [2.2, 0.03], ripple: 0.012 },
-  clearcoat: 0.25, clearcoatRough: 0.5,
 };
 
 // ------------------------------------------------------------------------------------------- ichthyosaur (boss)
@@ -605,7 +648,6 @@ const ichthyosaur: FishSpec = {
     { type: 'pelvic', t: 0.55, len: 0.06, angle: 50, shape: 'pointed', col: ['#d8a040', '#b07a22'], rays: 0, opaque: true, thick: 0.005, out: 0.4, flutter: 0.03 },
   ],
   swim: { k: 0.7, a0: 0.015, pow: 2.8, amp: 0.075, freq: 0.5, freqK: 1.0, flutter: [1.6, 0.02] },
-  clearcoat: 0.45, clearcoatRough: 0.35,
 };
 
 // ------------------------------------------------------------------------------------------- pumpkinseed
@@ -759,7 +801,6 @@ const pike: FishSpec = {
     { type: 'pelvic', t: 0.52, len: 0.06, angle: 50, col: ['#c0a050', '#b08040'], rays: 8, alpha: [0.8, 0.5], flutter: 0.03 },
   ],
   swim: { k: 0.9, a0: 0.02, pow: 2.6, amp: 0.08, freq: 0.9, freqK: 1.2, flutter: [5, 0.015] },
-  clearcoat: 0.6,
 };
 
 // ------------------------------------------------------------------------------------------- red snapper (rockfish)
@@ -835,7 +876,6 @@ const orca: FishSpec = {
       ext: (u) => 0.7 + 0.3 * Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2)) },
   ],
   swim: { k: 0.55, a0: 0.01, pow: 2.8, amp: 0.06, freq: 0.35, freqK: 0.9, vertical: true, flutter: [1.2, 0.012] },
-  clearcoat: 0.55, clearcoatRough: 0.28,
 };
 
 // ------------------------------------------------------------------------------------------- sperm whale
@@ -876,7 +916,6 @@ const spermWhale: FishSpec = {
     { type: 'pectoral', t: 0.32, y: -0.7, len: 0.05, baseLen: 0.02, span: 0.5, angle: 35, col: ['#2e3034', '#3a3c40'], rays: 0, opaque: true, thick: 0.004, out: 0.3, flutter: 0.03 },
   ],
   swim: { k: 0.5, a0: 0.008, pow: 3, amp: 0.05, freq: 0.22, freqK: 0.9, vertical: true, flutter: [1, 0.008] },
-  clearcoat: 0.4, clearcoatRough: 0.4,
 };
 
 // ------------------------------------------------------------------------------------------- lionfish
@@ -973,7 +1012,7 @@ const stonefish: FishSpec = {
 };
 
 export const SPECS: Record<string, FishSpec> = {
-  piranha, cichlid, cichlid_blue: cichlidBlue, peacock_bass: peacockBass, napoleon, triggerfish, sardine, barracuda, cleaner_wrasse: cleaner,
+  piranha, cichlid, cichlid_blue: cichlidBlue, peacock_bass: peacockBass, napoleon, triggerfish, sardine, golden_shiner: goldenShiner, barracuda, cleaner_wrasse: cleaner,
   pufferfish, moray, anglerfish, ichthyosaur,
   pumpkinseed, unicornfish, grouper, pike, snapper, orca, sperm_whale: spermWhale, lionfish, stonefish,
 };

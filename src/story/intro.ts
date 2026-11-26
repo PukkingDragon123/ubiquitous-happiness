@@ -59,7 +59,7 @@ import { glint } from '../combat/telegraph';
 import { PixelUI } from '../ui/pixel/ui';
 import { Text3DLayer, Float3D, T3D } from '../ui/text3d';
 import { Dialogue, type Line } from './dialogue';
-import { HEAL_ITEM, hpOf, hpText, hpDelta } from '../combat/types';
+import { HEAL_ITEM } from '../combat/types';
 import { sailorCap, shellNecklace, buildBread, GlassBottle, ShellShot, RuinedHome, TrawlNet, BubbleRing, KelpGate, CurrentStream, Minnow, type BottleKind } from './models';
 import { MrCrab, CrabShop } from './crab';
 
@@ -1393,7 +1393,7 @@ export class IntroScreen implements Screen {
     this.script_();
     this.twoShot(() => { const g = this.crab.group.position; return { x: g.x, y: g.y + 0.6 }; }, 3, 7);
     await this.talk([
-      { who: 'crab', text: `Those shells sting, huh? You're down to {red}${hpText(k.hp)}{/red}.` },
+      { who: 'crab', text: `Those shells sting, huh? You look {red}a bit bruised{/red}.` },
       { who: 'crab', text: `Here: a {gold}${HEAL_ITEM.name}{/gold}. Press {gold}${HEAL_ITEM.key}{/gold} (or H) and eat it. Takes a second, so not with a shark in your face.` },
     ]);
     this.free(true, this.tutBounds());
@@ -1401,7 +1401,7 @@ export class IntroScreen implements Screen {
     this.lessonCard('HEAL', `${HEAL_ITEM.key}: EAT A CLAM`);
     this.setGoal({ text: `Eat a ${HEAL_ITEM.name}`, keys: [[HEAL_ITEM.key, ''], ['H', 'eat']] });
     let ate = false, listen = true;
-    const hp0 = k.hp, t0 = this.clock;
+    const t0 = this.clock;
     w.on('flask', () => { if (listen) ate = true; });
     await this.until(() => {
       if (ate) return true;
@@ -1414,7 +1414,7 @@ export class IntroScreen implements Screen {
       this.t3d.add('YUM!', 0, 0, 0.8, T3D.heal, { size: 0.5, life: 1.3, rise: 0.6, follow: () => ({ x: k.x, y: k.y + 1.2 }) });
       w.fx.burst('heart', k.x, k.y + 0.4, 5, 1.2, { vy: 1, life: 1.2 });
       k.setExpr('happy', 1.5);
-      this.bark('crab', `Better? ${hpDelta(Math.max(1, k.hp - hp0))}. Clams are rare out there. Save 'em for when it counts.`, 3);
+      this.bark('crab', 'Better? Clams are rare out there. Save \'em for when it counts.', 3);
     }
     await this.wait(1.2);
   }
@@ -1803,7 +1803,8 @@ export class IntroScreen implements Screen {
 
   private hud(real: number) {
     const ui = this.ui;
-    if (this.step >= 0) { this.hpBar(); this.bagRow(); }
+    // no health readout in the prologue (v7): the HP bar first shows up on a real run
+    if (this.step >= 0) { this.clamRow(); this.bagRow(); }
     if (this.goal && !this.dlg.blocking) this.goalLine();
     // the [E] prompt over the kid
     if (this.prompt && !this.dlg.blocking) {
@@ -1846,21 +1847,13 @@ export class IntroScreen implements Screen {
     }
   }
 
-  /** health while training: the HP number on a little bar (HP like the run HUD), and the Healing Clams once they
-   *  have been introduced */
-  private hpBar() {
+  /** the Healing Clams in the pocket, once they have been introduced (no HP readout in the tutorial) */
+  private clamRow() {
+    if (this.step < L.heal) return;
     const ui = this.ui, k = this.kid;
-    const x = 6, y = 6, w = 56;
-    const f = clamp(k.hp / Math.max(1, k.maxHp), 0, 1);
-    ui.fill(x - 1, y - 1, w + 2, 9, '#06080e', 0.75);
-    ui.fill(x, y, w, 7, '#3a1a24');
-    ui.fill(x, y, Math.round(w * f), 7, f > 0.5 ? '#5ae08a' : f > 0.25 ? '#ffd860' : '#ff5a4a');
-    ui.fill(x, y, Math.round(w * f), 2, '#ffffff', 0.35);
-    ui.text(`${hpOf(k.hp)}/${hpOf(k.maxHp)} HP`, x + w + 4, y - 1, { font: 'small', color: '#f4f0e6', outline: '#06080e' });
-    if (this.step >= L.heal) {
-      const kw = ui.keycap(HEAL_ITEM.key, x, y + 11, true);
-      ui.text(`${HEAL_ITEM.short} x${k.combat.flasks}`, x + kw + 3, y + 13, { font: 'small', color: '#ffe8c8', outline: '#06080e' });
-    }
+    const x = 6, y = 6;
+    const kw = ui.keycap(HEAL_ITEM.key, x, y, true);
+    ui.text(`${HEAL_ITEM.short} x${k.combat.flasks}`, x + kw + 3, y + 2, { font: 'small', color: '#ffe8c8', outline: '#06080e' });
   }
 
   private bagRow() {

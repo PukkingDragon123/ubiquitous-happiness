@@ -39,7 +39,6 @@ export function assetFromSpec(spec: FishSpec): SpeciesAsset {
     uni, flags: { mode: 0, vertical: sw.vertical, morph: b.morph }, uwo: spec.uwo ?? { rim: 0.4, sss: [0.9, 0.88, 0.85], sssK: 0.8 },
     length: spec.L, mouth: v3(b.mouth), eye: v3(b.eye), eyeR: b.eyeR, anchors,
     amp: sw.amp ?? 0.1, freq: sw.freq ?? 1.3, freqK: sw.freqK ?? 1.0, jawIdle: b.jawIdle, normalScale: 0.55,
-    clearcoat: spec.clearcoat ?? 0.5, clearcoatRough: spec.clearcoatRough ?? 0.3,
   });
 }
 

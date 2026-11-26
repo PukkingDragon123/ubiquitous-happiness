@@ -19,13 +19,11 @@ const CROP: Record<string, (L: number) => Crop> = {
 
 export function fishPortrait(species: string, seed = 3): THREE.Object3D {
   const m = buildFish(species, seed);
-  // the UI stages are lit by bright studio lights and never tone-mapped: drop the underwater fresnel rim, the
-  // light-through-flesh wrap and most of the wet clearcoat, or a pale creature washes out to a white blur
+  // the UI stages are lit by bright studio lights and never tone-mapped: drop the underwater edge light and the
+  // light-through-flesh wrap, or a pale creature washes out to a white blur
   for (const mt of [m.material, ...m.extraMats]) {
     const u = (mt.userData as { uw?: { uRim: { value: number }; uSssK: { value: number }; uMatRimG: { value: number } } }).uw;
     if (u) { u.uRim.value = 0; u.uSssK.value = 0; u.uMatRimG.value = 0; }
-    const ph = mt as THREE.MeshPhysicalMaterial;
-    if (ph.isMeshPhysicalMaterial) ph.clearcoat = Math.min(ph.clearcoat, 0.12);
   }
   // crabs strike the threat pose (claws up): a taller, readable silhouette than the flat walking stance
   if (species === 'crab' || species === 'hermit') { m.anim.raise = 1; m.anim.pinch = 0; m.update(1 / 60, 0, 0); }

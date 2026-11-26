@@ -17,8 +17,17 @@ import { PixelUI, drawCard, cardLayout } from '../ui/pixel/ui';
 import { KIT, skin, type SkinKind } from '../ui/pixel/skins';
 import { easeOutBack } from '../core/math';
 
-export interface TagLine { text: string; font?: FontName; color?: string; gap?: number; key?: string }
-export type TagStyle = 'paper' | 'wood' | 'brass' | 'slate';
+export interface TagLine {
+  text: string; font?: FontName; color?: string; gap?: number; key?: string;
+  /** v7 'float' tags: an item icon before the text */
+  icon?: string;
+  /** v7 'float' tags: a kit icon (src/ui/pixel/art.ts: 'mail', 'star' ...) before the text */
+  kicon?: string;
+  /** v7 'float' tags: a row of material chips [id, have, need] (icon + have/need, green when met) instead of text */
+  cost?: [string, number, number][];
+}
+/** v7: 'float' is the home's compact hover card (a slim dark-water plate on a pointer, light text, material chips) */
+export type TagStyle = 'paper' | 'wood' | 'brass' | 'slate' | 'float';
 
 const kindOf = (s: TagStyle): SkinKind => (s === 'paper' || s === 'brass' ? 'paper' : 'dark');
 /** tag lines -> card lines (default fonts and colours per style) */
@@ -33,7 +42,84 @@ function cardLines(lines: TagLine[], style: TagStyle) {
 
 /** draw a tag card with a PixelUI at a UI position (top-left); returns its rect */
 export function drawTag(ui: PixelUI, lines: TagLine[], style: TagStyle, maxW: number, x: number, y: number, alpha = 1) {
+  if (style === 'float') return drawFloat(ui, lines, maxW, x, y, alpha);
   return drawCard(ui, cardLines(lines, style), kindOf(style), maxW, [x, y], { alpha, pin: style === 'paper' });
+}
+
+// ------------------------------------------------------------------ v7 float cards (the home's hover tags)
+// A compact, quiet card: a dark-water plate (ink rim, a lit top lip, a darker foot, two flat tones and nothing else),
+// a brass hairline under the name, light text in two sizes, material chips as icon + have/need, and a little pointer
+// under it at the thing it names. Small enough to sit beside furniture without covering the room.
+const F = { ink: '#071116', rim: '#102a30', body: '#14343a', body2: '#112d33', lip: '#2c5a5c', foot: '#0b1f24', brass: '#c8913a', brassL: '#f2c66d', name: '#f6ecd2', sub: '#a9cfc4', good: '#9be07a', bad: '#ff9a84' };
+export const FLOAT = F;
+const PADX = 6, PADY = 4, CHIP = 11;
+interface FRow { line: TagLine; font: FontName; h: number; w: number; text: string[] }
+function floatRows(ui: PixelUI, lines: TagLine[], maxW: number): { rows: FRow[]; w: number; h: number } {
+  const rows: FRow[] = [];
+  let w = 40;
+  lines.forEach((l, i) => {
+    if (l.cost) {
+      const cw = l.cost.reduce((a, [, hv, nd]) => a + CHIP + 2 + ui.measure(`${Math.min(hv, nd)}/${nd}`, 'small') + 7, -7);
+      rows.push({ line: l, font: 'small', h: CHIP + 1, w: cw, text: [] });
+      w = Math.max(w, cw); return;
+    }
+    const font: FontName = l.font === 'title' || (i === 0 && !l.font) ? 'body' : l.font ?? 'small';
+    const kw = l.key ? ui.keycapW(l.key) + 3 : 0, iw = l.icon ? 13 : l.kicon ? 12 : 0;
+    const text = ui.wrap(l.text, font, maxW - kw - iw);
+    const tw = Math.max(...text.map((t) => ui.measure(t, font))) + kw + iw;
+    rows.push({ line: l, font, h: Math.max(text.length * ui.lh(font), l.key ? 13 : 0) - (font === 'body' ? 1 : 0), w: tw, text });
+    w = Math.max(w, tw);
+  });
+  const h = rows.reduce((a, r, i) => a + r.h + (i ? 2 + (r.line.gap ?? 0) : 0), 0) + (rows.length > 1 ? 3 : 0);
+  return { rows, w: Math.ceil(w) + PADX * 2, h: h + PADY * 2 };
+}
+export function floatLayout(ui: PixelUI, lines: TagLine[], maxW: number) { const L = floatRows(ui, lines, maxW); return { w: L.w, h: L.h + 4 }; }
+/** a float card at (x, y) top-left (its pointer hangs 4 px below at px, default the centre; px -1: no pointer);
+ *  returns its rect */
+export function drawFloat(ui: PixelUI, lines: TagLine[], maxW: number, x: number, y: number, alpha = 1, px?: number) {
+  const { rows, w, h } = floatRows(ui, lines, maxW);
+  x = Math.round(x); y = Math.round(y);
+  const a = alpha;
+  // the plate: a soft cast shadow, the ink rim with clipped corners, two flat body tones, a lit lip, a dark foot
+  ui.fill(x + 2, y + 2, w, h, '#000000', 0.3 * a);
+  ui.fill(x + 1, y, w - 2, h, F.ink, a); ui.fill(x, y + 1, w, h - 2, F.ink, a);
+  ui.fill(x + 1, y + 1, w - 2, h - 2, F.body, a);
+  ui.fill(x + 1, y + Math.round(h * 0.55), w - 2, h - 2 - Math.round(h * 0.55) + 1, F.body2, a);
+  ui.fill(x + 2, y + 1, w - 4, 1, F.lip, a);
+  ui.fill(x + 2, y + h - 2, w - 4, 1, F.foot, a);
+  // brass corner ticks (a hint of the kit's fittings)
+  ui.fill(x + 2, y + 1, 3, 1, F.brassL, a); ui.fill(x + 1, y + 2, 1, 2, F.brass, a);
+  ui.fill(x + w - 5, y + 1, 3, 1, F.brassL, a); ui.fill(x + w - 2, y + 2, 1, 2, F.brass, a);
+  // the pointer under the plate
+  if (px !== -1) {
+    const pxx = Math.round(Math.max(x + 6, Math.min(x + w - 7, px ?? x + w / 2)));
+    for (let i = 0; i < 4; i++) { ui.fill(pxx - 3 + i, y + h - 1 + i, 7 - i * 2, 1, F.ink, a); if (i < 3) ui.fill(pxx - 2 + i, y + h - 1 + i, 5 - i * 2, 1, i === 0 ? F.body2 : F.foot, a); }
+  }
+  let yy = y + PADY;
+  rows.forEach((r, i) => {
+    if (i) yy += 2 + (r.line.gap ?? 0);
+    if (i === 1) { ui.fill(x + PADX, yy - 2, w - PADX * 2, 1, F.brass, 0.55 * a); yy += 2; }
+    const l = r.line;
+    if (l.cost) {
+      let cx = x + PADX;
+      for (const [id, hv, nd] of l.cost) {
+        const ok = hv >= nd;
+        ui.item(id, cx, yy, CHIP, CHIP, 1, a);
+        const t = `${Math.min(hv, nd)}/${nd}`;
+        ui.text(t, cx + CHIP + 2, yy + Math.round((CHIP - ui.cap('small')) / 2), { font: 'small', color: ok ? F.good : F.bad, shadow: F.ink, alpha: a });
+        cx += CHIP + 2 + ui.measure(t, 'small') + 7;
+      }
+      yy += r.h; return;
+    }
+    let tx = x + PADX;
+    if (l.key) { ui.keycap(l.key, tx, yy - 2, true); tx += ui.keycapW(l.key) + 3; }
+    if (l.icon) { ui.item(l.icon, tx, yy - 2, 11, 11, 1, a); tx += 13; }
+    if (l.kicon) { ui.icon(l.kicon, tx, yy + Math.round((ui.cap(r.font) - 6) / 2), a); tx += 12; }
+    const col = l.color ?? (i === 0 ? F.name : F.sub);
+    r.text.forEach((t, k) => ui.text(t, tx, yy + k * ui.lh(r.font), { font: r.font, color: col, shadow: F.ink, alpha: a }));
+    yy += r.h;
+  });
+  return { x, y, w, h: px === -1 ? h : h + 4 };
 }
 
 /**
@@ -107,7 +193,7 @@ export class Tag {
   get visible() { return this.shown; }
   private measure(ui: PixelUI | null) {
     if (!ui) return;
-    const L = cardLayout(ui, cardLines(this.lines, this.style), kindOf(this.style), Math.min(this.maxW + 20, ui.w - 16));
+    const L = this.style === 'float' ? floatLayout(ui, this.lines, Math.min(this.maxW, ui.w - 16)) : cardLayout(ui, cardLines(this.lines, this.style), kindOf(this.style), Math.min(this.maxW + 20, ui.w - 16));
     this.wUI = L.w; this.hUI = L.h;
   }
   /**
@@ -140,7 +226,8 @@ export class Tag {
       ui.tagRects.push([x, y, w, h]);
       const p = this.pop;
       const drop = Math.round((1 - easeOutBack(p, 2)) * -5);
-      drawTag(ui, this.lines, this.style, Math.min(this.maxW + 20, ui.w - 16), x, y + drop, Math.min(1, p * 2));
+      if (this.style === 'float') drawFloat(ui, this.lines, Math.min(this.maxW, ui.w - 16), x, y + Math.round((1 - easeOutBack(p, 1.6)) * 3), Math.min(1, p * 2.5), Math.round(ax));
+      else drawTag(ui, this.lines, this.style, Math.min(this.maxW + 20, ui.w - 16), x, y + drop, Math.min(1, p * 2));
     };
     const ui = PixelUI.current;
     if (ui) ui.later(draw); else PixelUI.overlay.push(draw);

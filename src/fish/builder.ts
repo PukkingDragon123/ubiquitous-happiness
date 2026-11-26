@@ -96,7 +96,6 @@ export interface FishSpec {
   morph?: { centre: V3; R: number; k?: number };
   uwo?: UwOpts; emissive?: number; normal?: number; outline?: boolean;
   noseRound?: number; tailCap?: number;
-  clearcoat?: number; clearcoatRough?: number;
 }
 
 /** what the builder produces, cached per species */

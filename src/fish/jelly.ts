@@ -114,7 +114,7 @@ export function jellyfish(): SpeciesAsset {
   return kitAsset('jellyfish', geo, pg, {
     length: R * 2, mouth: [0, -0.02, 0], eye: [0, H * 0.5, R * 0.6], mode: 1,
     shape: [0, 1, 0, 0], shape2: [1, 2, 0.008, 0], amp: 0, freq: 0.85, freqK: 0.2,
-    emissive: 1.2, uwo: { rim: 0.6, rimCol: [1, 0.7, 0.9], sss: [1, 0.6, 0.85], sssK: 0.9, caustics: 0.6 }, clearcoat: 0.6, clearcoatRough: 0.2,
+    emissive: 1.2, uwo: { rim: 0.6, rimCol: [1, 0.7, 0.9], sss: [1, 0.6, 0.85], sssK: 0.9, caustics: 0.6 },
     side: THREE.DoubleSide, palette: 16,
   });
 }

@@ -278,7 +278,7 @@ export function crabBase(name: string, pal: CrabPal, hermit = false): SpeciesAss
   };
   return kitAsset(name, body, pg, {
     length: W * 2.6, mouth: [0, 0, D * 1.1], eye: [W * eyeBase, Ht * 1.1, D * 1.02], eyeR: 0.011,
-    amp: 0, freq: 1, parts, animate, clearcoat: 0.3, clearcoatRough: 0.4, palette: 18,
+    amp: 0, freq: 1, parts, animate, palette: 18,
     anchors: { clawL: [-W * 1.4, Ht, D * 1.4], clawR: [W * 1.4, Ht, D * 1.4] },
     uwo: { rim: 0.25, sss: [0.9, 0.8, 0.75], sssK: 0.45 },
   });

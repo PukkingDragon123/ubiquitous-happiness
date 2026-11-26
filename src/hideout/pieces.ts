@@ -491,21 +491,21 @@ export function lectern(): THREE.Group {
 }
 
 // ------------------------------------------------------------------ ghosts (unbuilt spots)
-// v5: three looks so the room isn't a wall of blue wireframes. 'next' (the goal board's piece) glows and breathes,
-// every other unbuilt spot is a 'faint' whisper of a blueprint, and 'hot' (hovered / flashed) warms to gold.
+// v7: the room reads clean. No glowing blue wireframes: an unbuilt spot is just its rubble and a faint chalk
+// outline on the floor ('faint'); the goal board's piece ('next') shows as a pale chalk sketch (a soft, matte, see-
+// through copy of the model and a thin chalk box) that breathes gently; 'hot' (hovered / flashed) warms it to brass.
+// Normal blending and tone mapping, so nothing blooms.
 export type GhostState = 'faint' | 'next' | 'hot';
-const GHOST = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.1, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
-const GHOST_FAINT = new THREE.MeshBasicMaterial({ color: '#7ad8ff', transparent: true, opacity: 0.025, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
-const GHOST_HOT = new THREE.MeshBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 0.22, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
-const EDGE = new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.8, toneMapped: false });
-const EDGE_FAINT = new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: 0.1, toneMapped: false });
-const EDGE_HOT = new THREE.LineBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 1, toneMapped: false });
-const FLOOR = { faint: 0.14, next: 0.9, hot: 1 };
-/** breathe the next piece's blueprint (call once a frame) */
+const GHOST = new THREE.MeshBasicMaterial({ color: '#d8e8dc', transparent: true, opacity: 0.08, depthWrite: false });
+const GHOST_HOT = new THREE.MeshBasicMaterial({ color: '#f2d79a', transparent: true, opacity: 0.09, depthWrite: false });
+const EDGE = new THREE.LineBasicMaterial({ color: '#e8e0c8', transparent: true, opacity: 0.32 });
+const EDGE_HOT = new THREE.LineBasicMaterial({ color: '#f2c66d', transparent: true, opacity: 0.85 });
+const FLOOR = { faint: 0.12, next: 0.4, hot: 0.75 };
+/** breathe the next piece's chalk sketch (call once a frame) */
 export function pulseGhosts(t: number) {
-  const k = 0.5 + 0.5 * Math.sin(t * 2.6);
-  GHOST.opacity = 0.07 + 0.07 * k;
-  EDGE.opacity = 0.55 + 0.4 * k;
+  const k = 0.5 + 0.5 * Math.sin(t * 2.2);
+  GHOST.opacity = 0.05 + 0.04 * k;
+  EDGE.opacity = 0.22 + 0.16 * k;
 }
 /** a translucent blueprint copy of a model (shares geometry); setGhostState(g, ...) / setGhostHot(g, true) */
 export function ghostOf(obj: THREE.Object3D): THREE.Group {
@@ -515,7 +515,8 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
   obj.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    const c = new THREE.Mesh(m.geometry, GHOST_FAINT);
+    const c = new THREE.Mesh(m.geometry, GHOST);
+    c.visible = false;
     c.matrixAutoUpdate = false;
     c.matrix.copy(inv).multiply(m.matrixWorld);
     c.renderOrder = 5;
@@ -526,7 +527,8 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
   g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox!.clone().applyMatrix4(m.matrix); if (b.max.y - b.min.y > 0.06) box.union(b); } });
   if (!box.isEmpty()) {
     const sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz.x, sz.y, sz.z)), EDGE_FAINT);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz.x, sz.y, sz.z)), EDGE);
+    e.visible = false;
     // (lines never take clicks: a raycaster's default line threshold is a whole metre, which steals clicks from
     // whatever stands in front of the blueprint)
     e.position.copy(c); e.userData.edge = true; e.raycast = () => {};
@@ -538,9 +540,10 @@ export function ghostOf(obj: THREE.Object3D): THREE.Group {
 function applyGhost(g: THREE.Object3D, st: GhostState) {
   g.traverse((o) => {
     const m = o as THREE.Mesh;
-    if ((o as THREE.LineSegments).isLineSegments && o.userData.edge) (o as THREE.LineSegments).material = st === 'hot' ? EDGE_HOT : st === 'next' ? EDGE : EDGE_FAINT;
+    if ((o as THREE.LineSegments).isLineSegments && o.userData.edge) { (o as THREE.LineSegments).material = st === 'hot' ? EDGE_HOT : EDGE; o.visible = st !== 'faint'; }
     else if ((o as THREE.LineSegments).isLineSegments && o.userData.floor) ((o as THREE.LineSegments).material as THREE.LineBasicMaterial).opacity = FLOOR[st];
-    else if (m.isMesh && !m.userData.hit) m.material = st === 'hot' ? GHOST_HOT : st === 'next' ? GHOST : GHOST_FAINT;
+    // (the resting sketch is lines only: a see-through fill over many parts reads as a white box)
+    else if (m.isMesh && !m.userData.hit) { m.material = st === 'hot' ? GHOST_HOT : GHOST; m.visible = st === 'hot'; }
   });
 }
 /** a spot ghost's resting look ('next' for the goal, else 'faint'); a hot ghost keeps glowing until un-hot */
@@ -564,7 +567,7 @@ export function floorOutline(w: number, d: number): THREE.LineSegments {
   };
   edge(-w / 2, -d / 2, w / 2, -d / 2); edge(w / 2, -d / 2, w / 2, d / 2); edge(w / 2, d / 2, -w / 2, d / 2); edge(-w / 2, d / 2, -w / 2, -d / 2);
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#9ae4ff', transparent: true, opacity: FLOOR.faint, toneMapped: false }));
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#e8e0c8', transparent: true, opacity: FLOOR.faint, depthWrite: false }));
   l.raycast = () => {}; l.userData.floor = true;
   return l;
 }

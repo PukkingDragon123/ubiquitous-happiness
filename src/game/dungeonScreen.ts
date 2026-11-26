@@ -56,7 +56,7 @@ import { audio } from '../audio/audio';
 import { Blobfish } from '../player/blobfish';
 import { SkillBar } from '../skills/hud';
 import { ITEMS, installItemSystem, skillLevels, abilityLevels, findSpot, fits, getItem, expandIds } from './items';
-import { META, saveMeta, addMaterials, spendMaterials, stashItem, takeFromStash, returnToStash, type RunConfig, type RunResult, type RunTally } from '../meta/meta';
+import { META, saveMeta, spendMaterials, takeFromStash, postMail, type RunConfig, type RunResult, type RunTally } from '../meta/meta';
 import { AREAS as AREA_LIST, masteryScalars, MAX_MASTERY } from '../hideout/mastery';
 import { stationsBuilt } from '../hideout/blueprints';
 import { homeStations } from '../hideout/rebuild';
@@ -282,6 +282,7 @@ export class DungeonScreen implements Screen {
   enter(data?: unknown) {
     const d = (data ?? {}) as DungeonEnter;
     this.ended = false; this.paused = false; this.seq = []; this.deadT = -1; this.killer = null; this.mail = null; this.phase = 'play'; this.summary = null;
+    this.arrive = null;
     this.game.timeScale = 1;
     POST.uDesat.value = 0; POST.uPulse.value = 0; POST.uFade.value = 0;
     const q = new URLSearchParams(location.search);
@@ -335,7 +336,12 @@ export class DungeonScreen implements Screen {
   }
 
   private fresh(cfg: RunConfig) {
+    // (v7) arriving from the home's swim-out cinematic (src/hideout/exitCine.ts): fade up from its pale water and ease
+    // the camera out; 'title' = its title card already named the place, so the first stage skips its own area card
+    const cine = (cfg as RunConfig & { cine?: string }).cine;
+    this.arrive = cine ? { t: 0, title: cine === 'title' } : null;
     this.cfg = { ...cfg, loadout: [...cfg.loadout] };
+    delete (this.cfg as RunConfig & { cine?: string }).cine;
     const dev = this.dev;
     this.seed = dev ? Number(dev.get('seed') || 12345) : (Math.random() * 1e9) | 0;
     this.run.seed = this.seed; this.run.rng = new Rng(this.seed);
@@ -535,6 +541,8 @@ export class DungeonScreen implements Screen {
     }
     this.floorMax = depthOf(plan, y);
     this.camLook.copy(this.camTarget(1));
+    // (v7) the first moment after the swim-out cinematic: start close on the blobfish diving in, then ease out
+    if (this.arrive && i === 0 && !save) { this.camDist = 10.5; this.camLook.set(x + 1.2, y - 0.4, 0); POST.uFadeCol.value.set('#cdf3ff'); POST.uFade.value = 1; POST.uLetterbox.value = 1; }
     this.updateDepth(0, true);
     this.game.post.cut?.();
     if (!save) {
@@ -545,7 +553,7 @@ export class DungeonScreen implements Screen {
     // the area card (the HUD's big title, stamped in letter by letter): the place, then the stage of the voyage, how far
     // from home and the zone (the gauge keeps the live depth)
     const dTop = Math.round(depthOf(plan, plan.base));
-    this.after(0.6, () => {
+    if (!(i === 0 && !save && this.arrive?.title)) this.after(0.6, () => {
       const deeper = i >= this.planned;
       const farM = Math.round(plan.far0 / 10) * 10;
       const stage = deeper ? 'THE DEEP' : `STAGE ${i + 1} OF ${this.planned}`;
@@ -1167,8 +1175,8 @@ export class DungeonScreen implements Screen {
     const sent = this.run.items.filter((i) => m.picked.has(i.uid));
     this.run.items = this.run.items.filter((i) => !m.picked.has(i.uid));
     const { materials, gear } = packTotals(sent);
-    addMaterials(materials);
-    for (const g of gear) stashItem(g.id, g.level);
+    // v7: Marge delivers to the home's MAILBOX (received or disposed for pearls there), not straight to the stash
+    postMail(materials, gear, 'mail');
     META.extractions++; saveMeta();
     this.mailUsed += m.used;
     const goals = m.goals;
@@ -1503,8 +1511,8 @@ export class DungeonScreen implements Screen {
     r.home = homeGoals(carried);
     if (!this.dev) {
       const { materials, gear } = packTotals(items);
-      returnToStash(gear);
-      addMaterials(materials);
+      // v7: what you carry home waits in the mailbox too
+      postMail(materials, gear, 'home');
       META.wins++;
       const before = META.masteryUnlocked;
       META.masteryUnlocked = Math.max(META.masteryUnlocked, Math.min(MAX_MASTERY, this.cfg.mastery + 1));
@@ -1712,6 +1720,7 @@ export class DungeonScreen implements Screen {
     this.hintT -= dt;
     if (!prompt && this.hintT > 0) prompt = { key: this.hintKey, label: this.hintText };
     // ---- camera, water, fx
+    this.updateArrival(dt);
     this.updateCamera(dt);
     w.water.update(this.game.renderer, dt, this.camLook.x);
     w.fx.update(dt);
@@ -1843,6 +1852,17 @@ export class DungeonScreen implements Screen {
     if (this.desc && this.desc.stage !== 'surface') return new THREE.Vector3(clamp(tx, x0 + halfW, x1 - halfW), p.y - 1.5, 0);
     ty = lo < hi ? clamp(ty, lo, hi) : (lo + hi) / 2;
     return new THREE.Vector3(tx, ty, 0);
+  }
+
+  /** (v7) the swim-out cinematic's handover: the pale water clears and the letterbox slides away (input is live) */
+  private arrive: { t: number; title: boolean } | null = null;
+  private updateArrival(dt: number) {
+    const a = this.arrive;
+    if (!a) return;
+    a.t += dt;
+    POST.uFade.value = Math.max(0, 1 - a.t / 0.6);
+    POST.uLetterbox.value = Math.max(0, 1 - a.t / 1.2);
+    if (a.t > 1.3) { this.arrive = null; POST.uFade.value = 0; POST.uLetterbox.value = 0; POST.uFadeCol.value.set('#000000'); }
   }
 
   private updateCamera(dt: number) {

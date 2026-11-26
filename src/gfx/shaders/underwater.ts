@@ -3,14 +3,19 @@
 //   const mat = uw(new THREE.MeshStandardMaterial({ map, roughness: 0.6 }));   // patch in place, returns it
 //   uw(mat, { caustics: 0.5, sss: [1, 0.4, 0.5] })                                // per-material tweaks
 //
-// What the patch adds (on top of three's PBR lighting):
-//   - animated sun caustics projected down the sun direction onto upward-facing surfaces, with a slight RGB
-//     split, fading with depth and shadowed by the material's own shadow map term;
+// What the patch adds (on top of three's PBR lighting), all of it MATTE (v7: no white sheen anywhere):
+//   - animated sun caustics projected down the sun direction onto upward-facing surfaces, one soft warm tone (no RGB
+//     split: split caustics read as rainbow glints on small fish), capped so they dapple instead of glare, fading
+//     with depth and shadowed by the material's own shadow map term;
 //   - depth light falloff: lit (not emissive) light is attenuated per channel with depth below the surface,
 //     reds first, so deeper things go cool and dim like real water while glowing things stay bright;
-//   - optional soft "subsurface" wrap light + a wet rim sheen (for fleshy creatures like the blobfish);
+//   - optional soft "subsurface" wrap light + a soft edge light (`rim`) for fleshy creatures like the blobfish;
 //   - above the surface (y > 0) nothing changes;
-//   - a crisp global rim light on silhouette facets near the gameplay plane (UW.uRimG / uRimGCol, per material rimG);
+//   - a soft global edge light on the side-facing silhouette facets of things near the gameplay plane (UW.uRimG /
+//     uRimGCol, per material rimG) so characters pop off the water; floors, rock tops and backs don't get it;
+//   - both edge lights are the surface's OWN colour lifted (albedo x light, depth-attenuated), never added white,
+//     and PBR specular is turned well down (matte PS2: soft lambert, at most a low rough sheen; wet eyes opt out
+//     with { glossy: true });
 //   - the PS1 retro patch (vertex snapping, optional affine texture swim: src/gfx/retro.ts) and hard-faceted flat
 //     shading by default (opt out with { smooth: true }).
 // Distance fog / absorption along the view ray is applied later in post (src/gfx/post.ts) from the depth buffer.
@@ -28,7 +33,7 @@ export const UW = {
   /** floor on depth light so the abyss never goes pure black */
   uDepthMin: { value: new THREE.Vector3(0.08, 0.13, 0.2) },
   uCausticScale: { value: 0.55 },
-  /** global crisp rim light (fresnel on the facets) for everything near the gameplay plane: strength + colour */
+  /** global soft edge light (fresnel on the side-facing facets, albedo-tinted) near the gameplay plane: strength + colour */
   uRimG: { value: 0.35 },
   uRimGCol: { value: new THREE.Color('#e8fcff') },
 };
@@ -49,7 +54,7 @@ const CAUSTIC_GLSL = /* glsl */ `
 uniform float uTime; uniform float uWaterY; uniform vec3 uSunDir; uniform vec3 uCausticCol; uniform float uCaustic;
 uniform vec3 uDepthExt; uniform vec3 uDepthMin; uniform float uCausticScale;
 uniform float uMatCaustic; uniform float uMatDepth; uniform vec3 uSss; uniform float uSssK; uniform float uRim; uniform vec3 uRimCol;
-uniform float uRimG; uniform vec3 uRimGCol; uniform float uMatRimG;
+uniform float uRimG; uniform vec3 uRimGCol; uniform float uMatRimG; uniform float uMatSpec;
 varying vec3 vUwWorld; varying vec3 vUwNormal;
 float uwCausticF(vec2 p, float t) {
   vec2 i = p; float c = 1.0; float inten = 0.005;
@@ -59,19 +64,19 @@ float uwCausticF(vec2 p, float t) {
     c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
   }
   c /= 4.0; c = 1.17 - pow(c, 1.4);
-  return clamp(pow(abs(c), 8.0), 0.0, 3.0);
+  // soft-capped: the bright web dapples the surface instead of burning it to white
+  float k = pow(abs(c), 8.0);
+  return k / (1.0 + k * 0.8);
 }
 vec3 uwCaustics(vec3 wp, vec3 n) {
   float depth = uWaterY - wp.y;
   if (depth <= 0.0) return vec3(0.0);
   vec2 q = (wp.xz - uSunDir.xz / max(uSunDir.y, 0.2) * depth) * uCausticScale;
-  float t = uTime * 0.55;
-  float r = uwCausticF(q + vec2(0.012, 0.0) * depth, t);
-  float g = uwCausticF(q, t);
-  float b = uwCausticF(q - vec2(0.012, 0.0) * depth, t);
-  float facing = smoothstep(-0.15, 0.7, dot(n, uSunDir));
+  // one pattern, one warm tone (no per-channel split: that read as rainbow streaks on small fish)
+  float g = uwCausticF(q, uTime * 0.55);
+  float facing = smoothstep(0.1, 0.8, dot(n, uSunDir));
   float fade = exp(-depth * 0.045) * smoothstep(0.0, 0.4, depth);
-  return vec3(r, g, b) * uCausticCol * facing * fade;
+  return vec3(g) * uCausticCol * facing * fade;
 }
 vec3 uwDepthLight(float y) {
   float depth = max(0.0, uWaterY - y);
@@ -89,6 +94,7 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
     uRim: { value: o.rim ?? 0 },
     uRimCol: { value: new THREE.Vector3(...(o.rimCol ?? [0.7, 0.95, 1.0])) },
     uMatRimG: { value: o.rimG ?? 1 },
+    uMatSpec: { value: (o.glossy ?? (o.retro ? o.retro.glossy : undefined)) ? 1 : 0.35 },
   };
   (m.userData as Record<string, unknown>).uw = local;
   const prev = m.onBeforeCompile;
@@ -114,7 +120,9 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
         vec3 uwN = normalize(vUwNormal) * (gl_FrontFacing ? 1.0 : -1.0);
         vec3 dl = mix(vec3(1.0), uwDepthLight(vUwWorld.y), uMatDepth);
         reflectedLight.directDiffuse *= dl; reflectedLight.indirectDiffuse *= dl;
-        reflectedLight.directSpecular *= dl; reflectedLight.indirectSpecular *= dl;
+        // matte PS2: the PBR highlight is only a faint lift on the lit side (no white glint on a facet that happens to
+        // line up with the sun); glossy (wet eyes) materials keep theirs
+        reflectedLight.directSpecular *= dl * uMatSpec; reflectedLight.indirectSpecular *= dl * uMatSpec;
         #ifdef USE_SHADOWMAP
           float uwSh = 1.0;
           #if NUM_DIR_LIGHT_SHADOWS > 0
@@ -123,18 +131,22 @@ export function uw<T extends THREE.Material>(mat: T, o: UwOpts = {}): T {
         #else
           float uwSh = 1.0;
         #endif
-        vec3 cst = uwCaustics(vUwWorld, uwN) * uCaustic * uMatCaustic * (0.25 + 0.75 * uwSh);
-        reflectedLight.directDiffuse += diffuseColor.rgb * cst * 0.5;
+        vec3 cst = uwCaustics(vUwWorld, uwN) * uCaustic * uMatCaustic * (0.2 + 0.8 * uwSh);
+        reflectedLight.directDiffuse += diffuseColor.rgb * cst * 0.32;
         // soft wrap light: light bleeding through thin flesh toward the dark side
         float wrap = clamp(dot(uwN, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
         reflectedLight.indirectDiffuse += diffuseColor.rgb * uSss * uSssK * (1.0 - wrap) * dl;
+        // soft edge light (fleshy creatures): the surface's own colour lifted toward the silhouette, never white
         vec3 vdir = normalize(cameraPosition - vUwWorld);
         float fr = pow(1.0 - clamp(dot(uwN, vdir), 0.0, 1.0), 3.0);
-        reflectedLight.indirectSpecular += uRimCol * fr * uRim * dl;
-        // global rim: a crisp band on the silhouette facets of things near the play plane (they pop off the water)
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * uRimCol * fr * uRim * dl;
+        // global edge light on the side-facing silhouette facets of things near the play plane (they pop off the
+        // water): tinted by the albedo and the depth light; up / down-facing facets (the seabed seen edge-on, rock
+        // tops, backs and bellies) get none, so the floor never washes out
         float rimZ = 1.0 - smoothstep(2.5, 9.0, abs(vUwWorld.z));
-        float rimF = smoothstep(0.52, 0.68, 1.0 - clamp(dot(normal, geometryViewDir), 0.0, 1.0));
-        reflectedLight.indirectSpecular += uRimGCol * rimF * uRimG * uMatRimG * rimZ;
+        float rimF = smoothstep(0.55, 0.75, 1.0 - clamp(dot(normal, geometryViewDir), 0.0, 1.0));
+        float rimSide = 1.0 - smoothstep(0.45, 0.85, abs(uwN.y));
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * uRimGCol * (rimF * rimSide * uRimG * uMatRimG * rimZ * 1.4) * dl;
       }`);
   };
   const key = `uw${o.caustics ?? 1}|${o.depth ?? 1}|${o.sss ? 1 : 0}|${o.rim ? 1 : 0}`;

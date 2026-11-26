@@ -25,9 +25,10 @@ export class FishSchool {
     this.fx = new THREE.InstancedBufferAttribute(new Float32Array(count * 4), 4).setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('aInstSwim', this.sw);
     geo.setAttribute('aInstFx', this.fx);
-    const mat = new THREE.MeshPhysicalMaterial({
+    // matte, like FishModel's (no clearcoat: it glinted white across a whole school)
+    const mat = new THREE.MeshStandardMaterial({
       map: a.map, normalMap: a.normalMap, roughnessMap: a.roughnessMap, roughness: 1, metalness: 0, vertexColors: true,
-      alphaToCoverage: true, alphaTest: 0.5, clearcoat: a.clearcoat ?? 0.5, clearcoatRoughness: a.clearcoatRough ?? 0.3,
+      alphaToCoverage: true, alphaTest: 0.5,
     });
     mat.normalScale.set(a.normalScale, a.normalScale);
     swimMaterial(mat, a.uni, null, { ...a.flags, inst: true }, a.uwo);

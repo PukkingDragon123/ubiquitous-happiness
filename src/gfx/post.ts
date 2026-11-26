@@ -14,7 +14,8 @@
 //     crisp and saturated; beyond it, exponential fog (POST.uFogK) toward a clear per-area WATER COLOUR that runs
 //     from uScatterTop at the surface to uScatterDeep at POST.uFogDeep metres down: background layers read as
 //     clean steps of water colour, not haze;
-//   - volumetric god rays, ray-marched behind the play plane only (no haze over the action);
+//   - volumetric god rays, ray-marched behind the play plane only (no haze over the action), tinted toward the water
+//     colour and kept gentle so the background reads as water, never a white glare;
 //   - a small refraction wobble (whole pixels) for things seen through water / through the surface;
 //   - dry scenes (Screen.underwater === false) get plain distance fog (POST.uDryFog).
 //
@@ -213,7 +214,9 @@ void main() {
           if (dep2 < 0.0) continue;
           acc += shaft(p) * exp(-dep2 * 0.05);
         }
-        col += uRayCol * acc / 6.0 * min(L, 40.0) * 0.03 * uRays * mix(vec3(1.0), uScatterTop * 1.5, 0.3);
+        // the shafts are lighter WATER (tinted toward the surface colour), not a white wash over the background
+        vec3 rc = mix(uRayCol, uScatterTop * 1.35, 0.55);
+        col += rc * acc / 6.0 * min(L, 32.0) * 0.013 * uRays;
       }
     }
   }

@@ -133,7 +133,7 @@ function seaCucumber(): SpeciesAsset {
   return kitAsset('sea_cucumber', geo, pg, {
     length: L, mouth: [L / 2, R0 * 0.8, 0], eye: [L / 2 - 0.03, R0 * 1.4, 0], mode: 3,
     shape: [L / 2, L, 1.3, 0], shape2: [2, 3, 0.05, 0], jaw: [0, 0, 0, R0 * 0.8], amp: 0.06, freq: 0.35, freqK: 0.2,
-    clearcoat: 0.7, clearcoatRough: 0.25, uwo: { rim: 0.35, sss: [1, 0.7, 0.5], sssK: 0.6 },
+    uwo: { rim: 0.35, sss: [1, 0.7, 0.5], sssK: 0.6 },
   });
 }
 
@@ -192,7 +192,7 @@ function starfish(): SpeciesAsset {
   const { geo } = K.geometry();
   return kitAsset('starfish', geo, pg, {
     length: AR * 2, mouth: [0, 0, 0], eye: [0, 0, 0.05], amp: 0, freq: 0.3,
-    shape: [AR, AR * 2, 0, 0], shape2: [2, 0.6, 0.05, 0], clearcoat: 0.6, clearcoatRough: 0.35,
+    shape: [AR, AR * 2, 0, 0], shape2: [2, 0.6, 0.05, 0],
   });
 }
 

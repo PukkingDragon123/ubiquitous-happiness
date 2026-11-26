@@ -421,7 +421,7 @@ export function seaTurtle(): SpeciesAsset {
   const L = 1.25;
   return kitAsset('sea_turtle', body, pg, {
     length: L, mouth: [NX + HL + 0.005, headProf(1).cy - 0.01, 0], eye: [EX, EY, headProf(EF).hw * 0.86], eyeR: ER,
-    amp: 0, freq: 0.5, parts, animate, clearcoat: 0.18, clearcoatRough: 0.55, palette: 24,
+    amp: 0, freq: 0.5, parts, animate, palette: 24,
     anchors: { back: [0, RIMY + DOME + 0.04, 0] },
     uwo: { rim: 0.12, sss: [0.85, 0.82, 0.7], sssK: 0.3 },
   });

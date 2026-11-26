@@ -34,8 +34,9 @@ export class AchievementsPanel {
     const [il, it] = PANEL_IN.trophy;
     const done = META.achievements.unlocked.length;
     // the tally along the top rail
-    ui.text(`${done}/${ACHIEVEMENTS.length} EARNED`, x + il + 2, y + 8, { font: 'small', color: '#3a2008', shadow: '#f8dc90' });
-    ui.bar(x + il + 6 + ui.measure(`${done}/${ACHIEVEMENTS.length} EARNED`, 'small'), y + 9, 90, 5, done / ACHIEVEMENTS.length, '#f0c040');
+    // (v7: clear of the kelp that hangs over the frame's top-left corner)
+    ui.text(`${done}/${ACHIEVEMENTS.length} EARNED`, x + il + 18, y + 8, { font: 'small', color: '#3a2008', shadow: '#f8dc90' });
+    ui.bar(x + il + 22 + ui.measure(`${done}/${ACHIEVEMENTS.length} EARNED`, 'small'), y + 9, 90, 5, Math.min(1, done / ACHIEVEMENTS.length), '#f0c040');
     if (inp?.keyHit('ArrowRight')) this.sel = (this.sel + 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowLeft')) this.sel = (this.sel + ACHIEVEMENTS.length - 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowDown')) this.sel = Math.min(ACHIEVEMENTS.length - 1, this.sel + COLS);
@@ -87,7 +88,7 @@ export class AchievementsPanel {
     let hx = gx;
     hx += ui.icon('left', hx, by + 7) + 2; hx += ui.icon('right', hx, by + 7) + 5;
     ui.text('browse', hx, by + 6, { font: 'small', color: '#c8d8ff', shadow: '#000' });
-    panelLife(ui, this.fx, { x, y, w: ACH_W, h: ACH_H }, { x: gx, y: gy, w: COLS * CW, h: ROWS * CH }, 11, dt);
+    panelLife(ui, this.fx, { x, y, w: ACH_W, h: ACH_H }, { x: gx, y: gy, w: COLS * CW, h: ROWS * CH }, 9, dt);
     if (ui.button('ach:back', 'BACK', x + ACH_W - PANEL_IN.trophy[2] - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }

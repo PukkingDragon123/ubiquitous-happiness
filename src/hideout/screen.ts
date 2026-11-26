@@ -6,18 +6,22 @@
 // need, and what it unlocks). E / Space uses what you stand at. Things:
 //   build spots (blueprint ghosts)  click: the build scene (if you have the materials; else the tag shows what is missing)
 //   stash chest / workbench / wardrobe / trophy shelf   their panels (Esc, the close button or a click outside closes)
+//   the MAILBOX by the door (v7)    what runs send home waits here (its flag is up, a badge counts the parcels): the
+//                                   mail panel receives each parcel into the stash or disposes of it for pearls
 //   bed: nap · sofa: sit · lamps: on / off · goal board: points at the next build · Mr. Crab: a word of advice
 //   the front door (or the doorway): walk out onto the porch -> the PACKING SCENE (packing.ts) -> SWIM OUT
-// The goal board and the objective line (top left) always show the next build and its materials.
+// The goal board and the goal plate (top left) always show the next build and its materials (and the mail waiting).
+// v7: hover tags are compact float cards (tag.ts), Mr. Crab's words float with no box (T7's Dialogue barks), the
+// unbuilt spots are rubble and chalk (only the goal's blueprint shows, as a faint chalk sketch).
 // Esc: closes whatever is open; in the house it opens a small pause card (back / settings / signpost).
 //
 //   const h = new HideoutScreen(game, { onEnterRun, onResume, onMenu?, hero? }); game.register(h);
-//   game.go('hideout', { arrive?: true, view?: 'packing' | 'stash' | 'workshop' | 'wardrobe' | 'trophy' })
+//   game.go('hideout', { arrive?: true, view?: 'packing' | 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'mail' })
 //   test hooks: hideout.thingPoint(id), hideout.packPoint(id), hideout.uiButton(id), hideout.walkTo(id)
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { POST } from '../gfx/post';
-import { META, type RunConfig } from '../meta/meta';
+import { META, mailCount, mailMaterial, type RunConfig } from '../meta/meta';
 import { PixelUI } from '../ui/pixel/ui';
 import { audio } from '../audio/audio';
 import { damp, clamp01 } from '../core/math';
@@ -30,7 +34,11 @@ import { SettingsPanel, SETTINGS_W, SETTINGS_H } from '../title/pages';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 import { HubPlayer } from './player';
 import { Tag, type TagLine } from './tag';
-import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT } from './house';
+import { House, PORCH, BOARD_AT, CRAB_HOME, CODEX_AT, MAILBOX_AT, MAILBOX_STAND } from './house';
+import { MailPanel, mailRect } from './mailPanel';
+import { pearls } from './mail';
+import { FLOAT, drawFloat } from './tag';
+import { Dialogue } from '../story/dialogue';
 import { CodexBook, codexCount } from '../ui/codex';
 import { brassPlate } from './itemCard';
 import { bubbles } from './seaFx';
@@ -50,7 +58,7 @@ export interface HideoutOpts {
   /** the pause card's SIGNPOST: back to the title */ onMenu?: () => void;
 }
 type Mode = 'free' | 'panel' | 'build' | 'packing' | 'swim' | 'sit' | 'sleep';
-type Panel = 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'pause' | 'settings' | 'codex';
+type Panel = 'stash' | 'workshop' | 'wardrobe' | 'trophy' | 'pause' | 'settings' | 'codex' | 'mail';
 
 /** a clickable thing in the house */
 interface Thing { id: string; obj: () => THREE.Object3D | null; stand: () => THREE.Vector3; face: () => THREE.Vector3; tag: () => TagLine[]; use: () => void; reach?: number }
@@ -88,10 +96,11 @@ export class HideoutScreen implements Screen {
   private things: Thing[] = [];
   private hoverThing: Thing | null = null;
   private outline: { id: string; g: THREE.Group } | null = null;
-  private tag = new Tag('paper', 170);
-  private crabSay = new Tag('paper', 150);
+  private tag = new Tag('float', 150);
+  /** v7: Mr. Crab's words float over him with no box (T7's Dialogue barks) */
+  private dlg: Dialogue;
   private crabT = 0;
-  private crabLine: TagLine[] = [];
+  private mail = new MailPanel();
   private t = 0;
   private modeT = 0;
   private ray = (() => { const r = new THREE.Raycaster(); r.params.Line = { threshold: 0.02 }; r.params.Points = { threshold: 0.02 }; return r; })();
@@ -126,7 +135,10 @@ export class HideoutScreen implements Screen {
     this.crab.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     this.scene.add(this.crab.group);
     this.house.solids.push({ x: CRAB_HOME.x, z: CRAB_HOME.z, r: 0.45 });
-    this.scene.add(this.tag.mesh, this.crabSay.mesh);
+    this.scene.add(this.tag.mesh);
+    this.dlg = new Dialogue(this.ui, () => this.camera);
+    this.dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e8705a', voice: 'crab_click', pitch: 0.9, vol: 0.28, anchor: () => this.crab.group.position.clone().add(new THREE.Vector3(0, 1.05, 0)), onTalk: () => { this.crab.talk = 1; } });
+    this.mail.onMail = (kind) => { this.house.mailbox.ring(kind === 'dispose' ? 0.5 : 0.3); };
     this.packing = new Packing(this.house);
     this.packing.onClose = () => this.leavePacking();
     this.packing.onDive = (cfg) => this.startSwim(cfg);
@@ -152,34 +164,47 @@ export class HideoutScreen implements Screen {
         obj: () => (isBuilt(p.id) ? s.built : s.ghost),
         stand: () => s.stand, face: () => s.face,
         // the front door's spot is also the way out: until you can afford the door, clicking it walks you out
-        tag: () => (isBuilt(p.id) ? this.builtTag(p.id) : p.id === 'door' && !canAfford('door') ? [{ text: 'OUT', font: 'title' }, { text: 'pack and swim out', color: '#3a2810' }, ...this.costTag('door').slice(1, -1)] : this.costTag(p.id)),
+        tag: () => (isBuilt(p.id) ? this.builtTag(p.id) : p.id === 'door' && !canAfford('door') ? [{ text: 'Out to sea' }, { text: 'pack your bag and swim out', key: 'LMB' }] : this.costTag(p.id)),
         use: () => (isBuilt(p.id) ? this.useBuilt(p.id) : p.id === 'door' && !canAfford('door') ? this.goOut() : this.tryBuild(p.id)),
       });
       void built;
     }
     // the open doorway works before the door is rebuilt
-    T.push({ id: 'doorway', reach: 1.3, obj: () => null, stand: () => new THREE.Vector3(0, 0, IN.z1 - 0.7), face: () => new THREE.Vector3(0, 1, IN.z1 + 1), tag: () => [{ text: 'OUT', font: 'title' }, { text: 'pack and swim out', color: '#3a2810' }], use: () => this.goOut() });
+    T.push({ id: 'doorway', reach: 1.3, obj: () => null, stand: () => new THREE.Vector3(0, 0, IN.z1 - 0.7), face: () => new THREE.Vector3(0, 1, IN.z1 + 1), tag: () => [{ text: 'Out to sea' }, { text: 'pack your bag and swim out', key: 'LMB' }], use: () => this.goOut() });
     T.push({ id: 'board', reach: 1.4, obj: () => this.house.board.group, stand: () => BOARD_AT.clone().add(new THREE.Vector3(1.25, 0, 0.3)), face: () => BOARD_AT.clone().setY(1), tag: () => this.goalTag(), use: () => this.showGoal() });
-    T.push({ id: 'codex', reach: 1.2, obj: () => this.house.codex, stand: () => CODEX_AT.clone().add(new THREE.Vector3(-0.2, 0, -0.85)), face: () => CODEX_AT.clone().setY(1), tag: () => { const c = codexCount(); return [{ text: 'CODEX', font: 'title' }, { text: `field journal · ${c.known}/${c.total} met`, color: '#3a2810' }]; }, use: () => this.openPanel('codex') });
-    T.push({ id: 'crab', reach: 1.5, obj: () => this.crab.group, stand: () => this.crab.group.position.clone().add(new THREE.Vector3(0.9, 0, -0.55)), face: () => this.crab.group.position.clone().setY(0.5), tag: () => [{ text: 'MR. CRAB', font: 'title' }, { text: 'your landlord and builder', color: '#3a2810' }], use: () => this.crabTalk() });
+    T.push({ id: 'codex', reach: 1.2, obj: () => this.house.codex, stand: () => CODEX_AT.clone().add(new THREE.Vector3(-0.2, 0, -0.85)), face: () => CODEX_AT.clone().setY(1), tag: () => { const c = codexCount(); return [{ text: 'Codex' }, { text: `field journal · ${c.known}/${c.total} met` }]; }, use: () => this.openPanel('codex') });
+    T.push({ id: 'crab', reach: 1.5, obj: () => this.crab.group, stand: () => this.crab.group.position.clone().add(new THREE.Vector3(0.9, 0, -0.55)), face: () => this.crab.group.position.clone().setY(0.5), tag: () => [{ text: 'Mr. Crab' }, { text: 'your landlord and builder' }], use: () => this.crabTalk() });
+    // v7: Marge's mailbox by the door
+    T.push({ id: 'mailbox', reach: 1.1, obj: () => this.house.mailbox.group, stand: () => MAILBOX_STAND.clone(), face: () => MAILBOX_AT.clone().setY(1.2), tag: () => this.mailTag(), use: () => { this.house.mailbox.ring(0.6); this.openPanel('mail'); } });
     this.things = T;
   }
+  /** a build spot's float card: the name, its materials as chips (have / need), what it gives, the action */
   private costTag(id: string): TagLine[] {
-    const p = PIECE[id], lines: TagLine[] = [{ text: p.name, font: 'title' }];
-    for (const [m, have, need] of costLines(id)) lines.push({ text: `${MAT_NAME(m)}  ${Math.min(have, need)}/${need}`, color: have >= need ? '#1a5a1a' : '#8a1a14' });
-    lines.push({ text: p.unlock, color: '#1a4a7a', gap: 2 });
-    lines.push({ text: canAfford(id) ? 'click: build it with Mr. Crab' : 'bring the rest home from a run', color: canAfford(id) ? '#2a1808' : '#7a5a3a', gap: 2 });
-    return lines;
+    const p = PIECE[id], ok = canAfford(id);
+    const mailed = costLines(id).some(([m, h, n]) => h < n && h + mailMaterial(m) >= n);
+    return [
+      { text: p.name },
+      { text: '', cost: costLines(id) },
+      { text: p.unlock, color: FLOAT.sub },
+      ok ? { text: 'build it with Mr. Crab', key: 'LMB', color: FLOAT.good } : mailed ? { text: 'some of it waits in the mailbox', color: FLOAT.brassL } : { text: 'bring the rest home from a dive', color: FLOAT.bad },
+    ];
   }
   private builtTag(id: string): TagLine[] {
     const p = PIECE[id];
-    const use: Record<string, string> = { stash: 'open the stash', workbench: 'craft and upgrade', bed: 'take a nap', lampA: 'switch on / off', lampB: 'switch on / off', trophy: 'achievements', wardrobe: 'try on cosmetics', sofa: 'sit down', window: 'look out', door: 'go out: pack and dive' };
-    return [{ text: p.name, font: 'title' }, { text: use[id] ?? '', color: '#3a2810' }];
+    const use: Record<string, string> = { stash: 'open the sea chest', workbench: 'craft and upgrade', bed: 'take a nap', lampA: 'switch on / off', lampB: 'switch on / off', trophy: 'achievements', wardrobe: 'try on cosmetics', sofa: 'sit down', window: 'look out', door: 'pack your bag and dive' };
+    return [{ text: p.name }, { text: use[id] ?? '', key: 'LMB' }];
   }
   private goalTag(): TagLine[] {
     const g = nextGoal();
-    if (!g) return [{ text: 'HOME SWEET HOME', font: 'title' }, { text: 'Every piece is back. Go diving!', color: '#3a2810' }];
-    return [{ text: 'NEXT: ' + g.name, font: 'title' }, ...costLines(g.id).map(([m, h, n]) => ({ text: `${MAT_NAME(m)} ${Math.min(h, n)}/${n}`, color: h >= n ? '#1a5a1a' : '#8a1a14' })), { text: g.unlock, color: '#1a4a7a', gap: 2 }];
+    if (!g) return [{ text: 'Home sweet home' }, { text: 'every piece is back: go diving!' }];
+    return [{ text: 'Next up: ' + g.name }, { text: '', cost: costLines(g.id) }, { text: g.unlock, color: FLOAT.sub }];
+  }
+  /** the mailbox's float card: what waits in it (or that it is empty) */
+  private mailTag(): TagLine[] {
+    const n = mailCount();
+    if (!n) return [{ text: 'Mailbox' }, { text: 'empty: mail loot home with Marge on a dive' }];
+    const first = META.mail.slice(0, 3).map((m) => (ITEMS[m.id] ? getItem(m.id).name : m.id) + (m.n > 1 ? ` x${m.n}` : '')).join(', ');
+    return [{ text: `Mailbox · ${n} parcel${n > 1 ? 's' : ''}`, color: FLOAT.brassL }, { text: first + (n > 3 ? '...' : '') }, { text: 'receive or dispose for pearls', key: 'LMB', color: FLOAT.good }];
   }
 
   // ---------------------------------------------------------------- using things
@@ -196,7 +221,7 @@ export class HideoutScreen implements Screen {
         audio.play('click1', { vol: 0.4 });
         break;
       }
-      case 'window': this.hero.expression?.('happy'); audio.play('whale1', { vol: 0.25 }); this.say(this.crabSay, ['Nice view, eh?']); break;
+      case 'window': this.hero.expression?.('happy'); audio.play('whale1', { vol: 0.25 }); this.say(['Nice view, eh?']); break;
       case 'door': this.goOut(); break;
     }
   }
@@ -217,7 +242,7 @@ export class HideoutScreen implements Screen {
       const miss = costLines(id).filter(([, h, n]) => h < n).map(([m, h, n]) => `${n - h} ${MAT_NAME(m).toLowerCase()}`);
       this.flashSpot = { id, t: 1.2 };
       audio.play('k_err1', { vol: 0.35, dry: true });
-      this.say(this.crabSay, [`Need ${miss.join(', ')} more.`, 'Go and find some!']);
+      this.say([`Need ${miss.join(', ')} more.`, 'Go and find some!']);
       return;
     }
     if (!buildPiece(id)) return;
@@ -228,7 +253,7 @@ export class HideoutScreen implements Screen {
   }
   private showGoal() {
     const g = nextGoal();
-    if (!g) { this.say(this.crabSay, ['All done, kid. Proud of you.']); return; }
+    if (!g) { this.say(['All done, kid. Proud of you.']); return; }
     this.flashSpot = { id: g.id, t: 2.5 };
     const s = this.house.spots.get(g.id)!;
     this.rig.shot = { target: new THREE.Vector3(s.piece.x, 0.6, s.piece.z).lerp(this.hero.root.position, 0.3), yaw: 0, pitch: 0.95, dist: 11, fov: 30 };
@@ -236,26 +261,40 @@ export class HideoutScreen implements Screen {
     this.goalShotT = 1.7;
     this.sayGoal();
   }
+  /** the mail panel closed: Mr. Crab reacts when what came in lets you build the next piece */
+  private afterMail() {
+    const g = nextGoal();
+    if (g && canAfford(g.id)) { this.flashSpot = { id: g.id, t: 2.5 }; this.say([`That's the ${g.name.toLowerCase()} sorted!`, 'Click its blueprint, kid.']); audio.play('jin_good', { vol: 0.35, dry: true, delay: 0.3 }); }
+  }
   /** Mr. Crab stops talking (a modal with its own dialogue is opening over the home) */
   hush() { this.crabT = 0; this.crab.talk = 0; }
   /** back from a run (its summary card already shown): Mr. Crab reacts to what the haul lets you build next */
   private homecoming() {
     const g = nextGoal();
-    if (!g) { this.say(this.crabSay, ['Welcome home, kid!']); return; }
+    // v7: the haul waits in the mailbox: point the kid at it (and say what it will build, when it will)
+    const n = mailCount();
+    if (n) {
+      this.house.mailbox.ring(1.4);
+      audio.play('bell', { vol: 0.3, dry: true, delay: 1.0 });
+      const builds = g && !canAfford(g.id) && costLines(g.id).every(([m, h, nd]) => h + mailMaterial(m) >= nd);
+      this.say(builds ? ['You got mail, kid!', `Enough in there for the ${g!.name.toLowerCase()}.`] : ['Welcome back, kid!', `Marge left ${n} parcel${n > 1 ? 's' : ''} in the mailbox.`]);
+      return;
+    }
+    if (!g) { this.say(['Welcome home, kid!']); return; }
     if (canAfford(g.id)) {
       this.flashSpot = { id: g.id, t: 4 };
       audio.play('jin_good', { vol: 0.4, dry: true, delay: 1.2 });
-      this.say(this.crabSay, [`${g.name} ready to build!`, 'Click its blueprint.']);
+      this.say([`${g.name} ready to build!`, 'Click its blueprint.']);
     } else {
       const left = costLines(g.id).filter(([, h, n]) => h < n).map(([m, h, n]) => `${n - h} ${MAT_NAME(m).toLowerCase()}`);
-      this.say(this.crabSay, ['Welcome back, kid.', `${g.name}: ${left.slice(0, 2).join(', ')} to go.`]);
+      this.say(['Welcome back, kid.', `${g.name}: ${left.slice(0, 2).join(', ')} to go.`]);
     }
   }
   private sayGoal() {
     const g = nextGoal();
-    if (!g) { this.say(this.crabSay, ['Home sweet home!']); return; }
-    if (canAfford(g.id)) this.say(this.crabSay, [`We can build the ${g.name.toLowerCase()}!`, 'Click its blueprint.']);
-    else this.say(this.crabSay, [`Next: the ${g.name.toLowerCase()}.`, 'Bring materials home from a run.']);
+    if (!g) { this.say(['Home sweet home!']); return; }
+    if (canAfford(g.id)) this.say([`We can build the ${g.name.toLowerCase()}!`, 'Click its blueprint.']);
+    else this.say([`Next: the ${g.name.toLowerCase()}.`, 'Bring materials home from a run.']);
   }
   private crabTalk() {
     this.crab.talk = 1;
@@ -266,14 +305,17 @@ export class HideoutScreen implements Screen {
       g ? [`The ${g.name.toLowerCase()} is next.`, 'Check the board by the door.'] : ['Nothing left to fix!', 'Go show those humans.'],
       ['Out the front door, kid.', 'Pack your bag on the porch.'],
       ['Mail loot home with the manatee,', 'or bring it back yourself.'],
+      ['Marge drops your mail by the door.', 'Junk? She pays pearls for it.'],
     ];
-    this.say(this.crabSay, lines[Math.floor(this.t * 7) % lines.length]);
+    this.say(lines[Math.floor(this.t * 7) % lines.length]);
   }
-  private say(t: Tag, lines: string[]) { this.crabLine = lines.map((x, i) => ({ text: x, color: i ? '#3a2810' : '#2a1808' })); this.crabT = 3.2; this.crab.talk = 1; void t; }
+  /** Mr. Crab says something (his words float over him, no box: the Dialogue bark) */
+  private say(lines: string[]) { this.dlg.bark('crab', lines.join(' '), 2.6 + lines.join(' ').length * 0.02); this.crabT = 3.2; this.crab.talk = 1; }
 
   // ---------------------------------------------------------------- panels (Esc, the close button, a click outside)
   private openPanel(p: Panel) {
     this.panel = p; this.mode = 'panel'; this.modeT = 0;
+    this.dlg.finish(); this.crabT = 0;
     this.player.stop();
     this.tag.hide(); this.dropOutline();
     if (p === 'stash') { const s = this.house.spots.get('stash'); if (s?.built) audio.play('chest_creak', { vol: 0.45 }); }
@@ -282,9 +324,11 @@ export class HideoutScreen implements Screen {
     if (p === 'settings') this.settings.open();
     if (p === 'codex') { this.codexBook.open(); audio.play('page1', { vol: 0.45, dry: true }); }
     if (p === 'pause') audio.play('k_open1', { vol: 0.35, dry: true });
+    if (p === 'mail') { this.mail.open(); audio.play('creak1', { vol: 0.35 }); audio.play('page1', { vol: 0.3, dry: true, delay: 0.15 }); }
   }
   private closePanel() {
     if (this.panel === 'wardrobe') { this.wardPreview(null); this.wardHover = null; }
+    if (this.panel === 'mail') { this.mail.flush(); this.afterMail(); }
     const back = this.panel === 'settings' ? 'pause' : null;
     this.panel = null; this.mode = 'free'; this.modeT = 0;
     audio.play('k_back2', { vol: 0.3, dry: true });
@@ -300,6 +344,7 @@ export class HideoutScreen implements Screen {
       case 'settings': return { x: Math.round((ui.w - SETTINGS_W) / 2), y: Math.round((ui.h - SETTINGS_H) / 2), w: SETTINGS_W, h: SETTINGS_H };
       case 'pause': return { x: Math.round((ui.w - 176) / 2), y: Math.round((ui.h - 126) / 2) + 6, w: 176, h: 126 };
       case 'codex': return { x: 0, y: 0, w: ui.w, h: ui.h };
+      case 'mail': return mailRect(ui);
     }
   }
   private drawPanel(dt: number, live: boolean) {
@@ -316,6 +361,7 @@ export class HideoutScreen implements Screen {
         break;
       }
       case 'trophy': close = this.ach.draw(ui, r.x, r.y, dt); break;
+      case 'mail': close = this.mail.draw(ui, dt); break;
       case 'settings': close = this.settings.draw(ui, r.x, r.y, dt); break;
       case 'pause': close = this.pauseCard(r); break;
       // the codex closes itself (Esc, its button, a click outside the book)
@@ -353,22 +399,30 @@ export class HideoutScreen implements Screen {
   // ---------------------------------------------------------------- outside: packing, swimming out
   private goOut() {
     if (this.mode !== 'free') return;
-    const p = this.player, out = PORCH.stand.clone();
-    const path = this.house.path(this.hero.root.position.clone(), out);
-    if (path.length) p.goTo(path, () => this.enterPacking());
-    else this.enterPacking();
+    // (v7) walk up to the inside of the shut front door; the door beat (packing.ts) swings it open onto the sea and
+    // steps out into the kit nook. Already outside: straight into the nook.
+    if (this.hero.root.position.z > IN.z1) { this.enterPacking(false); return; }
+    const p = this.player, at = new THREE.Vector3(0, 0, IN.z1 - 1.25);
+    const path = this.house.path(this.hero.root.position.clone(), at);
+    if (path.length) p.goTo(path, () => this.enterPacking(true));
+    else this.enterPacking(true);
   }
-  private enterPacking() {
+  private enterPacking(beat = false) {
     if (this.mode === 'packing') return;
     this.mode = 'packing'; this.modeT = 0;
     this.player.stop();
     this.tag.hide(); this.dropOutline();
-    this.hero.root.position.copy(PORCH.stand);
-    this.hero.root.rotation.y = Math.PI / 2;
-    this.packing.open();
-    this.rig.shot = this.packing.shot(); this.rig.k = 1.8;
-    audio.play('box_open', { vol: 0.4 }); audio.play('chest_creak', { vol: 0.35, delay: 0.3 });
-    const s = this.house.spots.get('door'); if (s?.door) s.door.rotation.y = 0;
+    this.hoverThing = null;
+    this.packing.open({ beat, env: this.packEnv() });
+  }
+  /** what the kit nook and the swim-out cinematic borrow from the screen */
+  private packEnv() {
+    return {
+      hero: this.hero, rig: this.rig, bubbles: this.ocean.bubbles, scene: this.scene, player: this.player,
+      cut: () => this.game.post.cut?.(),
+      walk: (to: THREE.Vector3, then?: () => void) => this.player.goTo([this.hero.root.position.clone(), to.clone()], then),
+      stopWalk: () => this.player.stop(),
+    };
   }
   private leavePacking() {
     this.packing.close();
@@ -379,33 +433,20 @@ export class HideoutScreen implements Screen {
     const path = this.house.path(this.hero.root.position.clone(), inside);
     if (path.length) this.player.goTo(path); else this.hero.root.position.copy(inside);
   }
+  /** SWIM OUT: the packing scene already started the swim-out cinematic (exitCine.ts) */
   private startSwim(cfg: TableConfig) {
     this.swimCfg = cfg;
     this.mode = 'swim'; this.modeT = 0; this.swimT = 0;
-    this.packing.close();
-    this.hero.play?.('gear');
+    this.player.stop();
     audio.music(null, 1.5);
-    audio.play('jin_arrive', { vol: 0.4, dry: true, delay: 0.3 });
   }
-  /** the hero swims up and away from home toward the reef; the camera follows, then fades into the run */
+  /** the cinematic plays out (or is skipped), then the run starts */
   private swimUpdate(dt: number) {
     this.swimT += dt;
-    const r = this.hero.root, t = this.swimT;
-    if (t > 0.9) {
-      const k = t - 0.9;
-      r.position.x += dt * (1.5 + k * 2.5);
-      r.position.y += dt * (0.6 + k * 0.6);
-      r.position.z += dt * 1.2;
-      r.rotation.y = damp(r.rotation.y, 0, 4, dt);
-      if (Math.random() < dt * 14) this.ocean.bubbles.emit(r.position.x - 0.3, r.position.y + 0.3, r.position.z, { vy: 0.5, life: 2, size: 0.05 + Math.random() * 0.05 });
-    }
-    this.rig.shot = { target: r.position.clone().add(new THREE.Vector3(-0.5, 0.4, 0)), yaw: -0.25 + t * 0.04, pitch: 0.35, dist: 6.5 + t * 0.8, fov: 34 };
-    this.rig.k = 2;
-    if (t > 3.6 || (t > 0.5 && (this.game.input.keyHit('Escape') || this.game.input.keyHit('Space')))) {
-      const cfg = this.swimCfg!;
-      this.swimCfg = null; this.mode = 'free';
-      this.opts.onEnterRun(cfg);
-    }
+    if (!this.packing.cineUpdate(dt, this.ui, this.game.input, !this.game.modal) || !this.swimCfg) return;
+    const cfg = this.swimCfg;
+    this.swimCfg = null; this.mode = 'free';
+    this.opts.onEnterRun(cfg);
   }
 
   // ---------------------------------------------------------------- Screen
@@ -436,7 +477,7 @@ export class HideoutScreen implements Screen {
     this.hintT = 0;
     const view = d.view ?? new URLSearchParams(location.search).get('view') ?? '';
     if (view === 'packing') this.enterPacking();
-    else if (view === 'stash' || view === 'workshop' || view === 'wardrobe' || view === 'trophy') this.openPanel(view);
+    else if (view === 'stash' || view === 'workshop' || view === 'wardrobe' || view === 'trophy' || view === 'mail') this.openPanel(view);
     if (d.back) this.homecoming(); else this.sayGoal();
   }
   exit() {
@@ -499,14 +540,14 @@ export class HideoutScreen implements Screen {
     this.game.cursor = 'none';
     this.fadeIn = Math.max(0, this.fadeIn - dt * 1.5);
     const sleepFade = this.mode === 'sleep' ? (this.sleepT < 1 ? this.sleepT : this.sleepT < 3 ? 1 : Math.max(0, 1 - (this.sleepT - 3) * 1.2)) : 0;
-    const swimFade = this.mode === 'swim' ? clamp01((this.swimT - 2.6) / 1) : 0;
+    const swimFade = this.mode === 'swim' ? this.packing.cine.fade : 0;
     POST.uFade.value = Math.max(this.fadeIn, sleepFade, swimFade);
-    POST.uLetterbox.value = damp(POST.uLetterbox.value, this.mode === 'build' || this.mode === 'swim' ? 0.6 : 0, 4, dt);
+    POST.uLetterbox.value = damp(POST.uLetterbox.value, this.mode === 'build' ? 0.6 : this.mode === 'swim' || this.mode === 'packing' ? this.packing.bars : 0, 4, dt);
     this.ray.setFromCamera(new THREE.Vector2(input.mouse.nx, input.mouse.ny), this.camera);
     ui.begin(live ? input : null, dt);
 
     switch (this.mode) {
-      case 'free': this.freeMode(dt, live); this.goalMarker(); break;
+      case 'free': this.freeMode(dt, live); this.goalMarker(); this.mailMarker(); break;
       case 'sit':
         if (live && (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'KeyE'].some((k) => input.keyHit(k)) || (ui.pressed && this.modeT > 0.3))) this.standUp();
         break;
@@ -545,7 +586,7 @@ export class HideoutScreen implements Screen {
     // arriving: walking in through the door (no packing scene on the way in); done once inside
     this.inT += dt;
     if (this.arriveT >= 0) { this.arriveT += dt; if (this.hero.root.position.z < IN.z1 - 0.4 || this.arriveT > 4) { this.arriveT = -1; if (this.hero.root.position.z > IN.z1 - 0.4) this.hero.root.position.set(0.2, 0, IN.z1 - 1.6); } }
-    this.hero.lookAt?.(this.hoverThing ? this.hoverThing.face() : null);
+    this.hero.lookAt?.(this.mode === 'packing' || this.mode === 'swim' ? this.packing.look : this.hoverThing ? this.hoverThing.face() : null);
     this.hero.update(dt, { t: this.t, move: this.mode === 'sit' || this.mode === 'sleep' ? 0 : this.player.move });
     this.crabLife(dt);
     // ---- the house, the goal board, the lamps
@@ -564,23 +605,22 @@ export class HideoutScreen implements Screen {
     }
     // the door swings open while the hero passes through the doorway
     const ds = this.house.spots.get('door');
-    if (ds?.door) { const p = this.hero.root.position; const near = Math.abs(p.x) < 1.3 && p.z > IN.z1 - 1.1 && p.z < IN.z1 + 1.4; ds.door.rotation.y = damp(ds.door.rotation.y, near || this.mode === 'packing' ? 1.6 : 0, 5, dt); }
+    if (ds?.door) { const p = this.hero.root.position; const near = Math.abs(p.x) < 1.3 && p.z > IN.z1 - 1.1 && p.z < IN.z1 + 1.4; ds.door.rotation.y = damp(ds.door.rotation.y, (this.mode === 'packing' || this.mode === 'swim' ? this.packing.door : near ? 1 : 0) * 1.6, 5, dt); }
     this.ocean.update(dt, this.camera);
     this.dust.update(dt, this.t, 'burst'); this.sparks.update(dt, this.t, 'burst');
     if (Math.random() < dt * 5) this.dust.emit((Math.random() - 0.5) * 11, 0.4 + Math.random() * 2.8, (Math.random() - 0.5) * 8, { vy: -0.03, vx: (Math.random() - 0.5) * 0.08, life: 5, size: 0.03 });
-    // Mr. Crab's words float over him
-    if (this.crabT > 0 && (this.mode === 'free' || this.mode === 'build' || this.mode === 'sit')) {
-      this.crabT -= dt;
-      this.crabSay.show(this.crabLine);
-      this.crabSay.place(this.camera, this.crab.group.position.clone().add(new THREE.Vector3(0, 1.0, 0)), this.game.post.h, [0, -6], dt);
-    } else this.crabSay.hide();
-    // ---- the objective line (top left): the next build and its materials, always
+    // the mailbox: the flag up and the door ajar while mail waits, dropped open while its panel is up
+    this.house.mailbox.update(dt, this.t, mailCount(), this.panel === 'mail');
+    // ---- the goal plate (top left): the next build and its materials, the mail waiting
     if (this.mode === 'free' || this.mode === 'sit' || this.mode === 'build') {
-      this.objective();
+      this.objective(live && this.mode === 'free');
       // the floating tags (hover, Mr. Crab's words) are drawn at ui.end() and keep clear of these
-      const r = ui.rects.get('objective');
-      if (r) ui.tagRects.push([r[0] - 3, r[1] - 3, r[2] + 6, r[3] + 6]);
+      for (const id of ['objective', 'mailNote']) { const r = ui.rects.get(id); if (r) ui.tagRects.push([r[0] - 3, r[1] - 3, r[2] + 6, r[3] + 6]); }
     }
+    // Mr. Crab's words float over him (no box: the Dialogue's barks), while the room is on show
+    if (this.crabT > 0) this.crabT -= dt;
+    this.dlg.update(dt, null);
+    if (this.mode === 'free' || this.mode === 'build' || this.mode === 'sit') this.dlg.draw();
     if (this.markRect) ui.tagRects.push(this.markRect);
     this.markRect = null;
     if (this.fadeIn > 0.5) ui.cursor = 'arrow';
@@ -625,7 +665,7 @@ export class HideoutScreen implements Screen {
       const b = o ? new THREE.Box3().setFromObject(o) : null;
       const at = b ? new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y, b.min.y + 1.6) + 0.25, (b.min.z + b.max.z) / 2) : show.face().clone().setY(1.4);
       // hovered: the full tag; only in reach: just its key and name
-      const lines = show === hov ? show.tag() : [{ text: show.tag()[0]?.text ?? '', key: 'E', color: '#2a1808' }];
+      const lines = show === hov ? show.tag() : [{ text: show.tag()[0]?.text ?? '', key: 'E' }];
       this.tag.show(lines);
       this.tag.place(this.camera, at, this.game.post.h, [0, -8], dt);
       ui.cursor = hov ? 'point' : ui.cursor;
@@ -725,9 +765,9 @@ export class HideoutScreen implements Screen {
   }
 
   /**
-   * a little brass-trimmed marker floating over the NEXT piece's glowing blueprint: its name, a bobbing arrow, and
-   * either READY TO BUILD (green, pulsing) or how many materials are still missing. Hidden while that piece is hovered
-   * (its full tag shows instead). Drawn on the UI canvas but never takes the mouse: clicks go through to the room.
+   * v7: a quiet marker over the NEXT piece's chalk blueprint: a bobbing brass chevron (and READY in green when its
+   * materials are in). The name and the costs live on the goal plate and the hover card, so the room stays clear.
+   * Drawn on the UI canvas but never takes the mouse: clicks go through to the room.
    */
   private goalTop = new Map<string, THREE.Vector3>();
   /** the goal marker's rect this frame (tags keep clear of it) */
@@ -737,26 +777,50 @@ export class HideoutScreen implements Screen {
     if (!g || this.hoverThing?.id === g.id || this.fadeIn > 0.3) return;
     const s = this.house.spots.get(g.id); if (!s || !s.ghost.visible) return;
     let top = this.goalTop.get(g.id);
-    if (!top) { const b = new THREE.Box3().setFromObject(s.ghost); top = new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y + 0.15, (b.min.z + b.max.z) / 2); this.goalTop.set(g.id, top); }
+    if (!top) { const b = new THREE.Box3().setFromObject(s.ghost); top = new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y + 0.1, (b.min.z + b.max.z) / 2); this.goalTop.set(g.id, top); }
     const v = top.clone().project(this.camera);
     if (v.z > 1) return;
     const ax = Math.round((v.x * 0.5 + 0.5) * ui.w), ay = Math.round((-v.y * 0.5 + 0.5) * ui.h);
     const ready = canAfford(g.id);
-    const parts = costLines(g.id), have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
-    const name = g.name.toUpperCase(), sub = ready ? 'READY TO BUILD' : `${have}/${need} materials`;
-    const w = Math.max(ui.measure(name, 'body'), ui.measure(sub, 'small')) + 16, h = ui.lh('body') + ui.lh('small') + 7;
     const bob = Math.round(Math.sin(this.t * 3) * 2);
-    const x = Math.max(4, Math.min(ui.w - w - 4, ax - Math.round(w / 2))), y = Math.max(4, ay - h - 12 + bob);
-    // the arrow (brass, pointing down at the blueprint)
-    const tx = Math.max(x + 6, Math.min(x + w - 6, ax)), ty = y + h;
-    for (let i = 0; i < 6; i++) { ui.fill(tx - 5 + i, ty + i, 11 - i * 2, 1, i === 0 ? '#2a1606' : '#c8913a'); ui.fill(tx - 6 + i, ty + i, 1, 1, '#2a1606'); ui.fill(tx + 5 - i, ty + i, 1, 1, '#2a1606'); }
-    ui.fill(tx, ty + 6, 1, 1, '#2a1606');
-    ui.frame('dark', x, y, w, h);
-    this.markRect = [x - 2, y - 2, w + 4, h + 10];
-    if (ready) { const a = 0.5 + 0.5 * Math.sin(this.t * 5); ui.rect(x - 1, y - 1, w + 2, h + 2, '#8ee06a'); ui.fill(x, y, w, h, '#5fae3f', 0.12 * a); }
-    ui.text(name, x + w / 2, y + 4, { font: 'body', color: '#f2c66d', shadow: '#0b1622', align: 'center' });
-    ui.text(sub, x + w / 2, y + 5 + ui.lh('body'), { font: 'small', color: ready ? '#8ee06a' : '#9fb8b4', shadow: '#0b1622', align: 'center' });
-    bubbles(ui, x + 4, y - 1, w - 8, this.t, 12, 3, 16);
+    const y = Math.max(14, ay - 12 + bob);
+    this.chevron(ax, y, ready ? FLOAT.good : FLOAT.brassL);
+    if (ready) ui.text('READY', ax, y - 12, { font: 'small', color: FLOAT.good, outline: FLOAT.ink, align: 'center', alpha: 0.75 + 0.25 * Math.sin(this.t * 5) });
+    this.markRect = [ax - 14, y - 14, 28, 22];
+  }
+  /** a chunky down-pointing chevron (ink rim, a lit left face, a shaded right face) centred on x, tip at y + 7 */
+  private chevron(x: number, y: number, col: string) {
+    const ui = this.ui;
+    for (let i = 0; i < 7; i++) {
+      const w = 13 - i * 2;
+      ui.fill(x - 7 + i, y + i - 1, w + 2, 1, FLOAT.ink);
+      if (w > 0) { ui.fill(x - 6 + i, y + i, Math.ceil(w / 2), 1, col); ui.fill(x - 6 + i + Math.ceil(w / 2), y + i, Math.floor(w / 2), 1, '#000000', 0.25); ui.fill(x - 6 + i + Math.ceil(w / 2), y + i, Math.floor(w / 2), 1, col, 0.7); }
+    }
+    ui.fill(x - 1, y + 6, 3, 1, FLOAT.ink);
+  }
+  /** v7: a wax-seal badge over the mailbox counting the parcels in it (bobbing; a bubble now and then) */
+  private mailMarker() {
+    const ui = this.ui, n = mailCount();
+    if (!n || this.hoverThing?.id === 'mailbox' || this.fadeIn > 0.3) return;
+    const v = MAILBOX_AT.clone().setY(2.0).project(this.camera);
+    if (v.z > 1) return;
+    const ax = Math.round((v.x * 0.5 + 0.5) * ui.w), ay = Math.round((-v.y * 0.5 + 0.5) * ui.h);
+    const bob = Math.round(Math.sin(this.t * 2.6 + 1) * 2), pulse = Math.max(0, Math.sin(this.t * 4)) ** 8;
+    const txt = String(Math.min(99, n)), tw = ui.measure(txt, 'small');
+    const r = 6 + (tw > 6 ? 1 : 0), cx = ax, cy = ay - 10 + bob;
+    // the seal: an ink rim, a brass ring, the red wax with a lit top-left, the count in cream
+    for (let y = -r - 1; y <= r + 1; y++) for (let x = -r - 1; x <= r + 1; x++) {
+      const d = Math.hypot(x, y);
+      if (d > r + 1) continue;
+      const c = d > r ? FLOAT.ink : d > r - 1.2 ? (x + y < 0 ? '#f2c66d' : '#a86a24') : x + y < -r * 0.6 ? '#e8644a' : x + y > r * 0.7 ? '#8e2420' : '#c03a2a';
+      ui.fill(cx + x, cy + y, 1, 1, c);
+    }
+    if (pulse > 0.1) ui.rect(cx - r - 2, cy - r - 2, 2 * r + 5, 2 * r + 5, '#f2c66d');
+    ui.text(txt, cx + 1, cy - Math.round(ui.cap('small') / 2), { font: 'small', color: '#fff4e0', shadow: '#5c1418', align: 'center' });
+    // a little tail pointing down at the box
+    ui.fill(cx - 1, cy + r + 1, 3, 1, FLOAT.ink); ui.fill(cx, cy + r + 2, 1, 1, FLOAT.ink);
+    bubbles(ui, cx - 4, cy - r, 8, this.t, 21, 2, 14);
+    ui.tagRects.push([cx - r - 3, cy - r - 3, 2 * r + 7, 2 * r + 8]);
   }
 
   /** the goal board's painted note follows the next build and the materials at home */
@@ -764,13 +828,35 @@ export class HideoutScreen implements Screen {
     const g = nextGoal();
     this.house.board.paintGoal(g ? { name: g.name, costs: costLines(g.id), built: PIECES.filter((p) => isBuilt(p.id)).length, total: PIECES.length } : null);
   }
-  private objective() {
-    const ui = this.ui, g = nextGoal();
-    if (!g) { ui.objective('Home rebuilt! Out the front door to dive', undefined, { x: 8, y: 8, id: 'objective' }); return; }
-    const parts = costLines(g.id);
-    const have = parts.reduce((a, [, h, n]) => a + Math.min(h, n), 0), need = parts.reduce((a, [, , n]) => a + n, 0);
-    const ready = canAfford(g.id);
-    // (the strip stamps READY! itself when the materials are in, so the words stay short)
-    ui.objective(`Build the ${g.name.toLowerCase()}`, [have, need], { x: 8, y: 8, id: 'objective', cost: costOf(g.id), have: META.materials, ready });
+  /**
+   * v7 the goal plate (top left): a compact float plate with the next build and its materials as chips (READY when
+   * they are in: click it to look at the blueprint), and under it, while mail waits, a note that walks you to the
+   * mailbox when clicked. Small and quiet, never over the room's middle.
+   */
+  private objective(live: boolean) {
+    const g = nextGoal();
+    let y = 8;
+    if (!g) y += this.plate('objective', 8, y, [{ text: 'Home rebuilt!' }, { text: 'out the front door to dive', color: FLOAT.sub }], live ? () => this.goOut() : null) + 3;
+    else {
+      const ready = canAfford(g.id);
+      const lines: TagLine[] = [{ text: `Next: ${g.name}` }, { text: '', cost: costLines(g.id) }];
+      if (ready) lines.push({ text: 'ready to build!', color: FLOAT.good });
+      y += this.plate('objective', 8, y, lines, live ? () => this.showGoal() : null, ready ? FLOAT.good : null) + 3;
+    }
+    const n = mailCount();
+    if (n) this.plate('mailNote', 8, y, [{ text: `${n} parcel${n > 1 ? 's' : ''} in the mailbox`, kicon: 'mail', color: FLOAT.brassL }], live ? () => this.walkTo('mailbox') : null);
   }
+  /** a float plate at (x, y) (no pointer): hover brightens its rim, a click runs `act`; returns its height */
+  private plate(id: string, x: number, y: number, lines: TagLine[], act: (() => void) | null, glow: string | null = null): number {
+    const ui = this.ui;
+    const t = ui.anim('plate:' + id), dx = t < 0.25 ? Math.round((1 - Math.min(1, t / 0.25)) * -10) : 0;
+    const r = drawFloat(ui, lines, 220, x + dx, y, Math.min(1, t / 0.15), -1);
+    ui.mark(id, r.x, r.y, r.w, r.h);
+    const hov = !!act && ui.hover(r.x, r.y, r.w, r.h);
+    if (glow) { ui.rect(r.x - 1, r.y - 1, r.w + 2, r.h + 2, glow); ui.fill(r.x - 1, r.y - 1, r.w + 2, r.h + 2, glow, 0.05 + 0.05 * Math.sin(this.t * 4)); }
+    if (hov) { ui.block(r.x, r.y, r.w, r.h); ui.cursor = 'point'; ui.rect(r.x - 1, r.y - 1, r.w + 2, r.h + 2, FLOAT.brassL); if (ui.pressed) { audio.play('k_select1', { vol: 0.3, dry: true }); act!(); } }
+    else if (ui.hover(r.x, r.y, r.w, r.h)) ui.block(r.x, r.y, r.w, r.h);
+    return r.h;
+  }
+
 }

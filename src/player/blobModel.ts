@@ -288,8 +288,8 @@ const EYE_R = 0.066;
 let eyeMatCache: { ball: THREE.Material; skin: THREE.Material; glint: THREE.Material } | null = null;
 function eyeMaterials() {
   if (eyeMatCache) return eyeMatCache;
-  const ball = uw(new THREE.MeshPhysicalMaterial({ color: '#0c0a10', flatShading: true, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }), { caustics: 0.15, rim: 0.2, rimCol: [0.55, 0.7, 0.9] });
-  const skin = uw(new THREE.MeshPhysicalMaterial({ color: '#d99a9e', flatShading: true, roughness: 0.72, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1, 0.86, 0.86] });
+  const ball = uw(new THREE.MeshPhysicalMaterial({ color: '#0c0a10', flatShading: true, roughness: 0.6 }), { caustics: 0.15, rim: 0.2, rimCol: [0.55, 0.7, 0.9] });
+  const skin = uw(new THREE.MeshPhysicalMaterial({ color: '#d99a9e', flatShading: true, roughness: 0.72 }), { sss: [1, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1, 0.86, 0.86] });
   const glint = new THREE.MeshBasicMaterial({ color: '#fff8f0' });
   eyeMatCache = { ball, skin, glint };
   return eyeMatCache;
@@ -384,7 +384,7 @@ export class BlobModel {
   constructor(gear: BlobGear = {}) {
     const pg = paintPage();
     this.U = makeBlobUniforms(pg.rock);
-    this.bodyMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.72, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1.0, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1.0, 0.86, 0.86] });
+    this.bodyMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.72 }), { sss: [1.0, 0.42, 0.42], sssK: 0.55, rim: 0.14, rimCol: [1.0, 0.86, 0.86] });
     patchBlob(this.bodyMat, this.U, { bend: true, rock: true });
     const bodyGeo = buildBody();
     const body = new THREE.Mesh(bodyGeo, this.bodyMat);
@@ -402,7 +402,7 @@ export class BlobModel {
     this.body.add(fm);
     // the nose
     const nose = face.hit(0, 3, -0.02);
-    const noseMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.68, clearcoat: 0.12, clearcoatRoughness: 0.5 }), { sss: [1.0, 0.42, 0.42], sssK: 0.6, rim: 0.14, rimCol: [1, 0.86, 0.86] });
+    const noseMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.68 }), { sss: [1.0, 0.42, 0.42], sssK: 0.6, rim: 0.14, rimCol: [1, 0.86, 0.86] });
     patchBlob(noseMat, this.U, { bend: true, rock: true, key: 'nose' });
     this.nose = new THREE.Mesh(buildNose(nose), noseMat);
     this.nose.castShadow = true;

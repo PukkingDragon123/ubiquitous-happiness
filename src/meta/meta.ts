@@ -3,6 +3,8 @@
 //
 //   import { META, saveMeta, addMaterials, spendMaterials } from '../meta/meta';
 //   META.materials.copperOre += 3; saveMeta();
+//   postMail(materials, gear, 'mail')     what a run sends home lands in the MAILBOX (META.mail), not the stash:
+//                                         the home's mailbox (src/hideout/mail.ts) receives it or disposes it for pearls
 import type { ItemInst } from '../game/run';
 
 /** a piece of furniture / station placed in the hideout (grid cell coords, quarter-turn rotation) */
@@ -64,6 +66,13 @@ export interface RunResult {
   unlocked?: number;
 }
 
+/**
+ * a parcel waiting in the home's MAILBOX (v7): gear or a material stack mailed home with Marge during a run ('mail')
+ * or carried home by a victory ('home'). The mailbox (src/hideout/mail.ts) RECEIVES it (gear to the stash, materials
+ * to META.materials) or DISPOSES of it for pearls (META.materials.pearl, the home's currency).
+ */
+export interface MailItem { uid: number; id: string; level: number; n: number; from: 'mail' | 'home'; at: number; /** a material stack (else one piece of gear) */ mat: boolean }
+
 export interface MetaSave {
   version: 2;
   materials: Record<string, number>;
@@ -86,6 +95,8 @@ export interface MetaSave {
   achievements: AchievementsSave;
   /** dungeon records (src/game/dungeonScreen.ts): the deepest metre reached, the deepest floor, hadal floors entered */
   records?: { maxDepth: number; deepestFloor: number; hadal: number };
+  /** v7: the mailbox: what runs sent home, waiting to be received or disposed (saves before v7: empty) */
+  mail: MailItem[];
 }
 
 export interface CosmeticsSave { unlocked: string[]; equipped: { hat: string; skin: string; sword: string; trail: string; scarf: string } }
@@ -104,6 +115,7 @@ function fresh(): MetaSave {
     introDone: false,
     cosmetics: { unlocked: [], equipped: { hat: 'kasa', skin: 'pink', sword: 'toothpick', trail: 'bubbles', scarf: 'redScarf' } },
     achievements: { unlocked: [], at: {}, counters: {} },
+    mail: [],
   };
 }
 
@@ -119,6 +131,8 @@ function load(): MetaSave {
           ...f, ...m, settings: { ...f.settings, ...m.settings }, introDone: m.introDone ?? (m.runs ?? 0) > 0,
           cosmetics: { ...f.cosmetics, ...m.cosmetics, equipped: { ...f.cosmetics.equipped, ...m.cosmetics?.equipped } },
           achievements: { ...f.achievements, ...m.achievements, at: { ...m.achievements?.at }, counters: { ...m.achievements?.counters } },
+          // v7: the mailbox (older saves have none; drop any malformed parcel)
+          mail: Array.isArray(m.mail) ? m.mail.filter((q) => q && typeof q.id === 'string' && (q.n ?? 1) > 0).map((q) => ({ uid: q.uid, id: q.id, level: q.level ?? 1, n: q.n ?? 1, from: q.from === 'home' ? 'home' : 'mail', at: q.at ?? 0, mat: !!q.mat })) : [],
         };
       }
     }
@@ -159,3 +173,22 @@ export function returnToStash(items: { id: string; level?: number }[]) {
   for (const it of items) META.stash.push({ uid: META.nextUid++, id: it.id, gx: -1, gy: -1, rot: 0, level: it.level ?? 1 });
   saveMeta();
 }
+
+/**
+ * a run's haul lands in the MAILBOX (v7): one parcel per piece of gear, and the materials as stacks (a material
+ * already waiting in the mailbox is topped up, so the box never fills with five driftwood parcels)
+ */
+export function postMail(materials: Record<string, number>, gear: { id: string; level?: number }[], from: MailItem['from']) {
+  const at = Date.now();
+  for (const [id, n] of Object.entries(materials)) {
+    if (!(n > 0)) continue;
+    const q = META.mail.find((m) => m.mat && m.id === id);
+    if (q) { q.n += n; q.at = at; q.from = from; } else META.mail.push({ uid: META.nextUid++, id, level: 1, n, from, at, mat: true });
+  }
+  for (const g of gear) META.mail.push({ uid: META.nextUid++, id: g.id, level: g.level ?? 1, n: 1, from, at, mat: false });
+  saveMeta();
+}
+/** parcels waiting in the mailbox (gear pieces + material stacks) */
+export const mailCount = () => META.mail.length;
+/** how many of a material wait in the mailbox (home goals count them as home already: one click receives them) */
+export const mailMaterial = (id: string) => META.mail.reduce((a, m) => a + (m.mat && m.id === id ? m.n : 0), 0);

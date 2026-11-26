@@ -178,7 +178,7 @@ function buildRay(d: RayDef): SpeciesAsset {
   return kitAsset(d.name, geo, pg, {
     length: L, mouth: [XMAX - 0.04, -0.02, 0], eye: EYE, eyeR: er,
     mode: 2, shape: [XMAX, DL, 1.0, DW], shape2: [2, 4, 0.0, 0.05], amp: d.amp, freq: d.freq, freqK: 0.6,
-    clearcoat: 0.25, clearcoatRough: 0.45, palette: 20,
+    palette: 20,
     uwo: { rim: 0.2, sss: [0.9, 0.85, 0.75], sssK: 0.4 },
   });
 }

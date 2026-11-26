@@ -1,8 +1,10 @@
-// Dialogue: sailcloth speech bubbles with a rope edge (kit skin 'sail'), the speaker's name on a little driftwood
-// plaque, a trail of sea bubbles for the tail and a gentle bob while the words come. Anchored over the speaker in 3D
-// (they follow the entity and stay on screen, the tail pointing at the speaker even when it is off to one side), a typewriter with per-character voice
-// blips (pitch per speaker), punctuation pauses, inline emphasis tags and a speaker name tag. Lines can offer up to
-// three choices (click or 1-3). Advance with click / E / Space; hold to fast-forward.
+// Dialogue (v7): no box. The words float in the water near the speaker (low in the frame when there is no one to
+// point at): crisp pixel-font text with a soft dark outline so it reads over anything, the speaker's name as a small
+// line in their colour above it, a typewriter reveal (each new letter rises a pixel into place) with per-character
+// voice blips (pitch per speaker), punctuation pauses and inline emphasis tags, and a gentle drift and bob while it
+// hangs there. Small, real-looking air bubbles let go of the letters now and then, rise and pop; when a line is
+// done it lifts away and its bubbles pop. The advance hint is tiny ([E] / click) and lines can offer up to three
+// choices (click or 1-3), floating under the words. Advance with click / E / Space; hold to fast-forward.
 //
 //   const dlg = new Dialogue(ui, () => camera);
 //   dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e8603a', voice: 'crab_click', pitch: 0.9, anchor: () => crab.head() });
@@ -20,14 +22,15 @@ import * as THREE from 'three';
 import type { Input } from '../core/input';
 import type { PixelUI } from '../ui/pixel/ui';
 import type { FontName } from '../ui/pixel/font';
-import { KIT } from '../ui/pixel/skins';
+import { KIT, keycapBody, KEYCAP_H } from '../ui/pixel/skins';
+import { mouseTex } from '../ui/pixel/art';
 import { audio } from '../audio/audio';
-import { POST } from '../gfx/post';
+import { SeaBubbles, seaArt, seaDraw, rawCanvas, letterboxBar, readable, bubbleSprite, type SeaStyle, type Tier } from '../ui/seaText';
 
 export interface Speaker {
   id: string;
   name: string;
-  /** name tag colour */
+  /** name colour */
   color: string;
   /** sfx id (variant group) for the voice blips and its playback rate */
   voice: string; pitch: number; vol?: number;
@@ -50,9 +53,17 @@ export interface Line {
   speed?: number;
 }
 
-const COLORS: Record<string, string> = { red: '#d8283a', gold: '#c88a08', blue: '#2a64d0', green: '#2a9a3a', pink: '#d84a8a', grey: '#7a7078', white: '#ffffff' };
-const INK = '#2a1a24';
+/** inline colours, light enough to read as floating text on the dark outline */
+const COLORS: Record<string, string> = { red: '#ff8a76', gold: '#ffd45e', blue: '#8cc8ff', green: '#90e68a', pink: '#ff9ccc', grey: '#b8b2ba', white: '#ffffff' };
+const INK = '#fbf5e8';
 const FONT: FontName = 'body';
+const TIER: Tier = 'body';
+/** the floating line's leading (UI px): a touch more air than a panel's, for the outline */
+const LH = 15;
+const EDGE = '#06121a';
+/** how long a finished line takes to lift away, and a bark to fade */
+const LEAVE = 0.22;
+const BARK_FADE = 0.35;
 
 interface Ch { c: string; shake: boolean; wave: boolean; color: string; pause: number; slow: boolean }
 
@@ -73,7 +84,7 @@ export function parseTags(src: string): Ch[] {
         else if (name === 'wave') wave = !close;
         else if (name === 'slow') slow = !close;
         else if (name.startsWith('p=')) pause += Number(name.slice(2)) || 0;
-        else if (COLORS[name] || name.startsWith('#')) { if (close) col.pop(); else col.push(COLORS[name] ?? name); }
+        else if (COLORS[name] || name.startsWith('#')) { if (close) col.pop(); else col.push(COLORS[name] ?? readable(name)); }
         i = j + 1;
         continue;
       }
@@ -106,11 +117,28 @@ function wrapChars(chs: Ch[], maxW: number, measure: (s: string) => number): [nu
   return lines;
 }
 
+/** the floating-text style of an ink colour (a lighter top, the colour below, the soft dark outline) */
+const styleCache = new Map<string, SeaStyle>();
+function inkStyle(c: string): SeaStyle {
+  let s = styleCache.get(c);
+  if (!s) {
+    const v = c.replace('#', '');
+    const n = parseInt(v.length === 3 ? v.split('').map((x) => x + x).join('') : v.slice(0, 6), 16) || 0;
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const up = (x: number) => Math.round(x + (255 - x) * 0.3).toString(16).padStart(2, '0');
+    s = c === INK ? { top: '#fffcf4', bottom: '#eee4cc', edge: EDGE } : { top: '#' + up(r) + up(g) + up(b), bottom: c, edge: EDGE };
+    styleCache.set(c, s);
+  }
+  return s;
+}
+
 interface Active {
   line: Line;
   sp: Speaker;
   chs: Ch[];
   lines: [number, number][];
+  /** each wrapped line's width (UI px) */
+  lw: number[];
   shown: number;      // characters revealed (float)
   t: number;          // time on this line
   doneT: number;      // time since fully typed
@@ -120,6 +148,18 @@ interface Active {
   life: number;
   pick: number;
   blip: number;
+  /** seconds before typing starts (a beat after the previous line lifts away) */
+  wait: number;
+  /** where it floats (UI px: block centre x, block top y), eased toward its target */
+  px: number; py: number; placed: boolean;
+  /** anchored to a speaker (left-aligned, name on top, a little bubble tail toward them) or a caption (centred) */
+  anchored: boolean;
+  /** the speaker's point on screen (UI px), for the tail */
+  ax: number; ay: number;
+  /** >= 0: lifting away (seconds since) */
+  out: number;
+  seed: number;
+  bubT: number;
 }
 
 export class Dialogue {
@@ -128,17 +168,21 @@ export class Dialogue {
   blocking = false;
   /** characters per second */
   cps = 34;
-  /** the bubble's max text width (UI px) */
-  maxW = 230;
+  /** the widest a floating line may run (UI px) */
+  maxW = 220;
   private queue: Line[] = [];
   private cur: Active | null = null;
   private barks: Active[] = [];
+  /** finished lines lifting away */
+  private leaving: Active[] = [];
   private resolve: ((picks: number[]) => void) | null = null;
   private picks: number[] = [];
   private holdT = 0;
   private t = 0;
+  private dt = 0;
   private v = new THREE.Vector3();
   private hoverChoice = -1;
+  private fx = new SeaBubbles();
   /** where the current choice rows were drawn (UI pixels): tests and tools click these */
   choiceRects: { x: number; y: number; w: number; h: number }[] = [];
 
@@ -162,36 +206,56 @@ export class Dialogue {
   bark(who: string, text: string, life = 2.4) {
     const sp = this.speakers.get(who);
     if (!sp) return;
+    const old = this.barks.find((b) => b.sp.id === who);
+    if (old) this.retire(old);
     this.barks = this.barks.filter((b) => b.sp.id !== who);
-    if (this.barks.length > 2) this.barks.shift();
-    this.barks.push(this.make({ who, text }, sp, true, life));
+    if (this.barks.length > 2) this.retire(this.barks.shift()!);
+    const b = this.make({ who, text }, sp, true, life);
+    // a new bark over the same speaker waits for the old one to lift away (no words over words)
+    if (old && old.placed && old.shown >= 1) b.wait = LEAVE * 0.9;
+    this.barks.push(b);
   }
 
   get busy() { return !!this.cur; }
   /** drop everything (skips, screen exits) */
   finish() {
     const r = this.resolve;
-    this.resolve = null; this.cur = null; this.queue = []; this.blocking = false; this.barks = [];
+    this.resolve = null; this.cur = null; this.queue = []; this.blocking = false; this.barks = []; this.leaving = []; this.fx.clear();
     r?.(this.picks);
   }
 
   private make(line: Line, sp: Speaker, bark: boolean, life = 0): Active {
     const ui = this.ui;
     const chs = parseTags(line.text);
-    const maxW = Math.min(bark ? 160 : this.maxW, ui.w - 40);
+    const maxW = Math.min(bark ? 170 : this.maxW, ui.w - 40);
     const m = (t: string) => ui.measure(t, FONT);
     const lines = wrapChars(chs, maxW, m);
     const plain = chs.map((c) => c.c).join('');
+    const lw = lines.map(([a, b]) => Math.ceil(m(plain.slice(a, b))));
     let w = 0;
-    for (const [a, b] of lines) w = Math.max(w, m(plain.slice(a, b)));
-    const lh = ui.lh(FONT);
-    const nameW = sp.name ? ui.measure(sp.name, 'small') + 14 : 0;
-    w = Math.ceil(Math.max(w + 24, nameW + 26, 60));
-    const h = lines.length * lh + (bark ? 16 : 26); // conversations keep a strip under the text for the E prompt
-    return { line, sp, chs, lines, shown: 0, t: 0, doneT: 0, pause: 0, w, h, bark, life, pick: -1, blip: 0 };
+    for (const x of lw) w = Math.max(w, x);
+    const nameW = sp.name ? ui.measure(sp.name, 'small') + 20 : 0;
+    w = Math.ceil(Math.max(w, nameW));
+    const h = Math.max(1, lines.length) * LH;
+    const wait = !bark && (this.cur || this.leaving.length) ? LEAVE * 0.9 : 0;
+    return { line, sp, chs, lines, lw, shown: 0, t: 0, doneT: 0, pause: 0, w, h, bark, life, pick: -1, blip: 0, wait, px: 0, py: 0, placed: false, anchored: false, ax: 0, ay: 0, out: -1, seed: Math.random() * 6.28, bubT: 0.3 + Math.random() * 0.4 };
+  }
+
+  /** a line that is done: it lifts away (and lets its bubbles go) */
+  private retire(a: Active) {
+    if (!a.placed || a.shown < 1) return;
+    a.out = 0;
+    this.leaving.push(a);
+    // a few bubbles from the words, popping a moment later
+    const n = Math.min(5, 1 + Math.floor(a.shown / 14));
+    for (let i = 0; i < n; i++) {
+      const li = Math.floor(Math.random() * a.lines.length);
+      this.fx.add(a.px - a.lw[li] / 2 + Math.random() * a.lw[li], a.py + li * LH + 2 + Math.random() * 4, { r: 1.2 + Math.random() * 1.3, life: 0.15 + Math.random() * 0.35, vy: -16 - Math.random() * 10 });
+    }
   }
 
   private next() {
+    if (this.cur) this.retire(this.cur);
     const line = this.queue.shift();
     if (!line) {
       this.cur = null; this.blocking = false;
@@ -199,7 +263,7 @@ export class Dialogue {
       r?.(this.picks);
       return;
     }
-    const sp = this.speakers.get(line.who) ?? { id: line.who, name: line.who.toUpperCase(), color: '#5a6a8a', voice: 'k_tick', pitch: 1 };
+    const sp = this.speakers.get(line.who) ?? { id: line.who, name: line.who.toUpperCase(), color: '#9ab4d8', voice: 'k_tick', pitch: 1 };
     this.cur = this.make(line, sp, false);
     line.do?.();
   }
@@ -207,8 +271,12 @@ export class Dialogue {
   // ---------------------------------------------------------------- per frame
   update(dt: number, input: Input | null) {
     this.t += dt;
+    this.dt += dt;
     for (const b of this.barks) this.type(b, dt, 1);
-    this.barks = this.barks.filter((b) => b.doneT < b.life);
+    for (const b of this.barks) if (b.doneT >= b.life + BARK_FADE) b.out = 1;
+    this.barks = this.barks.filter((b) => b.doneT < b.life + BARK_FADE);
+    for (const l of this.leaving) l.out += dt;
+    this.leaving = this.leaving.filter((l) => l.out < LEAVE);
     const a = this.cur;
     if (!a) { this.holdT = 0; return; }
     const adv = !!input && (input.keyHit('Space') || input.keyHit('KeyE') || input.keyHit('Enter') || (input.pressed.has('Mouse0') && !a.line.choices));
@@ -224,13 +292,11 @@ export class Dialogue {
       for (let i = 0; i < a.line.choices.length; i++) if (input.keyHit('Digit' + (i + 1)) || input.keyHit('Numpad' + (i + 1))) { a.shown = total; this.choose(i); return; }
     }
     if (!typed) {
-      if (adv && a.t > 0.08) { a.shown = total; a.pause = 0; }
+      if (adv && a.t > 0.08) { a.shown = total; a.pause = 0; a.wait = 0; }
       return;
     }
     // choices
     if (a.line.choices?.length) {
-      const n = a.line.choices.length;
-      void n;
       if (input && this.hoverChoice >= 0 && this.ui.released && a.doneT > 0.15) this.choose(this.hoverChoice);
       return;
     }
@@ -258,6 +324,7 @@ export class Dialogue {
     a.t += dt;
     const total = a.chs.length;
     if (a.shown >= total) { a.doneT += dt; return; }
+    if (a.t < a.wait) return;
     if (a.pause > 0) { a.pause -= dt * speed; if (a.pause > 0) return; }
     const i0 = Math.floor(a.shown);
     const cur = a.chs[Math.min(total - 1, i0)];
@@ -291,152 +358,243 @@ export class Dialogue {
     const ui = this.ui;
     this.hoverChoice = -1;
     this.choiceRects = [];
-    for (const b of this.barks) this.bubble(b);
-    if (this.cur) this.bubble(this.cur);
-    void ui;
+    const dt = Math.min(0.1, this.dt); this.dt = 0;
+    this.lastDt = dt;
+    this.fx.step(dt);
+    const all = [...this.leaving, ...this.barks, ...(this.cur ? [this.cur] : [])];
+    // the conversation first, then the barks, each kept clear of what is already placed (no words over words)
+    const taken: [number, number, number, number][] = [];
+    for (const a of [...(this.cur ? [this.cur] : []), ...this.barks]) if (a.out < 0) this.place(a, dt, taken);
+    const bar = this.bar();
+    // every line's soft outline first, then the letters, so no outline ever cuts into a neighbour's glyphs
+    rawCanvas(ui, (ctx, hd) => {
+      for (const a of all) this.tail(a, ctx, hd);
+      for (const a of all) this.words(a, ctx, hd, 'edge');
+      for (const a of all) this.words(a, ctx, hd, 'fill');
+    });
+    this.fx.draw(ui, [bar, ui.h - bar]);
+    const a = this.cur;
+    if (a && a.out < 0 && a.shown >= a.chs.length) {
+      if (a.line.choices?.length) this.choices(a);
+      else if (a.line.auto === undefined) this.hint(a);
+    }
   }
 
-  /** letterbox bar height in UI px (bubbles stay off the bars) */
-  private bar() {
-    const ui = this.ui;
-    const k = POST.uLetterbox.value * Math.max(0, 1 - (ui.w / ui.h) / 2.39) * 0.5;
-    return Math.ceil(ui.h * k);
-  }
+  /** letterbox bar height in UI px (words stay off the bars) */
+  private bar() { return letterboxBar(this.ui); }
 
-  private project(p: THREE.Vector3): { x: number; y: number; on: boolean; behind: boolean } {
+  private project(p: THREE.Vector3): { x: number; y: number; behind: boolean } {
     const ui = this.ui;
-    const v = this.v.copy(p).project(this.cam());
+    const cam = this.cam();
+    cam.updateMatrixWorld();
+    const v = this.v.copy(p).project(cam);
     const behind = v.z > 1;
     let x = (v.x * 0.5 + 0.5) * ui.w, y = (1 - (v.y * 0.5 + 0.5)) * ui.h;
     if (behind) { x = ui.w - x; y = ui.h; }
-    return { x, y, on: !behind && x > 0 && x < ui.w && y > 0 && y < ui.h, behind };
+    return { x, y, behind };
   }
 
-  private bubble(a: Active) {
-    const ui = this.ui;
-    const bar = this.bar();
+  /** where a line floats: over the speaker's head (kept on screen and off the bars), else low in the frame */
+  private place(a: Active, dt: number, taken: [number, number, number, number][] = []) {
+    const ui = this.ui, bar = this.bar();
     const anchor = a.sp.anchor?.() ?? null;
-    const W = a.w, H = a.h;
-    const pop = Math.min(1, a.t / 0.16);
-    const m = 6;
-    let bx: number, by: number, tx: number | null = null, ty = 0;
+    const nameH = a.sp.name && !a.bark ? 12 : 0;
+    const m = 10;
+    let cx: number, top: number;
+    a.anchored = !!anchor;
     if (anchor) {
       const s = this.project(anchor);
-      bx = s.x - W / 2;
-      by = s.y - H - 20;
-      // keep on screen (and off the letterbox bars), leaving room for the name plaque on top
-      const minY = bar + m + 10, maxY = ui.h - bar - m - H - 4;
-      const cx = Math.max(m, Math.min(ui.w - m - W, bx));
-      const cy = Math.max(minY, Math.min(maxY, by));
-      tx = Math.max(cx + 12, Math.min(cx + W - 13, s.x));
-      ty = s.y;
-      bx = cx; by = cy;
+      a.ax = s.x; a.ay = s.behind ? ui.h : s.y;
+      cx = s.x; top = s.y - a.h - 16;
     } else {
-      // narrator / off-screen: a caption low in the frame
-      bx = (ui.w - W) / 2; by = ui.h - bar - H - 12;
+      cx = ui.w / 2; top = ui.h - bar - a.h - 26;
     }
-    // pop: rise 6 px with a soft overshoot; a gentle bob (like a sail on a swell) while the words are coming
-    const typed = a.shown >= a.chs.length;
-    const k = pop < 1 ? 1 - Math.pow(1 - pop, 3) * Math.cos(pop * 4) : 1;
-    const bob = typed ? 0 : Math.round(Math.sin(this.t * 4.2) * 1.2);
-    bx = Math.round(bx); by = Math.round(by + (1 - k) * 6 + bob);
-    const alpha = Math.min(1, pop * 2.5);
-    const f = (x: number, y: number, w: number, h: number, c: string, al = 1) => ui.fill(x, y, w, h, c, al * alpha);
-    ui.block(bx, by, W, H);
-    // ---- the tail: a little trail of bubbles drifting from the sail toward the speaker
-    if (tx !== null) {
-      const down = ty > by + H, up = ty < by;
-      if (down || up) {
-        const ex = Math.round(tx), ey = down ? by + H : by;
-        const dist = Math.min(26, Math.max(8, Math.abs(ty - ey) - 4));
-        const lean = Math.max(-8, Math.min(8, (ex - (bx + W / 2)) * 0.15));
-        [[0.18, 4], [0.52, 3], [0.86, 2]].forEach(([q, r], i) => {
-          const px = ex + lean * q + Math.sin(this.t * 3 + i * 1.7) * 0.8, py = ey + (down ? 1 : -1) * (3 + dist * q) + Math.sin(this.t * 2.4 + i) * 0.6;
-          this.trailBubble(Math.round(px), Math.round(py), r, alpha);
-        });
+    cx = Math.max(m + a.w / 2, Math.min(ui.w - m - a.w / 2, cx));
+    top = Math.max(bar + m + nameH, Math.min(ui.h - bar - a.h - 20, top));
+    // keep clear of the lines already placed this frame: above them, or below when there is no room above
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const [rx, ry, rw, rh] of taken) {
+        const x0 = cx - a.w / 2 - 3, y0 = top - nameH - 3;
+        if (x0 >= rx + rw || x0 + a.w + 6 <= rx || y0 >= ry + rh || y0 + a.h + nameH + 6 <= ry) continue;
+        const up = ry - 4 - a.h, dn = ry + rh + 4 + nameH;
+        top = up - nameH >= bar + 4 ? up : dn;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    taken.push([cx - a.w / 2, top - nameH, a.w, a.h + nameH]);
+    if (!a.placed) { a.px = cx; a.py = top; a.placed = true; return; }
+    // follow the speaker smoothly (no jitter when the camera or the speaker moves)
+    const k = 1 - Math.exp(-dt * 9);
+    a.px += (cx - a.px) * k; a.py += (top - a.py) * k;
+  }
+
+  /** a line's name and letters, one pass (outline or fill) */
+  private words(a: Active, ctx: CanvasRenderingContext2D, hd: number, pass: 'edge' | 'fill') {
+    if (!a.placed) return;
+    const ui = this.ui;
+    const t = this.t;
+    // fading: a bark's last moments, or a finished line lifting away (letters fade in on their own as they type)
+    let alpha = 1;
+    let lift = 0;
+    if (a.out >= 0 && !a.bark) { const q = Math.min(1, a.out / LEAVE); alpha *= 1 - q; lift = q * 7; }
+    if (a.bark && a.doneT > a.life) { const q = Math.min(1, (a.doneT - a.life) / BARK_FADE); alpha *= 1 - q; lift = q * 5; }
+    if (alpha <= 0.01) return;
+    // the gentle drift and bob of words hanging in the water
+    const ox = Math.sin(t * 0.55 + a.seed) * 1.6, oy = Math.sin(t * 0.9 + a.seed * 1.3) * 1.3 - lift;
+    const cx = a.px + ox, top = a.py + oy;
+    // the speaker's name: a small line in their colour, with a short rule either side
+    if (a.sp.name && !a.bark) {
+      const nst = this.nameStyle(a.sp.color);
+      const art = seaArt(a.sp.name, nst, 'small', hd);
+      const left = a.anchored ? Math.round((cx - a.w / 2) * hd) : Math.round(cx * hd - art.adv / 2);
+      const X = left, Y = Math.round((top - 11) * hd);
+      seaDraw(ctx, art, X, Y, pass, alpha * Math.max(0, Math.min(1, (a.t - a.wait) / 0.2)));
+      if (pass === 'fill') {
+        // a short rule in their colour after the name (and before it on a centred caption)
+        const ry = Y + Math.round(art.cap / 2), rw = 8 * hd, gap = 3 * hd, th = Math.max(1, Math.round(hd / 2));
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.fillStyle = EDGE;
+        ctx.fillRect(X + art.adv + gap - 1, ry - 1, rw + 2, th + 2);
+        if (!a.anchored) ctx.fillRect(X - gap - rw - 1, ry - 1, rw + 2, th + 2);
+        ctx.fillStyle = nst.bottom;
+        ctx.fillRect(X + art.adv + gap, ry, rw, th);
+        if (!a.anchored) ctx.fillRect(X - gap - rw, ry, rw, th);
       }
     }
-    // ---- the body: a sailcloth card with a twisted rope edge (and a soft shadow under it)
-    f(bx + 3, by + 3, W, H, '#000000', 0.22);
-    ui.frame('sail', bx, by, W, H, alpha);
-    // ---- the speaker's name on a little driftwood plaque nailed over the top edge, a stripe of their colour
-    if (a.sp.name) {
-      const nw = Math.ceil(ui.measure(a.sp.name, 'small')) + 18, nh = 14;
-      const nx = bx + 9, ny = by - 9;
-      ui.frame('plaque', nx, ny, nw, nh, alpha);
-      f(nx + 4, ny + nh - 3, nw - 8, 1, a.sp.color, 0.9);
-      ui.text(a.sp.name, nx + nw / 2, ny + 3, { font: 'small', color: KIT.ink, shadow: '#e6dec8', align: 'center', alpha });
-    }
-    // ---- the text, one character at a time (a fresh letter pops up a pixel)
-    const lh = ui.lh(FONT);
+    // the letters
     const plain = a.chs.map((c) => c.c).join('');
     const shown = Math.floor(a.shown);
-    const top = by + (a.bark ? 8 : 10);
     a.lines.forEach(([s, e], li) => {
-      const y = top + li * lh;
+      const x0 = Math.round(this.lineLeft(a, li, cx) * hd);
+      const y = top + li * LH;
       for (let i = s; i < e && i < shown; i++) {
         const ch = a.chs[i];
         if (ch.c === ' ') continue;
-        const xx = bx + 12 + ui.measure(plain.slice(s, i), FONT);
-        let dx = 0, dy = 0;
-        if (ch.shake) { const q = Math.floor(this.t * 20) + i * 7; dx = ((q * 13) % 3) - 1; dy = ((q * 7) % 3) - 1; }
-        if (ch.wave) dy += Math.round(Math.sin(this.t * 7 - i * 0.7) * 1.5);
+        const X = x0 + Math.round(ui.measure(plain.slice(s, i), FONT) * hd);
+        let dx = 0, dy = Math.sin(t * 2.4 - i * 0.45 + a.seed) * 0.45;
+        if (ch.shake) { const q = Math.floor(t * 20) + i * 7; dx += ((q * 13) % 3) - 1; dy += ((q * 7) % 3) - 1; }
+        if (ch.wave) dy += Math.sin(t * 7 - i * 0.7) * 1.5;
+        // a fresh letter fades in rising a few pixels into place
         const age = a.shown - i;
-        if (age < 1.5) dy -= 1;
-        ui.text(ch.c, xx + dx, y + dy, { font: FONT, color: ch.color, shadow: null, alpha });
+        const k = Math.min(1, age / 2.2);
+        dy += (1 - k) * 3;
+        seaDraw(ctx, seaArt(ch.c, inkStyle(ch.color), TIER, hd), X + Math.round(dx * hd), Math.round((y + dy) * hd), pass, alpha * (0.25 + 0.75 * k));
       }
     });
-    // ---- continue prompt (click / E) in the bottom-right corner, bobbing; or the choices
-    if (!a.bark && typed && !a.line.choices?.length && a.line.auto === undefined) {
-      const b = Math.round(Math.max(0, Math.sin(this.t * 6)) * 2);
-      const kw = ui.keycapW('E');
-      const px = bx + W - kw - 9, py = by + H - 15 - b;
-      ui.keycap('E', px, py);
-      // a bobbing brass arrow beside the key, inside the sail
-      const line = KIT.ink;
-      const ax = px - 10, ay = py + 3;
-      f(ax, ay, 7, 1, line); f(ax + 1, ay + 1, 5, 1, KIT.brass[2]); f(ax, ay + 1, 1, 1, line); f(ax + 6, ay + 1, 1, 1, line);
-      f(ax + 1, ay + 2, 5, 1, line); f(ax + 2, ay + 2, 3, 1, KIT.brass[2]); f(ax + 1, ay + 2, 1, 1, line); f(ax + 5, ay + 2, 1, 1, line);
-      f(ax + 2, ay + 3, 3, 1, line); f(ax + 3, ay + 3, 1, 1, KIT.brass[3]); f(ax + 3, ay + 4, 1, 1, line);
+    if (pass !== 'fill' || a.out >= 0) return;
+    // bubbles: a speck now and then from a fresh letter while typing, a slow trickle off the words once they sit
+    a.bubT -= this.dtLast();
+    if (a.bubT <= 0 && shown > 0) {
+      const typing = a.shown < a.chs.length;
+      a.bubT = typing ? 0.28 + Math.random() * 0.3 : 0.7 + Math.random() * 1.1;
+      const i = typing ? Math.max(0, shown - 1) : Math.floor(Math.random() * shown);
+      const li = Math.max(0, a.lines.findIndex(([s, e]) => i >= s && i < e));
+      const [s] = a.lines[li] ?? [0];
+      const x = this.lineLeft(a, li, cx) + ui.measure(plain.slice(s, i), FONT) + 2 + Math.random() * 3;
+      if (a.chs[i] && a.chs[i].c !== ' ') this.fx.add(x, top + li * LH - 1, { r: typing ? 1 + Math.random() * 0.6 : 1.2 + Math.random() * 1.2, life: 0.6 + Math.random() * 0.9 });
     }
-    if (!a.bark && typed && a.line.choices?.length) this.choices(a, bx, by, W, H);
+    // the text swallows world clicks under it (like any UI)
+    if (!a.bark) ui.block(Math.round(cx - a.w / 2) - 4, Math.round(top) - 14, Math.ceil(a.w) + 8, a.h + 18);
+  }
+  /** where a wrapped line starts (UI px): speech is left-aligned in its block, a caption's lines are centred */
+  private lineLeft(a: Active, li: number, cx: number) { return a.anchored ? cx - a.w / 2 : cx - (a.lw[li] ?? 0) / 2; }
+
+  /** a little trail of air bubbles from the words toward the speaker (the tail a speech bubble would have) */
+  private tail(a: Active, ctx: CanvasRenderingContext2D, hd: number) {
+    if (!a.anchored || !a.placed || a.out >= 0) return;
+    const ui = this.ui, t = this.t;
+    const ox = Math.sin(t * 0.55 + a.seed) * 1.6, oy = Math.sin(t * 0.9 + a.seed * 1.3) * 1.3;
+    const left = a.px + ox - a.w / 2, top = a.py + oy;
+    const ex = Math.max(4, Math.min(ui.w - 4, a.ax)), ey = Math.max(4, Math.min(ui.h - 4, a.ay));
+    const below = ey > top + a.h + 10, above = ey < top - 24;
+    if (!below && !above) return;
+    const sx = Math.max(left + 4, Math.min(left + a.w - 4, ex)), sy = below ? top + a.h + 2 : top - 15;
+    const dx = ex - sx, dy = (below ? ey - 6 : ey + 6) - sy;
+    const len = Math.hypot(dx, dy);
+    if (len < 8) return;
+    const fade = Math.max(0, Math.min(1, (a.t - a.wait) / 0.3)) * (a.bark && a.doneT > a.life ? Math.max(0, 1 - (a.doneT - a.life) / BARK_FADE) : 1);
+    [[4, 1.6], [12, 1.2], [19, 0.9]].forEach(([d, r], i) => {
+      if (d > len - 3) return;
+      const k = d / len;
+      const x = sx + dx * k + Math.sin(t * 2.6 + i * 1.9 + a.seed) * 0.8, y = sy + dy * k + Math.sin(t * 2.1 + i * 1.3) * 0.6;
+      const D = Math.max(3, Math.round(r * 2 * hd));
+      ctx.globalAlpha = fade;
+      ctx.drawImage(bubbleSprite(D), Math.round(x * hd - D / 2), Math.round(y * hd - D / 2));
+    });
   }
 
-  /** one bubble of the tail trail: an ink-rimmed sea bubble (r 1..3 UI px) with a glint, readable on any backdrop */
-  private trailBubble(cx: number, cy: number, r: number, alpha: number) {
+  private lastDt = 1 / 60;
+  private dtLast() { return this.lastDt; }
+
+  private nameCache = new Map<string, SeaStyle>();
+  private nameStyle(c: string): SeaStyle {
+    let s = this.nameCache.get(c);
+    if (!s) { const v = readable(c, 0.55); s = { top: readable(v, 0.72), bottom: v, edge: EDGE }; this.nameCache.set(c, s); }
+    return s;
+  }
+
+  /** the advance hint: a tiny [E] / click after the last word, bobbing */
+  private hint(a: Active) {
     const ui = this.ui;
-    for (let y = -r - 1; y <= r + 1; y++) for (let x = -r - 1; x <= r + 1; x++) {
-      const d = Math.hypot(x, y);
-      if (d > r + 0.75) continue;
-      const col = d > r - 0.25 ? KIT.ink : x + y < -r * 0.6 ? '#ffffff' : d > r - 1.2 ? '#bfeef0' : '#e8f8f2';
-      ui.fill(cx + x, cy + y, 1, 1, col, alpha * (col === '#e8f8f2' ? 0.85 : 1));
-    }
+    const t = this.t;
+    const li = a.lines.length - 1;
+    const ox = Math.sin(t * 0.55 + a.seed) * 1.6, oy = Math.sin(t * 0.9 + a.seed * 1.3) * 1.3;
+    const lw = a.lw[Math.max(0, li)] ?? 0;
+    const appear = Math.min(1, a.doneT / 0.25);
+    const x = Math.round(this.lineLeft(a, Math.max(0, li), a.px + ox) + lw + 5), y = Math.round(a.py + oy + Math.max(0, li) * LH - 2 - Math.max(0, Math.sin(t * 5)) * 1.5);
+    const kw = this.keycap('E', x, y, true, false, 0.9 * appear);
+    const mg = mouseTex('L');
+    ui.img(mg, x + kw + 3, y + Math.round((KEYCAP_H - mg.height) / 2), { alpha: 0.9 * appear });
   }
 
-  private choices(a: Active, bx: number, by: number, W: number, H: number) {
+  /** a kit keycap that can fade (ui.keycap always draws opaque) */
+  private keycap(label: string, x: number, y: number, dark: boolean, down: boolean, alpha: number) {
+    const ui = this.ui;
+    const w = ui.keycapW(label);
+    ui.img(keycapBody(w, KEYCAP_H, dark, down), x, y, { w, h: KEYCAP_H, alpha });
+    ui.text(label, x + w / 2, y + (down ? 3 : 1) + Math.round((8 - ui.cap('small')) / 2), { font: 'small', color: dark ? KIT.text : KIT.ink, shadow: null, align: 'center', alpha });
+    return w;
+  }
+
+  private choices(a: Active) {
     const ui = this.ui;
     const cs = a.line.choices!;
-    const rowH = 22;
+    const rowH = 17;
+    const hd = Math.max(1, ui.hd);
     let w = 0;
-    for (const c of cs) w = Math.max(w, ui.measure(c.text, FONT) + 40);
-    w = Math.ceil(Math.max(w, 120));
-    const total = cs.length * (rowH + 3);
+    for (const c of cs) w = Math.max(w, ui.measure(c.text, FONT) + ui.keycapW('1') + 12);
+    w = Math.ceil(w);
+    const total = cs.length * rowH;
     const bar = this.bar();
-    let x = Math.round(bx + W / 2 - w / 2), y = by + H + 8;
-    if (y + total > ui.h - bar - 2) y = by - total - 12;
-    x = Math.max(4, Math.min(ui.w - w - 4, x));
-    cs.forEach((c, i) => {
-      // each row slides in a little after the one above
-      const appear = Math.max(0, Math.min(1, (a.doneT - i * 0.06) / 0.18));
-      const yy = y + i * (rowH + 3) + Math.round((1 - appear) * 6);
-      const hov = ui.hover(x, yy, w, rowH);
-      this.choiceRects[i] = { x, y: yy, w, h: rowH };
-      if (hov) this.hoverChoice = i;
-      ui.button('dlg:choice:' + i, '', x, yy, w, rowH, { style: hov ? 'wood' : 'dark', sfx: '', state: hov ? (ui.down ? 'down' : 'hover') : 'normal' });
-      const [ft, fh] = hov ? (ui.down ? [4, rowH - 5] : [1, rowH - 5]) : [2, rowH - 5];
-      ui.keycap(String(i + 1), x + 5, yy + ft + Math.round((fh - 13) / 2), !hov);
-      ui.text(c.text, x + 24, yy + ft + Math.round((fh - ui.cap(FONT)) / 2), hov ? { font: FONT, color: KIT.ink, shadow: '#f2c66d', alpha: appear } : { font: FONT, color: KIT.text, shadow: '#06141a', alpha: appear });
-      if (hov) ui.cursor = 'point';
+    let y = Math.round(a.py + a.h + 8);
+    if (y + total > ui.h - bar - 4) y = Math.round(a.py - (a.sp.name ? 14 : 0) - total - 6);
+    const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, a.anchored ? a.px - a.w / 2 : a.px - w / 2)));
+    const rows: { i: number; yy: number; hov: boolean; appear: number }[] = [];
+    cs.forEach((_c, i) => {
+      // each row floats in a little after the one above
+      const appear = Math.max(0, Math.min(1, (a.doneT - i * 0.08) / 0.22));
+      const yy = y + i * rowH + Math.round((1 - appear) * 5 + Math.sin(this.t * 1.8 + i * 1.3) * 0.6);
+      const hov = appear > 0.5 && ui.hover(x - 4, yy - 2, w + 8, rowH);
+      this.choiceRects[i] = { x, y: yy, w, h: rowH - 2 };
+      ui.mark('dlg:choice:' + i, x, yy, w, rowH - 2);
+      ui.block(x - 4, yy - 2, w + 8, rowH);
+      if (hov) { this.hoverChoice = i; ui.cursor = 'point'; }
+      rows.push({ i, yy, hov, appear });
     });
+    const st = inkStyle(INK), hot: SeaStyle = { top: '#fff4c8', bottom: '#ffcf5a', edge: EDGE };
+    rawCanvas(ui, (ctx) => {
+      for (const pass of ['edge', 'fill'] as const) for (const r of rows) {
+        const tx = x + ui.keycapW('1') + 5 + (r.hov ? 2 : 0);
+        const art = seaArt(cs[r.i].text, r.hov ? hot : st, TIER, hd);
+        seaDraw(ctx, art, Math.round(tx * hd), Math.round((r.yy + 2) * hd), pass, r.appear);
+      }
+    });
+    for (const r of rows) {
+      this.keycap(String(r.i + 1), x + (r.hov ? 1 : 0), r.yy, !r.hov, r.hov && ui.down, r.appear);
+      // a small bubble marks the hovered answer
+      if (r.hov && Math.random() < 0.06) this.fx.add(x - 4, r.yy + 6, { r: 1 + Math.random() * 0.6, life: 0.5 });
+    }
   }
 }

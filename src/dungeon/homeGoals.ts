@@ -3,7 +3,7 @@
 //
 //   homeGoals({ driftwood: 3 })   -> [{ name: 'Workbench', unlock, lines: [{ id, have, after, need }], ready, readyNow }]
 //   the first entry is the house's current goal; then any other unbuilt piece the parcel helps with
-import { META } from '../meta/meta';
+import { META, mailMaterial } from '../meta/meta';
 import { ITEMS } from '../game/items';
 import { PIECES, costOf, isBuilt } from '../hideout/rebuild';
 
@@ -24,7 +24,8 @@ export function homeGoals(parcel: Record<string, number>, max = 3): HomeGoal[] {
     if (isBuilt(p.id)) continue;
     const cost = costOf(p.id);
     const lines: GoalLine[] = Object.entries(cost).filter(([id]) => ITEMS[id]).map(([id, need]) => {
-      const have = META.materials[id] ?? 0;
+      // (v7: what already waits in the home's mailbox counts as home)
+      const have = (META.materials[id] ?? 0) + mailMaterial(id);
       return { id, name: ITEMS[id].name, have, after: have + (parcel[id] ?? 0), need };
     });
     const helps = lines.some((l) => (parcel[l.id] ?? 0) > 0);

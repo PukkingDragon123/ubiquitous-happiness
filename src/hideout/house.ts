@@ -12,6 +12,7 @@ import { PIECES, isBuilt, homeProgress, type Piece } from './rebuild';
 import { buildShell, pieceModel, ghostOf, floorOutline, rubbleHeap, lectern, hitboxFor, GoalBoard, IN, WALL_T, DOOR_W, type Shell } from './pieces';
 import { damp } from '../core/math';
 import { TEX } from './tex';
+import { Mailbox } from './mailbox';
 
 export interface Spot {
   piece: Piece;
@@ -36,6 +37,13 @@ export const PORCH = { x0: -3.6, x1: 3.6, z0: IN.z1 + WALL_T, z1: 10.2, set: new
 export const BOARD_AT = new THREE.Vector3(-2.3, 0, 3.35);
 export const CRAB_HOME = new THREE.Vector3(-3.6, 0, 1.55);
 export const CODEX_AT = new THREE.Vector3(2.7, 0, 3.45);
+/** v7: Marge's mailbox just inside the front door (right of it), its door turned toward the doorway, its flag side
+ *  toward the camera; where the blobfish stands to open it */
+export const MAILBOX_AT = new THREE.Vector3(1.8, 0, 3.7);
+export const MAILBOX_YAW = -Math.PI / 2 + 0.45;
+/** the model is built life-size for a person; the home is the blobfish's scale */
+export const MAILBOX_SCALE = 1.3;
+export const MAILBOX_STAND = new THREE.Vector3(0.95, 0, 3.5);
 
 const CELL = 0.25, GX0 = IN.x0 - 0.5, GZ0 = IN.z0 - 0.5, GW = Math.ceil((IN.x1 - IN.x0 + 1) / CELL), GD = Math.ceil((PORCH.z1 - IN.z0 + 0.5) / CELL);
 
@@ -45,6 +53,8 @@ export class House {
   spots = new Map<string, Spot>();
   board = new GoalBoard();
   codex: THREE.Group;
+  /** v7: the mailbox (src/hideout/mailbox.ts) */
+  mailbox = new Mailbox();
   hemi: THREE.HemisphereLight;
   sun: THREE.DirectionalLight;
   warm: THREE.PointLight;
@@ -66,6 +76,9 @@ export class House {
     // the codex: a field journal open on a lectern by the door
     this.codex = lectern(); this.codex.position.copy(CODEX_AT); this.codex.rotation.y = -0.25;
     this.group.add(this.codex);
+    // the mailbox: always there (Marge put it up), the flag up while mail waits
+    this.mailbox.group.position.copy(MAILBOX_AT); this.mailbox.group.rotation.y = MAILBOX_YAW; this.mailbox.group.scale.setScalar(MAILBOX_SCALE);
+    this.group.add(this.mailbox.group);
     // ---- lights: a cold key through the broken roof, the water's hemisphere, a warm fill that grows with the home
     this.hemi = new THREE.HemisphereLight('#2e5470', '#1a1410', 0.9);
     this.sun = new THREE.DirectionalLight('#8ac8e8', 1.6);
@@ -121,7 +134,8 @@ export class House {
     this.group.add(ghost);
     const rubble = rubbleHeap(p.wall ? 4 : 6, p.x * 7 + p.z * 3);
     // (the front door's heap lies beside the doorway, not in it: the way out is always clear)
-    if (p.id === 'door') rubble.position.set(1.45, 0, IN.z1 - 0.55);
+    // (v7: on its left: the mailbox stands to its right)
+    if (p.id === 'door') rubble.position.set(-1.3, 0, IN.z1 - 0.55);
     else rubble.position.set(p.x + (p.wall !== undefined ? 0 : 0.2), 0, p.wall !== undefined ? p.z + (p.z < 0 ? 0.55 : -0.55) : p.z + 0.1);
     rubble.scale.setScalar(p.wall ? 0.7 : 0.85);
     this.group.add(rubble);
@@ -212,6 +226,7 @@ export class House {
     for (const s of this.spots.values()) if (s.rubble.visible && s.piece.wall === undefined) box(s.rubble.position.x, s.rubble.position.z, 0.7, 0.7, 0, 0.08);
     box(BOARD_AT.x, BOARD_AT.z, 1.3, 0.5, 0.18);
     box(CODEX_AT.x, CODEX_AT.z, 0.5, 0.45, 0);
+    box(MAILBOX_AT.x, MAILBOX_AT.z, 0.5, 0.78, MAILBOX_YAW, 0.12);
     // the fallen beam and the corner heaps while the house is a ruin
     if (this.shell.rubble[0]?.visible) { box(-4.7, 3.0, 1.5, 2.2, 0); box(4.9, 3.6, 1.1, 1.1, 0); box(5.3, 1.7, 1.0, 1.0, 0); }
   }
