@@ -40,6 +40,7 @@ import { BlobAvatar } from './obj/blobAvatar';
 import { HealClam3D } from './obj/clam';
 import { HP_PER, HEAL_ITEM, hpify } from '../combat/types';
 import { AbilityMedallion } from './obj/medallion';
+import { JellyFloat, BubbleChain, GlowKelp, HarpoonGauge } from './obj/gauges';
 import { hudModel, itemModel } from '../backpack/models';
 import { audio } from '../audio/audio';
 import { drawText } from './pixel/font';
@@ -391,6 +392,8 @@ export class Hud {
   private avatar = new BlobAvatar();
   private port = new Porthole3D(PR);
   private clam = new HealClam3D();
+  /** v6 signature gauges: HP jelly float, stamina bubble chain, mana glow-kelp, the boss's harpoon */
+  private jelly = new JellyFloat(); private bubbleChain = new BubbleChain(); private glowKelp = new GlowKelp(); private harpoon = new HarpoonGauge();
   /** the HP number as shown (counts up on a heal, drops on a hit) and its floating deltas */
   private hpShown = -1; private hpFlash = 0;
   private hpDeltas: { n: number; t: number }[] = [];
@@ -648,7 +651,7 @@ export class Hud {
     const nF = c?.flasksMax ?? 0;
     const x0 = pc.x + PR + 9, y0 = pc.y - 23;
     const barW = 112;
-    const ph = 42 + (hasMana ? 7 : 0);
+    const ph = 35 + (hasStam ? 12 : 0) + (hasMana ? 10 : 0);
     const aw = nF ? 40 : 0, ax = x0 + barW + 7;
     const right = (nF ? ax + aw : x0 + barW) + 8;
     const px0 = pc.x, pw = right - px0;
@@ -672,24 +675,21 @@ export class Hud {
       const a = 1 - clamp01((d.t - 0.7) / 0.5), up = easeOut(d.t * 1.5) * 12;
       ui.big((d.n > 0 ? '+' : '') + Math.round(d.n * HP_PER), nx + nw + 30, ty + 3 - up, 7.5, { color: d.n > 0 ? '#ffb8e0' : PAL.coral, alpha: a, align: 'center' });
     }
-    // --- the HP tube: coral liquid, a pale chip of the last hit, a pink pour while healing, a heartbeat when critical
-    let yy = y0 + 20;
-    const ticks = maxU > 1 && maxU <= 40 ? 1 / maxU : 0;
-    tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(9, ui.p(10)), this.hpBar, {
-      col: crit ? '#e8303a' : '#e0564a', chip: this.hpChip, ticks, t: this.t,
-      gain: this.hpPour > 0 ? Math.min(1, this.hpBar + this.hpPour * 0.25) : undefined, gainCol: '#ff8ac0',
-      flash: this.hurtT > 0.7 ? (this.hurtT - 0.7) * 2 : 0, pulse: crit ? Math.max(0, Math.sin(this.t * 7.5)) ** 4 : 0,
+    // --- HP: the jelly float in its rope net (a cord every 10 HP), stamina: the bubble chain, mana: the glow-kelp
+    let yy = y0 + 18;
+    const hf = clamp01(units / maxU);
+    this.jelly.draw(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 6), {
+      v: this.hpBar, chip: this.hpChip, gain: hf > this.hpBar + 0.002 ? hf : undefined, segs: Math.max(1, Math.round(maxU)),
+      crit, flash: this.hurtT > 0.7 ? (this.hurtT - 0.7) * 3.3 : 0, t: this.t, dt,
     });
-    yy += 12;
-    // --- stamina: teal, amber while regen waits, red guard-broken, white on a parry; a pale chip of what you spent
+    this.hpAt = { x: this.jelly.front.x / ui.k, y: this.jelly.front.y / ui.k };
+    yy += 15;
     if (hasStam && c) {
-      const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
-      const col = broken ? PAL.coral : c.staminaDelay > 0 ? '#e8a818' : '#2ac8a0';
-      const jig = c.guard === 'riposte' ? Math.round(Math.sin(this.t * 30)) * 0.5 : 0;
-      tube(ui.ui, ui.p(x0 - 2), ui.p(yy + jig), ui.p(barW + 4), Math.max(7, ui.p(7)), this.stamShown, { col, chip: this.stamChip, flash: this.stamFlash, ticks: 0.25, t: this.t });
+      const st = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0) ? 'broken' : this.stamFlash > 0.3 ? 'flash' : c.guard === 'riposte' ? 'riposte' : c.staminaDelay > 0 ? 'wait' : 'ok';
+      this.bubbleChain.draw(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), { v: this.stamShown, chip: this.stamChip, state: st, t: this.t, dt });
+      yy += 12;
     }
-    yy += 9;
-    if (hasMana) tube(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), Math.max(6, ui.p(6)), this.manaShown, { col: '#5a7aff', chip: this.manaChip, t: this.t + 3, crystal: true });
+    if (hasMana) this.glowKelp.draw(ui.ui, ui.p(x0 - 2), ui.p(yy), ui.p(barW + 4), { v: this.manaShown, chip: this.manaChip, t: this.t, dt });
     // --- the HEALING CLAM in its alcove, the charge count, the [R] HEAL tag hanging under the board
     this.clam.root.visible = nF > 0;
     if (nF > 0 && c) {
@@ -919,16 +919,11 @@ export class Hud {
     if (cx - BW / 2 - 14 < handR) { BW = Math.max(120, Math.min(320, ui.w - 10 - handR - 28)); cx = Math.max(handR + 14 + BW / 2, (handR + ui.w - 10) / 2); }
     const shake = Math.sin(this.t * 70) * this.bossShake * 2;
     const bx = cx - BW / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
-    // the dark plate with the bar
-    this.planes.draw(plate(ui.p(BW + 24), ui.p(25), 'iron', { rim: '#b04a3a', rope: [3, ui.p(BW + 24) - 8] }), ui.p(bx - 12), ui.p(py), { alpha: fade, shadow: 2 });
-    this.shimmer(ui, bx - 12, py, BW + 24, 25, 4.4, fade);
-    const v = this.bossShown;
-    tube(ui.ui, ui.p(bx - 4), ui.p(py + 6), ui.p(BW + 8), Math.max(9, ui.p(10)), v, { col: '#d8303a', chip: this.bossChip, flash: this.bossFlash, ticks: 0.1, t: this.t });
-    const po = clamp01(b.poise ?? 1);
-    if (po < 0.999) bar(ui.ui, ui.p(bx + 6), ui.p(py + 17.5), ui.p(BW - 12), Math.max(3, ui.p(3)), po, { col: '#f2c66d', back: '#160a0e' });
-    // the phase pips, centred on the plate's bottom rim
-    const n = Math.max(1, b.phases ?? 1), ph = Math.max(1, Math.min(n, b.phase ?? 1));
-    if (n > 1) for (let i = 0; i < n; i++) { const px = cx + (i - (n - 1) / 2) * 10, pyy = py + 23; gem(ui.ui, ui.p(px), ui.p(pyy), Math.max(2, ui.p(3.5)), '#e0564a', i < ph); }
+    // the carved harpoon: health inlaid in red coral lacquer, chunks chipping off on hits, iron collars at the phase
+    // thresholds, poise as a gold twine under the shaft
+    this.harpoon.draw(ui.ui, ui.p(bx - 22), ui.p(py + 9), ui.p(BW + 44), {
+      v: this.bossShown, chip: this.bossChip, flash: this.bossFlash, phase: b.phase, phases: b.phases, poise: b.poise, t: this.t, dt, alpha: fade,
+    });
     // the name ribbon stamps down onto the plate
     const name = b.name.toUpperCase();
     const st = clamp01((this.bossIn - 0.15) * 4), sEase = easeOutBack(st);

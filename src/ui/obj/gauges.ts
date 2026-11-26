@@ -156,7 +156,7 @@ export class JellyFloat {
     // bubbles rising through the jelly
     if (fill > 6) for (let i = 0; i < 4; i++) {
       const bx = 3 + ((i * 37 + 11) % Math.max(1, fill - 4)), by = h - 3 - Math.floor(((t * (0.45 + 0.13 * i) + i * 0.31) % 1) * (h - 5));
-      if (!isCav(b.get(bx, by)) && !isCav(this.stat[by * w + bx] ^ 1)) { b.set(bx, by, J[5]); if (i % 2 === 0) b.set(bx, by - 1, WHITE); }
+      if (isCav(this.stat[by * w + bx]) && isCav(this.stat[(by - 1) * w + bx])) { b.set(bx, by, J[5]); if (i % 2 === 0) b.set(bx, by - 1, WHITE); }
     }
     // the net over it all (cords, knots, rim ropes) and the glass glints: the static overlay, re-applied
     const ov = this.over;
