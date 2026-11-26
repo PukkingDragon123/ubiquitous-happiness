@@ -98,9 +98,13 @@ void main() {
   float fr = pow(1.0 - ndv, 1.7);
   vec3 L = normalize(vec3(-0.45, 0.8, 0.55));
   float s = max(dot(reflect(-V, N), L), 0.0);
-  float hi = smoothstep(0.9, 0.95, s);
-  vec3 col = mix(vCol * 0.85, vec3(0.86, 0.95, 0.96), fr * 0.6) + hi * 0.35;
-  float a = clamp(0.14 + fr * 0.75 + hi * 0.4, 0.0, 1.0);
+  float hi = smoothstep(0.92, 0.96, s);
+  // a real air bubble: nearly clear body, a rim that is pale where the light from above catches it and a darker,
+  // refracting teal low down, one small dull highlight (matte: no white glare)
+  float up = N.y * 0.5 + 0.5;
+  vec3 rim = mix(vec3(0.28, 0.52, 0.6), vec3(0.84, 0.94, 0.95), smoothstep(0.25, 0.75, up));
+  vec3 col = mix(vCol * 0.8, rim, fr) + hi * 0.28;
+  float a = clamp(0.1 + fr * 0.8 + hi * 0.35, 0.0, 1.0);
   gl_FragColor = vec4(col, a * abs(vFade));
 }`;
 let miniMat: THREE.ShaderMaterial | null = null;
