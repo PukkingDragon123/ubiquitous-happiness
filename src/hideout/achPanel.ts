@@ -36,7 +36,7 @@ export class AchievementsPanel {
     // the tally along the top rail
     // (v7: clear of the kelp that hangs over the frame's top-left corner)
     ui.text(`${done}/${ACHIEVEMENTS.length} EARNED`, x + il + 18, y + 8, { font: 'small', color: '#3a2008', shadow: '#f8dc90' });
-    ui.bar(x + il + 22 + ui.measure(`${done}/${ACHIEVEMENTS.length} EARNED`, 'small'), y + 9, 90, 5, Math.min(1, done / ACHIEVEMENTS.length), '#f0c040');
+    ui.bar(x + il + 22 + ui.measure(`${done}/${ACHIEVEMENTS.length} EARNED`, 'small'), y + 9, 56, 5, Math.min(1, done / ACHIEVEMENTS.length), '#f0c040');
     if (inp?.keyHit('ArrowRight')) this.sel = (this.sel + 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowLeft')) this.sel = (this.sel + ACHIEVEMENTS.length - 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowDown')) this.sel = Math.min(ACHIEVEMENTS.length - 1, this.sel + COLS);
