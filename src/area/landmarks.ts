@@ -23,7 +23,7 @@ const TAU = Math.PI * 2;
 export function buildLandmarks(scen: Scenery, group: THREE.Group, w: World) {
   const r = new Rng(scen.seed ^ 0x1a4d);
   switch (scen.a.id) {
-    case 'reef': reef(scen, r); shafts(scen, group, r, 6, '#fff4d0', 0.5); break;
+    case 'reef': reef(scen, r); shafts(scen, group, r, 6, '#bfe8e0', 0.2); break;
     case 'kelp': kelp(scen, group, r); break;
     case 'graveyard': graveyard(scen, r); break;
     case 'arctic': arctic(scen, group, r, w); break;
