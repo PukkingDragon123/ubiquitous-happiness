@@ -651,7 +651,7 @@ export class Hud {
     const nF = c?.flasksMax ?? 0;
     const x0 = pc.x + PR + 9, y0 = pc.y - 23;
     const barW = 112;
-    const ph = 35 + (hasStam ? 12 : 0) + (hasMana ? 10 : 0);
+    const ph = 35 + (hasStam ? 12 : 0) + (hasMana ? 12 : 0);
     const aw = nF ? 40 : 0, ax = x0 + barW + 7;
     const right = (nF ? ax + aw : x0 + barW) + 8;
     const px0 = pc.x, pw = right - px0;
@@ -921,7 +921,7 @@ export class Hud {
     const bx = cx - BW / 2 + shake, py = ui.h - 37 + (1 - ease) * 48;
     // the carved harpoon: health inlaid in red coral lacquer, chunks chipping off on hits, iron collars at the phase
     // thresholds, poise as a gold twine under the shaft
-    this.harpoon.draw(ui.ui, ui.p(bx - 22), ui.p(py + 9), ui.p(BW + 44), {
+    this.harpoon.draw(ui.ui, ui.p(bx - 26), ui.p(py + 9), ui.p(BW + 48), {
       v: this.bossShown, chip: this.bossChip, flash: this.bossFlash, phase: b.phase, phases: b.phases, poise: b.poise, t: this.t, dt, alpha: fade,
     });
     // the name ribbon stamps down onto the plate

@@ -29,6 +29,7 @@ import { itemModel } from './models';
 import { audio } from '../audio/audio';
 import { easeOutBack } from '../core/math';
 import { K, modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
+import { statRows, pocketMeter } from '../ui/obj/statRows';
 import { bubbles, kelp, caustics, SeaFx } from '../hideout/seaFx';
 import { Px, R, SPR, stamp, algae, coralline, grass, planks, wraps, lerpC } from '../ui/pixel/decor';
 
@@ -786,11 +787,8 @@ export class BackpackScreen implements Screen {
       const cnt = `${used}/${GRID_CELLS} pockets`;
       fg.text(cnt, x + w - pad, yy + fg.cap('title') - fg.cap('body'), { font: 'body', color: used >= GRID_CELLS ? K.coralL : K.cream, shadow: K.ink2, align: 'right' });
       yy += fg.lh('title') + 1;
-      // the capacity bar
-      const fw = Math.round((iw - 2) * used / GRID_CELLS);
-      ui.fill(ix, yy, iw, 5, K.ink2); ui.fill(ix + 1, yy + 1, iw - 2, 3, K.teal0);
-      if (fw > 0) { ui.fill(ix + 1, yy + 1, fw, 3, used >= GRID_CELLS ? K.coral : K.brass1); ui.fill(ix + 1, yy + 1, fw, 1, used >= GRID_CELLS ? K.coralL : K.brass2); }
-      yy += 11;
+      // the pocket meter: one stitched pocket per bag cell (src/ui/obj/statRows.ts)
+      yy += pocketMeter(fg, used, GRID_CELLS, ix, yy, iw, this.t) + 8;
       const b = buildLines(run.items);
       const bottom = y + h - 8;
       if (!b.stats.length && !b.skills.length) {
@@ -805,20 +803,8 @@ export class BackpackScreen implements Screen {
           yy += 19;
         }
       } else {
-        // the stat changes in two columns when they fit side by side, else one
-        const lh = fg.lh('body');
-        const half = Math.ceil(b.stats.length / 2);
-        const w1 = Math.max(0, ...b.stats.slice(0, half).map((q) => fg.measure(q.text, 'body')));
-        const w2 = Math.max(0, ...b.stats.slice(half).map((q) => fg.measure(q.text, 'body')));
-        const two = b.stats.length > 3 && w1 + 12 + w2 <= iw;
-        const rows = two ? half : b.stats.length;
-        const c2 = ix + Math.max(w1 + 12, Math.round(iw / 2));
-        b.stats.forEach((q, i) => {
-          const cx = two && i >= half ? c2 : ix, cy = yy + (two ? i % half : i) * lh;
-          if (cy + lh > bottom) return;
-          fg.text(q.text, cx, cy, { font: 'body', color: q.good ? K.kelpL : K.coralL, shadow: K.ink2 });
-        });
-        yy += rows * lh + 4;
+        // the stat changes as carved rows: an icon in a socket, the value big, the label (src/ui/obj/statRows.ts)
+        yy += statRows(fg, b.stats, ix, yy, iw, bottom - yy - (b.skills.length ? 24 : 0), this.t) + 6;
         if (b.skills.length && yy + 20 < bottom) {
           fg.text('SKILLS', ix, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += fg.lh('small');
           fg.textBox(b.skills.join(' · '), ix, yy, iw, { font: 'body', color: K.seaL, shadow: K.ink2 });

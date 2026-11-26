@@ -123,6 +123,11 @@ export class JellyFloat {
       while (this.chipBreak > 2) { this.chipBreak -= 2; this.bits.add({ x: x + 2 + chipPx + rnd(-1, 1), y: y + rnd(4, h - 4), vx: rnd(-6, 10), vy: rnd(-10, 10), c: '#ffe0d8', w: 2, h: 1, g: 220, life: 0.6 }); }
     }
     this.lastChip = s.chip;
+    // a heal pours in: pink drops fall into the float at the jelly's front and splash
+    if (gainPx > fill + 1 && Math.random() < s.dt * 22) {
+      this.bits.add({ x: x + 2 + fill + rnd(-1, 2), y: y - rnd(4, 9), vx: rnd(-4, 4), vy: rnd(20, 50), c: Math.random() < 0.3 ? '#ffffff' : '#ff9ac8', w: 1, h: 2, g: 320, life: 0.16 });
+      if (Math.random() < 0.5) this.bits.add({ x: x + 2 + fill, y: y + 3, vx: rnd(-30, 30), vy: rnd(-40, -15), c: '#ffc8e8', g: 260, life: 0.3 });
+    }
     this.slosh = Math.max(0, this.slosh - s.dt * 1.6);
     const t = s.t, beat = s.crit ? Math.max(0, Math.sin(t * 7.5)) ** 8 : 0, up = beat > 0.35 ? 1 : 0;
     const flash = s.flash ?? 0;
@@ -282,8 +287,8 @@ export class BubbleChain {
 }
 
 // ------------------------------------------------------------------ MANA: the bioluminescent kelp
-const KD = P('#0e1e0c', '#1d3a16', '#2a4a1e', '#33582a', '#4a6a2a');            // dull kelp (unlit)
-const GL = P('#1a1250', '#3a3aa8', '#5a5ae8', '#6a6aff', '#a8c0ff', '#e0f8ff');   // bioluminescent glow
+const KD = P('#0c1a0a', '#1a3414', '#24461c', '#2e5626', '#3e6a2c', '#56823a');   // dull kelp (unlit), dark -> light
+const GL = P('#160c48', '#2e2a96', '#4446d8', '#5c6af0', '#86b4ff', '#c8f4ff', '#ffffff'); // bioluminescence
 const BLAD = P('#3a3010', '#6e5c1c', '#a08a2c', '#ecd878');
 export interface KelpState { v: number; chip: number; t: number; dt: number }
 export class GlowKelp {
@@ -291,49 +296,57 @@ export class GlowKelp {
   private bits = new Bits();
   private lastV = -1;
   draw(ui: PixelUI, x: number, y: number, w: number, s: KelpState) {
-    const h = 9, b = this.b, t = s.t, cy = 4;
+    const h = 11, b = this.b, t = s.t, cy = 5;
     b.size(w, h); b.clear();
-    const x0 = 5, fill = x0 + Math.round(Math.max(0, Math.min(1, s.v)) * (w - x0 - 3)), chip = x0 + Math.round(Math.max(0, Math.min(1, s.chip)) * (w - x0 - 3));
-    if (this.lastV >= 0 && s.v < this.lastV - 0.003) for (let i = 0; i < 6; i++) this.bits.add({ x: x + fill + rnd(-2, 2), y: y + rnd(2, 7), vx: rnd(-10, 15), vy: rnd(-40, -15), c: i % 2 ? '#e0f8ff' : '#a8c0ff', g: -10, life: rnd(0.4, 0.8) });
+    const x0 = 5, span = w - x0 - 3;
+    const fill = x0 + Math.round(Math.max(0, Math.min(1, s.v)) * span), chip = x0 + Math.round(Math.max(0, Math.min(1, s.chip)) * span);
+    if (this.lastV >= 0 && s.v < this.lastV - 0.003) for (let i = 0; i < 7; i++) this.bits.add({ x: x + fill + rnd(-2, 2), y: y + rnd(2, 8), vx: rnd(-10, 18), vy: rnd(-45, -15), c: i % 2 ? '#ffffff' : '#86b4ff', g: -10, life: rnd(0.4, 0.8) });
     this.lastV = s.v;
     const pulse = (t * 46) % Math.max(20, fill + 24) - 12;
+    const glowCols: [number, number, number][] = [];
     for (let xx = 0; xx < w; xx++) {
       const lit = xx < fill, after = !lit && xx < chip;
       if (xx < x0) {
-        // the stipe: a narrow stem from a holdfast ring
-        for (const yy of [cy, cy + 1]) b.set(xx, yy, lit ? (yy === cy ? GL[4] : GL[2]) : (yy === cy ? KD[4] : KD[1]));
+        // the stipe: a narrow stem from a little holdfast
+        for (const yy of [cy, cy + 1]) b.set(xx, yy, lit ? (yy === cy ? GL[5] : GL[3]) : (yy === cy ? KD[5] : KD[2]));
         b.set(xx, cy - 1, INK); b.set(xx, cy + 2, INK);
         continue;
       }
-      const taper = Math.min(1, (xx - x0 + 1) / 6) * Math.min(1, (w - 1 - xx) / 9);
-      const hw = 3 * taper;
-      const rt = Math.sin(xx * 0.9) > 0.55 ? 1 : 0, rb = Math.sin(xx * 0.9 + 2.2) > 0.55 ? 1 : 0;
+      // the blade: tapering in from the stem and out to the tip, its margins ruffled (the frill steps in and out)
+      const taper = Math.min(1, (xx - x0 + 1) / 7) * Math.min(1, (w - 1 - xx) / 10);
+      const hw = 3.4 * taper;
+      const rt = Math.sin(xx * 1.05) > 0.4 ? 1 : 0, rb = Math.sin(xx * 1.05 + 2.4) > 0.4 ? 1 : 0;
       const top = Math.max(1, Math.round(cy - hw) + rt), bot = Math.min(h - 2, Math.round(cy + 1 + hw) - rb);
       if (bot < top) continue;
       b.set(xx, top - 1, INK); b.set(xx, bot + 1, INK);
+      if (lit) glowCols.push([xx, top - 1, bot + 1]);
       const near = Math.abs(xx - pulse) <= 3;
+      const vein = (xx - x0) % 5 === 0; // the blade's cells, divided by faint veins
       for (let yy = top; yy <= bot; yy++) {
-        const edge = yy === top || yy === bot, mid = yy === cy;
+        const edge = yy === top || yy === bot, mid = yy === cy, lower = yy > cy;
         let c: U;
         if (lit) {
-          c = mid ? (near ? WHITE : GL[5]) : edge ? (near ? GL[4] : GL[2]) : near ? GL[4] : (xx + yy * 2) % 6 === 0 ? GL[2] : GL[3];
-          if (!mid && !edge && hash(xx, yy) < 0.07 && Math.sin(t * 5 + hash(yy, xx) * 30) > 0.6) c = WHITE; // plankton twinkling
-          if (xx >= fill - 1 && !edge) c = GL[5];                                                          // the glowing front
-        } else if (after) c = mid ? GL[2] : edge ? GL[0] : GL[1];                                         // a dim afterglow
-        else c = mid ? KD[4] : edge ? KD[1] : (xx + yy * 2) % 6 === 0 ? KD[2] : KD[3];
+          c = mid ? (near ? GL[6] : GL[5]) : edge ? (lower ? GL[1] : GL[3]) : vein ? GL[2] : lower ? GL[3] : GL[4];
+          if (near && !mid) c = edge ? GL[4] : GL[5];
+          if (!mid && !edge && hash(xx, yy) < 0.08 && Math.sin(t * 5 + hash(yy, xx) * 30) > 0.55) c = GL[6]; // plankton twinkling
+          if (xx >= fill - 1 && !edge) c = GL[6];                                                            // the glowing front
+        } else if (after) c = mid ? GL[3] : edge ? GL[0] : GL[1];                                           // a dim afterglow
+        else c = mid ? KD[5] : edge ? (lower ? KD[0] : KD[2]) : vein ? KD[1] : lower ? KD[2] : KD[3];
         b.set(xx, yy, c);
       }
     }
     // air bladders on the midrib at 25 / 50 / 75%: olive-gold when dark, lit white-violet once the mana reaches them
     for (const k of [0.25, 0.5, 0.75]) {
-      const bx = x0 + Math.round(k * (w - x0 - 3)), on = bx < fill;
+      const bx = x0 + Math.round(k * span), on = bx < fill;
       for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) b.set(bx + dx, cy + dy, on ? GL[4] : BLAD[1]);
-      b.set(bx, cy, on ? WHITE : BLAD[3]); b.set(bx - 1, cy - 1, on ? GL[5] : BLAD[2]); b.set(bx + 1, cy + 1, on ? GL[2] : BLAD[0]);
+      b.set(bx, cy, on ? GL[6] : BLAD[3]); b.set(bx - 1, cy - 1, on ? GL[5] : BLAD[2]); b.set(bx + 1, cy + 1, on ? GL[2] : BLAD[0]);
+      for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, -1], [-1, 1], [1, 1]]) if (b.get(bx + dx, cy + dy) === INK) b.set(bx + dx, cy + dy, INK);
     }
     b.put();
     ui.img(b.shadow(), x + 1, y + 1, { alpha: 0.45 });
-    // the glow: a faint halo over the lit part, breathing
-    if (fill > x0 + 2) ui.fill(x + x0, y - 1, fill - x0, h + 2, '#8a9aff', 0.08 + 0.05 * Math.sin(t * 2.4));
+    // the glow: a soft light hugging the lit blade's outline, breathing
+    const ga = 0.16 + 0.08 * Math.sin(t * 2.4);
+    for (const [gx, gt, gb] of glowCols) { ui.fill(x + gx, y + gt - 1, 1, 1, '#86b4ff', ga); ui.fill(x + gx, y + gb + 1, 1, 1, '#86b4ff', ga); }
     ui.img(b.cv, x, y);
     this.bits.draw(ui, s.dt);
   }
@@ -416,7 +429,7 @@ export class HarpoonGauge {
   private paintStatic(w: number, h: number, n: number) {
     const b = this.b;
     b.clear();
-    const headL = 24, tailL = 22, l = headL + 3, r = w - tailL - 2;
+    const headL = 28, tailL = 22, l = headL + 5, r = w - tailL - 2;
     this.ch = { l, r };
     // the shaft: wood with grain, lit top, shaded bottom, ink outline
     for (let x = headL - 2; x < w - 6; x++) for (let y = 3; y <= 15; y++) {
@@ -440,21 +453,29 @@ export class HarpoonGauge {
     // notches every 10% on the shaft's top and bottom faces
     const cw = r - l;
     for (let k = 1; k < 10; k++) { const nx = l + Math.round((k / 10) * cw); b.set(nx, 4, WD[2]); b.set(nx + 1, 4, WD[8]); b.set(nx, 5, WD[3]); b.set(nx, 13, WD[1]); b.set(nx, 14, WD[1]); }
-    // the head: a barbed iron point, a ridged socket, rust in the recesses
-    for (let x = 0; x < headL + 1; x++) for (let y = 0; y < h; y++) {
-      const dy = y - 9;
-      let c: U | 0 = 0;
-      if (x <= 14) { const hw = (x / 14) * 4.6; if (Math.abs(dy + 0.5) <= hw + 0.5) c = Math.abs(dy + 0.5) > hw - 0.5 ? INK : dy < 0 ? (dy === -1 ? IR[5] : IR[4]) : dy === 0 ? IR[3] : IR[2]; }
-      if (x >= 14 && x <= headL && Math.abs(dy) <= 4) c = Math.abs(dy) === 4 || x === headL ? INK : (x - 14) % 3 === 0 ? IR[1] : dy < 0 ? IR[4] : IR[3];
-      if (c) b.set(x, y, c);
+    // the head: a long barbed iron point with a bright cutting edge, a ridged socket lashed to the shaft, rust
+    for (let x = 0; x <= 17; x++) {
+      const hw = (x / 17) * 5.2;
+      for (let y = 0; y < h; y++) {
+        const dy = y + 0.5 - 9.5, ad = Math.abs(dy);
+        if (ad > hw + 0.5) continue;
+        b.set(x, y, ad > hw - 0.5 ? INK : Math.abs(dy) < 0.6 ? IR[5] : dy < 0 ? (ad > hw - 1.5 ? IR[5] : IR[4]) : ad > hw - 1.5 ? IR[1] : IR[2]);
+      }
     }
-    // the barbs, swept back: thick wedges top and bottom
-    for (let k = 0; k <= 7; k++) for (const s of [-1, 1]) {
-      const bx = 9 + k, byy = 9 + s * (4 + Math.round(k * 0.62));
-      b.set(bx, byy, k === 7 ? INK : s < 0 ? IR[4] : IR[2]); b.set(bx, byy + s, INK); if (k > 1) b.set(bx, byy - s, s < 0 ? IR[3] : IR[1]);
+    // the barbs, swept back from the blade's shoulders
+    for (const sgn of [-1, 1]) for (let k = 0; k <= 9; k++) {
+      const bx = 11 + k, edge = 9.5 + sgn * (4.2 + k * 0.62);
+      for (let q = 0; q < 3 - Math.floor(k / 4); q++) { const yy = Math.round(edge - sgn * q); b.set(bx, yy, q === 0 ? INK : sgn < 0 ? (q === 1 ? IR[5] : IR[4]) : (q === 1 ? IR[2] : IR[3])); }
+      b.set(bx, Math.round(edge + sgn), INK);
     }
-    for (const [rx, ry] of [[6, 11], [10, 12], [17, 12], [19, 7]]) { b.set(rx, ry, RU[1]); b.set(rx + 1, ry, RU[0]); b.set(rx, ry - 1, RU[2]); }
-    b.set(2, 9, IR[5]); b.set(3, 8, IR[5]);
+    for (let x = 17; x <= headL + 2; x++) for (let y = 5; y <= 14; y++) {
+      const e = y === 5 || y === 14, ridge = (x - 17) % 4 === 0;
+      b.set(x, y, e ? INK : ridge ? IR[1] : y < 9 ? IR[4] : y === 9 ? IR[5] : IR[3]);
+    }
+    b.set(20, 7, IR[5]); b.set(21, 8, IR[1]); b.set(24, 11, IR[5]); b.set(25, 12, IR[1]);
+    for (const [rx, ry] of [[7, 11], [12, 12], [19, 12], [22, 12], [14, 7]]) { b.set(rx, ry, RU[1]); b.set(rx + 1, ry, RU[0]); b.set(rx, ry - 1, RU[2]); }
+    // twine lashing where the socket meets the shaft
+    for (let x = headL - 1; x <= headL + 2; x++) for (let y = 3; y <= 15; y++) b.set(x, y, y === 3 || y === 15 ? ROPE[0] : (x + y) % 3 === 0 ? ROPE[2] : (x + y) % 3 === 1 ? ROPE[5] : ROPE[4]);
     // the butt: a rope binding (twisted, diagonal), then the end grain
     for (let x = w - tailL; x < w - 8; x++) for (let y = 2; y <= 16; y++) {
       const ph = (x + y) % 4;
