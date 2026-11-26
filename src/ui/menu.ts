@@ -1,7 +1,9 @@
-// Main menu: an underwater diorama. The blobfish adventurer hovers in the god rays holding his toothpick sword
-// aloft, the title floats above in extruded pixel voxels, a worm on a hook dangles from a line above ("bite to
-// dive in" — click it and the blobfish lunges, chomps and the run begins), and a barnacled wooden signpost on
-// the seabed holds swinging planks for the other options. No buttons, no panels.
+// Main menu (v1, ?menu=): an underwater diorama. The blobfish adventurer hovers in the god rays holding his toothpick
+// sword aloft, a worm on a hook dangles from a line above ("bite to dive in" — click it and the blobfish lunges, chomps
+// and the run begins), and a barnacled wooden signpost on the seabed holds swinging planks for the other options.
+// v7: no 3D text. Every word is 2D on a PixelUI over the scene: the BLOBFISH logo (src/title/logo.ts) at the top, each
+// plank's word projected onto it (warming to gold and wobbling under the pointer), the game-over / victory heading and
+// its stats, the credits roll, and the little floating pops ('BITE TO DIVE IN', 'CHOMP!').
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
 import { makeSky } from '../gfx/sky';
@@ -12,8 +14,9 @@ import { Ocean } from '../world/ocean';
 import { BIOMES } from '../world/biomes';
 import { BlobModel, buildSword, outlineAt, SB_N } from '../player/blobModel';
 import { SoftBody } from '../player/softbody';
-import { voxelText } from './voxelText';
-import { STYLES, FloatText, textPlane, textSprite } from './text';
+import { PixelUI } from './pixel/ui';
+import type { TextOpts } from './pixel/font';
+import { Logo } from '../title/logo';
 import { buildBait } from '../fishing/bait';
 import { Px, ramp, pxNoise } from '../gfx/px';
 import { hash2 } from '../core/math';
@@ -22,24 +25,30 @@ import { audio } from '../audio/audio';
 import { damp, easeOutBack, clamp01 } from '../core/math';
 import { POST } from '../gfx/post';
 
-interface Plank { g: THREE.Group; label: string; action: () => void; hover: number; swing: number; swingV: number }
+interface Plank { g: THREE.Group; label: string | (() => string); action: () => void; hover: number; swing: number; swingV: number }
+/** a 2D word popped at a world point: it rises, wobbles and fades */
+interface Pop { text: string; x: number; y: number; vy: number; t: number; life: number; st: TextOpts }
+const POP: Record<'hint' | 'shout', TextOpts> = {
+  hint: { font: 'body', color: '#e6fbff', outline: '#0b1622' },
+  shout: { font: 'big', color: '#fff8dc', color2: '#ffc65e', outline: '#2a0b24', shadow: '#12060e' },
+};
 
 export class MenuScreen implements Screen {
   name = 'menu';
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(34, 1, 0.1, 1200);
-  overlay = new THREE.Scene();
-  overlays = [{ scene: this.overlay, camera: this.camera as THREE.Camera }];
+  ui = new PixelUI();
+  overlays = [this.ui.layer];
   private water = new WaterFX();
   private light = new Lighting();
   private fx = new Particles();
-  private text = new FloatText();
+  private pops: Pop[] = [];
+  private logo = new Logo();
   private ocean: Ocean;
   private blob = new BlobModel();
   private sb = new SoftBody(outlineAt, SB_N);
   private sword = buildSword();
   private swordPivot = new THREE.Group();
-  private title: THREE.Group = new THREE.Group();
   private bait: { group: THREE.Group; tick: (t: number, s: number) => void };
   private baitHover = 0;
   private lineMesh: THREE.Mesh;
@@ -52,14 +61,14 @@ export class MenuScreen implements Screen {
   onCredits?: () => void;
   onMenu?: () => void;
   mode: 'menu' | 'gameover' | 'victory' | 'credits' = 'menu';
-  private statLines: THREE.Sprite[] = [];
+  private head = '';
+  private lines: string[] = [];
 
   constructor(private game: Game) {
     this.light.applyLook(LOOKS.reef);
     this.ocean = new Ocean(BIOMES.reef, 4242);
     this.ocean.terrain.flatX = 0;
     this.scene.add(makeSky(), this.water.group, this.light.group, this.fx.object, this.ocean.group);
-    this.overlay.add(this.text.group);
     this.fx.waterAt = (x) => this.water.heightAt(x);
     this.fx.floorAt = (x) => this.ocean.terrain.floorAt(x);
     // the hero
@@ -68,12 +77,6 @@ export class MenuScreen implements Screen {
     this.swordPivot.add(this.sword);
     this.sword.scale.setScalar(1.9);
     this.scene.add(this.blob.root, ...this.blob.tailMeshes);
-    // title
-    const t1 = voxelText('BLOBFISH', { ...STYLES.title, fill: ['#fffbe8', '#ffe07a', '#ffb43a', '#f07a2a'] }, 1.15, 4, 0.55);
-    const t2 = voxelText('REEL REBELLION', { ...STYLES.title, fill: ['#ffffff', '#d8f6ff', '#8ad8ff'], outline: '#0c2a4a', outline2: '#020a14' }, 0.5, 3, 0.5);
-    t2.position.y = -0.82;
-    this.title.add(t1, t2);
-    this.scene.add(this.title);
     // dangling bait on a line from the surface
     this.bait = buildBait('worm');
     this.bait.group.scale.setScalar(4.2);
@@ -99,17 +102,15 @@ export class MenuScreen implements Screen {
     const barn = uw(new THREE.MeshStandardMaterial({ color: '#d8d0c0', roughness: 0.9 }));
     for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.05, 6), barn); b.position.set(Math.cos(i * 2.1) * 0.1, 0.2 + i * 0.12, Math.sin(i * 2.1) * 0.1); b.lookAt(b.position.clone().setY(b.position.y).multiplyScalar(2)); base.add(b); }
     this.scene.add(base);
-    const items: [string, () => void][] = [['CONTINUE', () => this.onStart?.()], ['CREDITS', () => this.onCredits?.()], [`SOUND: ${audio.volume.master > 0 ? 'ON' : 'OFF'}`, () => this.toggleSound()]];
+    const items: [string | (() => string), () => void][] = [['CONTINUE', () => this.onStart?.()], ['CREDITS', () => this.onCredits?.()], [() => `SOUND: ${audio.volume.master > 0 ? 'ON' : 'OFF'}`, () => this.toggleSound()]];
     items.forEach(([label, action], i) => {
       const g = new THREE.Group();
       const plank = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.42, 0.08), woodMat);
       plank.castShadow = true;
-      const txt = textPlane(label, { ...STYLES.body, fill: ['#fff6dc', '#f2d9a6'], outline: '#2a160a' }, 0.24);
-      txt.position.z = 0.05;
-      // nails + rope hangers
+      // nails + rope hangers (the word is 2D, drawn over the plank by update)
       const nail = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 4), uw(new THREE.MeshStandardMaterial({ color: '#6a5a4a', metalness: 0.7, roughness: 0.4 })));
       const n1 = nail.clone(); n1.position.set(-0.72, 0.12, 0.05); const n2 = nail.clone(); n2.position.set(0.72, 0.12, 0.05);
-      plank.add(txt, n1, n2);
+      plank.add(n1, n2);
       plank.position.set(0.95, -0.28, 0);
       g.add(plank);
       g.position.set(0, 3.05 - i * 0.6, 0.12);
@@ -127,6 +128,7 @@ export class MenuScreen implements Screen {
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    this.ui.resize(w, h, this.game.renderer.getPixelRatio());
     this.fx.setPixelScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
     this.ocean.snow.setScale(h * Math.min(devicePixelRatio || 1, 1.5), this.camera.fov);
   }
@@ -136,20 +138,10 @@ export class MenuScreen implements Screen {
     this.chomp = -1; this.camT = 0;
     audio.music(this.mode === 'gameover' ? 'mu_abyss' : 'mu_aquarium');
     POST.uDesat.value = 0; POST.uPulse.value = 0; this.game.timeScale = 1;
-    for (const s of this.statLines) s.removeFromParent();
-    this.statLines = [];
-    this.title.visible = this.mode === 'menu';
-    const head = this.mode === 'gameover' ? 'BELLY UP' : this.mode === 'victory' ? 'THE OCEAN IS FREE!' : this.mode === 'credits' ? 'CREDITS' : '';
+    this.pops = [];
+    this.head = this.mode === 'gameover' ? 'BELLY UP' : this.mode === 'victory' ? 'THE OCEAN IS FREE!' : this.mode === 'credits' ? 'CREDITS' : '';
     const lines: [string, string][] = this.mode === 'credits' ? CREDITS : this.mode === 'menu' ? [] : d.stats ?? [];
-    if (head) {
-      const h = textSprite(head, this.mode === 'gameover' ? STYLES.danger : STYLES.title, 0.75);
-      h.userData.row = -1; this.statLines.push(h); this.scene.add(h);
-    }
-    lines.forEach(([a, b], i) => {
-      const sp = textSprite(b ? `${a}  ${b}` : a, i % 2 ? STYLES.body : STYLES.hint, this.mode === 'credits' ? 0.24 : 0.32);
-      sp.userData.row = i; this.statLines.push(sp); this.scene.add(sp);
-    });
-    this.planks[0].label = this.mode === 'menu' ? this.planks[0].label : 'MENU';
+    this.lines = lines.map(([a, b]) => (b ? `${a}  ${b}` : a));
   }
   exit() {}
 
@@ -177,13 +169,6 @@ export class MenuScreen implements Screen {
     this.blob.look.set(this.baitHover > 0.5 ? 0.6 : 0.2 + mx * 0.6, this.baitHover > 0.5 ? 0.5 : 0.1 + my * 0.4);
     if (this.chomp < 0) this.blob.setExpression(this.mode === 'gameover' ? 'sleep' : this.mode === 'victory' ? 'happy' : this.baitHover > 0.5 ? 'happy' : 'brave');
     if (this.mode === 'gameover') { this.sb.angle = Math.PI * 0.92 + Math.sin(t * 0.6) * 0.08; root.rotation.z = 0; }
-    for (const sp of this.statLines) {
-      const row = sp.userData.row as number;
-      const appear = clamp01((this.camT - 0.6 - row * 0.18) * 2);
-      sp.position.set(0.4, heroY + 2.6 - (row + 1) * (this.mode === 'credits' ? 0.34 : 0.48) + (this.mode === 'credits' ? Math.max(0, this.camT - 4) * 0.25 : 0), 0.5);
-      if (row < 0) sp.position.y = heroY + 2.9;
-      sp.material.opacity = appear;
-    }
     this.blob.update(dt, { sb: this.sb, swim: 0.15, time: t, worldMatrix: root.matrixWorld, vel: new THREE.Vector2() });
     const hand = this.blob.handWorld(new THREE.Vector3());
     // sword raised to the light (in root space)
@@ -192,9 +177,6 @@ export class MenuScreen implements Screen {
     this.swordPivot.position.set(-0.22, -0.12, 0.62);
     this.swordPivot.rotation.set(0, 0.25, 1.32 + Math.sin(t * 1.3) * 0.06);
     if (Math.random() < dt * 1.5) { const tip = new THREE.Vector3(0.66, 0, 0).applyMatrix4(this.sword.matrixWorld); this.fx.emit('spark', tip.x, tip.y, { n: 1, size: 0.25, life: 0.5, color: '#fff8e0' }); }
-    // title bobbing in the rays
-    this.title.position.set(0.1, heroY + 2.3 + Math.sin(t * 0.9) * 0.06, -0.8);
-    this.title.rotation.set(Math.sin(t * 0.5) * 0.03, Math.sin(t * 0.37) * 0.08, Math.sin(t * 0.7) * 0.015);
     // the dangling bait
     const bx = -2.3 + Math.sin(t * 0.7) * 0.12, by = heroY + 0.35 + Math.sin(t * 1.1) * 0.1;
     this.bait.group.position.set(bx, by, 0.4);
@@ -207,7 +189,7 @@ export class MenuScreen implements Screen {
     const baitHit = this.ray.intersectObject(this.bait.group, true).length > 0 || this.rayNear(bx, by, 0.55);
     this.baitHover = damp(this.baitHover, baitHit ? 1 : 0, 10, dt);
     this.game.cursor = baitHit ? 'point' : 'normal';
-    if (baitHit && Math.random() < dt * 2) this.text.pop('BITE TO DIVE IN', bx, by - 0.9, 'hint', { size: 0.26, life: 0.9, vy: 0.05 });
+    if (baitHit && Math.random() < dt * 2) this.pop('BITE TO DIVE IN', bx, by - 0.9, 'hint', 0.9, 0.05);
     let hoverPlank: Plank | null = null;
     for (const p of this.planks) {
       const hit = this.ray.intersectObject(p.g.userData.pick, true).length > 0;
@@ -228,14 +210,70 @@ export class MenuScreen implements Screen {
       this.chomp += dt;
       // lunge at the bait
       this.sb.accel((bx + 0.6 - this.sb.cx) * 30, (by - this.sb.cy) * 30, dt);
-      if (this.chomp > 0.35 && this.bait.group.visible) { this.bait.group.visible = false; this.fx.burst('star', bx, by, 10, 3); this.fx.emit('bubble', bx, by, { n: 20, speed: 2 }); this.text.pop('CHOMP!', bx, by + 0.6, 'shout', { size: 0.5 }); this.game.addShake(0.15); }
+      if (this.chomp > 0.35 && this.bait.group.visible) { this.bait.group.visible = false; this.fx.burst('star', bx, by, 10, 3); this.fx.emit('bubble', bx, by, { n: 20, speed: 2 }); this.pop('CHOMP!', bx, by + 0.6, 'shout', 1.2, 0.6); this.game.addShake(0.15); }
       if (this.chomp > 1.0) { this.chomp = -1; this.bait.group.visible = true; this.onStart?.(); }
     }
     if (Math.random() < dt * 3) this.fx.emit('bubble', this.sb.cx + 0.4, this.sb.cy - 0.1, { n: 1, size: 0.1 });
     this.water.update(this.game.renderer, dt, 0);
     this.ocean.update(0, heroY, t);
     this.fx.update(dt);
-    this.text.update(dt);
+    this.draw2d(dt);
+  }
+
+  private pop(text: string, x: number, y: number, style: 'hint' | 'shout', life: number, vy: number) { this.pops.push({ text, x, y, vy, t: 0, life, st: POP[style] }); }
+  /** a world point -> UI px */
+  private toUi(v: THREE.Vector3): [number, number] {
+    const p = v.clone().project(this.camera);
+    return [Math.round((p.x * 0.5 + 0.5) * this.ui.w), Math.round((-p.y * 0.5 + 0.5) * this.ui.h)];
+  }
+  /** every word, 2D over the scene */
+  private draw2d(dt: number) {
+    const ui = this.ui, t = this.t;
+    ui.begin(this.game.input, dt);
+    const intro = clamp01(this.camT / 1.2);
+    // the logo, top centre, dropping in letter by letter
+    if (this.mode === 'menu') {
+      const lw = this.logo.w || 280;
+      this.logo.draw(ui, Math.round((ui.w - lw) / 2), 14, { t, appear: this.camT });
+    }
+    // the planks' words, projected onto the planks
+    for (const p of this.planks) {
+      const label = this.mode !== 'menu' && p === this.planks[0] ? 'MENU' : typeof p.label === 'function' ? p.label() : p.label;
+      const c = (p.g.userData.pick as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      const [x, y] = this.toUi(c);
+      const hot = p.hover > 0.5;
+      const st: TextOpts = hot ? { font: 'title', color: '#fff8dc', color2: '#ffc65e', outline: '#2a0b24' } : { font: 'title', color: '#fff6dc', color2: '#f2d9a6', outline: '#2a160a' };
+      let cx = x - Math.round(ui.measure(label, 'title') / 2);
+      [...label].forEach((ch, j) => {
+        const dy = hot ? Math.round(Math.sin(t * 7 - j * 0.7) * 1.2) : 0;
+        cx += ui.text(ch, cx, y - Math.round(ui.cap('title') / 2) + dy, { ...st, alpha: intro });
+      });
+    }
+    // the game-over / victory heading and its lines, or the credits roll
+    if (this.head) {
+      const cx = Math.round(ui.w / 2);
+      let y = 34;
+      const a = clamp01((this.camT - 0.4) * 2);
+      const hs: TextOpts = this.mode === 'gameover' ? { font: 'big', color: '#ffe0e0', color2: '#ff4a3a', outline: '#3a0006', shadow: '#000000' } : { font: 'big', color: '#fff7d6', color2: '#ffb43a', outline: '#4a1c08', shadow: '#000000' };
+      ui.text(this.head, cx, y + Math.round(Math.sin(t * 1.6) * 1.5), { ...hs, align: 'center', alpha: a });
+      y += 34;
+      const scroll = this.mode === 'credits' ? Math.max(0, this.camT - 4) * 14 : 0;
+      this.lines.forEach((l, i) => {
+        const yy = y + i * (this.mode === 'credits' ? 14 : 18) - scroll;
+        const la = clamp01((this.camT - 0.6 - i * 0.18) * 2) * clamp01((yy - 20) / 16);
+        if (la > 0) ui.text(l, cx, yy, { font: this.mode === 'credits' ? 'body' : 'title', color: i % 2 ? '#f3e7c9' : '#9fc0bc', outline: '#0b1622', align: 'center', alpha: la });
+      });
+    }
+    // the floating pops
+    for (const p of this.pops) {
+      p.t += dt; p.y += p.vy * dt;
+      const k = p.t / p.life, a = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
+      const [x, y] = this.toUi(new THREE.Vector3(p.x, p.y, 0.4));
+      const jump = p.t < 0.25 ? Math.round((1 - easeOutBack(clamp01(p.t / 0.25), 3)) * 8) : 0;
+      ui.text(p.text, x + Math.round(Math.sin(p.t * 3) * 1), y + jump, { ...p.st, align: 'center', alpha: a });
+    }
+    this.pops = this.pops.filter((p) => p.t < p.life);
+    ui.end();
   }
 
   private rayNear(x: number, y: number, r: number) {

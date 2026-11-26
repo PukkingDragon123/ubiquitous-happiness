@@ -1,22 +1,22 @@
 // The underwater signpost the title's travelling shot arrives at: an old waterlogged post planted in a rock
-// cairn, barnacled, wrapped in a kelp strand and rope, with
-//   - the TITLE PLANK on top: BLOBFISH in glassy bubble letters (src/ui/text3d.ts bubbleWord: real 3D, jiggling)
-//     and REEL REBELLION V-carved into the wood below (a real height-field normal map + paint),
-//   - two carved ARROW BOARDS on iron pegs: NEW GAME (pointing on, to the right) and RESUME (pointing back home,
-//     to the left; greyed, dusty and silted over when there is no save),
+// cairn, barnacled, wrapped in a kelp strand and rope, with (v7: no words on it at all; the title's words are 2D,
+// drawn on the UI over the scene by src/title/logo.ts and menu2d.ts)
+//   - the TITLE PLANK on top: a blobfish emblem between two wave marks V-carved into the wood (a real height-field
+//     normal map + paint),
+//   - two carved ARROW BOARDS on iron pegs: the way on (chevrons, pointing right: NEW GAME) and the way home (a little
+//     house, pointing left: CONTINUE; greyed, dusty and silted over when there is no save),
 //   - a carved wooden GEAR nailed to the post (settings),
 //   - a brass LANTERN hanging off the plank on a rope, swinging in the current.
 // Hovering a board warms it (emissive glow of its own paint), kicks a wobble on its peg and brightens the lantern.
 //
 //   const s = new Signpost(); scene.add(s.group); s.group.position.set(x, floorY, z);
 //   s.setEnabled('resume', hasSave); s.pick(raycaster) -> 'new' | 'resume' | 'gear' | null
-//   s.update(dt, t, hot)   (hot = the board under the mouse / keyboard selection);  s.lanternWorld(v)
+//   s.update(dt, t, hot, lantern?)   (hot = the board of the chosen menu item);  s.lanternWorld(v)
 import * as THREE from 'three';
 import { Px, hex, mix, type RGB } from '../gfx/px';
 import { psxMat, facet } from '../player/psx';
 import { Kit } from '../hideout/kit';
-import { glyphs, type FontName } from '../ui/pixel/font';
-import { bubbleWord, T3D } from '../ui/text3d';
+import { blobSprite } from './critter';
 import { boulder, rockPage, KELP, BRASS, GLOWP } from './art';
 import { fbm, hash2, damp, clamp01, TAU } from '../core/math';
 
@@ -24,24 +24,48 @@ export type BoardId = 'new' | 'resume' | 'gear';
 
 // ------------------------------------------------------------------ text masks + carving
 interface Mask { w: number; h: number; m: Uint8Array }
-/** the pixel font's hard on/off mask of a string, trimmed to its ink, optionally dilated (bold) */
-function textMask(str: string, font: FontName, bold = 0): Mask {
-  const g = glyphs(str, { font, color: '#ffffff' });
-  const d = g.cv.getContext('2d')!.getImageData(0, 0, g.w, g.h).data;
-  let x0 = g.w, y0 = g.h, x1 = -1, y1 = -1;
-  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) if (d[(y * g.w + x) * 4 + 3] > 127) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  if (x1 < 0) return { w: 1, h: 1, m: new Uint8Array(1) };
-  const w = x1 - x0 + 1 + bold * 2, h = y1 - y0 + 1 + bold * 2;
-  const m = new Uint8Array(w * h);
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    if (d[(y * g.w + x) * 4 + 3] <= 127) continue;
-    for (let dy = -bold; dy <= bold; dy++) for (let dx = -bold; dx <= bold; dx++) {
-      if (bold > 0 && Math.abs(dx) + Math.abs(dy) > bold) continue;
-      m[(y - y0 + bold + dy) * w + (x - x0 + bold + dx)] = 1;
-    }
-  }
+/** a mask from hand-drawn rows ('#' = carved) */
+function rowsMask(rows: string[]): Mask {
+  const w = Math.max(...rows.map((r) => r.length)), h = rows.length, m = new Uint8Array(w * h);
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) m[y * w + x] = r[x] === '#' ? 1 : 0; });
   return { w, h, m };
 }
+/** the blobfish emblem: the title critter's silhouette flanked by two carved wave marks */
+function emblemMask(): Mask {
+  const cv = blobSprite('big');
+  const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
+  const wave = ['..##....##..', '.#..#..#..#.', '#....##....#'];
+  const gap = 4, W = wave[0].length * 2 + cv.width + gap * 2, H = Math.max(cv.height, 3);
+  const m = new Uint8Array(W * H);
+  for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) m[y * W + x + wave[0].length + gap] = d[(y * cv.width + x) * 4 + 3] > 127 ? 1 : 0;
+  const wy = Math.round(H / 2) - 1;
+  wave.forEach((r, j) => { for (let i = 0; i < r.length; i++) if (r[i] === '#') { m[(wy + j) * W + i] = 1; m[(wy + j) * W + W - r.length + i] = 1; } });
+  return { w: W, h: H, m };
+}
+const CHEVRONS = rowsMask([
+  '##....##....##....',
+  '###...###...###...',
+  '.###...###...###..',
+  '..###...###...###.',
+  '...###...###...###',
+  '..###...###...###.',
+  '.###...###...###..',
+  '###...###...###...',
+  '##....##....##....',
+]);
+const HOUSE = rowsMask([
+  '......##......',
+  '.....####.....',
+  '....######....',
+  '...########...',
+  '..##########..',
+  '.############.',
+  '..##########..',
+  '..###....###..',
+  '..###....###..',
+  '..###....###..',
+  '..##########..',
+]);
 const on = (k: Mask, x: number, y: number) => x >= 0 && y >= 0 && x < k.w && y < k.h && k.m[y * k.w + x] === 1;
 
 /**
@@ -158,7 +182,6 @@ function slabGeo(poly0: [number, number][], depth: number): THREE.BufferGeometry
 const WOOD = ['#1c1610', '#33291c', '#4c3e2a', '#66563a', '#82704c'];
 const WOOD_DRY = ['#1e1c18', '#36322a', '#4e4a3e', '#686252', '#827c6a'];
 const CREAM: [string, string, string] = ['#b89a64', '#ecd8a4', '#fff6d6'];
-const RED: [string, string, string] = ['#7a1a14', '#c43a2c', '#f07050'];
 const GREY: [string, string, string] = ['#5a5852', '#7a766c', '#9a968a'];
 
 // sizes (metres)
@@ -228,13 +251,12 @@ export class Signpost {
     }
     post.add(kk.build(false));
 
-    // ---- the title plank: BLOBFISH in voxels over REEL REBELLION carved into two weathered boards
+    // ---- the title plank: a blobfish emblem carved into two weathered boards (no words: the title is 2D on the UI)
     const plank = new THREE.Group(); plank.position.set(0.05, PLANK.y, POST_W / 2 + PLANK.d / 2); plank.rotation.z = -0.022; post.add(plank);
     const PW = 384, PH = Math.round(PW * PLANK.h / PLANK.w);
     const pp = new Px(PW, PH), ph = new Float32Array(PW * PH);
     woodPage(pp, WOOD, { seed: 9, seams: [Math.round(PH * 0.52)], algae: 0.55 });
-    const sub = textMask('REEL REBELLION', 'title', 1);
-    carve(pp, ph, sub, PW / 2, Math.round(PH * 0.76), 2, RED, { chip: 0.03, seed: 2 });
+    carve(pp, ph, emblemMask(), PW / 2, Math.round(PH * 0.5), 3, CREAM, { chip: 0.06, seed: 2 });
     // nail heads at the board ends
     for (const [nx, ny] of [[10, 12], [PW - 11, 12], [10, PH - 14], [PW - 11, PH - 14], [PW / 2 - 2, 8], [PW / 2 + 2, PH - 10]]) { pp.ellipse(nx, ny, 2.4, 2.4, '#3a3632'); pp.set(nx - 1, ny - 1, '#8a8478'); }
     const plankTex = pp.texture();
@@ -246,11 +268,6 @@ export class Signpost {
     const plankPoly: [number, number][] = [[-hw, -hh], [hw * 0.35, -hh], [hw * 0.42, -hh + 0.05], [hw * 0.5, -hh], [hw, -hh], [hw, hh - 0.18], [hw - 0.13, hh - 0.05], [hw - 0.3, hh], [-hw, hh]];
     const pm = new THREE.Mesh(slabGeo(plankPoly, PLANK.d), [plankM, plankSide]);
     pm.castShadow = true; pm.receiveShadow = true; plank.add(pm);
-    // the title: BLOBFISH in glassy bubble letters (src/ui/text3d.ts), puffed up proud of the upper board
-    const letters = bubbleWord('BLOBFISH', T3D.logo, 0.5);
-    letters.scale.setScalar((PLANK.w * 0.84) / Math.max(0.01, letters.userData.width as number));
-    letters.position.set(-0.02, hh * 0.47, PLANK.d / 2 + 0.06);
-    plank.add(letters);
     // barnacles on the plank corners
     const bk = new Kit();
     for (let i = 0; i < 9; i++) { const c = i % 3; const x = (c === 0 ? -hw + 0.12 : c === 1 ? hw - 0.2 : -hw + 0.35) + (hash2(i, 1, 7) - 0.5) * 0.18, y = -hh + 0.1 + hash2(i, 2, 7) * 0.22; barnacle(bk, x, y, PLANK.d / 2 + 0.015, 0.03 + hash2(i, 3, 7) * 0.03, Math.PI / 2); }
@@ -266,11 +283,11 @@ export class Signpost {
       const W = len + back, Wpx = Math.round(W / FONT_M), Hpx = Math.round((BOARD_H + 0.14) / FONT_M);
       const bp = new Px(Wpx, Hpx), bh = new Float32Array(Wpx * Hpx);
       woodPage(bp, enabled ? WOOD : WOOD_DRY, { seed: id === 'new' ? 21 : 33, seams: [], algae: enabled ? 0.45 : 0.7, grey: enabled ? 0 : 0.35 });
-      const mk = textMask(label, 'big', 0);
+      const mk = label === 'home' ? HOUSE : CHEVRONS;
       // centre the text on the board's straight part (away from the point)
       const straight0 = dir > 0 ? back : tipL, straightW = len + back - tipL;
       const cxm = dir > 0 ? (straight0 + straightW / 2 - 0.0) : (tipL + straightW / 2);
-      carve(bp, bh, mk, Math.round((cxm / W) * Wpx), Math.round(Hpx / 2), 1, enabled ? CREAM : GREY, { chip: enabled ? 0.03 : 0.2, seed: id === 'new' ? 5 : 8 });
+      carve(bp, bh, mk, Math.round((cxm / W) * Wpx), Math.round(Hpx / 2), 2, enabled ? CREAM : GREY, { chip: enabled ? 0.03 : 0.2, seed: id === 'new' ? 5 : 8 });
       if (!enabled) {
         // silt and dust settled on the dead board: pale speckle heavier toward the top edge, a crust of grey sponge
         for (let yy = 0; yy < Hpx; yy++) for (let xx = 0; xx < Wpx; xx++) {
@@ -299,9 +316,9 @@ export class Signpost {
       pivot.rotation.z = b.rest;
       return b;
     };
-    const nb = mkBoard('new', 'NEW GAME', 1, 3.42, 2.95, true);
-    const rb = mkBoard('resume', 'RESUME', -1, 2.5, 2.55, true);
-    const rbOff = mkBoard('resume', 'RESUME', -1, 2.5, 2.55, false);
+    const nb = mkBoard('new', 'onward', 1, 3.42, 2.95, true);
+    const rb = mkBoard('resume', 'home', -1, 2.5, 2.55, true);
+    const rbOff = mkBoard('resume', 'home', -1, 2.5, 2.55, false);
     rbOff.pivot.visible = false;
     this.offResume = rbOff; this.onResume = rb;
 
@@ -372,7 +389,8 @@ export class Signpost {
   /** the lantern's brightness 0..1 (the screen drives the point light from it) */
   get lanternK() { return 0.75 + this.lantern.bright * 0.6; }
 
-  update(dt: number, t: number, hot: BoardId | null) {
+  /** hot: the board for the chosen item (it glows); lantern: the lantern brightens without a board (CREDITS) */
+  update(dt: number, t: number, hot: BoardId | null, lantern = false) {
     for (const b of Object.values(this.boards) as Board[]) {
       const isHot = hot === b.id && b.enabled;
       b.glow = damp(b.glow, isHot ? 1 : 0, 10, dt);
@@ -386,7 +404,7 @@ export class Signpost {
     }
     // the lantern swings on its rope and brightens while anything is hovered
     const L = this.lantern;
-    L.bright = damp(L.bright, hot && this.boards[hot].enabled ? 1 : 0, 6, dt);
+    L.bright = damp(L.bright, (hot && this.boards[hot].enabled) || lantern ? 1 : 0, 6, dt);
     const push = Math.sin(t * 0.6) * 0.06 + Math.sin(t * 1.7 + 1) * 0.02;
     L.vel += (-(L.ang - push) * 9 - L.vel * 0.8) * dt; L.ang += L.vel * dt;
     L.pivot.rotation.z = L.ang; L.pivot.rotation.x = Math.sin(t * 0.45) * 0.05;
