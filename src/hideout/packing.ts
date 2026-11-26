@@ -22,6 +22,7 @@
 //   const p = new Packing(house); p.open({ beat, env }); each frame in packing mode: p.update(dt, ui, input, cam, ray, h, live)
 //   swimming out: p.cineUpdate(dt, ui, input, live) -> true when the run should start;  p.door / p.bars / p.look
 //   p.config() -> TableConfig (RunConfig + pack + mats, start area 'reef')
+import { hpOf } from '../combat/types';
 import * as THREE from 'three';
 import { damp, dampAngle, easeOutBack, clamp01 } from '../core/math';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
@@ -76,7 +77,7 @@ interface Drag { from: 'wall' | 'bag'; it: ItemInst; entry?: Entry; sx: number; 
 type Focus = { area: 'wall'; i: number } | { area: 'bag'; uid: number } | null;
 
 const STAT_ROWS: { k: keyof Stats; label: string; icon: string; mul: number; fmt: (v: number) => string }[] = [
-  { k: 'maxHp', label: 'HP', icon: 'heart', mul: 1, fmt: (v) => String(v) },
+  { k: 'maxHp', label: 'HP', icon: 'heart', mul: 1, fmt: (v) => String(hpOf(v)) },
   { k: 'swordDmg', label: 'ATTACK', icon: 'sword', mul: 10, fmt: (v) => (v / 10).toFixed(1) },
   { k: 'speed', label: 'SPEED', icon: 'bubble', mul: 10, fmt: (v) => (v / 10).toFixed(1) },
   { k: 'maxMana', label: 'MANA', icon: 'mana', mul: 1, fmt: (v) => String(v) },
@@ -270,7 +271,7 @@ export class Packing {
   }
   /** going out: inside, low behind the blobfish, looking out through the shut front door at the open sea */
   private beatShot(): Shot {
-    const cam = new THREE.Vector3(0.5, 1.05, IN.z1 - 3.4), tgt = new THREE.Vector3(0, 0.9, IN.z1 + 4.5);
+    const cam = new THREE.Vector3(-0.55, 1.05, IN.z1 - 3.3), tgt = new THREE.Vector3(0.15, 0.9, IN.z1 + 4.5);
     const d = cam.clone().sub(tgt), dist = d.length();
     return { target: tgt, yaw: Math.atan2(d.x, d.z), pitch: Math.asin(d.y / dist), dist, fov: 40 };
   }
@@ -881,7 +882,7 @@ export class Packing {
       ui.fill(hx, ry + 2, 1, Math.max(0, cy - 17 - ry - 2), '#8c6e38');
       const hov = !this.drag && ui.hover(hx - 17, cy - 17, 34, 34) ? 1 : 0;
       this.stage.put(m.c.root, hx + sway, cy, 10);
-      m.c.update(dt, { hover: hov, ready: true, selected: age < 0.8 });
+      m.c.update(Math.min(dt, 1 / 40), { hover: hov, ready: true, selected: age < 0.8 });
       if (age < 0.05) m.c.bump();
       ui.block(hx - 17, cy - 17, 34, 34);
       if (hov) { const it = skillItem(m.id); ui.tooltip([{ text: SKILL_NAMES[m.id] ?? (ABILITY_NAME as Record<string, string>)[m.id] ?? m.id, font: 'title', color: K.brass2 }, { text: it ? `from your ${it.name}` : 'granted by your gear', color: K.cream2, font: 'small' }], { kind: 'dark', maxW: 170 }); }
