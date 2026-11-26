@@ -334,6 +334,8 @@ export class RunSummaryCard {
       if (ready && Math.sin(t * 4) > 0.6) ui.fill(bxx - 2, byy - 2, bw + 4, bh + 4, PAL.brass2, 0.3);
       go = ui.button('runsum:continue', 'CONTINUE', bxx, byy, bw, bh, { style: 'green', key: 'Enter', disabled: !ready, font: 'title' });
     }
+    // impatient? a press during the reveal jumps straight to the finished card (the next press continues)
+    if (!ready && t > 0.6 && (ui.input?.keyHit('Enter') || ui.input?.keyHit('Space') || ui.input?.keyHit('Escape') || ui.pressed)) this.t = Math.max(this.t, T3 + 0.12);
     if (ready && (go || ui.input?.keyHit('Space') || ui.input?.keyHit('Escape') || (ui.pressed && !ui.hover(bxx, byy, bw, bh)))) {
       for (const m of this.models) m.removeFromParent();
       this.emptyProp?.removeFromParent();
