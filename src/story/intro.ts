@@ -371,7 +371,7 @@ export class IntroScreen implements Screen {
     this.dlg.speaker({ id: 'mom', name: 'MOM', color: '#c84a7a', voice: 'chirp', pitch: 1.3, vol: 0.26, anchor: at(() => this.swimHead(this.mom)), onTalk: () => this.mom.p.sb.poke(0, 1, 0.6) });
     this.dlg.speaker({ id: 'dad', name: 'DAD', color: '#3a5a9a', voice: 'chirp', pitch: 0.78, vol: 0.3, anchor: at(() => this.swimHead(this.dad)), onTalk: () => this.dad.p.sb.poke(0, 1, 0.6) });
     this.dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#c8402a', voice: 'crab_click', pitch: 0.9, vol: 0.34, anchor: at(() => this.crab.head()), onTalk: () => { this.crab.talk = 1; } });
-    this.dlg.speaker({ id: 'marge', name: 'MARGE', color: '#2a8a8a', voice: 'bub', pitch: 0.85, vol: 0.35, anchor: at(() => { const m = this.area.mailbox.manatee; return new THREE.Vector3(m.x, m.y + 1.3, m.z); }) });
+    this.dlg.speaker({ id: 'marge', name: 'MARGE', color: '#2a8a8a', voice: 'bub', pitch: 0.85, vol: 0.35, anchor: at(() => { const m = this.area.mailbox.manatee; return new THREE.Vector3(m.x, m.y + 1.3, m.z); }), onTalk: () => this.area.mailbox.manatee.talk() });
     this.dlg.speaker({ id: 'narr', name: '', color: '#000000', voice: 'k_tick', pitch: 0.7, vol: 0.12 });
     // music + room tone
     this.ambience?.stop(); this.ambience = audio.loop(a.ambience, 0.3);

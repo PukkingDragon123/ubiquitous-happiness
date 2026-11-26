@@ -329,7 +329,7 @@ export class DungeonScreen implements Screen {
     this.player.onDeath = () => this.die();
     this.dlg = new Dialogue(this.hud.ui, () => this.camera);
     this.dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e8603a', voice: 'crab_click', pitch: 0.9, anchor: () => this.shop?.head() ?? null });
-    this.dlg.speaker({ id: 'manatee', name: 'MAUDE', color: '#8ab8e8', voice: 'whale', pitch: 1.6, vol: 0.25, anchor: () => { const m = this.level?.manatee; return m ? new THREE.Vector3(m.x, m.y + 1.3, m.z) : null; } });
+    this.dlg.speaker({ id: 'manatee', name: 'MARGE', color: '#8ab8e8', voice: 'whale', pitch: 1.6, vol: 0.25, anchor: () => { const m = this.level?.manatee; return m ? new THREE.Vector3(m.x, m.y + 1.3, m.z) : null; }, onTalk: () => this.level?.manatee?.talk() });
     this.wire();
     this.resize(this.game.w, this.game.h);
   }
