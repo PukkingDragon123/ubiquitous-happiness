@@ -83,6 +83,7 @@ import { buildFish } from '../fish';
 import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillDrops, rollBig, bigChance, type Reward } from '../dungeon/rewards';
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
 import type { PixelUI } from '../ui/pixel/ui';
+import { runSpec, type TouchSpec } from '../ui/touch';
 import { plate, PAL } from '../ui/obj/plates';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 
@@ -262,6 +263,19 @@ export class DungeonScreen implements Screen {
   private hintT = 0;
   private hintText = '';
   private hintKey = '';
+  /** v8 touch: the E-key prompt showing this frame (lights the USE button with its word) */
+  private touchPrompt: string | null = null;
+  touch(): TouchSpec | null {
+    const p = this.player;
+    if (this.summary || this.ended || !this.level || !p) return null;
+    if (this.paused) return { buttons: { pause: true } };
+    if (this.mail) return null;
+    if (this.phase === 'dead') return { buttons: { pause: true } };
+    const spec = runSpec(p, { prompt: this.touchPrompt, bombs: this.bombs });
+    // a question on the floating words: they take the taps (no stick under them)
+    if (this.dlg?.choosing) spec.stick = false;
+    return spec;
+  }
   /** a line of help at the bottom of the screen for a few seconds */
   hint(text: string, life = 4, key = '') { this.hintText = text; this.hintT = life; this.hintKey = key; }
   /** dev: teleport the blobfish (console: dungeon.tp(x, y?)) */
@@ -1718,6 +1732,7 @@ export class DungeonScreen implements Screen {
     const chestPrompt = this.mail ? null : this.updateChests();
     let prompt = this.mail ? null : this.interact() ?? chestPrompt ?? this.wayPrompt();
     this.hintT -= dt;
+    this.touchPrompt = prompt && prompt.key === 'E' && !prompt.bad ? prompt.label : this.dlg?.busy ? 'NEXT' : null;
     if (!prompt && this.hintT > 0) prompt = { key: this.hintKey, label: this.hintText };
     // ---- camera, water, fx
     this.updateArrival(dt);

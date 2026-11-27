@@ -35,6 +35,7 @@
 // a skip aborts the whole chain (every pending await rejects with ABORT). Shots are functions returning a camera
 // framing { x, y, dist, yaw, h, roll (dutch), fov (zoom) }; push() blends two of them over time, whip() snaps.
 import * as THREE from 'three';
+import type { TouchSpec } from '../ui/touch';
 import type { Game, Screen } from '../game/game';
 import type { Input } from '../core/input';
 import { Run } from '../game/run';
@@ -56,7 +57,7 @@ import { makeBoat, makeFisherman, type Vessel, type Fisherman } from '../humans'
 import { ITEMS, installItemSystem, getItem } from '../game/items';
 import { addMaterials, stashItem, returnToStash } from '../meta/meta';
 import { glint } from '../combat/telegraph';
-import { PixelUI } from '../ui/pixel/ui';
+import { PixelUI, keyName } from '../ui/pixel/ui';
 import { Text3DLayer, Float3D, T3D } from '../ui/text3d';
 import { Dialogue, type Line } from './dialogue';
 import { HEAL_ITEM } from '../combat/types';
@@ -94,6 +95,8 @@ class Gate {
   /** the real input (captured before the gate is swapped in as game.input) */
   base: Input | null = null;
   get mouse() { return this.base!.mouse; }
+  get touchMode() { return this.base?.touchMode ?? false; }
+  get stick() { return this.src && this.allow.has('move') ? this.src.stick : null; }
   get lastMouse() { return this.src && this.allow.has('aim') ? this.src.lastMouse : 0; }
   get lastKeyboard() { return this.src && this.allow.has('aim') ? this.src.lastKeyboard : performance.now(); }
   get down() { return this.src && this.allow.has('keys') ? this.src.down : this.none; }
@@ -962,6 +965,8 @@ export class IntroScreen implements Screen {
   }
   /** a lesson's name card: a big bubble word up ahead of the kid (and the key under it) */
   private lessonCard(title: string, sub: string) {
+    // (a touch screen: name the on-screen keys, src/ui/touch.ts)
+    if (PixelUI.touch) sub = ({ SWIM: 'THE STICK: THUMB ON THE LEFT', DART: 'TAP DASH', CHARGE: 'HOLD DASH, LET GO', SLASH: 'TAP ATTACK', PARRY: 'TAP GUARD', HEAL: 'HEAL: EAT A CLAM' } as Record<string, string>)[title] ?? sub;
     // over the middle of the shot the lesson just framed, in its upper half
     const c = this.camFn();
     const x = c.x, y = Math.min(-1.6, c.y + c.dist * 0.17);
@@ -1568,6 +1573,24 @@ export class IntroScreen implements Screen {
     if (ids.length) this.t3d.add('SENT HOME', this.area.mailbox.manatee.x, this.area.mailbox.manatee.y + 2, 0, T3D.gold, { size: 0.5, life: 2.2, rise: 0.5 });
   }
 
+  /** v8 touch: SKIP (hold, like ESC) always; in free play the stick, DASH, and from the fight lessons on ATTACK,
+   *  GUARD, HEAL and USE */
+  touch(): TouchSpec | null {
+    if (!this.built || this.finished || this.skipping >= 0) return null;
+    const skip = { label: 'SKIP', at: { a: 'tr' as const, x: 26, y: 30 } };
+    const free = this.control === 'free' && !this.dlg.blocking;
+    if (!free) return { buttons: { pause: skip } };
+    const k = this.kid, atk = this.allowAttack;
+    return {
+      stick: true,
+      buttons: {
+        pause: skip, dash: true, attack: atk, ability: atk,
+        flask: atk && k.combat.flasksMax > 0 ? { count: k.combat.flasks, dim: k.combat.flasks <= 0 } : false,
+        interact: atk ? { label: 'USE' } : false,
+      },
+    };
+  }
+
   // ================================================================ frame
   update(dt: number) {
     const g = this.game, inp = g.input;
@@ -1809,11 +1832,11 @@ export class IntroScreen implements Screen {
     // the [E] prompt over the kid
     if (this.prompt && !this.dlg.blocking) {
       const s = this.toUi(this.kid.x, this.kid.y + 0.6);
-      const kw = ui.keycap(this.prompt.key, 0, -100);
+      const kw = ui.keycap(keyName(this.prompt.key), 0, -100);
       const lw = ui.measure(this.prompt.label, 'small');
       const wd = kw + 3 + lw, x = Math.round(s.x - wd / 2), y = Math.round(s.y - 30 + Math.sin(this.real * 4) * 1.5);
       ui.fill(x - 3, y - 2, wd + 6, 16, '#000000', 0.45);
-      ui.keycap(this.prompt.key, x, y);
+      ui.keycap(keyName(this.prompt.key), x, y);
       ui.text(this.prompt.label, x + kw + 3, y + 3, { font: 'small', color: '#f4f0e6', outline: '#06080e' });
     }
     // an arrow to the current goal when it's off screen
@@ -1831,7 +1854,9 @@ export class IntroScreen implements Screen {
     const text = g.of !== undefined ? `${g.text}  ${g.n ?? 0}/${g.of}` : g.text;
     const tw = ui.measure(text, 'body');
     let kw = 0;
-    for (const [key, label] of g.keys ?? []) kw += ui.keycap(key, 0, -100) + 3 + (label ? ui.measure(label, 'small') + 7 : 0);
+    // (on a touch screen WASD and ARROWS both say STICK: show it once)
+    const keys = (g.keys ?? []).map(([k2, l]) => [keyName(k2), l] as [string, string]).filter(([k2, l], i, a) => !(PixelUI.touch && !l && a.some(([k3], j) => j > i && k3 === k2)));
+    for (const [key, label] of keys) kw += ui.keycap(key, 0, -100) + 3 + (label ? ui.measure(label, 'small') + 7 : 0);
     const w = 14 + tw + (kw ? kw + 8 : 0) + 6;
     const pop = Math.min(1, this.goalT * 5);
     const x = Math.round((ui.w - w) / 2), y = bar + 5 - Math.round((1 - pop) * 6);
@@ -1841,7 +1866,7 @@ export class IntroScreen implements Screen {
     ui.fill(x + 5, y + 6, 3, 3, '#ffd860');
     ui.text(text, x + 12, y + 4, { font: 'body', color: '#ffffff', shadow: '#000', alpha: pop });
     let hx = x + 12 + tw + 8;
-    for (const [key, label] of g.keys ?? []) {
+    for (const [key, label] of keys) {
       hx += ui.keycap(key, hx, y + 2, true) + 3;
       if (label) hx += ui.text(label, hx, y + 5, { font: 'small', color: '#c8d8f0', shadow: '#000', alpha: pop }) + 7;
     }
@@ -1911,7 +1936,8 @@ export class IntroScreen implements Screen {
     void real;
     const k = clamp(this.skipT / SKIP_HOLD, 0, 1);
     const cx = ui.w - 16, cy = ui.h - 16, r = 7;
-    const hintOn = this.real < 10 || k > 0 || this.control === 'script';
+    // (a touch screen has its own SKIP key, top right: the ring only shows the hold filling)
+    const hintOn = PixelUI.touch ? k > 0 : this.real < 10 || k > 0 || this.control === 'script';
     if (!hintOn) return;
     const alpha = k > 0 ? 1 : 0.55;
     ui.fill(cx - r - 2, cy - r - 2, r * 2 + 5, r * 2 + 5, '#000000', 0.35 * alpha);
@@ -1922,7 +1948,7 @@ export class IntroScreen implements Screen {
       let a = Math.atan2(xx + 0.5, -(yy + 0.5)); if (a < 0) a += TAU;
       ui.fill(cx + xx, cy + yy, 1, 1, a / TAU <= k ? '#ffd860' : '#3a4252', alpha);
     }
-    ui.text('ESC', cx, cy - 3, { font: 'small', color: k > 0 ? '#ffffff' : '#c8c8c8', align: 'center', alpha });
+    if (!PixelUI.touch) ui.text('ESC', cx, cy - 3, { font: 'small', color: k > 0 ? '#ffffff' : '#c8c8c8', align: 'center', alpha });
     ui.text(k > 0 ? 'SKIPPING...' : 'HOLD TO SKIP', cx - r - 5, cy - 3, { font: 'small', color: '#e8e0d0', outline: '#06080e', align: 'right', alpha });
   }
 }

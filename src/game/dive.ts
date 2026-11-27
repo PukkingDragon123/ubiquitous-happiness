@@ -2,6 +2,7 @@
 // runs the gameplay loop, frames the camera, and when every angler has given up, a crossroads current opens
 // that carries you back to the map.
 import * as THREE from 'three';
+import { runSpec, type TouchSpec } from '../ui/touch';
 import type { Game, Screen } from './game';
 import type { World, Entity, Team, DamageKind } from './types';
 import { Run } from './run';
@@ -72,6 +73,8 @@ export class DiveScreen implements Screen {
   static boss?: (w: World, node: DiveNode, fishing: FishingSystem, done: () => void) => void;
 
   constructor(public game: Game) {}
+  /** v8 touch: the swim-and-fight set (USE rides a current / lets go) */
+  touch(): TouchSpec | null { return this.player ? runSpec(this.player, { prompt: this.riding ? 'LET GO' : null }) : null; }
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();

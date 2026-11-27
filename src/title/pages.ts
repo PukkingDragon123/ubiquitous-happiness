@@ -1,12 +1,12 @@
 // The small pages shared by the title and the game (v7 polish):
 //   SettingsPanel  SOUND (volume, music), PICTURE (motion blur, low quality), CONTROLS (the keys), RESET SAVE; a kit
 //                  card: a lacquered driftwood panel with its name plank, carved section heads with rope rules,
-//                  rows that light up under the pointer, values that count, and a little blobfish that potters
+//                  rows that light up under the pointer, values that count, and a little hermit crab that potters
 //                  along the bottom and blows a bubble whenever you change something.
 //   CreditsPanel   a slow scroll (gold heads, cream names) that fades in and out at the edges of the window, with the
-//                  blobfish waving goodbye at the end.
+//                  hermit crab waving its claw goodbye at the end.
 //   PausePanel     an in-game pause screen in the title's style: the scene dimmed, a jelly-letter title (PAUSED / HOME)
-//                  and the choices as big floating words (no boxes) with the blobfish cursor; the caller gives the items.
+//                  and the choices as big floating words (no boxes) with the pearl cursor; the caller gives the items.
 // draw() returns true (Settings / Credits) when the page wants to close; they fill exactly SETTINGS_W x SETTINGS_H /
 // CREDITS_W x CREDITS_H UI px from (x, y).
 //
@@ -18,7 +18,7 @@ import { KIT } from '../ui/pixel/skins';
 import { META, saveMeta, resetMeta } from '../meta/meta';
 import { audio } from '../audio/audio';
 import { clamp01 } from '../core/math';
-import { blobSprite } from './critter';
+import { hermitCrab } from './seaSprites';
 import { TitleMenu, type MenuItem } from './menu2d';
 import { JellyWord, SEAGLASS } from './logo';
 
@@ -53,26 +53,29 @@ function rowGlow(ui: PixelUI, id: string, x: number, y: number, w: number, h: nu
   return k;
 }
 
-/** a blobfish pottering about in a strip (x0..x1) at y; it puffs a bubble when nudged */
+/** a hermit crab pottering about in a strip (x0..x1) at y; it waves and blows a bubble when nudged */
 class Potterer {
   private x = -1; private dir = 1; private puff = -1; private t = 0; private wait = 0;
   nudge() { this.puff = 0; }
   draw(ui: PixelUI, x0: number, x1: number, y: number, dt: number) {
     this.t += dt;
-    const spr = blobSprite('big', { blink: (this.t % 3.9) < 0.12, puff: this.puff >= 0 && this.puff < 0.25 });
+    const walking = this.wait <= 0 && this.puff < 0;
+    const spr = hermitCrab(this.puff >= 0 && this.puff < 0.6 ? 2 : walking ? ((Math.floor(this.t * 7) % 2) as 0 | 1) : 0);
+    y += 5; // (it is shorter than the old fellow: sit it on the same line)
     if (this.x < 0) this.x = x0;
     if (this.wait > 0) this.wait -= dt;
-    else {
+    else if (this.puff < 0) {
       this.x += this.dir * dt * 9;
       if (this.x > x1 - spr.width) { this.x = x1 - spr.width; this.dir = -1; this.wait = 1.2; }
       if (this.x < x0) { this.x = x0; this.dir = 1; this.wait = 1.6; }
     }
     if (this.puff >= 0) {
       this.puff += dt;
-      if (this.puff > 0.25 && this.puff - dt <= 0.25) { const mx = this.dir > 0 ? this.x + spr.width : this.x; ui.bubble(mx, y + 11, { r: 2, vy: -16, life: 1.2 }); ui.bubble(mx + this.dir * 2, y + 8, { r: 1, vy: -20, delay: 0.1 }); }
+      if (this.puff > 0.25 && this.puff - dt <= 0.25) { const mx = this.dir > 0 ? this.x + spr.width - 4 : this.x + 4; ui.bubble(mx, y + 4, { r: 2, vy: -16, life: 1.2 }); ui.bubble(mx + this.dir * 2, y + 1, { r: 1, vy: -20, delay: 0.1 }); }
       if (this.puff > 0.6) this.puff = -1;
     }
-    const bob = Math.round(Math.sin(this.t * 2.2) * 1);
+    // a scuttle: a hop of a pixel on every other step
+    const bob = walking && Math.floor(this.t * 7) % 2 ? -1 : 0;
     ui.img(spr, Math.round(this.x), y + bob, { flipX: this.dir < 0, w: spr.width, h: spr.height });
   }
 }
@@ -80,7 +83,7 @@ class Potterer {
 export class SettingsPanel {
   private arm = 0;
   private confirm = false;
-  private fish = new Potterer();
+  private crab = new Potterer();
   open() { this.arm = 0; this.confirm = false; }
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
     const w = SETTINGS_W, h = SETTINGS_H;
@@ -133,18 +136,21 @@ export class SettingsPanel {
     // ---- CONTROLS: two tidy columns of keycaps
     sectionHead(ui, 'CONTROLS', 'move', ix, yy, iw);
     yy += 15;
-    const keys: [string, string][] = [['WASD', 'swim'], ['LMB', 'attack'], ['RMB', 'skill'], ['SHIFT', 'dash'], ['E', 'use'], ['TAB', 'bag']];
+    // (a touch screen: the on-screen keys, src/ui/touch.ts)
+    const keys: [string, string][] = PixelUI.touch
+      ? [['STICK', 'swim'], ['ATTACK', 'hit'], ['GUARD', 'parry'], ['DASH', 'dart'], ['SKILL', 'cast'], ['USE', 'use']]
+      : [['WASD', 'swim'], ['LMB', 'attack'], ['RMB', 'skill'], ['SHIFT', 'dash'], ['E', 'use'], ['TAB', 'bag']];
     // columns as wide as their widest hint, spread across the row
     const cw = [0, 1, 2].map((c) => Math.max(ui.hintW(...keys[c]), ui.hintW(...keys[c + 3])));
     const gap = Math.max(0, Math.floor((iw - 6 - cw[0] - cw[1] - cw[2]) / 2));
     const cols = [ix + 6, ix + 6 + cw[0] + gap, ix + 6 + cw[0] + cw[1] + gap * 2];
     keys.forEach(([k, l], i) => ui.hint(k, l, cols[i % 3], yy + Math.floor(i / 3) * 16));
-    // ---- the buttons, and the blobfish pottering between them
-    if (changed) this.fish.nudge();
+    // ---- the buttons, and the hermit crab pottering between them
+    if (changed) this.crab.nudge();
     const by = y + h - 33;
     if (ui.button('set:reset', 'RESET SAVE', x + 13, by, 98, 22, { style: 'red' })) { this.confirm = true; this.arm = 0; }
     if (ui.button('set:back', 'BACK', x + w - 95, by, 82, 22, { style: 'green', key: 'Escape', keyLabel: 'ESC' })) close = true;
-    if (ui.deco) this.fish.draw(ui, x + 116, x + w - 100, by + 2, dt);
+    if (ui.deco) this.crab.draw(ui, x + 116, x + w - 100, by + 2, dt);
     return close;
   }
 }
@@ -181,9 +187,9 @@ export class CreditsPanel {
           const a = clamp01((yy - wy0) / 14) * clamp01((wy1 - (yy + lh)) / 14);
           if (f === 'big') ui.text(l, cx, yy, { font: 'big', color: '#ffd6bc', color2: '#e9767c', outline: '#2a0b24', align: 'center', alpha: a });
           else ui.text(l, cx, yy, { font: f === 'head' ? 'title' : f === 'small' ? 'small' : 'body', color: c || W, align: 'center', outline: f === 'head' ? KIT.ink : undefined, shadow: f === 'head' ? undefined : '#06141a', alpha: a });
-          // the blobfish under the last line, waving its tail goodbye
+          // the hermit crab under the last line, waving its claw goodbye
           if (l === 'thanks for playing') {
-            const spr = blobSprite('big', { blink: (this.t % 2.7) < 0.15 });
+            const spr = hermitCrab(Math.floor(this.t * 3) % 2 ? 2 : 0);
             const fa = clamp01((yy + 22 - wy0) / 14) * clamp01((wy1 - (yy + 40)) / 14);
             if (fa > 0) ui.img(spr, Math.round(cx - spr.width / 2 + Math.sin(this.t * 2) * 3), yy + 20 + Math.round(Math.sin(this.t * 3) * 1), { alpha: fa, w: spr.width, h: spr.height });
           }

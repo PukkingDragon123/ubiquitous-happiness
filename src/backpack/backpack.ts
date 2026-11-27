@@ -17,6 +17,7 @@
 // doesn't, gold over a stack it tops up or a partner it fuses with. Tab / Esc / the big X closes.
 // Test hooks (CSS px): bp.cellPoint(gx, gy), bp.trayPoint(bx, by), bp.itemPoint(uid), bp.closePoint()
 import * as THREE from 'three';
+import type { TouchSpec } from '../ui/touch';
 import type { Game, Screen } from '../game/game';
 import type { Run, ItemInst } from '../game/run';
 import {
@@ -286,6 +287,8 @@ export class BackpackScreen implements Screen {
   /** board slot of each loose item (top-left cell on the seabed grid) */
   private slot = new Map<number, { bx: number; by: number }>();
   private held: ItemInst | null = null;
+  /** v8 touch: ROTATE while something is held (the R key's job) */
+  touch(): TouchSpec | null { return this.held ? { buttons: { rotate: true } } : null; }
   private heldFrom: { gx: number; gy: number; rot: number; slot?: { bx: number; by: number } } | null = null;
   private grab = { x: 0, y: 0 };
   private plan: Plan = { kind: 'none' };
@@ -794,12 +797,14 @@ export class BackpackScreen implements Screen {
       if (!b.stats.length && !b.skills.length) {
         // an empty bag: how packing works, three steps with their keys
         yy += fg.textBox('Gear in the pockets changes your stats and deals you skills.', ix, yy, iw, { font: 'body', color: K.cream2, shadow: K.ink2 }) + 8;
-        const steps: [string, string][] = [['LMB', 'drag finds into the pockets'], ['R', 'turn things to make them fit'], ['LMB', 'drop a twin on a twin: they stack'], ['LMB', 'drop a partner on it: they fuse']];
+        const steps: [string, string][] = PixelUI.touch
+          ? [['DRAG', 'finds into the pockets'], ['ROTATE', 'turns the thing you hold'], ['DRAG', 'a twin on a twin: they stack'], ['DRAG', 'a partner on it: they fuse']]
+          : [['LMB', 'drag finds into the pockets'], ['R', 'turn things to make them fit'], ['LMB', 'drop a twin on a twin: they stack'], ['LMB', 'drop a partner on it: they fuse']];
         for (const [k, t] of steps) {
           if (yy + 16 > bottom) break;
           fg.fill(ix, yy - 2, iw, 16, K.ink2, 0.5);
-          fg.hint(k, '', ix + 4, yy);
-          fg.text(t, ix + 28, yy + 1, { font: 'body', color: K.cream, shadow: K.ink2 });
+          const kw = fg.hint(k, '', ix + 4, yy);
+          fg.text(t, ix + Math.max(28, kw), yy + 1, { font: 'body', color: K.cream, shadow: K.ink2 });
           yy += 19;
         }
       } else {
@@ -885,6 +890,8 @@ export class BackpackScreen implements Screen {
     const fg = this.fg, L = this.L;
     let x = L.colX + cs + 2;
     const y = L.hintY;
+    // (a touch screen: drag with a finger, the ROTATE key turns, the close button closes)
+    if (PixelUI.touch) { x += fg.hint('DRAG', 'move things', x, y); fg.hint('ROTATE', 'turn the held thing', x, y); return; }
     x += fg.hint('LMB', 'drag', x, y);
     x += fg.keycap('R', x, y) + 3;
     x += fg.hint('RMB', 'turn', x, y);

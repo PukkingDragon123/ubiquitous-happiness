@@ -191,7 +191,8 @@ export class Blobfish implements SkillCaster {
     this.struggleHold = inp.held('dash');
     const mw = w.game.mouseWorld(w.camera);
     const mouseRecent = performance.now() - inp.lastMouse < 2500 || inp.lastMouse > inp.lastKeyboard;
-    if (mouseRecent) { this.aim.set(mw.x - this.x, mw.y - this.y); if (this.aim.lengthSq() < 0.01) this.aim.set(this.facing, 0); this.aim.normalize(); }
+    if (inp.touchMode) this.touchAim(w, ax);
+    else if (mouseRecent) { this.aim.set(mw.x - this.x, mw.y - this.y); if (this.aim.lengthSq() < 0.01) this.aim.set(this.facing, 0); this.aim.normalize(); }
     else if (Math.hypot(ax.x, ax.y) > 0.1) this.aim.set(ax.x, ax.y).normalize();
     // ---- environment
     const surfY = w.water.heightAt(this.x);
@@ -327,6 +328,26 @@ export class Blobfish implements SkillCaster {
   /** a trail segment along the blade (gold for ripostes / full-charge heavies) */
   trailPush(base: THREE.Vector3, tip: THREE.Vector3, gold = false) { (gold ? this.goldTrail : this.trail).push(base, tip); }
   /** the moveset started a dodge */
+  /** v8 touch: who the thumbs are aiming at (the nearest foe in reach, favouring the way the stick points) */
+  touchTarget: Entity | null = null;
+  /** no mouse on a touch screen: aim at the nearest enemy in reach (favouring the one the stick points toward), else
+   *  along the stick, else keep the last aim */
+  private touchAim(w: World, ax: { x: number; y: number }) {
+    const sl = Math.hypot(ax.x, ax.y);
+    let best: Entity | null = null, bs = Infinity;
+    for (const e of w.near(this.x, this.y, 6.5, 'enemy')) {
+      const dx = e.x - this.x, dy = e.y - this.y, d = Math.hypot(dx, dy) || 1e-3;
+      const dot = sl > 0.2 ? (dx * ax.x + dy * ax.y) / (d * sl) : 0;
+      const sc = d * (1.35 - dot * 0.6);
+      if (sc < bs) { bs = sc; best = e; }
+    }
+    this.touchTarget = best;
+    if (best) this.aim.set(best.x - this.x, best.y - this.y);
+    else if (sl > 0.2) this.aim.set(ax.x, ax.y);
+    if (this.aim.lengthSq() < 1e-4) this.aim.set(this.facing, 0);
+    this.aim.normalize();
+  }
+
   dodged(_w: World) {
     this.dashT = 0.22;
     // rogue 6-set: dashing through an enemy backstabs it
@@ -374,7 +395,9 @@ export class Blobfish implements SkillCaster {
       if (this.noManaT <= 0) { w.text.pop('NO MANA', this.x, this.y + 0.9, 'hint', { size: 0.28 }); w.sfx('k_err2', this.x, 0.4); this.noManaT = 0.6; }
       return false;
     }
-    const mw = w.game.mouseWorld(w.camera);
+    // (on a touch screen there is no mouse: the auto-aimed foe, else six units along the aim)
+    const tt = w.game.input.touchMode ? this.touchTarget : null;
+    const mw = w.game.input.touchMode ? (tt && tt.alive ? new THREE.Vector3(tt.x, tt.y, 0) : new THREE.Vector3(this.x + this.aim.x * 6, this.y + this.aim.y * 6, 0)) : w.game.mouseWorld(w.camera);
     const tx = aimX ?? (Math.hypot(mw.x - this.x, mw.y - this.y) < 14 ? mw.x : this.x + this.aim.x * 6);
     const ty = aimY ?? (Math.hypot(mw.x - this.x, mw.y - this.y) < 14 ? mw.y : this.y + this.aim.y * 6);
     if (aimX !== undefined && aimY !== undefined) { this.aim.set(aimX - this.x, aimY - this.y); if (this.aim.lengthSq() > 1e-4) this.aim.normalize(); }

@@ -10,6 +10,7 @@ import { UW } from '../gfx/shaders/underwater';
 import { audio } from '../audio/audio';
 import { Px } from '../gfx/px';
 import { textSprite, STYLES } from '../ui/text';
+import { TouchLayer, type TouchSpec } from '../ui/touch';
 
 export interface Screen {
   name: string;
@@ -23,6 +24,8 @@ export interface Screen {
   exit(): void;
   update(dt: number): void;
   resize?(w: number, h: number): void;
+  /** v8: what the touch layer shows right now (the move stick, which buttons); none = taps are clicks only */
+  touch?(): TouchSpec | null;
 }
 
 export class Game {
@@ -30,6 +33,8 @@ export class Game {
   renderer: THREE.WebGLRenderer;
   post: Post;
   input: Input;
+  /** v8: the on-screen stick and buttons on a touch device */
+  touch: TouchLayer;
   time = 0;
   dt = 0;
   paused = false;
@@ -40,6 +45,7 @@ export class Game {
   modal: Screen | null = null;
   private screens = new Map<string, Screen>();
   private last = performance.now();
+  private lastReal = performance.now();
   private fpsAcc = 0; private fpsN = 0; fps = 60;
   w = 1; h = 1;
   lowQuality = false;
@@ -66,6 +72,7 @@ export class Game {
     this.renderer.setClearColor(0x000000, 1);
     this.post = new Post(this.renderer, lq);
     this.input = new Input(canvas);
+    this.touch = new TouchLayer(this.input);
     this.curTex = makeCursors();
     this.curSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.curTex.normal, transparent: true, depthTest: false }));
     this.curScene.add(this.curSprite);
@@ -73,6 +80,9 @@ export class Game {
     this.pauseSign.visible = false;
     this.curScene.add(this.pauseSign);
     addEventListener('resize', () => this.resize());
+    // phones: turning the device, the URL bar sliding away
+    addEventListener('orientationchange', () => setTimeout(() => this.resize(), 120));
+    window.visualViewport?.addEventListener('resize', () => this.resize());
     this.resize();
     const unlock = () => audio.unlock();
     addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
@@ -125,6 +135,7 @@ export class Game {
     const frame = (now: number) => {
       requestAnimationFrame(frame);
       let dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000));
+      this.lastReal = this.last;
       this.last = now;
       this.fpsAcc += dt; this.fpsN++;
       if (this.fpsAcc > 0.5) { this.fps = this.fpsN / this.fpsAcc; this.fpsAcc = 0; this.fpsN = 0; }
@@ -138,7 +149,7 @@ export class Game {
       const s = this.screen;
       // Esc pauses the dive: the world freezes under a floating pixel sign
       if (!this.modal && s?.name === 'dive' && this.input.hit('pause')) { this.paused = !this.paused; audio.play(this.paused ? 'k_open1' : 'k_close1', { vol: 0.5, dry: true }); }
-      if (this.paused && s?.name === 'dive' && this.input.keyHit('KeyM')) { this.paused = false; this.go('menu', { mode: 'menu' }); }
+      if (this.paused && s?.name === 'dive' && (this.input.keyHit('KeyM') || (this.input.touchMode && this.input.pressed.has('Mouse0')))) { this.paused = false; this.go('menu', { mode: 'menu' }); }
       if (this.paused && s?.name !== 'dive') this.paused = false;
       this.pauseSign.visible = this.paused;
       this.pauseSign.position.set(this.w / 2, this.h / 2 + Math.sin(performance.now() / 400) * 6, 0);
@@ -149,13 +160,16 @@ export class Game {
         POST.uUnderwaterPost.value = view.underwater === false ? 0 : 1;
         // modal screens draw over the live world beneath them (it keeps its last frame frozen)
         const m = this.input.mouse;
-        this.curSprite.visible = this.cursor !== 'none' && m.inside;
+        // the touch layer: what the screen wants on it (paused: just the pause key), drawn over everything
+        const spec: TouchSpec | null = this.paused ? { buttons: { pause: true } } : view.touch?.() ?? null;
+        this.touch.update(Math.min(0.05, (now - this.lastReal) / 1000), spec, this.w, this.h, this.renderer.getPixelRatio());
+        this.curSprite.visible = this.cursor !== 'none' && m.inside && !this.input.touchMode;
         this.curSprite.material.map = this.curTex[this.cursor] ?? this.curTex.normal;
         const k = this.cursor === 'aim' ? 0 : 0.5;
         this.curSprite.scale.set(36, 36, 1);
         this.curSprite.position.set(m.x + (this.cursor === 'aim' ? 0 : 18 - 6), this.h - m.y - (this.cursor === 'aim' ? 0 : 18 - 6), 0);
         void k;
-        this.post.render(view.scene, view.camera, [...(view.overlays ?? []), { scene: this.curScene, camera: this.curCam }]);
+        this.post.render(view.scene, view.camera, [...(view.overlays ?? []), ...(this.touch.visible ? [this.touch.layer] : []), { scene: this.curScene, camera: this.curCam }]);
       }
       this.input.endFrame();
     };

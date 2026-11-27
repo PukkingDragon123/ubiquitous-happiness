@@ -1,7 +1,7 @@
 // The underwater signpost the title's travelling shot arrives at: an old waterlogged post planted in a rock
 // cairn, barnacled, wrapped in a kelp strand and rope, with (v7: no words on it at all; the title's words are 2D,
 // drawn on the UI over the scene by src/title/logo.ts and menu2d.ts)
-//   - the TITLE PLANK on top: a blobfish emblem between two wave marks V-carved into the wood (a real height-field
+//   - the TITLE PLANK on top: a scallop-shell emblem between two wave marks V-carved into the wood (a real height-field
 //     normal map + paint),
 //   - two carved ARROW BOARDS on iron pegs: the way on (chevrons, pointing right: NEW GAME) and the way home (a little
 //     house, pointing left: CONTINUE; greyed, dusty and silted over when there is no save),
@@ -16,7 +16,6 @@ import * as THREE from 'three';
 import { Px, hex, mix, type RGB } from '../gfx/px';
 import { psxMat, facet } from '../player/psx';
 import { Kit } from '../hideout/kit';
-import { blobSprite } from './critter';
 import { boulder, rockPage, KELP, BRASS, GLOWP } from './art';
 import { fbm, hash2, damp, clamp01, TAU } from '../core/math';
 
@@ -30,14 +29,28 @@ function rowsMask(rows: string[]): Mask {
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) m[y * w + x] = r[x] === '#' ? 1 : 0; });
   return { w, h, m };
 }
-/** the blobfish emblem: the title critter's silhouette flanked by two carved wave marks */
+/** a scallop shell (v8: no 2D blobfish): a fan from the hinge with a scalloped rim, the grooves between its five ribs
+ *  left standing, and the two hinge ears */
+function scallopMask(): Mask {
+  const w = 21, h = 17, m = new Uint8Array(w * h);
+  const hx0 = 10.5, hy0 = 15.2;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = x + 0.5 - hx0, dy = hy0 - (y + 0.5), a = Math.atan2(dx, dy), r = Math.hypot(dx, dy * 1.05);
+    const ribs = 6, u = (a / 1.32 + 1) / 2 * ribs; // 0..ribs across the fan
+    const fan = Math.abs(a) < 1.32 && dy > -0.5 && r < 13.6 + Math.cos(u * Math.PI * 2) * 0.9;
+    const groove = Math.abs(u - Math.round(u)) < 0.09 && r > 3.2 && Math.round(u) > 0 && Math.round(u) < ribs;
+    const ear = y >= 13 && y <= 16 && Math.abs(dx) < 5.2 && Math.abs(dx) > 1.6;
+    m[y * w + x] = (fan && !groove) || ear ? 1 : 0;
+  }
+  return { w, h, m };
+}
+/** the emblem: a scallop shell flanked by two carved wave marks */
 function emblemMask(): Mask {
-  const cv = blobSprite('big');
-  const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
+  const sh = scallopMask();
   const wave = ['..##....##..', '.#..#..#..#.', '#....##....#'];
-  const gap = 4, W = wave[0].length * 2 + cv.width + gap * 2, H = Math.max(cv.height, 3);
+  const gap = 4, W = wave[0].length * 2 + sh.w + gap * 2, H = Math.max(sh.h, 3);
   const m = new Uint8Array(W * H);
-  for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) m[y * W + x + wave[0].length + gap] = d[(y * cv.width + x) * 4 + 3] > 127 ? 1 : 0;
+  for (let y = 0; y < sh.h; y++) for (let x = 0; x < sh.w; x++) m[y * W + x + wave[0].length + gap] = sh.m[y * sh.w + x];
   const wy = Math.round(H / 2) - 1;
   wave.forEach((r, j) => { for (let i = 0; i < r.length; i++) if (r[i] === '#') { m[(wy + j) * W + i] = 1; m[(wy + j) * W + W - r.length + i] = 1; } });
   return { w: W, h: H, m };
@@ -251,7 +264,7 @@ export class Signpost {
     }
     post.add(kk.build(false));
 
-    // ---- the title plank: a blobfish emblem carved into two weathered boards (no words: the title is 2D on the UI)
+    // ---- the title plank: a scallop emblem carved into two weathered boards (no words: the title is 2D on the UI)
     const plank = new THREE.Group(); plank.position.set(0.05, PLANK.y, POST_W / 2 + PLANK.d / 2); plank.rotation.z = -0.022; post.add(plank);
     const PW = 384, PH = Math.round(PW * PLANK.h / PLANK.w);
     const pp = new Px(PW, PH), ph = new Float32Array(PW * PH);

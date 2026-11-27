@@ -408,7 +408,7 @@ export class PlayerCombat implements Defender {
         this.glow = Math.max(this.glow, 0.25 + this.dashCharge * 0.75);
         // the line: toward the aim (mouse), or the held direction on keys
         const ax = w.game.input.axis();
-        if (Math.hypot(ax.x, ax.y) > 0.1 && performance.now() - w.game.input.lastMouse > 1500) this.dashDir.set(ax.x, ax.y).normalize(); else this.dashDir.set(p.aim.x, p.aim.y).normalize();
+        if (Math.hypot(ax.x, ax.y) > 0.1 && (w.game.input.touchMode || performance.now() - w.game.input.lastMouse > 1500)) this.dashDir.set(ax.x, ax.y).normalize(); else this.dashDir.set(p.aim.x, p.aim.y).normalize();
         // energy gathers in: sparkles pulled toward the body, a rising hum, a ding at full
         this.dashTick -= dt;
         if (this.dashTick <= 0) { this.dashTick = 0.18; w.sfx('k_tick', p.x, 0.3 + this.dashCharge * 0.3, 0.8 + this.dashCharge * 1.4); }

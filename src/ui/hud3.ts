@@ -718,12 +718,13 @@ export class Hud {
         ui.ui.img(on ? pip : off, ui.p(ax + aw - 3) - pip.width * gs, ui.p(ay + 13 + i * 6.5 + bounce), { w: pip.width * gs, h: pip.height * gs });
       }
       // the hanging tag: [R] HEAL on a brass plate on two cords
-      const kw = ui.ui.keycapW(HEAL_ITEM.key) / ui.k;
+      // (a touch screen has its own HEAL key: no keycap)
+      const kw = PixelUI.touch ? 0 : ui.ui.keycapW(HEAL_ITEM.key) / ui.k;
       const lw = ui.bigW(HEAL_ITEM.verb, 6);
       const tw = kw + lw + 24, tx = ax + aw / 2 - tw / 2 - 2, tyy = y0 + ph + 3;
       for (const cx2 of [tx + 4, tx + tw - 5]) { ui.fill(cx2, y0 + ph - 1, 1, 4, '#2a1a0c'); ui.fill(cx2 + 1, y0 + ph - 1, 1, 4, '#c8a070'); }
       this.planes.draw(plate(ui.p(tw), ui.p(16), 'brass'), ui.p(tx), ui.p(tyy), { shadow: 1 });
-      ui.ui.keycap(HEAL_ITEM.key, ui.p(tx + 3), ui.p(tyy + 1.5), false, eating > 0);
+      if (!PixelUI.touch) ui.ui.keycap(HEAL_ITEM.key, ui.p(tx + 3), ui.p(tyy + 1.5), false, eating > 0);
       ui.big(HEAL_ITEM.verb, tx + 6 + kw, tyy + 5, 6, { color: has ? '#2a1608' : '#7a3a2a', outline: null, shadow: null });
       if (!has && Math.sin(this.t * 3) > 0) ui.big('EMPTY', ax + aw / 2, ay + ah - 9, 4.5, { color: PAL.coral2, align: 'center' });
     }

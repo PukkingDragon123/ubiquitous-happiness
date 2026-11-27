@@ -347,7 +347,7 @@ function paintRay(): Px {
   return p;
 }
 
-/** a small framed painting (a blobfish portrait / a sunset / a whale) */
+/** a small framed painting (a moon jelly / a sunset / a whale) */
 function paintPainting(kind: string): Px {
   const W = 32, Hh = 24, p = new Px(W, Hh);
   if (kind === 'whale') {
@@ -359,11 +359,13 @@ function paintPainting(kind: string): Px {
     p.circle(16, 14, 5, '#fff2b0');
     for (let y = 15; y < 24; y += 2) p.rect(12 + (y % 3), y, 8 - (y - 15) / 2, 1, '#ffdc8a');
   } else {
-    p.fill((_x, y) => (y < 12 ? hex('#3a2a4a') : hex('#2a1a3a')));
-    p.ellipse(16, 14, 9, 8, (nx, ny) => (ny < -0.3 ? hex('#ffc8d4') : nx + ny > 0.6 ? hex('#c86a88') : hex('#f4a0b4')));
-    p.ellipse(18, 18, 4, 3, '#e090a8');
-    p.set(13, 11, '#1a0a10'); p.set(19, 11, '#1a0a10'); p.set(13, 10, '#ffffff');
-    p.rect(14, 21, 5, 1, '#6a2a3a');
+    // a moon jelly drifting down through the blue (v8: no blobfish portrait)
+    p.fill((_x, y) => (y < 8 ? hex('#1e4a7a') : y < 16 ? hex('#163a66') : hex('#0e2448')));
+    p.ellipse(16, 9, 8, 5, (nx, ny) => (ny > 0.45 ? null : ny < -0.4 ? hex('#fff0fa') : nx > 0.5 ? hex('#c890c8') : hex('#f0c4e4')));
+    p.ellipse(16, 8, 3, 2, '#d89ccc');
+    for (const [x, ph] of [[11, 0], [14, 1], [18, 2], [21, 0.5]] as [number, number][]) for (let y = 12; y < 22; y++) p.set(x + Math.round(Math.sin(y * 0.7 + ph) * 0.8), y, y < 17 ? '#e0aad6' : '#a070a8');
+    p.set(12, 6, '#ffffff'); p.set(13, 6, '#ffffff');
+    for (const [x, y] of [[4, 18], [26, 5], [7, 4], [27, 19]] as [number, number][]) p.set(x, y, '#8fd0dc');
   }
   p.outline('#1a0c06');
   return p;

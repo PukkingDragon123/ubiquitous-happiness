@@ -1,8 +1,9 @@
 // The title's menu (v7): the words float in the water over the scene, 2D, no boxes. Each item is set in the kit's
 // biggest face (one font pixel per UI pixel), cream with an ink outline; the chosen one warms to gold, slides out,
 // its letters wobble on a running swell and jump in a ripple when it is picked up, a glint sweeps across it, a little
-// burst of bubbles rises off it, and a small pixel blobfish swims up and down the list to sit beside it (blowing a
-// bubble now and then). Activating an item flashes it, bursts bubbles and the blobfish darts off through the word.
+// burst of bubbles rises off it, and a little open scallop with a pearl in it (v8: no 2D blobfish) glides up and down
+// the list to rest beside it (its lid lifts now and then to let a bubble go). Activating an item flashes it, bursts
+// bubbles and the pearl flashes as the scallop darts off through the word.
 //
 //   const m = new TitleMenu();                      (TitleMenu<string> for other lists: the in-game pause words)
 //   const r = m.draw(ui, x, y, { items, t, appear, live, align? });   r.activate = the item picked this frame (or null)
@@ -11,7 +12,7 @@ import type { PixelUI } from '../ui/pixel/ui';
 import type { TextOpts } from '../ui/pixel/font';
 import { easeOutBack, clamp01, damp } from '../core/math';
 import { audio } from '../audio/audio';
-import { blobSprite } from './critter';
+import { pearlClam } from './seaSprites';
 
 export type ItemId = 'new' | 'continue' | 'settings' | 'credits';
 export interface MenuItem<T extends string = ItemId> {
@@ -19,7 +20,7 @@ export interface MenuItem<T extends string = ItemId> {
   /** one line for the caption bar */ desc: string;
   /** a warning state: the label is swapped, coral, shaking (NEW GAME over a save: START OVER?) */ warn?: string;
   /** a coral word (QUIT) */ danger?: boolean;
-  /** it opens a page over the menu (SETTINGS, CREDITS): the blobfish stays put instead of darting off */ stay?: boolean;
+  /** it opens a page over the menu (SETTINGS, CREDITS): the cursor stays put instead of darting off */ stay?: boolean;
 }
 
 const ROW = 30;
@@ -147,7 +148,7 @@ export class TitleMenu<T extends string = ItemId> {
         }
       }
     });
-    // ---- the little blobfish that swims up and down to sit beside the chosen word
+    // ---- the pearl in its scallop that glides up and down to rest beside the chosen word
     if (o.appear > 0.25) {
       const tx = selX - 32 + Math.round(Math.sin(t * 2.1) * 1.5), ty = selY - 1;
       if (this.fishX < 0) { this.fishX = tx - 30; this.fishY = ty; }
@@ -157,11 +158,11 @@ export class TitleMenu<T extends string = ItemId> {
       else { this.fishV = 0; this.fishX = damp(this.fishX, tx, 9, dt); }
       const vy = (ty - this.fishY);
       this.fishY = damp(this.fishY, ty, 10, dt);
-      // a puff, then a bubble from its mouth, every couple of seconds
+      // the lid lifts, then a bubble rises out of the shell, every couple of seconds
       if (!darting && t > this.nextPuff) { this.puffT = 0; this.nextPuff = t + 1.8 + ((t * 13) % 1.4); }
-      if (this.puffT >= 0) { this.puffT += dt; if (this.puffT > 0.22) { this.puffT = -1; ui.bubble(this.fishX + 24, this.fishY + 13, { r: 2, vy: -14, life: 1.3 }); ui.bubble(this.fishX + 26, this.fishY + 9, { r: 1, vy: -18, delay: 0.12 }); } }
-      const blink = (t % 4.3) < 0.12;
-      const spr = blobSprite('big', { blink, puff: this.puffT >= 0 });
+      if (this.puffT >= 0) { this.puffT += dt; if (this.puffT > 0.32) { this.puffT = -1; ui.bubble(this.fishX + 14, this.fishY + 4, { r: 2, vy: -14, life: 1.3 }); ui.bubble(this.fishX + 11, this.fishY + 2, { r: 1, vy: -18, delay: 0.12 }); } }
+      const glint = (t % 4.3) < 0.18 || darting;
+      const spr = pearlClam({ open: this.puffT >= 0 ? Math.min(1, this.puffT * 6) : 0, glint });
       const tilt = Math.round(Math.max(-2, Math.min(2, vy * 0.15)));
       const fa = darting ? Math.max(0, 1 - this.flashT * 1.2) : clamp01((o.appear - 0.25) * 3);
       if (fa > 0) {

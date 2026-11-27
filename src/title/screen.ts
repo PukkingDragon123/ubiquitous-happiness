@@ -392,6 +392,8 @@ export class TitleScreen implements Screen {
       ui.text(it.desc, cx, y + (font === 'body' ? 2 : 3), { font, color: it.warn ? KIT.badLight : KIT.text, shadow: '#000000', alpha: a });
     }
     let x = ui.w - 10;
+    // (a touch screen: the words are the buttons, no keys to show)
+    if (PixelUI.touch) { const w0 = ui.hintW('ENTER', 'a word'); ui.hint('ENTER', 'a word', x - w0, y, { color: KIT.textDim }); return; }
     const w2 = ui.hintW('ENTER', 'select');
     x -= w2; ui.hint('ENTER', 'select', x, y, { color: KIT.textDim });
     const w1 = 13 * 2 + 3 + Math.ceil(ui.measure('choose', 'small')) + 10;

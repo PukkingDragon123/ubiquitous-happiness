@@ -183,20 +183,29 @@ export function buildLantern(armDir: 1 | -1 = -1): { group: THREE.Group; light: 
 }
 
 // ------------------------------------------------------------------ the satchel (3D)
-/** the pocket's painted front: leather, a stitched border, an embroidered round patch with a little blobfish */
+/** the pocket's painted front: leather, a stitched border, an embroidered round patch with a little scallop shell */
 function pocketPage(): HTMLCanvasElement {
   const W = 36, H = 18, px = new Px(W, H);
   const L = LEATHER;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px.set(x, y, L[y === 0 ? 5 : y === H - 1 ? 2 : (x * 5 + y * 3) % 23 === 0 ? 3 : 4]);
   for (let x = 2; x < W - 2; x += 2) { px.set(x, 2, THREAD); px.set(x, H - 3, THREAD); }
   for (let y = 3; y < H - 3; y += 2) { px.set(2, y, THREAD); px.set(W - 3, y, THREAD); }
-  // the patch: a ring of navy twill, a pink blobfish face
+  // the patch: a ring of navy twill, a coral scallop shell stitched on it
   const cx = W / 2 - 0.5, cy = H / 2 - 0.5;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const d = Math.hypot(x - cx, (y - cy) * 1.05);
     if (d < 6.6) px.set(x, y, d > 5.6 ? hx('#e8d8a8') : d > 4.8 ? hx('#1a2a48') : hx('#2c4a78'));
   }
-  for (const [x, y, c] of [[-2, -1, '#f6a8b8'], [-1, -1, '#f6a8b8'], [0, -1, '#f6a8b8'], [1, -1, '#f6a8b8'], [-3, 0, '#e88898'], [-2, 0, '#f6a8b8'], [-1, 0, '#1a0a10'], [0, 0, '#f6a8b8'], [1, 0, '#1a0a10'], [2, 0, '#e88898'], [-3, 1, '#e88898'], [-2, 1, '#f6a8b8'], [-1, 1, '#ffc8d0'], [0, 1, '#ffc8d0'], [1, 1, '#f6a8b8'], [2, 1, '#d87888'], [-2, 2, '#d87888'], [-1, 2, '#e88898'], [0, 2, '#e88898'], [1, 2, '#d87888']] as [number, number, string][]) px.set(Math.round(cx) + x, Math.round(cy) + y, hx(c));
+  // a fan of ribs (light / dark stitches) over two hinge ears
+  const SC = ['#f0a27c', '#c8603e', '#fccaa6'];
+  const shell: [number, number, number][] = [
+    [-1, -2, 2], [0, -2, 2],
+    [-2, -1, 0], [-1, -1, 1], [0, -1, 0], [1, -1, 1],
+    [-3, 0, 0], [-2, 0, 1], [-1, 0, 0], [0, 0, 1], [1, 0, 0], [2, 0, 1],
+    [-2, 1, 0], [-1, 1, 1], [0, 1, 0], [1, 1, 1],
+    [-2, 2, 1], [-1, 2, 0], [0, 2, 0], [1, 2, 1],
+  ];
+  for (const [x, y, c] of shell) px.set(Math.round(cx) + x, Math.round(cy) + y, hx(SC[c]));
   return px.done();
 }
 const LEATHER: C[] = ['#24100e', '#41201a', '#633322', '#86482c', '#a8653a', '#c88a52', '#e2b278'].map(hx);

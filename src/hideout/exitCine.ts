@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import type { HideoutHero } from './hero';
 import type { CamRig, Shot } from './camera';
 import type { Motes } from './ocean';
-import type { PixelUI } from '../ui/pixel/ui';
+import { keyName, type PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
 import type { RunConfig } from '../meta/meta';
 import { audio } from '../audio/audio';
@@ -233,8 +233,8 @@ export class ExitCine {
     this.drawTitle(ui, t);
     if (t > 0.2) {
       const a = Math.min(1, (t - 0.2) * 3) * 0.75;
-      const lbl = 'skip', kw = 22, x = ui.w - 14 - ui.measure(lbl, 'small') - kw - 4, y = ui.h - 22;
-      ui.keycap('ESC', x, y, true);
+      const lbl = 'skip', key = keyName('ESC') === 'ESC' ? 'ESC' : 'TAP', kw = ui.keycapW(key), x = ui.w - 14 - ui.measure(lbl, 'small') - kw - 4, y = ui.h - 22;
+      ui.keycap(key, x, y, true);
       ui.text(lbl, x + kw + 4, y + 2, { font: 'small', color: K.cream2, shadow: '#000000', alpha: a });
     }
     return false;

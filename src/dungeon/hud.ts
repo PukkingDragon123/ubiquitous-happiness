@@ -12,7 +12,7 @@
 //   const hud = new DungeonHud();  overlays: [..., hud.ui.layer];  hud.resize(w, h, pr)
 //   const act = hud.draw(dt, state, input)   -> 'resume' | 'bag' | 'quit' | 'mail:send' | 'mail:close' | 'mail:mats' | 'mail:<uid>' | null
 //   hud.l.title(...) / hud.l.areaCard(...) / hud.l.pickup(id) / hud.l.flash('pack')
-import { PixelUI } from '../ui/pixel/ui';
+import { PixelUI, keyName } from '../ui/pixel/ui';
 import { Hud, type HudData } from '../ui/hud3';
 import * as THREE from 'three';
 import { itemModel } from '../backpack/models';
@@ -119,7 +119,8 @@ export class DungeonHud {
     if (p.shop) { this.shopCard(p, at); return; }
     const short = shortLabel(p.label);
     const a = this.promptA, pop = 1 - (1 - a) ** 3;
-    const kw = p.key ? ui.keycap(p.key, -999, -999) : 0;
+    const key = keyName(p.key);
+    const kw = p.key ? ui.keycap(key, -999, -999) : 0;
     const tw = ui.measure(short, 'body');
     const w = Math.round(tw + (kw ? kw + 6 : 0) + 16), h = 20;
     const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2))), y = Math.round(Math.max(6, at.y - 34)) + Math.round((1 - pop) * 6);
@@ -130,7 +131,7 @@ export class DungeonHud {
     const px = Math.round(Math.max(x + 6, Math.min(x + w - 7, at.x)));
     for (let i = 0; i < 4; i++) { ui.fill(px - 3 + i, y + h - 1 + i, 7 - i * 2, 1, PAL.ink2, a); if (i < 3) ui.fill(px - 2 + i, y + h - 1 + i, 5 - i * 2, 1, ramp(rim)[2], a); }
     let cx = x + 8;
-    if (kw) { ui.keycap(p.key, cx, y + Math.round((h - 13) / 2)); cx += kw + 6; }
+    if (kw) { ui.keycap(key, cx, y + Math.round((h - 13) / 2)); cx += kw + 6; }
     ui.text(short, cx, y + Math.round((h - ui.cap('body')) / 2), { font: 'body', color: p.bad ? PAL.coral2 : PAL.cream, alpha: a });
     // the longer explanation, when there is one: a cream note pinned under the tag for a moment
     const rest = full.replace(/^[A-Z ]+:\s*/, (m0) => (m0.includes(':') ? '' : m0));
@@ -188,10 +189,11 @@ export class DungeonHud {
     const pw = bigText(ui, String(sh.price), x + 13 + pearl.width + 4, by + 3, { cap: 12, color: can ? PAL.brass2 : PAL.coral, alpha: a });
     ui.text('PEARLS', x + 13 + pearl.width + 8 + pw, by + 7, { font: 'small', color: PAL.dim, alpha: a });
     if (can) {
-      const kw = ui.keycap(p.key || 'E', -999, -999);
+      const key = keyName(p.key || 'E');
+      const kw = ui.keycap(key, -999, -999);
       const lw = ui.measure('BUY', 'title');
       const bx = x + w - 13 - lw - kw - 6;
-      ui.keycap(p.key || 'E', bx, by + 4);
+      ui.keycap(key, bx, by + 4);
       ui.text('BUY', bx + kw + 6, by + 2, { font: 'title', color: PAL.kelp2, alpha: a });
     } else ui.text('NOT ENOUGH', x + w - 13, by + 5, { font: 'body', color: PAL.coral2, align: 'right', alpha: a });
   }

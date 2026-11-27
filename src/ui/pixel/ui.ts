@@ -128,7 +128,18 @@ interface ListState { scroll: number; target: number; drag: number }
 export const UI_TARGET_H = 360;
 export const UI_MIN_H = 320, UI_MIN_W = 560;
 
+/** v8 touch: what a key reads as on the touch layer's buttons (hint rows say DASH, not SHIFT) */
+const TOUCH_KEY: Record<string, string> = {
+  SHIFT: 'DASH', LMB: 'TAP', J: 'ATTACK', RMB: 'GUARD', K: 'GUARD', E: 'USE', F: 'USE', R: 'HEAL', H: 'HEAL', TAB: 'BAG', I: 'BAG', B: 'BAG',
+  ESC: 'PAUSE', ENTER: 'TAP', SPACE: 'TAP', SPC: 'TAP', CLICK: 'TAP', WASD: 'STICK', ARROWS: 'STICK', Q: 'CYCLE', L: 'CYCLE', G: 'BOMB',
+};
+export function touchKey(k: string) { return TOUCH_KEY[k.toUpperCase()] ?? k; }
+/** a key's name as the player should read it: the touch button's on a touch screen */
+export function keyName(k: string) { return PixelUI.touch ? touchKey(k) : k; }
+
 export class PixelUI {
+  /** v8: the touch layer is up (src/ui/touch.ts): no pointer cursor, no keycaps on buttons, hints name the buttons */
+  static touch = false;
   readonly cv: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
   w = 320; h = 180;
@@ -303,7 +314,7 @@ export class PixelUI {
     for (const d of later) d(this);
     this.drawFx();
     for (const t of this.tips) t();
-    if (this.drawCursor && this.inside && this.cursorVisible) {
+    if (this.drawCursor && this.inside && this.cursorVisible && !PixelUI.touch) {
       const c = cursorTex(this.cursor);
       this.ctx.drawImage(c.cv, this.mx - c.hx, this.my - c.hy, c.w, c.h);
     }
@@ -759,7 +770,7 @@ export class PixelUI {
     // kit icons are 1 texel per UI px, like the rest of the kit; a caller's canvas is taken as UI px
     const icCv = typeof o.icon === 'string' ? iconTex(o.icon) : o.icon;
     const ic = icCv ? { cv: icCv, width: icCv.width, height: icCv.height } : undefined;
-    const kc = o.key ? (o.keyLabel ?? labelForKey(o.key)) : '';
+    const kc = o.key && !PixelUI.touch ? (o.keyLabel ?? labelForKey(o.key)) : '';
     const kcW = kc ? this.keycapW(kc) : 0;
     const tw = label ? this.measure(label, font) : 0;
     const total = (ic ? ic.width + (label ? 3 : 0) : 0) + tw;
@@ -937,6 +948,7 @@ export class PixelUI {
   /** a keycap (or mouse glyph for LMB / RMB / MMB) + verb hint ('E use'); returns the width incl. trailing space */
   hint(key: string, label: string, x: number, y: number, o: { color?: string; dark?: boolean; font?: FontName } = {}) {
     let w = 0;
+    if (PixelUI.touch) key = touchKey(key);
     if (key === 'LMB' || key === 'RMB' || key === 'MMB') {
       const g = this.mouseGlyph(key), gw = g.width;
       this.img(g, x, y + Math.round((KEYCAP_H - g.height) / 2), { w: gw, h: g.height }); w = gw + 3;
@@ -946,7 +958,7 @@ export class PixelUI {
     return Math.ceil(w) + 10;
   }
   /** the width hint() takes */
-  hintW(key: string, label: string, font: FontName = 'small') { return (key === 'LMB' || key === 'RMB' || key === 'MMB' ? 12 : this.keycapW(key) + 4) + Math.ceil(this.measure(label, font)) + 10; }
+  hintW(key: string, label: string, font: FontName = 'small') { if (PixelUI.touch) key = touchKey(key); return (key === 'LMB' || key === 'RMB' || key === 'MMB' ? 12 : this.keycapW(key) + 4) + Math.ceil(this.measure(label, font)) + 10; }
   private mouseGlyph(k: string) { return mouseTex(k === 'LMB' ? 'L' : k === 'RMB' ? 'R' : 'M'); }
 
   /**

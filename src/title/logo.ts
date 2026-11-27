@@ -3,22 +3,24 @@
 //
 //   - the letters: fat jelly letters in blobfish-flesh pink (a 7-tone plum -> peach ramp, clean bands), a lit top /
 //     left rim and a shine stripe, a shaded bottom / right rim, a 5 px plum extrusion below and an ink outline; the
-//     O is a brass porthole (riveted ring, dark water behind glass, a little blobfish peering out and blinking);
+//     O is a brass porthole (riveted ring, dark water behind glass, a little moon jelly pulsing past behind it);
 //     hand-placed sea life on them: barnacles on the first B, a coralline crust on the L, an algae film on the second
 //     B, a sea star on the F, a whelk snail climbing the I, a limpet on the S, barnacles and algae on the H
 //   - the name board: one weathered plank (grain runs, a knot, salt-bleached ends, a chipped corner, nails, rope
 //     lashings, barnacles, an algae film, a coralline crust), REEL REBELLION gold-leafed on it in the kit font
 //   - live: every letter bobs on its own swell, kelp fronds sway up behind the board, rope ends swing, bubbles rise
 //     off the letters, a caustic web slides over them and a glint sweeps across every few seconds; it drops in letter
-//     by letter with a splash of bubbles, and a click on it (poke) makes the letters jump and the porthole fish spin
+//     by letter with a splash of bubbles, and a click on it (poke) makes the letters jump and the jelly tumble
 //
 //   const logo = new Logo();  logo.draw(ui, x, y, { t, appear, alpha });   logo.w / logo.h (UI px);  logo.poke()
 import { Px, R, hx, hash, stamp, SPR, algae, coralline, nail, wraps, type C, type Spr } from '../ui/pixel/decor';
 import type { PixelUI } from '../ui/pixel/ui';
 import { easeOutBack, clamp01 } from '../core/math';
-import { FLESH, blobSprite } from './critter';
+import { jelly } from './seaSprites';
 
 const rampC = (...s: string[]) => s.map(hx);
+/** blobfish flesh, plum shadows -> peach lights (7): the PINK letters */
+export const FLESH = rampC('#2a0b24', '#5e1a3c', '#93304f', '#c94f66', '#e9767c', '#ffa594', '#ffd6bc');
 /** the letters' extrusion (their plum underside, dark -> lit lip) */
 const SIDE = rampC('#12081a', '#261028', '#3c1634', '#561e40');
 const BSIDE = rampC('#24100a', '#4a240e', '#7a4416', '#a86a24');
@@ -401,7 +403,8 @@ export class Logo {
     }
     // ---- the letters
     pos.forEach((p, i) => { if (p) ui.img(this.glyphs[i].cv, p.x, p.y, { alpha: p.a }); });
-    // ---- the porthole fellow (behind the glass, drawn over the water, under the glass streaks)
+    // ---- the porthole jelly (behind the glass, drawn over the water, under the glass streaks): it drifts across the
+    // window, pulsing its bell, and tumbles when the logo is poked
     const oi = WORD.indexOf('O'), op = pos[oi], og = this.glyphs[oi];
     if (op && og.glass && ui.deco) {
       const [gx, gy, gr] = og.glass;
@@ -409,22 +412,22 @@ export class Logo {
       ctx.save();
       ctx.beginPath(); ctx.arc(cx, cy, gr - 0.5, 0, Math.PI * 2); ctx.clip();
       const spin = this.pokeT < 1.1;
-      const sx = Math.sin(t * 0.55) * (gr - 8), dir = Math.cos(t * 0.55) >= 0 ? 1 : -1;
-      const blink = (t % 3.7) < 0.14;
-      const fish = blobSprite('small', { blink: blink || spin });
-      const fx = Math.round(cx + sx - fish.width / 2), fy = Math.round(cy - fish.height / 2 + Math.sin(t * 1.3) * 1.5 + 2);
+      // the bell squeezes (a quick pulse), then glides up a little and sinks back
+      const pulse = (t * 1.6) % 1, ph = pulse < 0.12 ? 1 : pulse < 0.24 ? 2 : pulse < 0.36 ? 3 : 0;
+      const sx = Math.sin(t * 0.42) * (gr - 7), lift = pulse < 0.4 ? -pulse * 4 : -1.6 + (pulse - 0.4) * 2.6;
+      const fish = jelly(ph);
+      const fx = Math.round(cx + sx - fish.width / 2), fy = Math.round(cy - fish.height / 2 + lift + Math.sin(t * 0.7) * 1.5 + 1);
       ctx.globalAlpha = op.a;
       if (spin) {
-        // a happy spin when the logo is poked
+        // a tumble when the logo is poked
         ctx.translate(Math.round(cx), Math.round(cy)); ctx.rotate(this.pokeT * 9); ctx.drawImage(fish, -Math.round(fish.width / 2), -Math.round(fish.height / 2));
-      } else if ((dir < 0)) { ctx.translate(fx + fish.width, fy); ctx.scale(-1, 1); ctx.drawImage(fish, 0, 0); }
-      else ctx.drawImage(fish, fx, fy);
+      } else ctx.drawImage(fish, fx, fy);
       ctx.restore();
       // the glass catches the light over him
       const s0 = Math.round(gr * 0.42);
       for (let k = 0; k < 5; k++) ui.fill(cx - s0 + k - 3, cy - s0 - k + 1, 1, 1, '#a2d8cc', 0.55 * op.a);
-      // he blows a bubble now and then
-      if (!spin && (t % 3.1) < dt) ui.bubble(fx + (dir > 0 ? fish.width : 0), fy + 2, { r: 1, vy: -10, life: 0.8 });
+      // a bead of air rises past it now and then
+      if (!spin && (t % 3.1) < dt) ui.bubble(fx + fish.width - 2, fy + 2, { r: 1, vy: -10, life: 0.8 });
     }
     // ---- a glint sweeping across the word every few seconds (the lit variant, clipped to a slanted band)
     const per = 5.5, g0 = (t + 2) % per;

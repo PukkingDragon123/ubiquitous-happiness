@@ -20,6 +20,7 @@
 //   test hooks: hideout.thingPoint(id), hideout.packPoint(id), hideout.uiButton(id), hideout.walkTo(id)
 import * as THREE from 'three';
 import type { Game, Screen } from '../game/game';
+import type { TouchSpec } from '../ui/touch';
 import { POST } from '../gfx/post';
 import { META, mailCount, mailMaterial, type RunConfig } from '../meta/meta';
 import { PixelUI } from '../ui/pixel/ui';
@@ -95,6 +96,8 @@ export class HideoutScreen implements Screen {
   private codexBook = new CodexBook();
   private things: Thing[] = [];
   private hoverThing: Thing | null = null;
+  /** v8 touch: the last tapped thing (its tag stays up a moment) and the thing in reach */
+  private tapThing: Thing | null = null; private tapT = 0; private nearNow: Thing | null = null;
   private outline: { id: string; g: THREE.Group } | null = null;
   private tag = new Tag('float', 150);
   /** v7: Mr. Crab's words float over him with no box (T7's Dialogue barks) */
@@ -527,6 +530,13 @@ export class HideoutScreen implements Screen {
     const b = new THREE.Box3().setFromObject(o), c = b.getCenter(new THREE.Vector3());
     return this.worldToCss(c.x, c.y, c.z);
   }
+  /** v8 touch: PAUSE (and USE when standing at something) in the house; ROTATE while dragging in the kit nook */
+  touch(): TouchSpec | null {
+    if (this.game.modal) return null;
+    if (this.mode === 'free') return { buttons: { pause: { at: { a: 'tr', x: 26, y: 30 } }, interact: this.nearNow && this.inT > 2 ? { label: 'USE', at: { a: 'br', x: 48, y: 52, r: 26 } } : false } };
+    if (this.mode === 'packing' && this.packing.dragging) return { buttons: { rotate: true } };
+    return null;
+  }
   packPoint(id: string) { return this.packing.point(id, this.camera, this.game.w, this.game.h); }
   walkTo(id: string) { const th = this.things.find((q) => q.id === id); if (th) this.walkUse(th); }
 
@@ -655,20 +665,25 @@ export class HideoutScreen implements Screen {
         if (p && Math.abs(p.x) < 1.1 && p.z > IN.z1 - 0.9 && p.z < IN.z1 + 1.6) hov = this.things.find((q) => q.id === (isBuilt('door') ? 'door' : 'doorway')) ?? null;
       }
     }
-    this.hoverThing = hov;
-    this.setOutline(hov);
+    // v8 touch: there is no hover, so a tapped thing keeps its outline and full tag for a few seconds
+    if (input.touchMode && hov && ui.pressed) { this.tapThing = hov; this.tapT = 3.5; }
+    this.tapT -= dt;
+    const shown = hov ?? (input.touchMode && this.tapT > 0 ? this.tapThing : null);
+    this.hoverThing = shown;
+    this.setOutline(shown);
     // the thing in reach (E uses it)
     const near = this.nearThing();
-    const show = hov ?? near;
+    this.nearNow = near;
+    const show = shown ?? near;
     if (show) {
       const o = show.obj();
       const b = o ? new THREE.Box3().setFromObject(o) : null;
       const at = b ? new THREE.Vector3((b.min.x + b.max.x) / 2, Math.min(b.max.y, b.min.y + 1.6) + 0.25, (b.min.z + b.max.z) / 2) : show.face().clone().setY(1.4);
       // hovered: the full tag; only in reach: just its key and name
-      const lines = show === hov ? show.tag() : [{ text: show.tag()[0]?.text ?? '', key: 'E' }];
+      const lines = show === shown ? show.tag() : [{ text: show.tag()[0]?.text ?? '', key: 'E' }];
       this.tag.show(lines);
       this.tag.place(this.camera, at, this.game.post.h, [0, -8], dt);
-      ui.cursor = hov ? 'point' : ui.cursor;
+      ui.cursor = shown ? 'point' : ui.cursor;
     } else this.tag.hide();
     if (!live) return;
     if (input.keyHit('Escape')) { this.openPanel('pause'); return; }
@@ -691,7 +706,7 @@ export class HideoutScreen implements Screen {
     // first visit: a hint about the controls, painted on the bottom of the screen briefly
     if (this.hintT < 14 && META.runs === 0) {
       const a = Math.min(1, (14 - this.hintT) / 2);
-      ui.text('click the floor to walk  ·  click things to use them', ui.w / 2, ui.h - 18, { font: 'small', color: '#f0e4cc', shadow: '#000', align: 'center', alpha: a });
+      ui.text(input.touchMode ? 'tap the floor to walk  ·  tap things to use them' : 'click the floor to walk  ·  click things to use them', ui.w / 2, ui.h - 18, { font: 'small', color: '#f0e4cc', shadow: '#000', align: 'center', alpha: a });
     }
   }
   /** walking out of the doorway onto the porch starts the packing scene */

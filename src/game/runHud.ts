@@ -6,7 +6,7 @@
 //   in world    the wreck's hp + stage pips + what the next repair needs (above the hull), [E] prompts over the
 //               blobfish, off-screen arrows to the mail buoy and the wreck, rising "SENT HOME" receipts
 //   the skill bar + mana crystal is E's SkillBar (its own overlay); the pause menu and banners live here too.
-import { PixelUI } from '../ui/pixel/ui';
+import { PixelUI, keyName } from '../ui/pixel/ui';
 import { ITEMS, getItem } from './items';
 import { audio } from '../audio/audio';
 
@@ -253,11 +253,12 @@ export class RunHud {
     // ---- the interaction prompt over the blobfish
     if (s.prompt && s.player.on) {
       const p = s.prompt;
-      const kw = ui.keycap(p.key, 0, -100);
+      const key = keyName(p.key);
+      const kw = ui.keycap(key, 0, -100);
       const lw = ui.measure(p.label, 'small');
       const w = kw + 3 + lw, x = Math.round(s.player.x - w / 2), y = Math.round(s.player.y - 34 + Math.sin(this.t * 4) * 1.5);
       ui.fill(x - 3, y - 2, w + 6, 16, '#000000', 0.45);
-      ui.keycap(p.key, x, y);
+      ui.keycap(key, x, y);
       if (p.k !== undefined && p.k > 0) ui.fill(x + 1, y + 10, Math.round((kw - 2) * p.k), 1, C.gold);
       ui.text(p.label, x + kw + 3, y + 3, { font: 'small', color: C.white, outline: C.ink });
     }

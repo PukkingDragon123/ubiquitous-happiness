@@ -501,7 +501,7 @@ const BUILD: Record<string, Builder> = {
     p.height = 2.0;
   },
   painting(k, p) {
-    const kinds = ['portrait', 'whale', 'sunset'];
+    const kinds = ['jelly', 'whale', 'sunset'];
     const kind = kinds[Math.floor(Math.random() * 3)];
     k.box(MAT.brass(), 0.82, 0.64, 0.05, 0, 1.45, -0.44);
     k.box(W('walnut'), 0.74, 0.56, 0.055, 0, 1.45, -0.44);

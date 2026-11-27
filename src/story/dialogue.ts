@@ -20,7 +20,7 @@
 // {slow}..{/slow} (half speed). Unknown tags are ignored.
 import * as THREE from 'three';
 import type { Input } from '../core/input';
-import type { PixelUI } from '../ui/pixel/ui';
+import { PixelUI } from '../ui/pixel/ui';
 import type { FontName } from '../ui/pixel/font';
 import { KIT, keycapBody, KEYCAP_H } from '../ui/pixel/skins';
 import { mouseTex } from '../ui/pixel/art';
@@ -162,6 +162,15 @@ interface Active {
   bubT: number;
 }
 
+/** a touch screen: click -> tap (clicks -> taps, clicked -> tapped, clicking -> tapping), keeping the case */
+function touchWords(t: string) {
+  const END: Record<string, string> = { '': '', s: 's', ed: 'ped', ing: 'ping' };
+  return t.replace(/\b(click|Click|CLICK)(s|ed|ing)?\b/g, (_m, w: string, e = '') => {
+    const out = 'tap' + (END[e.toLowerCase()] ?? '');
+    return w === 'CLICK' ? out.toUpperCase() : w === 'Click' ? 'T' + out.slice(1) : out;
+  });
+}
+
 export class Dialogue {
   speakers = new Map<string, Speaker>();
   /** a conversation that wants the player's attention (the owner should suspend gameplay input) */
@@ -217,6 +226,8 @@ export class Dialogue {
   }
 
   get busy() { return !!this.cur; }
+  /** a question is up (its choices take the clicks / taps) */
+  get choosing() { return !!this.cur?.line.choices?.length; }
   /** drop everything (skips, screen exits) */
   finish() {
     const r = this.resolve;
@@ -226,7 +237,8 @@ export class Dialogue {
 
   private make(line: Line, sp: Speaker, bark: boolean, life = 0): Active {
     const ui = this.ui;
-    const chs = parseTags(line.text);
+    // (a touch screen: the words say tap, not click)
+    const chs = parseTags(PixelUI.touch ? touchWords(line.text) : line.text);
     const maxW = Math.min(bark ? 170 : this.maxW, ui.w - 40);
     const m = (t: string) => ui.measure(t, FONT);
     const lines = wrapChars(chs, maxW, m);
@@ -544,9 +556,10 @@ export class Dialogue {
     const lw = a.lw[Math.max(0, li)] ?? 0;
     const appear = Math.min(1, a.doneT / 0.25);
     const x = Math.round(this.lineLeft(a, Math.max(0, li), a.px + ox) + lw + 5), y = Math.round(a.py + oy + Math.max(0, li) * LH - 2 - Math.max(0, Math.sin(t * 5)) * 1.5);
-    const kw = this.keycap('E', x, y, true, false, 0.9 * appear);
+    // (a touch screen: just TAP)
+    const kw = this.keycap(PixelUI.touch ? 'TAP' : 'E', x, y, true, false, 0.9 * appear);
     const mg = mouseTex('L');
-    ui.img(mg, x + kw + 3, y + Math.round((KEYCAP_H - mg.height) / 2), { alpha: 0.9 * appear });
+    if (!PixelUI.touch) ui.img(mg, x + kw + 3, y + Math.round((KEYCAP_H - mg.height) / 2), { alpha: 0.9 * appear });
   }
 
   /** a kit keycap that can fade (ui.keycap always draws opaque) */

@@ -5,6 +5,8 @@
 //   hold   – hold SPACE: a needle sweeps the gauge; release inside the wedge
 //   push   – press the arrow sequence in order; each correct key pops its bubble
 //   timing – (nibble) a ring closes in on the bait; press E when it lines up
+// v8 touch: a tap anywhere (or DASH / ATTACK / USE) is SPACE / E, holding a finger holds; the move stick pushes the
+// arrows (src/ui/touch.ts). The keycaps say TAP / HOLD.
 import * as THREE from 'three';
 import { Px, hex, ramp, mix } from '../gfx/px';
 import type { Input } from '../core/input';
@@ -86,6 +88,8 @@ export class QTE {
   private done = 0;
   private result: QteResult | null = null;
   timingTarget = 0;
+  /** the touch layer is up: the keycaps say TAP / HOLD */
+  touch = false;
 
   constructor() {
     this.gaugeCv.width = 64; this.gaugeCv.height = 64;
@@ -109,7 +113,7 @@ export class QTE {
       this.seq.forEach((k, i) => { const s = spriteOf(keycap(KEY_LABEL[k], false, false), 0.36, 0.36); const b = spriteOf(bubble(), 0.56, 0.56); b.userData.i = i; s.userData.i = i; this.group.add(b, s); this.sprites.push(b, s); });
     } else if (kind === 'mash' || kind === 'hold' || kind === 'timing') {
       const key: Key = kind === 'timing' ? 'KeyE' : 'Space';
-      const s = spriteOf(keycap(KEY_LABEL[key], key === 'Space', false), key === 'Space' ? 0.72 : 0.36, 0.36);
+      const s = spriteOf(keycap(this.touch ? (kind === 'hold' ? 'HOLD' : 'TAP') : KEY_LABEL[key], key === 'Space' || this.touch, false), key === 'Space' || this.touch ? 0.72 : 0.36, 0.36);
       const b = spriteOf(bubble(), key === 'Space' ? 0.95 : 0.6, key === 'Space' ? 0.95 : 0.6);
       this.group.add(b, s); this.sprites.push(b, s);
       this.gauge.visible = true;
@@ -131,6 +135,7 @@ export class QTE {
 
   update(dt: number, input: Input, ax: number, ay: number, time: number) {
     if (!this.kind) return;
+    this.touch = input.touchMode;
     this.pulse = Math.max(0, this.pulse - dt * 6);
     if (this.done > 0) {
       // result pop: everything bursts outward then disappears
@@ -145,13 +150,16 @@ export class QTE {
     const k = this.kind;
     const intro = easeOutBack(clamp01(this.t / 0.25), 2.2);
     const bob = Math.sin(time * 5) * 0.04;
+    // v8 touch: a tap anywhere is SPACE / E (and the DASH / ATTACK / USE keys work too); the stick flicks the arrows
+    const tap = input.touchMode && (input.pressed.has('Mouse0') || input.hit('dash') || input.hit('attack') || input.hit('interact'));
+    const touchHeld = input.touchMode && (input.down.has('Mouse0') || input.held('dash') || input.held('attack') || input.held('interact'));
     if (k === 'mash') {
-      if (input.keyHit('Space')) { this.fill += 0.13; this.pulse = 1; audio.play('bub', { vol: 0.35, rate: 0.9 + this.fill * 0.6 }); }
+      if (input.keyHit('Space') || tap) { this.fill += 0.13; this.pulse = 1; audio.play('bub', { vol: 0.35, rate: 0.9 + this.fill * 0.6 }); }
       this.fill = Math.max(0, this.fill - dt * 0.18);
       if (this.fill >= 1) this.finish(true, 1 - this.t / this.dur);
       else if (this.t > this.dur) this.finish(false, this.fill);
     } else if (k === 'hold') {
-      const down = input.key('Space');
+      const down = input.key('Space') || touchHeld;
       if (down) { this.holding = true; this.needle += dt / (this.dur * 0.55); }
       if (this.holding && !down && !this.held) {
         this.held = true;
@@ -173,7 +181,7 @@ export class QTE {
       if (this.t > this.dur) this.finish(false, this.seqI / this.seq.length);
     } else if (k === 'timing') {
       const ring = 1 - this.t / this.dur; // closes from 1 to 0
-      if (input.keyHit('KeyE')) { const d = Math.abs(ring - (1 - this.timingTarget)); this.finish(d < 0.12, 1 - d / 0.12); }
+      if (input.keyHit('KeyE') || tap) { const d = Math.abs(ring - (1 - this.timingTarget)); this.finish(d < 0.12, 1 - d / 0.12); }
       if (this.t > this.dur) this.finish(false, 0);
     }
     // ---- place sprites
@@ -198,7 +206,8 @@ export class QTE {
       b.scale.set(bw * intro / sq, bw * intro * sq, 1);
       const kw = bw > 0.9 ? 0.72 : 0.36;
       s.scale.set(kw * intro / sq, 0.36 * intro * sq, 1);
-      if (this.kind === 'hold' && this.holding) s.material.map = keycap('SPACE', true, true); else if (this.kind !== 'timing') s.material.map = keycap('SPACE', true, this.pulse > 0.5);
+      const lab = this.touch ? (this.kind === 'hold' ? 'HOLD' : 'TAP') : 'SPACE';
+      if (this.kind === 'hold' && this.holding) s.material.map = keycap(lab, true, true); else if (this.kind !== 'timing') s.material.map = keycap(lab, true, this.pulse > 0.5);
       this.gauge.position.set(cx, cy, 1.99);
       this.gauge.scale.setScalar((bw + 0.7) * intro);
       this.drawGauge(time);

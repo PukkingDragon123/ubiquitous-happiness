@@ -6,7 +6,7 @@
 //     and trailing bubbles; the satchel gulps with a splash, bulges a little fuller, the newest things poke out of
 //     its mouth, and the item pops into its pocket on the SATCHEL panel (2D, right: the open bag with its 8 x 6
 //     stitched pockets). Click a packed thing: it flies back to its peg with a clink. Drag works too: drag from the
-//     wall onto a pocket, drag inside the satchel to rearrange (R / right click turns), drag out to unpack. A full
+//     wall onto a pocket, drag inside the satchel to rearrange (R / right click / the touch ROTATE key turns), drag out to unpack. A full
 //     satchel repacks itself (biggest first) before it refuses.
 //   - the TALLY under it: HP / attack / speed / mana / crit / luck count up or down as the gear changes (a flash and
 //     an arrow on whatever just moved), and the sets the packed gear starts
@@ -30,7 +30,7 @@ import { MASTERY, MAX_MASTERY, masteryMods } from './mastery';
 import { ITEMS, getItem, GRID_W, GRID_H, fits, instCells, findSpot, stackCap, shapeSize, setBonuses, setCounts, applyItems, SKILL_NAMES, ABILITY_NAME, RARITY_COLOR, skillItem } from '../game/items';
 import { BASE_STATS, type ItemInst, type Stats } from '../game/run';
 import { itemModel } from '../backpack/models';
-import { itemIconBox, type PixelUI } from '../ui/pixel/ui';
+import { itemIconBox, keyName, PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
 import { UiStage } from '../ui/obj/stage';
 import { AbilityMedallion } from '../ui/obj/medallion';
@@ -129,6 +129,8 @@ export class Packing {
   private popT = new Map<number, number>();
   private peekIds: string[] = [];
   private drag: Drag | null = null;
+  /** something is being dragged about (the touch layer shows a ROTATE key) */
+  get dragging() { return !!this.drag?.moved; }
   private flash = { text: '', sub: '', t: 0 };
   private page = 0;
   private nextMatUid = -1;
@@ -797,7 +799,7 @@ export class Packing {
     const d = this.drag!;
     const sz = shapeSize(getItem(d.it.id).shape), fw = (d.rot % 2 ? sz.h : sz.w) * CELL, fh = (d.rot % 2 ? sz.w : sz.h) * CELL;
     this.drawIcon(ui, d.it.id, d.it.level ?? 1, d.rot, ui.mx - fw / 2, ui.my - fh / 2 - 2, 0.92, 1.12);
-    ui.text('R  turn', ui.mx + fw / 2 + 4, ui.my - 4, { font: 'small', color: K.cream2, outline: K.ink2 });
+    if (!PixelUI.touch) ui.text('R  turn', ui.mx + fw / 2 + 4, ui.my - 4, { font: 'small', color: K.cream2, outline: K.ink2 });
   }
   /** the tally: what the packed gear makes of you, counting as it changes */
   private drawTally(ui: PixelUI, x: number, y: number, w: number) {
@@ -975,7 +977,7 @@ export class Packing {
     if ((s.n ?? 1) > 1 && s.from === 'wall') ui.text(`x${s.n}`, x + w - 8, y + 7, { font: 'title', color: K.brass2, shadow: K.ink2, align: 'right' });
     const verb = s.from === 'bag' ? 'unpack' : 'pack it';
     const kx = x + 8, ky = y + h - ui.lh('small') - 5;
-    const kw = ui.keycap(this.kbd ? 'SPC' : 'CLICK', kx, ky - 1, true);
+    const kw = ui.keycap(this.kbd ? 'SPC' : keyName('CLICK'), kx, ky - 1, true);
     ui.text(verb, kx + kw + 4, ky + 1, { font: 'small', color: K.dim, shadow: null });
     ui.text(s.from === 'bag' ? 'drag: move' : 'drag: place', x + w - 8, ky + 1, { font: 'small', color: K.dim2, shadow: null, align: 'right' });
   }

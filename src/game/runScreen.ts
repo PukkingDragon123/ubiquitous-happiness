@@ -13,6 +13,7 @@
 //   game.go('run', { resume: save }) continue META.activeRun
 //   game.go('run')                   dev: a run from the URL (&area=kelp&mastery=0&wave=1&god=1&rich=1&inter=30)
 import * as THREE from 'three';
+import { runSpec, type TouchSpec } from '../ui/touch';
 import type { Game, Screen } from './game';
 import { Run, type ItemInst } from './run';
 import { RunWorld } from './runWorld';
@@ -120,6 +121,12 @@ export class RunScreen implements Screen {
   private critPending = false;
 
   constructor(public game: Game) { (window as unknown as { runScreen: RunScreen }).runScreen = this; }
+  /** v8 touch: the swim-and-fight set; between waves a tap (Mouse0 held) or the USE key starts the next one */
+  touch(): TouchSpec | null {
+    if (this.ended || !this.player) return null;
+    if (this.paused || this.phase === 'dead' || this.phase === 'fade') return { buttons: { pause: true } };
+    return runSpec(this.player, { prompt: this.phase === 'intermission' ? 'GO' : this.phase === 'sailing' ? 'SAIL' : null });
+  }
 
   // ---------------------------------------------------------------- Screen
   resize(w: number, h: number) {
@@ -635,7 +642,7 @@ export class RunScreen implements Screen {
     const wk = a.shipwreck;
     if (this.phase === 'intermission') {
       this.interT -= dt;
-      if (inp.key('Enter') || inp.key('NumpadEnter')) this.holdT += dt; else this.holdT = Math.max(0, this.holdT - dt * 2);
+      if (inp.key('Enter') || inp.key('NumpadEnter') || (inp.touchMode && inp.key('KeyE'))) this.holdT += dt; else this.holdT = Math.max(0, this.holdT - dt * 2);
       if (this.interT <= 0 || this.holdT >= 1) this.startWave();
     } else if (this.phase === 'sailing') {
       this.sailT += dt;

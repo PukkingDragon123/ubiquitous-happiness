@@ -13,7 +13,7 @@
 // with `key` gets that keycap in front (the hint row).
 import * as THREE from 'three';
 import { drawText, measure, lineH, wrap, type FontName } from '../ui/pixel/font';
-import { PixelUI, drawCard, cardLayout } from '../ui/pixel/ui';
+import { PixelUI, drawCard, cardLayout, keyName } from '../ui/pixel/ui';
 import { KIT, skin, type SkinKind } from '../ui/pixel/skins';
 import { easeOutBack } from '../core/math';
 
@@ -112,7 +112,7 @@ export function drawFloat(ui: PixelUI, lines: TagLine[], maxW: number, x: number
       yy += r.h; return;
     }
     let tx = x + PADX;
-    if (l.key) { ui.keycap(l.key, tx, yy - 2, true); tx += ui.keycapW(l.key) + 3; }
+    if (l.key) { const kn = keyName(l.key); ui.keycap(kn, tx, yy - 2, true); tx += ui.keycapW(kn) + 3; }
     if (l.icon) { ui.item(l.icon, tx, yy - 2, 11, 11, 1, a); tx += 13; }
     if (l.kicon) { ui.icon(l.kicon, tx, yy + Math.round((ui.cap(r.font) - 6) / 2), a); tx += 12; }
     const col = l.color ?? (i === 0 ? F.name : F.sub);
