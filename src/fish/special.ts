@@ -33,15 +33,18 @@ function centroidOf(ps: V3[]): V3 { let x = 0, y = 0, z = 0; for (const p of ps)
 // A fat spotted sausage that inches along by peristalsis (swim mode 3), red papillae spikes along its back and
 // a crown of branched feeding tentacles at the mouth end.
 function seaCucumber(): SpeciesAsset {
-  const pg = new Page(256, 128), K = new Kit(pg);
-  const bodyR = pg.alloc(160, 64), papR = pg.alloc(8, 16), tentR = pg.alloc(8, 16);
+  const pg = new Page(256, 256), K = new Kit(pg);
+  const bodyR = pg.alloc(160, 128), papR = pg.alloc(8, 16), tentR = pg.alloc(8, 16);
   const L = 0.55, R0 = 0.065;
   const rad = (f: number) => R0 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.02 + f * 0.96)), 0.32) * (1 + 0.06 * Math.sin(f * 9 + 1));
+  // u runs round the body (0 = the back), v along it (head -> tail). The page is 160 round x 128 along, so the lattice
+  // is stretched along v by the pixel-density ratio to keep the spots round, and shifted so its wrap seam sits on the
+  // pale sole (no seam down the back, no banding along the length)
   paintRect(pg, bodyR, (u, v, i, j) => {
-    const top = Math.cos(v * TAU);
-    let c = grad(['#4a2a14', '#7a4a20', '#a8702e', '#c89850', '#e8c890'])(0.3 + (1 - top) * 0.35, i, j);
+    const top = Math.cos(u * TAU);
+    let c = grad(['#4a2a14', '#7a4a20', '#a8702e', '#c89850', '#e8c890'])(0.3 + (1 - top) * 0.35 - 0.08 * Math.sin(v * Math.PI), i, j);
     // dark leopard spots with a soft brown halo (a jittered lattice, not noise)
-    const q = cells(i, j * 1.4, 9, 0.7, 13);
+    const q = cells((i + 80) % 160, j * 1.6, 15, 0.7, 13);
     if (q.d < 0.26 && top > -0.4) c = mix(c, C('#1a0e08'), 0.85);
     else if (q.d < 0.38 && top > -0.4) c = shade(c, 0.85);
     if (top < -0.55) c = mix(c, C('#e0c8a0'), 0.6);

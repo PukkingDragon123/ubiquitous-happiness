@@ -514,18 +514,60 @@ export function floorHatch(): FloorHatch {
 
 // ------------------------------------------------------------------ the post office's pillar box
 export function postBox(): THREE.Group {
+  // a sea-worn pillar box: stepped plinth, a tapered fluted column with gold bands and rivets (rust weeping under
+  // them), a hooded letter slot, a raised door with a keyhole and an envelope plate, a crowned dome with a finial,
+  // and barnacles crusting the foot. Same footprint and height as before (~1.4 m, r 0.45).
   const g = new THREE.Group();
-  const paint = M('postBlue', () => ctex('dg.post', 32, 32, (p) => {
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, tone(T.blue, x < 4 ? 1 : x < 10 ? 3 : x < 24 ? 2 : 1));
-    for (let x = 0; x < 32; x++) { p.set(x, 6, tone(T.gold, 3)); p.set(x, 7, tone(T.gold, 1)); }
-    // a little envelope badge
-    p.rect(11, 14, 10, 7, '#f4ecd8'); p.line(11, 14, 16, 18, '#8a7a60'); p.line(20, 14, 16, 18, '#8a7a60');
+  const paint = M('postBlue2', () => ctex('dg.post2', 64, 64, (p) => {
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const k = x % 8;                                   // eight flutes round the column: lit edge, body, shade
+      p.set(x, y, tone(T.blue, k === 0 ? 4 : k < 3 ? 3 : k < 6 ? 2 : 1));
+    }
+    for (const y0 of [8, 54]) for (let x = 0; x < 64; x++) {
+      p.set(x, y0, tone(T.gold, 4)); p.set(x, y0 + 1, tone(T.gold, 3)); p.set(x, y0 + 2, tone(T.gold, 2)); p.set(x, y0 + 3, tone(T.gold, 0));
+    }
+    for (let x = 3; x < 64; x += 8) { rivet(p, x, 13, T.iron); rust(p, x + 1, 16, 3 + (x % 3)); rivet(p, x, 49, T.iron); }
+    // a pale salt tide-line low on the column
+    for (let x = 0; x < 64; x++) if ((x * 7) % 5 < 3) p.set(x, 51, tone(T.ice, 3));
+  }), { rough: 0.65 });
+  const gold = M('postGold', () => ctex('dg.postGold', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, tone(T.gold, y < 3 ? 4 : y < 9 ? 3 : y < 13 ? 2 : 1)); }), { rough: 0.5, metal: 0.4 });
+  const door = M('postDoor', () => ctex('dg.postDoor', 32, 32, (p) => {
+    bevel(p, 0, 0, 32, 32, T.blue, 2, 2);
+    // the envelope plate
+    p.rect(8, 6, 16, 11, tone(T.gold, 2)); p.rect(9, 7, 14, 9, '#f4ecd8');
+    p.line(9, 7, 16, 12, '#8a7a60'); p.line(22, 7, 16, 12, '#8a7a60');
+    // a keyhole in a brass escutcheon
+    p.rect(14, 21, 5, 7, tone(T.gold, 3)); p.rect(16, 22, 1, 2, '#120808'); p.rect(15, 24, 3, 3, '#120808');
   }), { rough: 0.6 });
   const dark = M('dark', () => null, { color: '#120808', rough: 1 });
-  const body = mesh(lpCyl(0.38, 1.2, 8), paint); body.position.y = 0.6; g.add(body);
-  const cap = mesh(lpSphere(0.4, 1), paint); cap.scale.y = 0.5; cap.position.y = 1.2; g.add(cap);
-  const slot = mesh(new THREE.BoxGeometry(0.36, 0.06, 0.1), dark); slot.position.set(0, 0.95, 0.36); g.add(slot);
-  const base = mesh(lpCyl(0.45, 0.14, 8), M('frame.reef', () => stonePage(AREA_STONE.reef, 'reef'), { rough: 0.9 })); base.position.y = 0.07; g.add(base);
+  const stone = M('frame.reef', () => stonePage(AREA_STONE.reef, 'reef'), { rough: 0.9 });
+  const bone = M('postBarnacle', () => ctex('dg.barnacle', 8, 8, (p) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) p.set(x, y, tone(T.bone, y < 2 ? 4 : y < 5 ? 3 : 1)); }), { rough: 0.95 });
+  const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z = 0) => { const me = mesh(geo, m); me.position.set(x, y, z); g.add(me); return me; };
+  // plinth: two stepped stone tiers
+  add(lpCyl(0.47, 0.1, 10), stone, 0, 0.05);
+  add(lpCyl(0.42, 0.08, 10, 0.4), stone, 0, 0.14);
+  // the column (slight taper), the crown rim, the dome and its finial
+  add(lpCyl(0.37, 1.02, 16, 0.35), paint, 0, 0.69);
+  add(lpCyl(0.41, 0.07, 16, 0.4), gold, 0, 1.22);
+  const cap = add(lpSphere(0.39, 1), paint, 0, 1.25); cap.scale.y = 0.5;
+  add(lpCyl(0.06, 0.06, 6, 0.04), gold, 0, 1.47);
+  add(lpSphere(0.055, 0), gold, 0, 1.53);
+  // the hooded letter slot
+  add(chamferBox(0.36, 0.06, 0.08), dark, 0, 0.97, 0.36);
+  add(chamferBox(0.44, 0.05, 0.14, 0.015), gold, 0, 1.025, 0.36);
+  // the raised door (front)
+  {
+    const dg = boxUV(chamferBox(0.34, 0.44, 0.05, 0.012).translate(0.17, 0.22, 0), 1);
+    const uv = dg.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 0.34, uv.getY(i) / 0.44);   // the front face spans the page
+    add(dg.translate(-0.17, -0.22, 0), door, 0, 0.62, 0.35);
+  }
+  // barnacles round the foot
+  for (let i = 0; i < 9; i++) {
+    const a = 0.4 + i * 0.83, rr = 0.36, h = 0.22 + hash2(i, 3, 17) * 0.16;
+    const b = add(lpCone(0.035 + hash2(i, 1, 17) * 0.02, 0.05, 5), bone, Math.cos(a) * rr, h, Math.sin(a) * rr);
+    b.lookAt(Math.cos(a) * 2, h, Math.sin(a) * 2); b.rotateX(Math.PI / 2);
+  }
   return g;
 }
 

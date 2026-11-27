@@ -63,7 +63,8 @@ function paintPage() {
     // organic blotches on the back and flanks (domain-warped cells, two clean tones)
     const wx = x + Math.sin(y * 0.13) * 5, wy = y + Math.sin(x * 0.11 + 1.7) * 4;
     const [f1, , id] = worley(wx, wy, 22, 5, 0);
-    if (up > -0.35 && id < 0.42 && f1 < 6.5 + id * 6) v -= 1;
+    // (kept to the back and upper flanks, fewer and smaller, so they read as mottling rather than bruises)
+    if (up > 0.05 && id < 0.32 && f1 < 5 + id * 6) v -= 1;
     const [g1, , gid] = worley(x, y, 9, 11, 0);
     if (up > -0.1 && gid < 0.16 && g1 < 1.4) v -= 1.6;       // freckles
     idx[y * bw + x] = Math.round(v);
@@ -266,7 +267,7 @@ function buildNose(base: THREE.Vector3): THREE.BufferGeometry {
 function finGeo(len: number, wid: number, cup: number, reg: { x: number; y: number; w: number; h: number }): THREE.BufferGeometry {
   const L = new Loft();
   const grid: V3[][] = [];
-  const R = 3, C = 4;
+  const R = 5, C = 5;
   for (let i = 0; i < R; i++) {
     const v = i / (R - 1);
     const row: V3[] = [];
@@ -301,7 +302,7 @@ function buildEye(M: { ball: THREE.Material; skin: THREE.Material; glint: THREE.
   ball.position.z = -r * 0.3;
   const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 1.0, r * 0.34, 4, 9), M.skin);
   rim.position.z = -r * 0.12;
-  const glint = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 0.2, 0), M.glint);
+  const glint = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 0.24, 0), M.glint);
   glint.position.set(-r * 0.28, r * 0.36, r * 0.58);
   // upper lid: a skin dome hinged on the eye's horizontal axis
   const lid = new THREE.Mesh(new THREE.SphereGeometry(r * 1.1, 9, 3, 0, Math.PI * 2, 0, Math.PI / 2), M.skin);
@@ -424,11 +425,11 @@ export class BlobModel {
     // fins + tail
     const finMat = uw(new THREE.MeshPhysicalMaterial({ map: pg.map, flatShading: true, roughness: 0.75, side: THREE.DoubleSide, alphaTest: 0.5 }), { sss: [1.0, 0.45, 0.45], sssK: 0.9 });
     patchBlob(finMat, this.U, { rock: true, key: 'fin' });
-    this.finR = new THREE.Mesh(finGeo(0.33, 0.3, 0.05, R_FIN), finMat);
-    this.finL = new THREE.Mesh(finGeo(0.33, 0.3, 0.05, R_FIN), finMat);
+    this.finR = new THREE.Mesh(finGeo(0.34, 0.36, 0.06, R_FIN), finMat);
+    this.finL = new THREE.Mesh(finGeo(0.34, 0.36, 0.06, R_FIN), finMat);
     this.finR.position.set(...bodyPoint(0.6, 0.18, -0.03)); this.finL.position.set(...bodyPoint(0.6, 0.82, -0.03));
     this.finR.castShadow = this.finL.castShadow = true;
-    this.tail = new THREE.Mesh(finGeo(0.2, 0.3, 0.0, R_TAIL), finMat);
+    this.tail = new THREE.Mesh(finGeo(0.24, 0.38, 0.03, R_TAIL), finMat);
     this.tail.position.set(-0.6, 0.04, 0);
     this.tail.castShadow = true;
     this.body.add(this.finR, this.finL, this.tail);
@@ -498,7 +499,8 @@ export class BlobModel {
     const t = this.animT, P: Pose = { ...ZERO };
     switch (this.anim) {
       case 'idle': {
-        P.y = Math.sin(t * 2) * 0.012; P.roll = Math.sin(t * 1.3) * 0.03; P.sq = Math.sin(t * 2.2) * 0.02;
+        // hovering: a slow breath (squash out of phase with the bob), a lazy nose-nod and a little drift roll
+        P.y = Math.sin(t * 2) * 0.018; P.roll = Math.sin(t * 1.3) * 0.035; P.sq = Math.sin(t * 2 - 1.2) * 0.026; P.pitch = Math.sin(t * 0.9 + 0.6) * 0.035;
         P.finR = Math.sin(t * 2.4) * 0.25; P.finL = Math.sin(t * 2.4 + 1) * 0.25; P.finAmp = 0.4; P.tail = 0.3; P.wpn = 0.75 + Math.sin(t * 1.5) * 0.06;
         break;
       }

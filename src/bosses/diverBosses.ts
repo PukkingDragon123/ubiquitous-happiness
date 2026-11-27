@@ -9,6 +9,7 @@
 //              back) | ICE SPIKES (red: a ring marks where they erupt) | P2 + three-shot volley | P3 + a
 //              shoulder CHARGE across the arena (white, parryable)
 import * as THREE from 'three';
+import { Loft, ring, usFor, FULL, type V3 } from '../gfx/loft';
 import type { World, Entity, Team } from '../game/types';
 import type { Arena } from '../combat/types';
 import type { MoveDef } from '../combat/core';
@@ -107,25 +108,53 @@ abstract class DiverBoss extends BossBase {
 }
 
 // =========================================================================================== CAPTAIN GAFF
-const rust = () => kitMat('gaffAnchor', 32, 32, (x, y) => {
-  let c: [number, number, number] = [92, 84, 80];
-  if (nz(x, y, 8, 5) > 0.6) c = [142, 74, 38];
-  if (hh(x, y, 9) > 0.96) c = [190, 120, 60];
-  return band(c, 0.86 + (y < 4 ? 0.18 : 0) + (nz(x * 2, y, 6, 1) - 0.5) * 0.14, x, y, 0.07);
+// a sea-rotted iron page, hand-placed (no noise): 5-tone cool iron, an orange rust tide down the flanks, a few pits
+const ANC: [number, number, number][] = [[34, 32, 36], [58, 56, 62], [86, 84, 90], [116, 114, 118], [150, 148, 150]];
+const ARU: [number, number, number][] = [[86, 38, 18], [128, 62, 26], [168, 92, 40], [202, 128, 62]];
+const rust = () => kitMat('gaffAnchor2', 32, 32, (x, y) => {
+  let k = x < 3 ? 3 : x > 15 && x < 19 ? 1 : 2;
+  if (y < 3) k += 1;
+  const tide = 18 + ((x * 5) % 7) - (x % 4 === 0 ? 4 : 0);              // rust runs down from the tide line in drips
+  if (y > tide) return ARU[Math.min(3, Math.max(0, k - (y > tide + 6 ? 1 : 0)))];
+  if ((x * 7 + y * 3) % 23 === 0) return ANC[0];                          // pits
+  return ANC[Math.min(4, k)];
 }, { rough: 0.8, metal: 0.3 });
 function buildAnchor(): THREE.Group {
+  // an admiralty anchor, lofted in one piece: the ring, a tapering octagonal shank, the stock bar across it with ball
+  // ends, the curved crown arms and broad spade flukes, and the pointed crown. Hangs from its ring at the origin,
+  // shank down (-y), the arms in the x-y plane, the stock along z (same layout and size as before)
   const g = new THREE.Group();
-  const m = rust();
-  const add = (geo: THREE.BufferGeometry, p: [number, number, number], r: [number, number, number] = [0, 0, 0], s: [number, number, number] = [1, 1, 1]) => { const me = new THREE.Mesh(geo, m); me.position.set(...p); me.rotation.set(...r); me.scale.set(...s); me.castShadow = true; g.add(me); };
-  // the anchor hangs from its ring at the origin, shank pointing down (-y)
-  add(new THREE.TorusGeometry(0.14, 0.04, 4, 8), [0, 0, 0]);
-  add(new THREE.BoxGeometry(0.16, 1.5, 0.16), [0, -0.85, 0]);
-  add(new THREE.BoxGeometry(0.9, 0.1, 0.1), [0, -0.3, 0], [0, Math.PI / 2, 0]); // the stock (across)
+  const L = new Loft();
+  const TAU = Math.PI * 2;
+  // ring
+  { const path: V3[] = []; for (let i = 0; i <= 12; i++) { const a = (i / 12) * TAU; path.push([Math.sin(a) * 0.14, Math.cos(a) * 0.14, 0]); } L.tube(path, () => 0.04, 5, FULL, 0); }
+  // shank (thicker toward the crown), a collar under the stock
+  L.tube([[0, -0.1, 0], [0, -0.8, 0], [0, -1.58, 0]], (t) => 0.07 + t * 0.03, 8, FULL, 0, { capStart: true });
+  L.tube([[0, -0.24, 0], [0, -0.36, 0]], () => 0.1, 8, FULL, 0, { capStart: true, capEnd: true });
+  // the stock: a bar along z swelling in the middle, ball ends
+  L.tube([[0, -0.3, -0.46], [0, -0.3, 0], [0, -0.3, 0.46]], (t) => 0.045 + 0.025 * Math.sin(Math.PI * t), 6, FULL, 0, { capStart: true, capEnd: true });
+  for (const z of [-0.5, 0.5]) L.tube([[0, -0.3, z - 0.05], [0, -0.3, z + 0.05]], (t) => 0.06 * Math.sin(Math.PI * Math.max(0.15, Math.min(0.85, t))), 6, FULL, 0, { capStart: true, capEnd: true });
   for (const s of [1, -1]) {
-    add(new THREE.BoxGeometry(0.62, 0.14, 0.14), [s * 0.3, -1.52, 0], [0, 0, s * 0.55]);
-    add(new THREE.ConeGeometry(0.17, 0.42, 4), [s * 0.6, -1.25, 0], [0, 0, s * -0.4], [1, 1, 0.45]); // flukes
+    // a curved arm from the crown up and out
+    const arm: V3[] = [];
+    for (let i = 0; i <= 6; i++) { const a = (i / 6) * 1.05; arm.push([s * Math.sin(a) * 0.62, -1.62 + (1 - Math.cos(a)) * 0.62, 0]); }
+    L.tube(arm, (t) => 0.085 - t * 0.03, 7, FULL, 0);
+    // the fluke: a broad flat spade on the arm's end, pointing up and out to a bill
+    const e = arm[arm.length - 1], d: V3 = [s * Math.cos(1.05), Math.sin(1.05), 0];   // the arm's end tangent
+    const dl = Math.hypot(d[0], d[1]); const dx = d[0] / dl, dy = d[1] / dl;
+    const rings = [];
+    for (let i = 0; i <= 5; i++) {
+      const f = i / 5, w = 0.2 * Math.sin(Math.PI * Math.min(1, 0.25 + f * 0.85)) + 0.01;
+      const c: V3 = [e[0] - dx * 0.22 + dx * f * 0.5, e[1] - dy * 0.22 + dy * f * 0.5, 0];
+      rings.push({ pts: ring(c, [-dy, dx, 0], [0, 0, 1], w, 0.04 * (1 - f * 0.6), 0.04 * (1 - f * 0.6), 8, 3), v: f });
+    }
+    L.loft(rings, usFor(8), FULL, 0, { start: [e[0] - dx * 0.24, e[1] - dy * 0.24, 0], end: [e[0] + dx * 0.36, e[1] + dy * 0.36, 0] });
   }
-  add(new THREE.ConeGeometry(0.1, 0.25, 4), [0, -1.7, 0], [Math.PI, 0, 0]);
+  // the crown point
+  L.tube([[0, -1.6, 0], [0, -1.72, 0], [0, -1.83, 0]], (t) => 0.1 * (1 - t) + 0.01, 6, FULL, 0, { capEnd: true });
+  const me = new THREE.Mesh(L.build(), rust());
+  me.castShadow = true;
+  g.add(me);
   return g;
 }
 const GA: Record<string, MoveDef> = {
@@ -149,7 +178,7 @@ export class CaptainGaff extends DiverBoss {
     super('captainGaff', arena, { name: 'CAPTAIN GAFF', title: 'and his Anchor', hp: 110, poise: 150, r: 1.5 }, 'scuba', 'none', 2.25);
     this.anchor.scale.setScalar(G);
     w.scene.add(this.anchor);
-    const lg = new THREE.TorusGeometry(0.07 * G, 0.022 * G, 4, 6), lm = rust();
+    const lg = new THREE.TorusGeometry(0.07 * G, 0.022 * G, 5, 8), lm = rust();
     for (let i = 0; i < 12; i++) { const l = new THREE.Mesh(lg, lm); l.castShadow = true; this.links.push(l); w.scene.add(l); }
     this.anc.x = this.x - 1; this.anc.y = this.arena.floor + 0.4 * G;
   }

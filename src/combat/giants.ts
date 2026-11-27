@@ -17,6 +17,9 @@ import { band, nz, hh } from '../humans/fabric';
 import { attackPlayer } from './resolve';
 import { callout } from './feel';
 import { clamp, damp } from '../core/math';
+import { buildFish, type FishModel } from '../fish';
+import { Loft, FULL, type V3 } from '../gfx/loft';
+import { facet } from '../gfx/lowpoly';
 
 /** what the kit needs from its giant (a souls Human) */
 export interface GiantHost extends Entity {
@@ -35,39 +38,21 @@ function pxTex(key: string, w: number, h: number, draw: (p: Px) => void): THREE.
   return t;
 }
 
-// ------------------------------------------------------------------ dead fish (pixel-art cards)
-const FISH_COLS: [string, string, string, string][] = [
-  ['#c8d0d8', '#8a96a4', '#f0f4f8', '#4a5a6a'],   // a silver herring
-  ['#e88a3a', '#b05a20', '#f8d0a0', '#6a2a10'],   // an orange snapper
-  ['#8ab070', '#5a7a48', '#d8e8b8', '#2a3a20'],   // a striped perch
-];
-function deadFishTex(i: number) {
-  return pxTex('deadFish' + i, 48, 20, (p) => {
-    const [mid, back, belly, dark] = FISH_COLS[i % 3];
-    // a limp fish, nose down (+y is the tail end): body, tail, fins, an X eye, a gash
-    for (let y = 0; y < 20; y++) for (let x = 0; x < 48; x++) {
-      const t = x / 47, cy = 10 + Math.sin(t * 3) * 1.2;
-      const half = t < 0.1 ? t * 50 : t < 0.78 ? 6.2 - (t - 0.3) * 4 : 0;
-      if (Math.abs(y - cy) < half && t < 0.8) {
-        const k = (y - cy) / half;
-        p.set(x, y, k < -0.35 ? back : k > 0.45 ? belly : mid);
-        if (i === 2 && x % 7 < 2 && k < 0.4) p.set(x, y, dark);
-      }
-      // the tail fork
-      if (t >= 0.78 && Math.abs(y - cy) < (t - 0.72) * 30 && Math.abs(Math.abs(y - cy) - (t - 0.72) * 22) < 3.5) p.set(x, y, back);
-    }
-    // the X eye, the gill line, a bloody gash
-    for (const [dx, dy] of [[0, 0], [1, 1], [2, 2], [2, 0], [0, 2]]) p.set(6 + dx, 7 + dy, '#1a1414');
-    for (let y = 6; y < 15; y++) p.set(12, y, dark);
-    for (let x = 18; x < 24; x++) p.set(x, 12 + (x & 1), '#a01818');
-    p.outline('#14100c');
-  });
-}
-function fishCard(i: number, len: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(len, len * 20 / 48), new THREE.MeshStandardMaterial({ map: deadFishTex(i), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6, flatShading: true }));
-  m.geometry.translate(len / 2, 0, 0); // hangs from its mouth
-  m.castShadow = true;
-  return m;
+// ------------------------------------------------------------------ dead fish (real fish-pipeline models, v8 polish)
+// The trophies used to be flat pixel-art cards; now they are the game's own fish (cached geometry + texture per
+// species, a tiny per-instance material), posed dead: a limp C-curl and a gaping jaw, hung from the mouth.
+const DEAD_SP = ['sardine', 'snapper', 'pumpkinseed'];
+function fishCard(i: number, len: number, keep?: FishModel[]): THREE.Object3D {
+  const m = buildFish(DEAD_SP[i % DEAD_SP.length], 31 + i);
+  m.group.scale.setScalar(len / m.length);
+  m.group.rotation.y = Math.PI;           // nose toward -x ...
+  m.group.position.x = len / 2;           // ... at the origin, so it hangs from its mouth with the body along +x
+  m.inst.uSwim.value.set(i * 1.3, 0, (i % 2 ? 1 : -1) * 0.45, 0.75);
+  m.inst.uFx.value.set(0, 0, 0, -0.3);    // eyes rolled
+  m.mesh.castShadow = true;
+  keep?.push(m);
+  const g = new THREE.Group(); g.add(m.group);
+  return g;
 }
 
 // ------------------------------------------------------------------ props
@@ -95,14 +80,24 @@ function lanternMesh(): { g: THREE.Group; glass: THREE.MeshStandardMaterial } {
   return { g, glass };
 }
 function gaffHook(): THREE.Group {
+  // a lofted gaff: a lashed socket, the shaft, a J that curls over and back with a tapering point and an inner barb
+  // (in the y-z plane, the point curling back toward the pole like the old torus one)
   const g = new THREE.Group();
   const R = rust();
-  const curve = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 4, 10, Math.PI * 1.25), R);
-  curve.rotation.set(0, Math.PI / 2, 0); curve.position.set(0, 0.16, 0.02);
-  const barb = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.12, 4), R);
-  barb.position.set(0, 0.3, -0.13); barb.rotation.x = -2.4;
-  curve.castShadow = barb.castShadow = true;
-  g.add(curve, barb);
+  const B = new Loft();
+  const C: V3 = [0, 0.2, -0.13], r = 0.13;
+  const at = (a: number): V3 => [0, C[1] + Math.sin(a) * r, C[2] + Math.cos(a) * r];
+  const path: V3[] = [[0, -0.02, 0], [0, 0.1, 0]];
+  for (let i = 0; i <= 12; i++) path.push(at((i / 12) * Math.PI * 1.18));
+  B.tube(path, (t) => (t < 0.12 ? 0.024 : 0.024 * Math.pow(1 - (t - 0.12) / 0.88, 0.8) + 0.003), 6, FULL, 0, { capStart: true, capEnd: true });
+  const bb = at(Math.PI * 0.98), bt: V3 = [0, bb[1] + 0.055, bb[2] + (C[2] - bb[2]) * 0.3];
+  B.tube([bb, [0, (bb[1] + bt[1]) / 2, (bb[2] + bt[2]) / 2], bt], (t) => 0.012 * (1 - t) + 0.002, 4, FULL, 0, { capEnd: true });
+  B.tube([[0, -0.08, 0], [0, 0.02, 0], [0, 0.06, 0]], () => 0.034, 6, FULL, 0, { capStart: true, capEnd: true });
+  const hook = new THREE.Mesh(facet(B.build()), R);
+  const lash = new THREE.Mesh(facet(new THREE.CylinderGeometry(0.031, 0.031, 0.04, 6)), hoseMat());   // a ribbed cord lashing
+  lash.position.y = 0.08;
+  hook.castShadow = lash.castShadow = true;
+  g.add(hook, lash);
   return g;
 }
 
@@ -194,6 +189,7 @@ export class GiantKit {
   private added = false;
   private lastX = 0;
   private t = Math.random() * 10;
+  private fish: FishModel[] = [];
 
   constructor(public host: GiantHost, o: { trophies?: number; bag?: boolean; lantern?: 'belt' | 'hand' | null; hose?: boolean; hook?: boolean }) {
     const S = host.S;
@@ -206,7 +202,7 @@ export class GiantKit {
     const n = o.trophies ?? 3;
     for (let i = 0; i < n; i++) {
       const len = (0.34 + Math.random() * 0.14) * S;
-      const card = fishCard(i + Math.floor(Math.random() * 3), len);
+      const card = fishCard(i + Math.floor(Math.random() * 3), len, this.fish);
       card.rotation.z = -Math.PI / 2; // nose up at the hook, tail down
       const g = new THREE.Group(); g.add(card);
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: '#2a2620' }));
@@ -221,7 +217,7 @@ export class GiantKit {
       const sack = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2 * S, 1), netBagMat());
       sack.scale.set(1, 1.25, 0.8); sack.position.y = -0.24 * S;
       g.add(sack);
-      for (let i = 0; i < 4; i++) { const c = fishCard(i, 0.28 * S); c.position.set((Math.random() - 0.5) * 0.15 * S, -0.3 * S + Math.random() * 0.15 * S, (i - 1.5) * 0.04 * S); c.rotation.z = Math.random() * 6; g.add(c); }
+      for (let i = 0; i < 4; i++) { const c = fishCard(i, 0.28 * S, this.fish); c.position.set((Math.random() - 0.5) * 0.15 * S, -0.3 * S + Math.random() * 0.15 * S, (i - 1.5) * 0.04 * S); c.rotation.z = Math.random() * 6; g.add(c); }
       this.obj.add(g);
       this.bag = { m: g, line: null, ang: 0, vel: 0, off: new THREE.Vector3(-0.12 * S, 0.06 * S, -0.12 * S), len: 0 };
     }
@@ -370,6 +366,8 @@ export class GiantKit {
 
   dispose() {
     this.obj.removeFromParent();
+    for (const m of this.fish) m.dispose();
+    this.fish.length = 0;
     for (const h of this.hurt) h.alive = false;
     if (this.lanternWP) this.lanternWP.alive = false;
     if (this.hoseWP) this.hoseWP.alive = false;

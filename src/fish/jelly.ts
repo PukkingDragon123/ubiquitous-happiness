@@ -22,24 +22,25 @@ export function jellyfish(): SpeciesAsset {
   // ------------------------------------------------------------------------------------------ paint
   // bell: u around (0..1), v apex (0) -> margin (1)
   paintRect(pg, bellR, (u, v) => {
-    let c = mix(C('#f6cde4'), C('#d98ac0'), smoothstep(0.0, 0.85, v));
-    let a = 0.6 + v * 0.12, h = 0;
+    // a clean 5-tone hue-shifted ramp: blush apex -> mauve shoulder -> deep plum margin band
+    let c = mix(C('#fbdcec'), C('#e6a2cc'), smoothstep(0.0, 0.55, v));
+    c = mix(c, C('#c8609e'), smoothstep(0.55, 0.86, v));
+    let a = 0.62 + v * 0.12, h = 0;
     const lu = (u * LAP) % 1;           // position within a lappet sector
-    // 16 radial canals: faint lines on the sector borders
-    if (Math.abs(lu - 0.5) < 0.04 && v > 0.12 && v < 0.88) { c = shade(c, 0.9); a += 0.08; }
-    // warts: neat radial rows of mauve dots, two rows per sector, denser toward the margin
-    const rows = [0.25, 0.75];
-    for (const ru of rows) {
-      const du = (lu - ru) * (TAU / LAP) * Math.sin(Math.min(1, v + 0.1) * Math.PI * 0.5) * 6.5;
-      const step = 0.085 - v * 0.03;
-      const dv = (((v + (ru > 0.5 ? step * 0.5 : 0)) % step) - step * 0.5) / step;
-      const q = Math.hypot(du * 3.2, dv * 1.6);
-      if (v > 0.16 && v < 0.86 && q < 0.42 + v * 0.3) { c = q < 0.3 ? C('#8e2a6e') : C('#b8508e'); a = 0.95; h = 1; }
+    // 16 radial canals: thin darker lines on the sector borders, fading out toward the apex
+    if (Math.abs(lu - 0.5) < 0.05 && v > 0.16 && v < 0.86) { c = mix(c, C('#b0508e'), 0.55); a += 0.1; }
+    // nematocyst warts: two small round plum dots per lappet sector, centred between the canals (clean, countable)
+    {
+      const cu = Math.min(lu, 1 - lu) * (TAU / LAP) * R * Math.sin(Math.min(1, v) * Math.PI * 0.5);
+      for (const v0 of [0.7]) {
+        const q = Math.hypot(cu / 0.016, (v - v0) / 0.04);
+        if (q < 1) { c = mix(c, C('#b04a88'), q < 0.55 ? 0.7 : 0.4); a = 0.9; h = 1; }
+      }
     }
-    // lappets: the scalloped margin band is a deeper mauve with a paler edge
-    if (v > 0.86) { c = v > 0.96 ? C('#f0b0d8') : C('#a8407e'); a = 0.85; }
+    // lappets: the scalloped margin band is a deeper plum with a pale frosted lip
+    if (v > 0.86) { c = v > 0.95 ? C('#ffd0ea') : C('#94306e'); a = 0.88; }
     return [c, a, 0.18, h];
-  }, (u, v) => (v > 0.86 && v < 0.96 ? [70, 16, 56] : null));
+  }, (u, v) => (v > 0.86 && v < 0.95 ? [70, 16, 56] : null));
   paintRect(pg, innerR, (u, v) => {
     // subumbrella: pale with four darker gonad crescents and the mouth stalk
     const ang = u * TAU;
@@ -62,7 +63,7 @@ export function jellyfish(): SpeciesAsset {
     return [c, 0.8, 0.25, fold * 0.3];
   });
   // ------------------------------------------------------------------------------------------ bell
-  const NS = LAP * 2, NR = 6;
+  const NS = LAP * 2, NR = 8;
   const bellPt = (th: number, v: number, k: number): V3 => {
     const lu = ((th / TAU) * LAP) % 1;
     // lappet scallop: margin bulges out mid-lobe, notches in between
@@ -100,13 +101,22 @@ export function jellyfish(): SpeciesAsset {
   for (let n = 0; n < 4; n++) {
     const th0 = (n / 4) * TAU + TAU / 8, L = 0.62 + (n % 2) * 0.08;
     const grid: V3[][] = [];
-    const N = 14;
+    const N = 22;
     for (let i = 0; i <= N; i++) {
       const f = i / N, th = th0 + f * 2.6, w = 0.055 * (1 - f * 0.6) * (0.75 + 0.25 * Math.sin(f * 9 + n));
       const rr = 0.03 + f * 0.035;
       const c: V3 = [Math.cos(th0 + f * 0.6) * rr, -0.08 - f * L, Math.sin(th0 + f * 0.6) * rr];
       const d: V3 = [Math.cos(th) * w, 0.012 * Math.sin(f * 17), Math.sin(th) * w];
-      grid.push([[c[0] - d[0], c[1] - d[1], c[2] - d[2]], c, [c[0] + d[0], c[1] + d[1], c[2] + d[2]]]);
+      // ruffled edges: the two outer columns curl off the ribbon's plane in alternating frills (a curtain, not a strip)
+      const nx = -Math.sin(th), nz = Math.cos(th), fr = 0.022 * (1 - f * 0.4);
+      const e1 = Math.sin(f * 38 + n) * fr, e2 = Math.sin(f * 38 + n + 2.2) * fr;
+      grid.push([
+        [c[0] - d[0] + nx * e1, c[1] - d[1], c[2] - d[2] + nz * e1],
+        [c[0] - d[0] * 0.5 + nx * e1 * 0.3, c[1] - d[1] * 0.5, c[2] - d[2] * 0.5 + nz * e1 * 0.3],
+        c,
+        [c[0] + d[0] * 0.5 + nx * e2 * 0.3, c[1] + d[1] * 0.5, c[2] + d[2] * 0.5 + nz * e2 * 0.3],
+        [c[0] + d[0] + nx * e2, c[1] + d[1], c[2] + d[2] + nz * e2],
+      ]);
     }
     K.sheetPart(grid, armR, 0, (i, A, u, v) => { A.swim[i * 4] = 1; A.swim[i * 4 + 1] = n * 2.3 + 0.5; A.swim[i * 4 + 2] = 0.12 + v * 0.75; A.ao[i] = 0.92; });
   }

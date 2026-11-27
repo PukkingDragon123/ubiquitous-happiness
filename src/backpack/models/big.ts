@@ -35,7 +35,7 @@ export const BIG_MODELS: Record<string, Build> = {
     c.add(surf(16, 3, (u, v) => { const a = (u * 2 - 1) * 1.1, r = 0.2 + v * 1.3; return [Math.sin(a) * r, -0.14 + Math.sin(u * TAU * 4) * 0.07 * v, -0.9 + Math.cos(a) * r * 0.92]; }, { uv: Mn.r(0, 0, 48, 32), back: true }), mat('mantle', Mn, { rough: 0.35, emissive: '#1a3a90', ek: 0.45 }), [0, 0, 0], [0, 0, 0], 1, { smooth: 0.8 });
     // the pearl, big and glowing
     const Pr = tx('gPearl', 32, 16, (p) => { p.all(PAL.pearl, 4); for (let x = 0; x < 32; x++) { p.t(x, 5 + Math.round(Math.sin(x * 0.4) * 1.5), PAL.pink, 5); p.t(x, 11, PAL.yellow, 5); } p.R(0, 13, 32, 3, PAL.pearl, 3); p.R(5, 2, 5, 3, PAL.white, 5); });
-    c.add(ball(0.42, 14, 10), mat('gPearl', Pr, { rough: 0.15, metal: 0.1, emissive: '#d8c8a0', ek: 0.55 }), [0.05, 0.22, 0.05], [0.3, 0.5, 0], 1, { smooth: 1.3 });
+    c.add(ball(0.42, 14, 10), mat('gPearl', Pr, { rough: 0.6, metal: 0.05, emissive: '#c8a8b0', ek: 0.22 }), [0.05, 0.22, 0.05], [0.3, 0.5, 0], 1, { smooth: 1.3 });   // matte nacre, a soft glow (no white blow-out)
     // gold encrusting the hinge (legendary)
     const G = S.gold();
     c.add(cbox(0.7, 0.22, 0.3, 0.07), G, [0, -0.02, -1.0]);

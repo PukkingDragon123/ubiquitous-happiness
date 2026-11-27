@@ -506,7 +506,7 @@ const moray: FishSpec = {
   cy: [[0, -0.003], [0.06, 0], [1, 0]],
   mouth: { t: 0.072, th: [[0, 0.5], [0.04, 0.53], [0.072, 0.57]], open: 0.6, idle: 0.35, interior: '#d8a8a0', crease: '#1a1408', lip: 0.035, lipCol: '#c8b880',
     teeth: { upper: 9, lower: 9, size: 0.0095, style: 'fang', inset: 0.84, t0: 0.006, t1: 0.06, rake: 0.3, col: ['#ffffff', '#f4f0e4', '#d8d0bc', '#8a8070'] } },
-  eye: { t: 0.034, y: 0.58, r: 0.0095, fwd: 0.35, up: 0.25, lid: 'angry', lidCol: '#8a7a3a', lidLine: '#1a1408', lidTilt: 0.45, lidLevel: 0.3, bulge: 0.72,
+  eye: { t: 0.034, y: 0.6, r: 0.0125, fwd: 0.35, up: 0.25, lid: 'angry', lidCol: '#8a7a3a', lidLine: '#1a1408', lidTilt: 0.45, lidLevel: 0.3, bulge: 0.72,
     paint: { iris: ['#2a2a08', '#7a7a20', '#d8d048', '#fff8a0'], pupil: 0.48, ring: '#fffff0', sclera: '#e8e0b0', irisR: 0.86 } },
   rough: 0.4, sheen: 0,
   paint: (c) => {

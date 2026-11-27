@@ -17,25 +17,55 @@ import { attackPlayer } from '../combat/resolve';
 import { dangerZone, glint } from '../combat/telegraph';
 import { callout } from '../combat/feel';
 import { kitMat } from '../humans/diveGear';
-import { band, hh, nz } from '../humans/fabric';
+import { band } from '../humans/fabric';
 import { clamp, damp } from '../core/math';
+import { Loft, ring, usFor, FULL, type V3, type Reg } from '../gfx/loft';
 
 // ------------------------------------------------------------------ materials (clean pixel paint, flat shaded)
-const shellMat = () => kitMat('kkShell', 64, 64, (x, y) => {
-  let k = 0.95 + (nz(x, y, 14, 7) - 0.5) * 0.16 + (y < 10 ? 0.12 : 0) - (y > 50 ? 0.12 : 0);
-  let c: [number, number, number] = [198, 64, 38];
-  if (nz(x * 1.3, y, 9, 3) > 0.68) c = [226, 120, 70];                       // pale mottling
-  if (hh(x >> 2, y >> 2, 11) > 0.93) { c = [214, 206, 188]; k = 1.05 + ((x + y) & 1) * 0.08; } // barnacles
-  if (Math.abs(((x * 0.7 + y) % 23) - 11) < 0.6 && nz(x, y, 20, 9) > 0.55) { c = [96, 26, 20]; }  // old scars
-  return band(c, k, x, y, 0.06);
-}, { rough: 0.62 });
-const clawMat = () => kitMat('kkClaw', 32, 32, (x, y) => {
-  const tip = x > 22;
-  return band(tip ? [44, 30, 30] : [204, 70, 40], (tip ? 1 : 0.9 + (nz(x, y, 8, 4) - 0.5) * 0.18) + (y < 5 ? 0.15 : 0), x, y, 0.07);
-}, { rough: 0.5 });
-const bellyMat = () => kitMat('kkBelly', 32, 32, (x, y) => band([232, 204, 162], 0.88 + (y % 8 === 0 ? -0.12 : 0) + (nz(x, y, 10, 2) - 0.5) * 0.1, x, y), { rough: 0.8 });
+const bellyMat = () => kitMat('kkBelly', 32, 32, (x, y) => band([232, 204, 162], 0.9 + (y % 8 === 0 ? -0.14 : y % 8 === 1 ? 0.08 : 0) + (x % 16 === 0 ? -0.06 : 0), x, y), { rough: 0.8 });
 const goldMat = () => kitMat('kkGold', 16, 16, (x, y) => band([236, 184, 58], y < 4 ? 1.25 : 0.85 + (x % 5 === 0 ? 0.15 : 0), x, y, 0.08), { rough: 0.35, metal: 0.8 });
 const eyeMat = () => kitMat('kkEye', 8, 8, (x, y) => (x < 3 && y < 3 ? [255, 255, 255] : [16, 12, 12]), { rough: 0.2 });
+
+// v8 polish: the lofted king's pages, hand-placed (no noise): a 6-tone hue-shifted crimson ramp, a cream belly ramp.
+// Shell page (64 x 64): x runs round the carapace (top at x = 0 / 63, the belly at x = 32), y along it (back -> front).
+const KR: [number, number, number][] = [[58, 10, 20], [110, 22, 32], [168, 42, 42], [216, 80, 58], [244, 138, 90], [255, 192, 138]];
+const KB: [number, number, number][] = [[122, 90, 72], [176, 140, 108], [216, 188, 148], [240, 220, 180]];
+const shellMat2 = () => kitMat('kkShell2', 64, 64, (x, y) => {
+  const top = Math.cos((x / 64) * Math.PI * 2);
+  if (top < -0.42) {                                                     // the belly plates: cream, segmented
+    let k = top < -0.8 ? 2 : 1;
+    if (y % 7 === 0) k = 0; else if (y % 7 === 1) k = 3;
+    return KB[k];
+  }
+  let k = top > 0.55 ? 3 : top > 0.1 ? 2 : 1;
+  if (top > 0.85 && y > 10 && y < 54) k = 4;                              // the lit crown of the dome
+  if (top > -0.1 && top < 0.1) k = 0;                                     // the shadowed rim groove
+  // tubercles: a staggered lattice of round knobs (lit top-left pixel, dark lower-right)
+  const ox = (Math.floor(y / 6) % 2) * 3, kx = (x + ox) % 6, ky = y % 6;
+  if (top > 0.05) { if (kx === 2 && ky === 2) k = Math.min(5, k + 2); else if ((kx === 3 && ky === 3) || (kx === 2 && ky === 3)) k = Math.max(0, k - 1); }
+  // two old battle scars (dark groove, pale lip) and a barnacle cluster, hand-placed
+  for (const [x0, y0, len] of [[6, 20, 12], [52, 34, 9]]) { const d = x - x0 - (y - y0); if (y >= y0 && y < y0 + len) { if (d === 0) return KR[0]; if (d === -1) return KR[5]; } }
+  for (const [bx, by] of [[10, 44], [13, 46], [9, 47], [56, 14], [58, 16]]) { const dx = x - bx, dy = y - by; if (dx >= 0 && dx < 2 && dy >= 0 && dy < 2) return dx === 0 && dy === 0 ? [242, 234, 214] : [196, 184, 160]; if (dx === 2 && dy === 1) return [90, 80, 66]; }
+  if (y > 59) k = Math.max(0, k - 1);                                     // the front rim edge
+  return KR[k];
+}, { rough: 0.62 });
+// Claw page (32 x 32): rows 0..15 = palms / limb segments (UV top half), rows 16..31 = fingers and leg tips with the
+// black-brown tips at the far end (rows 25+). x runs round each part (the flat facets do the shading).
+const clawMat2 = () => kitMat('kkClaw2', 32, 32, (x, y) => {
+  let k = x === 16 || x === 17 ? 1 : x < 3 ? 3 : 2;                        // one lit ridge, one seam underneath
+  if (y < 16) { if ((x + y * 3) % 11 === 0) k = Math.min(5, k + 2); return KR[k]; }   // pale knob speckle on the limbs
+  if (y >= 28) return [[30, 20, 20], [52, 36, 34], [74, 52, 46], [96, 70, 60]][Math.min(3, k)] as [number, number, number];
+  if (y >= 25) return [[70, 22, 24], [96, 32, 30], [124, 46, 40], [150, 66, 54]][Math.min(3, k)] as [number, number, number];
+  return KR[Math.min(5, k + (y < 19 ? 0 : 0))];
+}, { rough: 0.5 });
+const LIMB: Reg = { x: 0, y: 0.5, w: 1, h: 0.5 }, TIP: Reg = { x: 0, y: 0, w: 1, h: 0.5 };
+/** a tapered spike / tooth: base -> tip along d, slightly curved by `bend` */
+function spike(L: Loft, base: V3, d: V3, len: number, r0: number, reg: Reg, bend: V3 = [0, 0, 0]) {
+  const m: V3 = [base[0] + d[0] * len * 0.5 + bend[0] * len * 0.15, base[1] + d[1] * len * 0.5 + bend[1] * len * 0.15, base[2] + d[2] * len * 0.5 + bend[2] * len * 0.15];
+  const t: V3 = [base[0] + d[0] * len + bend[0] * len * 0.3, base[1] + d[1] * len + bend[1] * len * 0.3, base[2] + d[2] * len + bend[2] * len * 0.3];
+  L.tube([base, m, t], (u) => r0 * (1 - u) + 0.004, 5, reg, 0, { capEnd: true });
+}
+const nrm = (v: V3): V3 => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 
 function part(geo: THREE.BufferGeometry, mat: THREE.Material, at: [number, number, number], scale: [number, number, number] = [1, 1, 1], rot: [number, number, number] = [0, 0, 0]) {
   const m = new THREE.Mesh(geo, mat);
@@ -112,32 +142,59 @@ export class KingCrab extends BossBase {
   }
 
   private build() {
-    const S = shellMat(), C = clawMat(), B = bellyMat(), G = goldMat(), E = eyeMat();
+    // v8 polish: lofted carapace, jointed limb segments, swollen crusher palm, curved toothed fingers and walking-leg
+    // daggers (was icosahedra, cylinders and cones). The rig (groups, pivots, tip marker) is unchanged.
+    const S = shellMat2(), C = clawMat2(), G = goldMat(), E = eyeMat();
+    const B = bellyMat();
     // the shell materials get their own emissive for the hit flash (clones so other crabs don't flash)
     const shell = (S as THREE.MeshStandardMaterial).clone(); const claw = (C as THREE.MeshStandardMaterial).clone();
     shell.emissive = new THREE.Color(0, 0, 0); claw.emissive = new THREE.Color(0, 0, 0);
     this.shellMats.push(shell, claw);
-    const ico = (d = 1) => new THREE.IcosahedronGeometry(1, d);
     const b = this.bodyG;
-    b.add(part(ico(1), shell, [0, 0, 0], [1.15, 0.85, 1.05]));
-    b.add(part(ico(1), B, [0.05, -0.4, 0], [1.0, 0.45, 0.9]));
-    // rim spikes along the carapace edge
-    const cone = new THREE.ConeGeometry(0.12, 0.38, 5);
-    for (let i = 0; i < 7; i++) {
-      const a = -1.1 + i * 0.37;
-      b.add(part(cone, shell, [Math.cos(a) * 1.22, 0.28 + Math.sin(a + 1.1) * 0.08, Math.sin(a) * 0.95], [1, 1, 1], [0, 0, -a - 0.4]));
-      b.add(part(cone, shell, [Math.cos(a) * 1.22, 0.28, -Math.sin(a) * 0.95], [1, 1, 1], [0, 0, -a - 0.4]));
+    // ---- the carapace: a broad dome with a raised rim shelf, narrowing to a horned rostrum at the front
+    {
+      const L = new Loft(), NA = 22, NR = 16;
+      const rz = (f: number) => 1.1 * Math.pow(Math.sin(Math.PI * f), 0.42) * (1 - 0.14 * Math.max(0, (f - 0.7) / 0.3));
+      const ryT = (f: number) => 0.84 * Math.pow(Math.sin(Math.PI * Math.min(1, f * 1.08)), 0.62) + 0.04;
+      const ryB = (f: number) => 0.46 * Math.pow(Math.sin(Math.PI * f), 0.5) + 0.03;
+      const shelf = (th: number) => { const a = Math.min(th, Math.PI * 2 - th); return 0.07 * Math.exp(-(((a - 1.42) / 0.22) ** 2)) - 0.03 * Math.exp(-(((a - 1.75) / 0.2) ** 2)); };
+      const rings = [];
+      for (let i = 1; i < NR; i++) { const f = i / NR; rings.push({ pts: ring([-1.15 + f * 2.3, -0.02, 0], [0, 0, 1], [0, 1, 0], rz(f), ryT(f), ryB(f), NA, 2.3, shelf), v: f }); }
+      L.loft(rings, usFor(NA), FULL, 0, { start: [-1.2, 0.0, 0], end: [1.2, 0.02, 0] });
+      // rim spikes along the shelf (seven a side, curving up and out), tubercle spines on the dome, rostrum horns
+      const rimAt = (f: number, side: number): V3 => { const a = 1.42, k = 1 + shelf(a); return [-1.15 + f * 2.3, -0.02 + Math.cos(a) * ryT(f) * k, side * Math.sin(a) * rz(f) * k]; };
+      for (const side of [1, -1]) for (let i = 0; i < 7; i++) {
+        const f = 0.16 + i * 0.105, p = rimAt(f, side);
+        spike(L, p, nrm([(f - 0.5) * 0.9, 0.45, side]), 0.3 + (i === 3 ? 0.08 : 0) - Math.abs(i - 3) * 0.02, 0.075, FULL, [0, 1, 0]);
+      }
+      for (const [f, a] of [[0.4, 0.5], [0.55, -0.55], [0.3, -0.35], [0.66, 0.4], [0.48, 0]] as [number, number][]) {
+        const p: V3 = [-1.15 + f * 2.3, -0.02 + Math.cos(a) * ryT(f), Math.sin(a) * rz(f)];
+        spike(L, p, nrm([0.2, 1, Math.sin(a) * 0.6]), 0.14, 0.05, FULL);
+      }
+      for (const side of [1, -1]) spike(L, [1.12, 0.12, side * 0.12], nrm([1, 0.45, side * 0.35]), 0.26, 0.06, FULL, [0, 1, 0]);
+      b.add(part(L.build(), shell, [0, 0, 0]));
     }
-    // a gold crown on top (five points) and a mouth plate
-    b.add(part(new THREE.CylinderGeometry(0.34, 0.42, 0.2, 5), G, [0.1, 0.72, 0]));
-    for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; b.add(part(new THREE.ConeGeometry(0.07, 0.26, 4), G, [0.1 + Math.cos(a) * 0.33, 0.92, Math.sin(a) * 0.33])); }
-    b.add(part(new THREE.OctahedronGeometry(0.08), new THREE.MeshStandardMaterial({ color: '#3ad0ff', emissive: '#1080c0', roughness: 0.3, flatShading: true }), [0.42, 0.78, 0]));
-    b.add(part(ico(0), B, [1.12, -0.05, 0], [0.22, 0.28, 0.42]));
-    // eye stalks
+    // ---- the sternum plate underneath and the mouthparts (maxillipeds) at the front
+    {
+      const L = new Loft(), NA = 14;
+      const rings = [];
+      for (let i = 1; i < 8; i++) { const f = i / 8, w = 0.82 * Math.pow(Math.sin(Math.PI * f), 0.5); rings.push({ pts: ring([-0.8 + f * 1.7, -0.36, 0], [0, 0, 1], [0, 1, 0], w, 0.1, 0.12, NA, 2.6), v: f }); }
+      L.loft(rings, usFor(NA), FULL, 0, { start: [-0.82, -0.36, 0], end: [0.92, -0.34, 0] });
+      for (const side of [1, -1]) L.tube([[1.0, -0.02, side * 0.1], [1.12, -0.16, side * 0.12], [1.14, -0.32, side * 0.09]], (t) => 0.07 - t * 0.03, 5, FULL, 0, { capStart: true, capEnd: true });
+      b.add(part(L.build(), B, [0, 0, 0]));
+    }
+    // a gold crown on top (five points) and its sea-glass gem
+    b.add(part(new THREE.CylinderGeometry(0.34, 0.42, 0.2, 10), G, [0.1, 0.8, 0]));
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; b.add(part(new THREE.ConeGeometry(0.07, 0.26, 4), G, [0.1 + Math.cos(a) * 0.33, 1.0, Math.sin(a) * 0.33])); }
+    b.add(part(new THREE.OctahedronGeometry(0.08), new THREE.MeshStandardMaterial({ color: '#3ad0ff', emissive: '#1080c0', roughness: 0.6, flatShading: true }), [0.44, 0.84, 0]));
+    // eye stalks: a jointed stalk, a socket collar and the bead
     for (const z of [0.28, -0.28]) {
-      const g = new THREE.Group(); g.position.set(0.95, 0.42, z);
-      g.add(part(new THREE.CylinderGeometry(0.05, 0.07, 0.42, 5), shell, [0, 0.21, 0]));
-      const eye = part(new THREE.IcosahedronGeometry(0.11, 1), E, [0.03, 0.46, 0]);
+      const g = new THREE.Group(); g.position.set(0.98, 0.36, z);
+      const L = new Loft();
+      L.tube([[0, -0.04, 0], [0.02, 0.2, 0], [0.04, 0.4, 0]], (t) => 0.075 - t * 0.025, 6, LIMB, 0, { capStart: true });
+      L.tube([[0.04, 0.37, 0], [0.04, 0.42, 0]], () => 0.075, 6, LIMB, 0, { capStart: true });
+      g.add(part(L.build(), shell, [0, 0, 0]));
+      const eye = part(new THREE.IcosahedronGeometry(0.11, 1), E, [0.05, 0.48, 0]);
       g.add(eye); this.eyeBalls.push(eye);
       b.add(g); this.eyes.push(g);
     }
@@ -145,28 +202,64 @@ export class KingCrab extends BossBase {
     for (const [z, big] of [[0.9, true], [-0.9, false]] as const) {
       const k = big ? 1.25 : 0.95;
       const shoulder = new THREE.Group(); shoulder.position.set(0.75, -0.05, z);
-      shoulder.add(part(new THREE.CylinderGeometry(0.15 * k, 0.18 * k, 0.8, 6), claw, [0.4, 0, 0], [1, 1, 1], [0, 0, Math.PI / 2]));
+      {
+        const L = new Loft();
+        L.tube([[-0.05, 0, 0], [0.4, 0.04 * k, 0], [0.84, 0, 0]], (t) => (0.15 + 0.05 * Math.sin(Math.PI * t)) * k, 7, LIMB, 0, { capStart: true, capEnd: true });
+        for (let i = 0; i < 3; i++) spike(L, [0.2 + i * 0.22, 0.17 * k, 0], nrm([0.4, 1, 0]), 0.1 * k, 0.035 * k, TIP);
+        shoulder.add(part(L.build(), claw, [0, 0, 0]));
+      }
       const elbow = new THREE.Group(); elbow.position.set(0.8, 0, 0);
-      elbow.add(part(new THREE.CylinderGeometry(0.17 * k, 0.15 * k, 0.7, 6), claw, [0.35, 0, 0], [1, 1, 1], [0, 0, Math.PI / 2]));
-      elbow.add(part(ico(0), claw, [0, 0, 0], [0.2 * k, 0.2 * k, 0.2 * k]));
+      {
+        const L = new Loft();
+        L.tube([[-0.06, 0, 0], [0.35, 0.03 * k, 0], [0.74, 0, 0]], (t) => (0.17 - 0.03 * t + 0.03 * Math.sin(Math.PI * t)) * k, 7, LIMB, 0, { capStart: true, capEnd: true });
+        for (let i = 0; i < 2; i++) spike(L, [0.2 + i * 0.25, 0.18 * k, 0.04 * k], nrm([0.5, 1, 0.3]), 0.09 * k, 0.03 * k, TIP);
+        elbow.add(part(L.build(), claw, [0, 0, 0]));
+      }
       const c = new THREE.Group(); c.position.set(0.7, 0, 0);
-      c.add(part(ico(1), claw, [0.32 * k, 0, 0], [0.5 * k, 0.34 * k, 0.3 * k]));               // palm
-      c.add(part(new THREE.ConeGeometry(0.16 * k, 0.75 * k, 5), claw, [0.95 * k, -0.08 * k, 0], [1, 1, 0.8], [0, 0, -Math.PI / 2 - 0.12])); // fixed finger
+      {
+        // the palm (propodus): swollen, ridged on top; the fixed finger (pollex) curving up, toothed on its inner edge
+        const L = new Loft(), NA = 14;
+        const rings = [];
+        for (let i = 0; i <= 8; i++) {
+          const f = i / 8, pp = 0.55 + 0.45 * Math.sin(Math.PI * f * 0.8);
+          rings.push({ pts: ring([f * 0.78 * k, 0, 0], [0, 0, 1], [0, 1, 0], 0.27 * k * pp * (big ? 1 : 0.85), 0.34 * k * pp, 0.3 * k * pp, NA, 2.2, (th) => 0.06 * Math.exp(-((Math.min(th, Math.PI * 2 - th) / 0.35) ** 2))), v: f });
+        }
+        L.loft(rings, usFor(NA), LIMB, 0, { start: [-0.04 * k, 0, 0], end: [0.82 * k, 0.02 * k, 0] });
+        const pol: V3[] = [[0.6 * k, -0.1 * k, 0], [0.95 * k, -0.15 * k, 0], [1.25 * k, -0.1 * k, 0], [1.4 * k, 0.03 * k, 0]];
+        L.tube(pol, (t) => 0.16 * k * Math.pow(1 - t, 0.7) + 0.008, 6, TIP, 0, { capEnd: true });
+        for (let i = 0; i < 4; i++) spike(L, [(0.82 + i * 0.13) * k, (-0.07 + i * 0.01) * k, 0], nrm([0.25, 1, 0]), 0.07 * k, 0.03 * k, TIP);
+        c.add(part(L.build(), claw, [0, 0, 0]));
+      }
       const finger = new THREE.Group(); finger.position.set(0.55 * k, 0.16 * k, 0);
-      finger.add(part(new THREE.ConeGeometry(0.13 * k, 0.7 * k, 5), claw, [0.36 * k, 0.02, 0], [1, 1, 0.8], [0, 0, -Math.PI / 2 + 0.1]));
+      {
+        // the movable finger (dactyl): hooked down at the tip, teeth on its lower edge
+        const L = new Loft();
+        L.tube([[-0.02 * k, 0, 0], [0.35 * k, 0.05 * k, 0], [0.66 * k, -0.01 * k, 0], [0.82 * k, -0.14 * k, 0]], (t) => 0.13 * k * Math.pow(1 - t, 0.7) + 0.008, 6, TIP, 0, { capStart: true, capEnd: true });
+        for (let i = 0; i < 3; i++) spike(L, [(0.25 + i * 0.14) * k, -0.07 * k, 0], nrm([0.2, -1, 0]), 0.06 * k, 0.026 * k, TIP);
+        finger.add(part(L.build(), claw, [0, 0, 0]));
+      }
       c.add(finger);
       const tip = new THREE.Object3D(); tip.position.set(1.2 * k, 0, 0); c.add(tip);
       elbow.add(c); shoulder.add(elbow);
       b.add(shoulder);
       this.arms.push({ shoulder, elbow, claw: c, finger, tip, big });
     }
-    // legs: three per side, splayed
+    // legs: three per side, splayed; a thick upper segment and a long dagger-tipped lower one
     for (const side of [1, -1]) for (let i = 0; i < 3; i++) {
       const hip = new THREE.Group(); hip.position.set(0.35 - i * 0.48, -0.2, side * 0.8);
       hip.rotation.set(side * 0.5, 0, 0);
-      hip.add(part(new THREE.CylinderGeometry(0.09, 0.11, 0.8, 5), shell, [0, 0.35, 0]));
+      {
+        const L = new Loft();
+        L.tube([[0, -0.02, 0], [0.02, 0.38, 0], [0, 0.78, 0]], (t) => 0.1 + 0.025 * Math.sin(Math.PI * t) - t * 0.02, 6, LIMB, 0, { capStart: true, capEnd: true });
+        spike(L, [0.08, 0.5, 0], nrm([1, 0.6, 0]), 0.08, 0.025, TIP);
+        hip.add(part(L.build(), shell, [0, 0, 0]));
+      }
       const knee = new THREE.Group(); knee.position.set(0, 0.72, 0);
-      knee.add(part(new THREE.ConeGeometry(0.1, 1.5, 5), claw, [0, -0.72, 0], [1, 1, 1], [Math.PI, 0, 0]));
+      {
+        const L = new Loft();
+        L.tube([[0, 0.06, 0], [0.04, -0.45, 0], [0.03, -0.98, 0], [-0.05, -1.46, 0]], (t) => 0.095 * Math.pow(1 - t, 0.55) + 0.012, 6, TIP, 0, { capStart: true, capEnd: true });
+        knee.add(part(L.build(), claw, [0, 0, 0]));
+      }
       hip.add(knee);
       b.add(hip);
       this.legs.push({ hip, knee, ph: i * 2.1 + (side > 0 ? 0 : 1.05), side });

@@ -80,7 +80,7 @@ class RemoraMinion implements Entity {
   constructor(x: number, y: number, vx: number, vy: number, public box: () => Arena) {
     this.x = x; this.y = y; this.vx = vx; this.vy = vy;
     this.m = buildFish('remora', (Math.random() * 99) | 0);
-    this.m.group.scale.setScalar(1.6);
+    this.m.group.scale.setScalar(1.9);
     this.obj.add(this.m.group);
     this.core = new EnemyCore(this, { poise: 6, head: () => ({ x: this.x, y: this.y + 0.35 }) });
   }
@@ -300,14 +300,19 @@ export class WhaleShark extends BossBase {
     this.obj.add(this.pivot);
     // the remoras riding along: under the belly, on the flank behind the pectoral, one on the back
     const anc = this.m.asset.anchors;
-    const spots: [THREE.Vector3 | undefined, number, number][] = [[anc.belly, -0.1, 0.32], [anc.flank, -0.25, 0.4], [anc.back, 0.12, 0.25]];
-    spots.forEach(([a, dy, dz], i) => {
+    // (sized to read at the fight's camera distance: a real remora is tiny next to a whale shark, but here they must
+    // be seen to be the minions that peel off; five of them, flipped belly-up where they cling under the body)
+    const spots: [THREE.Vector3 | undefined, number, number, number, boolean][] = [
+      [anc.belly, 0, -0.17, 0.42, true], [anc.flank, -0.9, -0.42, 0.58, true], [anc.back, -1.6, 0.2, 0.3, false],
+      [anc.flank, 1.5, -0.7, 0.62, true], [anc.belly, -2.6, -0.12, 0.3, true],
+    ];
+    spots.forEach(([a, dx, dy, dz, flip], i) => {
       if (!a) return;
       const r = buildFish('remora', 20 + i);
-      r.group.position.set(a.x - i * 0.8, a.y + dy, a.z + dz);
-      r.group.rotation.z = i === 2 ? 0 : Math.PI;
-      if (i !== 2) r.group.rotation.x = Math.PI;
-      r.group.scale.setScalar(1.55);
+      r.group.position.set(a.x + dx, a.y + dy, a.z + dz);
+      r.group.rotation.z = flip ? Math.PI : 0;
+      if (flip) r.group.rotation.x = Math.PI;
+      r.group.scale.setScalar(2.5 + (i % 2) * 0.25);
       this.m.group.add(r.group);
       this.riders.push(r);
     });
@@ -488,13 +493,12 @@ export class WhaleShark extends BossBase {
         if (c.justEntered('active')) {
           const box = () => this.arena;
           this.riders.forEach((r, i) => {
-            if (!r.group.visible && this.ridersOn) return;
+            if ((!r.group.visible && this.ridersOn) || i >= 3) return;   // the extra two riders just swim off (same minion count)
             r.group.updateMatrixWorld(true);
             const v = r.group.getWorldPosition(new THREE.Vector3());
             const e = new RemoraMinion(v.x, v.y, R(-3, 3), R(-1, 2), box);
             w.add(e);
             w.fx.emit('bubbleBig', v.x, v.y, { n: 6, spread: 0.3, speed: 1.4 });
-            void i;
           });
           if (this.phase === 3) { const e = new RemoraMinion(this.x, this.y - 1, R(-3, 3), -2, box); w.add(e); }
           this.showRiders(false); this.ridersT = 14;

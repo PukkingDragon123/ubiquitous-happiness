@@ -60,29 +60,36 @@ function spanishDancer(): SpeciesAsset {
     if (top < -0.6) c = mix(c, C('#ff9a8a'), 0.5);                   // the pale sole
     return [c, 1, 0.55, q.d < 0.32 ? 0.6 : 0.2];
   });
+  // the skirt page: crimson folds (troughs a shade darker, crests a shade warmer), fine pale veins fanning to the hem,
+  // then the famous cream hem band with a white lip and a row of tiny crimson dots
+  const RUF = 12;
   paintRect(pg, skirtR, (u, v, i) => {
-    // root -> rim (v): crimson with fine white veining, then the cream rim band
-    let c = mix(C('#a01020'), C('#e83a40'), v);
-    if (i % 9 === 0 && v < 0.7) c = mix(c, C('#ffb0a0'), 0.5);
-    if (v > 0.74) c = v > 0.9 ? C('#fff2dc') : C('#ffd8b0');
-    return [c, 1, 0.5, v > 0.74 ? 0.8 : 0.2];
+    const fold = Math.sin(u * TAU * RUF);
+    let c = mix(C('#8a0e1e'), C('#e0383e'), 0.25 + v * 0.6);
+    if (fold < -0.45) c = mix(c, C('#5a0614'), 0.45);
+    else if (fold > 0.55 && v > 0.25) c = mix(c, C('#ff6a5a'), 0.35);
+    if (i % 7 === 0 && v > 0.15 && v < 0.72) c = mix(c, C('#ffb0a0'), 0.4);
+    if (v > 0.72) c = v > 0.9 ? C('#fff6e6') : C('#ffd8b0');
+    if (v > 0.76 && v < 0.86 && i % 5 === 2) c = C('#c0182a');
+    return [c, 1, 0.5, v > 0.72 ? 0.8 : fold > 0 ? 0.4 : 0.1];
   });
   paintSwatch(pg, rhR, ['#fff4e8', '#ff8a7a', '#c01828', '#7a0a18'], 0.5);
   paintSwatch(pg, gillR, ['#fff2e4', '#ffb0a0', '#e03a40', '#900a1a'], 0.5);
   slugBody(K, bodyR, L, W, H, { rings: 24 });
-  // the mantle skirt: a closed frilly ring round the body's flanks, flaring out and rippling (flutter grows to the rim)
-  const NA = 48, NRr = 5, grid: V3[][] = [];
+  // the mantle skirt: a closed ring round the body's flanks that flares out and falls in deep up-and-down ruffles
+  // (a flamenco hem, so it reads as a skirt from the side camera too, not a flat ribbon); flutter grows to the rim
+  const NA = 72, NRr = 6, grid: V3[][] = [];
   for (let r = 0; r <= NRr; r++) {
     const row: V3[] = [], t = r / NRr;
     for (let c = 0; c <= NA; c++) {
       const a = (c / NA) * TAU, f = 0.5 + Math.cos(a) * 0.46, side = Math.sin(a);
       const w = W(f), h = H(f);
-      const out = 0.01 + t * 0.06 * (0.75 + 0.25 * Math.abs(side));
-      const wav = Math.sin(a * 9) * 0.011 * t * t;
-      // ring in the top view: x along the length, z out to the side
+      const ruf = Math.sin(a * RUF), ruf2 = Math.sin(a * RUF * 2 + 1.1);
+      const out = (0.008 + t * 0.072 * (0.72 + 0.28 * Math.abs(side))) * (1 + 0.1 * ruf * t);
+      const wav = (ruf * 0.03 + ruf2 * 0.006) * Math.pow(t, 1.5);
       const x = -L / 2 + f * L + Math.cos(a) * out * 0.9;
       const z = side * (w * 0.92 + out);
-      row.push([x, h * 0.32 + t * t * 0.04 + wav, z]);
+      row.push([x, h * 0.34 + t * 0.018 - t * t * 0.022 + wav, z]);
     }
     grid.push(row);
   }
@@ -96,9 +103,9 @@ function spanishDancer(): SpeciesAsset {
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU, d = norm([Math.cos(a) * 0.7 - 0.2, 0.9, Math.sin(a) * 0.7]);
     const b = add(g, [Math.cos(a) * 0.012, 0, Math.sin(a) * 0.012]);
-    const mid = add(b, scale(d, 0.022));
-    K.tube([b, mid], () => 0.004, 6, gillR, { flutter: 0.4, phase: k });
-    for (let q = 0; q < 3; q++) { const qa = a + (q - 1) * 0.7; K.cone(mid, norm([Math.cos(qa) * 0.8, 0.7, Math.sin(qa) * 0.8]), 0.02, 0.004, gillR, 4, { flutter: 0.8, phase: k + q }); }
+    const mid = add(b, scale(d, 0.028));
+    K.tube([b, mid], () => 0.005, 6, gillR, { flutter: 0.4, phase: k });
+    for (let q = 0; q < 3; q++) { const qa = a + (q - 1) * 0.7; K.cone(mid, norm([Math.cos(qa) * 0.8, 0.7, Math.sin(qa) * 0.8]), 0.026, 0.005, gillR, 4, { flutter: 0.8, phase: k + q }); }
   }
   // oral tentacles under the head
   for (const s of [-1, 1]) K.cone(onBody(L, W, H, 0.98, s * 1.6).p, [1, -0.2, s * 0.6], 0.025, 0.006, rhR, 4, { flutter: 0.4, phase: s });
