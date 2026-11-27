@@ -4,6 +4,8 @@
 //   &god=1            the blobfish can't be hurt      &mastery=0  mastery level      &floorIdx=N  start on floor N+1
 //   &seed=N           level seed      &rich=1  a pack full of materials      &reveal=1  the whole strip map
 //   &keys=N &bombs=N &pearls=N        starting counters
+//   &boss=whale       every boss is THE GENTLE GIANT (the v8 whale shark: swallow, stomach, cough). Straight into the
+//                     fight: ?preview=dungeon&floor=abyss&at=boss&boss=whale (&god=1 to watch it)
 // The full flow is set up too, so dying / winning / quitting lands in the hideout as in the real game.
 import type { Game, Screen } from '../game/game';
 import { setupFlow } from '../game/flow';

@@ -353,6 +353,16 @@ const DEFS: ItemDef[] = [
     shape: [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1]],
     desc: 'Confiscated from a giant. He wants it back. He cannot have it back.',
     stats: (s, l) => { s.crit += 0.06 * l; s.swordReach += 0.25; s.gadgetPower += 0.15 * l; } },
+  // ---------------------------------------------------------------- v8: the whale shark's loot (src/bosses/whaleShark.ts): only
+  // it drops these (craftOnly keeps them out of every random roll)
+  { id: 'giantsHook', name: "The Giant's Hook", kind: 'weapon', rarity: 'legendary', maxLevel: 3, tags: ['warrior', 'metal'], look: 'metal', craftOnly: true,
+    shape: [[1, 0], [1, 1], [0, 2], [1, 2]],
+    desc: 'Torn from a gentle giant\'s lip. It hooked the biggest fish in the sea. Now it hooks back.',
+    stats: (s, l) => { s.swordDmg += 0.4 * l; s.swordReach += 0.2; s.crit += 0.05 * l; s.biteHeal += 1; } },
+  { id: 'whaleTrophy', name: 'Gentle Giant Trophy', kind: 'trinket', rarity: 'legendary', maxLevel: 3, tags: ['rogue', 'water'], look: 'wood', craftOnly: true,
+    shape: [[0, 0], [1, 0], [0, 1], [1, 1]],
+    desc: 'A carved plaque of a spotted giant. You were inside it once. You do not talk about it.',
+    stats: (s, l) => { s.maxHp += 1; s.luck += 0.3 * l; s.magnet += 0.3; } },
   // ---------------------------------------------------------------- v8: hermit crabs and sea slugs (src/dungeon/critters.ts
   // wires the run effects: scrolls teach workbench recipes, the ink / bait / charm / pouch / shell procs)
   { id: 'recipeScroll', name: "Hermit's Recipe Scroll", kind: 'material', shape: [[0, 0]], rarity: 'rare', maxLevel: 1, stack: 3, look: 'soft', craftOnly: true,

@@ -86,7 +86,7 @@ function nextAreas(area: string, rng: Rng): string[] {
  * The branches at the end of a floor: two, sometimes three, each a (biome, route) with its sign. `metres` is the
  * real depth of the floor's first shelf (the danger and the giants are judged for the depth the branch arrives at).
  */
-export function crossroads(area: string, floorIdx: number, seed: number, metres: number, mastery = 0): Branch[] {
+export function crossroads(area: string, floorIdx: number, seed: number, metres: number, mastery = 0, whaleFree = true): Branch[] {
   const rng = new Rng((seed ^ Math.imul(floorIdx + 7, 0x51ed27)) >>> 0);
   const next = nextAreas(area, rng);
   const near = rng.chance(0.5) ? 'safe' : 'trade';
@@ -106,7 +106,10 @@ export function crossroads(area: string, floorIdx: number, seed: number, metres:
   return rng.shuffle(out).map((b) => {
     const R = ROUTE[b.route];
     const m = arrive + R.drop + 30 * (R.descent - 1);
-    return { ...b, name: placeName(b.area), note: R.note, danger: R.danger, giant: giantsAt(b.area, m, mastery), reward: [...R.reward] };
+    // v8: a deeper branch into stage 3 or later is where THE GENTLE GIANT waits (the whale shark boss, once a run:
+    // src/game/dungeonScreen.ts whaleFloor): its sign says so
+    const whale = whaleFree && b.route === 'deep' && floorIdx + 1 >= 2;
+    return { ...b, name: placeName(b.area), note: whale ? 'A GIANT SHADOW' : R.note, danger: R.danger, giant: giantsAt(b.area, m, mastery), reward: [...R.reward] };
   });
 }
 

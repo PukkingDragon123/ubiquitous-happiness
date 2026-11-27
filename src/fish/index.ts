@@ -10,6 +10,7 @@ import { FishBuilder, FishSpec } from './builder';
 import { FishModel, SpeciesAsset, makeAsset } from './model';
 import { SPECS } from './species';
 import { SPECIALS } from './special';
+import { WHALE_SPECS } from './whaleShark';
 
 export { FishModel } from './model';
 export type { SpeciesAsset } from './model';
@@ -43,13 +44,14 @@ export function assetFromSpec(spec: FishSpec): SpeciesAsset {
 }
 
 /** all species ids buildFish understands */
-export const SPECIES: string[] = [...Object.keys(SPECS), ...Object.keys(SPECIALS)];
+export const SPECIES: string[] = [...Object.keys(SPECS), ...Object.keys(SPECIALS), ...Object.keys(WHALE_SPECS)];
 
 export function speciesAsset(species: string): SpeciesAsset {
   let a = cache.get(species);
   if (!a) {
     if (SPECS[species]) a = assetFromSpec(SPECS[species]);
     else if (SPECIALS[species]) a = SPECIALS[species]();
+    else if (WHALE_SPECS[species]) a = assetFromSpec(WHALE_SPECS[species]);
     else throw new Error('unknown fish species ' + species);
     cleanTexture(a.map, a.palette ?? 14);
     cache.set(species, a);

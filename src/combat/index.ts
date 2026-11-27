@@ -75,7 +75,7 @@ export function roomBudget(difficulty = 0): [number, number] {
 /** the floor's boss, placed in the arena (it plays its intro when the player comes in) */
 export function spawnBoss(world: World, floorId: FloorId | string, arena: Arena): BossEntity {
   setArena(world, arena);
-  const b = buildBoss(world, (floorId as FloorId), arena);
+  const b = buildBoss(world, (floorId as FloorId | 'whale'), arena);
   world.add(b);
   (b as BossEntity & { onSpawn?(w: World): void }).onSpawn?.(world);
   return b;

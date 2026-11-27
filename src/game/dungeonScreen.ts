@@ -35,6 +35,7 @@
 //   game.go('dungeon')                     dev, from the URL: ?preview=dungeon&floor=reef&at=boss|shop|treasure|post|
 //                                          secret|challenge|arena|cross|fork|den|grotto&god=1&mastery=0&floorIdx=0
 //                                          &seed=N&rich=1&keys=N&bombs=N&pearls=N&route=deep|safe|trade
+//                                          &boss=whale (v8: the whale shark fight on any floor)
 //   The run's end goes to (window).flow.runEnded(result) when flow has it, else hideout + the result card.
 //
 // World events (besides K's and the v2 ones): 'arenaLock' {kind}, 'roomCleared' {type}, 'floorCleared' {n},
@@ -508,7 +509,7 @@ export class DungeonScreen implements Screen {
     const rope = i === this.planned - 1 || (i >= this.planned && (i - this.planned) % 2 === 1);
     // the ways on from this floor's end (the crossroads): judged from the depth of its first shelf
     const shelf0 = depth0 + (i === 0 && depth0 <= 0 ? 11 : 14);
-    const branches = crossroads(area, i, this.seed, shelf0, this.cfg.mastery);
+    const branches = crossroads(area, i, this.seed, shelf0, this.cfg.mastery, !this.routes.slice(2, i + 1).includes('deep'));
     this.plan = save ? save.plan : genLevel({ n: i, area, seed, mastery: this.cfg.mastery, depth0, rope, far0, route: this.routes[i] ?? 'main', branches });
     this.plan.far0 ??= far0;
     const plan = normalizePlan(this.plan);
@@ -584,6 +585,16 @@ export class DungeonScreen implements Screen {
       this.game.addShake(0.15);
     });
     audio.play('jin_biome', { vol: 0.5 });
+  }
+
+  /**
+   * v8: THE GENTLE GIANT (the whale shark, src/bosses/whaleShark.ts) is the boss of a late floor (stage 3 on) reached by
+   * a DEEPER crossroads branch, once a run (its sign reads A GIANT SHADOW: src/dungeon/routes.ts). Dev: &boss=whale.
+   */
+  whaleFloor(i = this.floorIdx): boolean {
+    if (this.dev?.get('boss') === 'whale') return true;
+    // once a run: the first deeper branch from stage 3 on
+    return i >= 2 && this.routes[i] === 'deep' && !this.routes.slice(2, i).includes('deep');
   }
 
   /** dev: start next to a POI / arena (?at=boss|shop|treasure|post|secret|challenge|arena) */
@@ -779,7 +790,7 @@ export class DungeonScreen implements Screen {
       this.music('mu_volcano');
       this.after(1.4, () => {
         if (this.fight !== f) return;
-        const b = f.boss = spawnBoss(this.world, baseOf(this.floors[this.floorIdx]), this.arenaBox(a));
+        const b = f.boss = spawnBoss(this.world, this.whaleFloor() ? 'whale' : baseOf(this.floors[this.floorIdx]), this.arenaBox(a));
         // deeper bosses hit the same, but take longer to bring down (the endless deep keeps climbing)
         const hpK = this.scal.enemyHp * (1 + Math.max(0, depthOf(this.plan, a.floor) - 60) / 400);
         if (b.hp !== undefined) { b.hp *= hpK; if (b.maxHp) b.maxHp *= hpK; }
@@ -970,7 +981,11 @@ export class DungeonScreen implements Screen {
     this.music(this.level!.a.music);
     audio.play('jin_legend', { vol: 0.6 });
     const p = this.plan.pois.find((q) => q.kind === 'boss')!;
+    // a boss with its own loot (v8 whale shark: the hook from its lip on the pedestal, its trophy in the burst)
+    const loot = (b as unknown as { loot?: string[] } | null)?.loot?.filter((id) => ITEMS[id]) ?? [];
+    if (loot.length) p.items ??= [loot[0]];
     this.bossRewards(a, p, true);
+    if (loot.length > 1) this.spawnRewards(loot.slice(1).map((id) => ({ kind: 'item', id }) as Reward), (a.x0 + a.x1) / 2 + 2.5, a.floor + 4.5, true);
     const bigB = this.plan.chests.find((c) => c.arena === a.id && c.kind === 'big' && !c.opened);
     const lvlB = this.level!;
     if (bigB) this.after(1.4, () => { if (this.level === lvlB) this.dropChest('big', bigB.x, lvlB.terrain.floorUnder(bigB.x, a.top) + 0.5, bigB); });
@@ -1728,6 +1743,8 @@ export class DungeonScreen implements Screen {
     }
     // ---- the level
     L.update(dt, this.camLook.x);
+    // a boss that relights the level after it updated its lamps (v8: the whale shark's stomach)
+    (this.fight?.boss as (BossEntity & { afterLevel?(): void }) | null | undefined)?.afterLevel?.();
     for (const pr of this.props) pr.update(dt);
     w.emit('tick', { dt });
     if (this.phase === 'play') {
@@ -1807,7 +1824,10 @@ export class DungeonScreen implements Screen {
     this.lookT -= dt;
     if (force || this.lookT <= 0) {
       this.lookT = 0.15;
-      const L = depthLook(lvl.look, camD);
+      let L = depthLook(lvl.look, camD);
+      // a boss can re-light the scene (v8: inside the whale shark's stomach)
+      const bl = this.fight?.boss as (BossEntity & { look?(l: typeof L): typeof L }) | null | undefined;
+      if (bl?.look && !this.fight?.bossDone) L = bl.look(L);
       this.light.applyLook(L);
       meadowLook(L.sun, L.sunI, L.hemiSky, L.hemiGround, L.hemi);
       POST.uExposure.value = L.exposure * (1 - this.scal.darkness);
@@ -1857,7 +1877,21 @@ export class DungeonScreen implements Screen {
   private lastFit = 16.5;
   private frameDt = 1 / 60;
   private lastView: ForkPlan['view'] | null = null;
+  /** a boss that directs the camera (the whale shark's swallow, its stomach): look at (x, y) from dist */
+  private bossCam(): { x: number; y: number; dist: number; k?: number; cut?: number } | null {
+    const b = this.fight?.boss as (BossEntity & { cam?(): { x: number; y: number; dist: number; k?: number; cut?: number } | null }) | null | undefined;
+    return b && !this.fight?.bossDone && b.cam ? b.cam() : null;
+  }
+  private hintK = 0;
+  private hintCut = 0;
   private camTarget(snap = 0): THREE.Vector3 {
+    const hint = this.bossCam();
+    this.hintK = hint ? hint.k ?? 3 : 0;
+    if (hint) {
+      if (hint.cut !== undefined && hint.cut !== this.hintCut) { this.hintCut = hint.cut; this.camDist = hint.dist; this.camLook.set(hint.x, hint.y, 0); }
+      this.camDist = snap ? hint.dist : damp(this.camDist, hint.dist, hint.k ?? 2, this.frameDt);
+      return new THREE.Vector3(hint.x, hint.y, 0);
+    }
     const p = this.player, plan = this.plan, f = this.fight;
     const fov = (this.camera.fov * Math.PI) / 360;
     // at a vista (a big drop-off) the camera eases back and looks down over the edge
@@ -1916,9 +1950,9 @@ export class DungeonScreen implements Screen {
     const want = clamp(p.vx * 0.55, -3.5, 3.5) + p.facing * 1.2;
     this.lookAhead = damp(this.lookAhead, want, 1.6, dt);
     const t = this.camTarget();
-    const k = this.fight ? 3 : 4.5;
+    const k = this.hintK || (this.fight ? 3 : 4.5);
     this.camLook.x = damp(this.camLook.x, t.x, k, dt);
-    this.camLook.y = damp(this.camLook.y, t.y, 3.5, dt);
+    this.camLook.y = damp(this.camLook.y, t.y, this.hintK || 3.5, dt);
     const sh = this.game.shakeOffset();
     this.camera.position.set(this.camLook.x + sh.x, this.camLook.y + 0.8 + sh.y, this.camDist);
     this.camera.lookAt(this.camLook.x + sh.x * 0.5, this.camLook.y + sh.y * 0.5, 0);
