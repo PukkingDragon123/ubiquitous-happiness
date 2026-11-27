@@ -4,6 +4,7 @@
 // real shape, and the same design re-rasterises crisply at 16 / 24 px for lists and the HUD.
 import { Pix, bez, bez3, curve, ngon, starPts, type V2 } from './pix';
 import { R } from './ramps';
+import { CRITTER_ICONS } from './iconCritters';
 
 export interface IconDesign { size?: [number, number]; draw: (p: Pix) => void }
 
@@ -1205,3 +1206,5 @@ export const ICON_ART: Record<string, IconDesign> = {
     p.glint(80, 13);
   } },
 };
+// v8: the hermit crab and sea slug loot
+Object.assign(ICON_ART, CRITTER_ICONS);

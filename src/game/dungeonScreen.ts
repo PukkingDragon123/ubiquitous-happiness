@@ -86,6 +86,7 @@ import type { PixelUI } from '../ui/pixel/ui';
 import { runSpec, type TouchSpec } from '../ui/touch';
 import { plate, PAL } from '../ui/obj/plates';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
+import { Critters, registerCritterCodex, type CritterHost } from '../dungeon/critters';
 
 // ------------------------------------------------------------------ save / resume
 export interface DungeonTally extends RunTally { rooms: number; floors: number; pearls: number; chests?: number; far?: number; fish?: number; giants?: number }
@@ -212,6 +213,8 @@ export class DungeonScreen implements Screen {
   /** the route's chests (plan id -> entity) and any champion drops still shut */
   private chests = new Map<number, Chest>();
   private shop: ShopStock | null = null;
+  /** v8: the floor's hermit crabs and sea slugs (src/dungeon/critters.ts) */
+  critters: Critters | null = null;
   private shopPoi: PoiPlan | null = null;
   /** floors planned by the table (the run is won by surfacing after the last of them, or any rope below) */
   planned = 3;
@@ -345,6 +348,8 @@ export class DungeonScreen implements Screen {
     this.dlg = new Dialogue(this.hud.ui, () => this.camera);
     this.dlg.speaker({ id: 'crab', name: 'MR. CRAB', color: '#e8603a', voice: 'crab_click', pitch: 0.9, anchor: () => this.shop?.head() ?? null });
     this.dlg.speaker({ id: 'manatee', name: 'MARGE', color: '#8ab8e8', voice: 'whale', pitch: 1.6, vol: 0.25, anchor: () => { const m = this.level?.manatee; return m ? new THREE.Vector3(m.x, m.y + 1.3, m.z) : null; }, onTalk: () => this.level?.manatee?.talk() });
+    this.dlg.speaker({ id: 'hermit', name: 'HERMIT CRAB', color: '#f0a070', voice: 'crab_click', pitch: 1.5, anchor: () => { const t = this.critters?.talker; return t ? new THREE.Vector3(t.x, t.y + t.h + 0.35, 0) : null; } });
+    registerCritterCodex();
     this.wire();
     this.resize(this.game.w, this.game.h);
   }
@@ -482,6 +487,7 @@ export class DungeonScreen implements Screen {
     this.props = [];
     this.pedestals.clear(); this.chests.clear(); this.groups.clear();
     this.shop = null; this.shopPoi = null; this.fight = null;
+    this.critters?.dispose(); this.critters = null;
     this.t3d.clear();
     this.dmgAcc.clear();
     this.world?.clearRoom();
@@ -528,6 +534,7 @@ export class DungeonScreen implements Screen {
     if (!save && this.tally.floors === 0 && this.dev?.get('at') === 'cross') { const b = plan.arenas.find((q) => q.kind === 'boss'); if (b) b.cleared = true; lvl.openExit(); }
     this.buildPois();
     this.spawnChests();
+    this.buildCritters();
     // the blobfish arrives: dives in from the surface / drops down the entry shaft (or back at the checkpoint)
     let x = save ? save.checkX : plan.startX;
     // (dev: ?at= places the first floor only)
@@ -650,6 +657,25 @@ export class DungeonScreen implements Screen {
       if (c.cache && !c.items) c.items = this.cacheItems(c);
       this.addChest(c, T.floorUnder(c.x, c.y + 0.6));
     }
+  }
+  /** v8: the floor's hermit crabs and sea slugs: planned once per floor (saved in the plan), spawned as you swim near */
+  private buildCritters() {
+    const host: CritterHost = {
+      world: this.world, plan: this.plan, run: this.run, player: this.player,
+      floorUnder: (x, y) => this.level!.terrain.floorUnder(x, y),
+      anchor: (x, y, z) => this.anchor(x, y, z),
+      rewards: (r, x, y, st) => this.spawnRewards(r, x, y, st),
+      dropChest: (x, y) => { this.dropChest('small', x, y); },
+      say: (who, text, life) => { if (this.critters) this.critters.talker = who; this.dlg.bark('hermit', text, life); },
+      pearls: (y) => depthPearls(depthOf(this.plan, y)),
+      fighting: () => !!this.fight,
+      title: (n, sub, col) => this.hud.l.title(n, sub, col ?? '#f3e7c9', 2.6),
+      hint: (t, l, k) => this.hint(t, l, k),
+      refresh: () => { this.installStats(); this.applyStats(); },
+      save: () => this.save(),
+    };
+    this.critters = new Critters(host);
+    this.critters.build(this.scene);
   }
   /** a supply cache: what the house still needs (the current goal's missing materials first), else this water's own */
   private cacheItems(c: ChestPlan): string[] {
@@ -1133,10 +1159,12 @@ export class DungeonScreen implements Screen {
     const cam = this.camera, dist = Math.max(4, cam.position.z);
     const hh = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * dist, hw = hh * cam.aspect;
     for (const e of this.world.entities) {
-      if (!e.alive || e.team !== 'enemy' || isHelper(e) || this.codexMet.has(e)) continue;
+      // (v8: critters carry their own codex page)
+      const page = (e as { codexPage?: string }).codexPage;
+      if (!e.alive || (!page && (e.team !== 'enemy' || isHelper(e))) || this.codexMet.has(e)) continue;
       if (Math.abs(e.x - cam.position.x) > hw * 0.9 || Math.abs(e.y - cam.position.y) > hh * 0.9) continue;
       this.codexMet.add(e);
-      const id = codexIdOf(e.kind);
+      const id = page ?? codexIdOf(e.kind);
       if (!id) continue;
       const known = codexKnown(id);
       codexSeen(id, depthOf(this.plan, e.y));
@@ -1730,7 +1758,8 @@ export class DungeonScreen implements Screen {
       if (inp.hit('bag')) this.openBag();
     }
     const chestPrompt = this.mail ? null : this.updateChests();
-    let prompt = this.mail ? null : this.interact() ?? chestPrompt ?? this.wayPrompt();
+    const critPrompt = this.mail || !this.critters ? null : this.critters.update(dt, this.phase === 'play' && !this.dlg?.busy && inp.hit('interact'));
+    let prompt = this.mail ? null : this.interact() ?? critPrompt ?? chestPrompt ?? this.wayPrompt();
     this.hintT -= dt;
     this.touchPrompt = prompt && prompt.key === 'E' && !prompt.bad ? prompt.label : this.dlg?.busy ? 'NEXT' : null;
     if (!prompt && this.hintT > 0) prompt = { key: this.hintKey, label: this.hintText };
@@ -1787,12 +1816,14 @@ export class DungeonScreen implements Screen {
     }
     // the blobfish's own lantern (kasa hat light): off in the sunlit zone, the main light down in the dark
     if (this.lamp) {
-      const I = playerLight(m);
+      // (v8: a glow dorid's touch lights the lantern right up)
+      const gk = this.critters?.glowK ?? 0;
+      const I = playerLight(m) + gk * 2.4;
       this.lamp.light.intensity = I * (0.92 + Math.sin(this.world.time * 7) * 0.04 + Math.sin(this.world.time * 13) * 0.03);
       // a lantern pool round the blobfish (quadratic falloff), not a floodlight over the whole seabed
       this.lamp.light.distance = 5 + I * 1.4; this.lamp.light.decay = 2;
       this.lamp.set(p.x + p.facing * 0.25, p.y + 0.7, 1.4);
-      p.ambientGlow = clamp((m - 60) / 200, 0, 1);
+      p.ambientGlow = Math.max(clamp((m - 60) / 200, 0, 1), gk * 0.8);
     }
     // records
     if (this.phase === 'play' && !this.vdepth) {

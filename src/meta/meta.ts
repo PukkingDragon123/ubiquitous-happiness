@@ -97,6 +97,8 @@ export interface MetaSave {
   records?: { maxDepth: number; deepestFloor: number; hadal: number };
   /** v7: the mailbox: what runs sent home, waiting to be received or disposed (saves before v7: empty) */
   mail: MailItem[];
+  /** v8: workbench recipes learned from hermit crabs' recipe scrolls (item ids; src/hideout/recipes.ts) */
+  recipes?: string[];
 }
 
 export interface CosmeticsSave { unlocked: string[]; equipped: { hat: string; skin: string; sword: string; trail: string; scarf: string } }

@@ -7,7 +7,7 @@ import type { PixelUI } from '../ui/pixel/ui';
 import { META } from '../meta/meta';
 import { ITEMS, getItem, RARITY_COLOR, statLines, type ItemKind } from '../game/items';
 import type { ItemInst } from '../game/run';
-import { CRAFTS, craft, craftAvailable, stationName, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
+import { CRAFTS, craft, craftAvailable, craftLock, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
 import { audio } from '../audio/audio';
 import { K, itemHead, itemBody, photoWindow, itemPhoto, brassPlate } from './itemCard';
 import { panelArt, wellArt, rowArt, cellArt, emptyChestArt, trayArt, PANEL_IN, type PanelKind } from './panelArt';
@@ -265,7 +265,7 @@ export class WorkshopPanel {
         ui.text('NEEDS', dx + 8, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += ui.lh('small') + 1;
         ui.costRow(c.cost, dx + 8, yy, { have: META.materials, showHave: true, size: 18, font: 'body' });
         const av = craftAvailable(c);
-        if (!av) ui.text(`build a ${stationName(c.station!)} first`, dx + 8, by + 6, { font: 'body', color: K.coralL, shadow: K.ink2 });
+        if (!av) ui.text(craftLock(c) ?? '', dx + 8, by + 6, { font: 'body', color: K.coralL, shadow: K.ink2 });
         if (ui.button('craft', 'CRAFT', dx + dw - 98, by, 90, btnH, { style: 'green', disabled: !canMake(c), icon: 'hammer', sfx: '' })) {
           if (craft(c)) { audio.play('clank1', { vol: 0.5 }); audio.play('jin_good', { vol: 0.35, dry: true }); this.bang = 0.5; this.fx.burst(dx + dw - 53, by, 14); }
         }

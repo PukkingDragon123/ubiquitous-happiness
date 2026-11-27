@@ -353,6 +353,32 @@ const DEFS: ItemDef[] = [
     shape: [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1]],
     desc: 'Confiscated from a giant. He wants it back. He cannot have it back.',
     stats: (s, l) => { s.crit += 0.06 * l; s.swordReach += 0.25; s.gadgetPower += 0.15 * l; } },
+  // ---------------------------------------------------------------- v8: hermit crabs and sea slugs (src/dungeon/critters.ts
+  // wires the run effects: scrolls teach workbench recipes, the ink / bait / charm / pouch / shell procs)
+  { id: 'recipeScroll', name: "Hermit's Recipe Scroll", kind: 'material', shape: [[0, 0]], rarity: 'rare', maxLevel: 1, stack: 3, look: 'soft', craftOnly: true,
+    desc: 'Kelp paper rolled tight and sealed with a claw print. You read it the moment you pick it up: a new workbench recipe.', stats: (s) => { s.luck += 0.1; } },
+  { id: 'spareShell', name: 'Spare Shell', kind: 'material', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 1, stack: 3, tags: ['water'], craftOnly: true,
+    desc: 'Left behind when a queue of hermit crabs all moved up one shell. Somebody got an upgrade.', stats: (s) => { s.armor += 0.01; } },
+  { id: 'shellArmor', name: 'Hermit Shell Armour', kind: 'armor', shape: [[0, 0], [1, 0], [0, 1], [1, 1]], rarity: 'rare', maxLevel: 3, tags: ['warrior', 'water'], craftOnly: true,
+    gear: { armor: 'shellPlate' }, desc: 'Three spare shells laced over your back like a hermit crab would. Tuck in when things get bitey.',
+    stats: (s, l) => { s.armor += 0.06 * l; s.maxHp += 1 * l; }, note: (l) => `Getting hurt: ${15 * l}% chance to tuck in and heal 10 HP` },
+  { id: 'slugInk', name: 'Slug-Ink Bomb', kind: 'ability', shape: [[0, 0]], rarity: 'rare', maxLevel: 3, tags: ['rogue', 'poison'], look: 'glass', craftOnly: true, glow: 0.4,
+    desc: 'Violet sea-hare ink packed into a puffer skin. Your puffer-bombs burst into a toxic cloud.',
+    stats: (s, l) => { s.poison += 0.2 * l; }, note: (l) => `Bombs leave an ink cloud: ${l + 1} poison ticks on every fish in it` },
+  { id: 'pearlPouch', name: 'Pearl Pouch', kind: 'trinket', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 3, look: 'soft', craftOnly: true,
+    desc: 'A hermit crab\'s savings, in a kelp purse. It jingles. It is now yours.',
+    stats: (s, l) => { s.luck += 0.2 * l; s.magnet += 0.2; }, note: (l) => `Opening a chest: +${l} pearl${l > 1 ? 's' : ''}` },
+  { id: 'bunnyCharm', name: 'Sea Bunny Charm', kind: 'trinket', shape: [[0, 0]], rarity: 'rare', maxLevel: 3, tags: ['summoner', 'water'], look: 'soft', craftOnly: true,
+    desc: 'A fluffy little sea slug carved in pumice, black-tipped ears and all. Lucky, fast and very soft.',
+    stats: (s, l) => { s.speed += 0.25 * l; s.luck += 0.2 * l; }, note: (l) => `Every ${Math.round(30 / l)} s: heal 10 HP` },
+  { id: 'nudiBait', name: 'Nudibranch Bait', kind: 'tool', shape: [[0, 0]], rarity: 'uncommon', maxLevel: 3, tags: ['rogue', 'poison'], look: 'soft', craftOnly: true,
+    desc: 'A bright, toxic slug-shaped lure on a hook. Fish that bite you regret it; fishermen\'s lines hate it.',
+    stats: (s, l) => { s.lineCut += 0.3 * l; }, note: (l) => `A fish that bites you is poisoned (${l + 1} ticks); stolen bait +2 coins`,
+    hook: (run, it) => run.on('baitStolen', (d) => { if (chance(0.5)) { run.coins += 2; proc(run, it.id, '+2', d); } void it; }) },
+  { id: 'giantShell', name: 'Giant Hermit Shell', kind: 'armor', rarity: 'epic', maxLevel: 3, tags: ['warrior', 'water'], look: 'soft', craftOnly: true,
+    shape: [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]], gear: { armor: 'shellPlate' },
+    desc: 'A knobbed triton the giant hermit outgrew, barnacles and all. You could live in it. You might.',
+    stats: (s, l) => { s.armor += 0.08 + 0.04 * l; s.maxHp += 2 * l; s.pressureResist += 0.1 * l; s.speed -= 0.2; }, note: (l) => `Getting hurt: ${15 + 10 * l}% chance to tuck in and heal 10 HP` },
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(DEFS.map((d) => [d.id, d]));
@@ -426,6 +452,8 @@ export const RECIPES: Recipe[] = [
   { a: 'urchinSpine', b: 'sharkTooth', out: 'stingrayBarb' },
   { a: 'urchinSpine', b: 'seaGlass', out: 'venomVial' },
   { a: 'inkSac', b: 'leadShot', out: 'inkBomb' },
+  // v8: hermit crab leftovers
+  { a: 'spareShell', b: 'seashell', out: 'shellArmor' },
 ];
 
 export function recipeFor(a: string, b: string): Recipe | null {

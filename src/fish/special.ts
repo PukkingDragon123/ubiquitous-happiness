@@ -13,7 +13,9 @@ import { FishModel, SpeciesAsset } from './model';
 import { kitAsset, paintRect, cells } from './kitutil';
 import { seaTurtle } from './turtle';
 import { jellyfish } from './jelly';
-import { crab, crabBase } from './crab';
+import { crab } from './crab';
+import { hermitAsset, HERMIT_SPECIALS } from './hermit';
+import { NUDI_SPECIALS } from './nudibranch';
 import { stingrayHoneycomb, stingrayBlue } from './ray';
 import { hash2, vnoise, clamp } from '../core/math';
 import { worley, RGB } from '../gfx/px';
@@ -23,71 +25,8 @@ const TAU = Math.PI * 2;
 const v3 = (p: V3) => new THREE.Vector3(p[0], p[1], p[2]);
 
 // ============================================================================================ hermit crab
-// Friendly hermit crab facing +x inside a spiral voxel-ridged shell, with big snipping claws (cuts fishing lines).
-function hermit(): SpeciesAsset {
-  const base = crabBase('hermit_body', { shell: ['#5a0e0a', '#9a2214', '#c8401e', '#ec7a44'], belly: '#f6d8b8', leg: ['#e0482a', '#b8301c', '#7a1a10'], tip: '#2a1008', gran: '#ffe0c8', eye: '#101010', spots: '#fff4e8', ring: '#1a0806' }, true);
-  // spiral shell: a cone wound round a helix, ridged, cream with brown + violet bands
-  const pg = new Page(256, 128), K = new Kit(pg);
-  const shR = pg.alloc(200, 64), lipR = pg.alloc(32, 16);
-  paintRect(pg, shR, (u, v, i, j) => {
-    // along the whorl (v): growth ribs + spiral colour bands; around (u): banded cream/brown/violet
-    const rib = Math.max(0, Math.sin(v * 260));
-    const bandU = Math.sin(u * TAU * 3 + 0.6);
-    let c = grad(['#3a1e2a', '#7a4a4a', '#c08a60', '#e8c8a0', '#fff0dc'])(0.25 + 0.5 * (0.5 + 0.5 * Math.cos(u * TAU)) + rib * 0.18, i, j);
-    if (bandU > 0.55) c = mix(c, C('#8a4a2a'), 0.75);
-    if (bandU < -0.8) c = mix(c, C('#6a4a8a'), 0.5);
-    if (rib > 0.9) c = shade(c, 1.12);
-    return [c, 1, 0.3, rib * 0.8];
-  });
-  paintSwatch(pg, lipR, ['#ffe8f0', '#f0b8c8', '#c07890'], 0.2);
-  // conical helix: whorls shrink toward the apex, which points back and up
-  const axis = norm([-0.75, 0.62, 0]), u1 = norm(cross(axis, [0, 0, 1])), u2 = norm(cross(axis, u1));
-  const sb: V3 = [-0.02, 0.05, 0];
-  const path: V3[] = [];
-  const N = 36, turns = 3.1;
-  for (let i = 0; i <= N; i++) {
-    const f = i / N, phi = f * turns * TAU + 0.6;
-    const rho = 0.06 * Math.pow(1 - f, 1.1) + 0.002;
-    path.push(add(add(sb, scale(axis, 0.17 * Math.pow(f, 0.8))), add(scale(u1, Math.cos(phi) * rho), scale(u2, Math.sin(phi) * rho))));
-  }
-  const ft = K.lo.count;
-  K.lo.tube(path, (t) => (0.046 * Math.pow(1 - t, 1.2) + 0.003) * (1 + 0.04 * Math.max(0, Math.sin(t * 120))), 12, pg.reg(shR), K.newG(), { capEnd: true });
-  K.tag(ft, (i, A) => { A.ao[i] = 1; });
-  const rings: { pts: V3[]; v: number }[] = [];
-  {
-    // flared, pearly aperture lip around the first ring
-    const p0 = path[0], d0 = norm(sub(path[0], path[1]));
-    const a1 = norm(cross(d0, [0, 0, 1])), a2 = norm(cross(d0, a1));
-    for (const [k, rr, off] of [[0, 0.058, 0], [1, 0.064, 0.006], [2, 0.05, 0.004]] as [number, number, number][]) {
-      rings.push({ pts: Kit.ring(add(p0, scale(d0, off)), a1, a2, rr, rr, 18), v: k / 2 });
-    }
-  }
-  K.loftPart(rings, lipR);
-  const shell = K.geometry().geo;
-  const shellTex = pg.textures(2);
-  const parts0 = base.parts!;
-  base.parts = (m: FishModel) => {
-    // the crab body faces the camera by default; turn it to face +x and sit it in the shell mouth
-    const body = new THREE.Group();
-    body.add(m.mesh);
-    parts0(m);
-    const kids = m.group.children.filter((o) => o !== body);
-    for (const o of kids) body.add(o);
-    body.rotation.y = Math.PI / 2;
-    body.position.set(0.02, 0.0, 0);
-    m.group.add(body);
-    const sm = m.makeMaterial({ map: shellTex.map, normalMap: shellTex.normalMap, roughnessMap: shellTex.roughnessMap, emissiveMap: null });
-    const sh = new THREE.Mesh(shell, sm);
-    sh.castShadow = true;
-    sh.position.set(-0.035, 0.012, 0); sh.scale.setScalar(1.3); // the shell dominates; the body comes out of its mouth
-    m.group.add(sh);
-    m.parts.shell = sh;
-  };
-  base.name = 'hermit';
-  base.length = 0.36;
-  base.mouth.set(0.14, 0.02, 0); base.eye.set(0.12, 0.06, 0.02);
-  return base;
-}
+// (v8: the hermit crabs live in ./hermit.ts: one rig, seven shells; 'hermit' is the banded whelk)
+const hermit = () => hermitAsset('whelk');
 function centroidOf(ps: V3[]): V3 { let x = 0, y = 0, z = 0; for (const p of ps) { x += p[0]; y += p[1]; z += p[2]; } return [x / ps.length, y / ps.length, z / ps.length]; }
 
 // ============================================================================================ sea cucumber
@@ -197,6 +136,7 @@ function starfish(): SpeciesAsset {
 }
 
 export const SPECIALS: Record<string, () => SpeciesAsset> = {
-  jellyfish, crab, hermit, sea_turtle: seaTurtle, stingray: stingrayHoneycomb, stingray_blue: stingrayBlue,
+  jellyfish, crab, sea_turtle: seaTurtle, stingray: stingrayHoneycomb, stingray_blue: stingrayBlue,
   sea_cucumber: seaCucumber, starfish,
+  ...HERMIT_SPECIALS, hermit, ...NUDI_SPECIALS,
 };

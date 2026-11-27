@@ -5,9 +5,12 @@ import { META, saveMeta, hasMaterials, spendMaterials, stashItem } from '../meta
 import { stationsBuilt, BLUEPRINTS } from './blueprints';
 import type { ItemInst } from '../game/run';
 
-export interface Craft { out: string; cost: Record<string, number>; station?: string }
+/** station: needs that piece of the home built; scroll: needs its recipe learned from a hermit crab's scroll (v8) */
+export interface Craft { out: string; cost: Record<string, number>; station?: string; scroll?: boolean }
 
 const C = (out: string, cost: Record<string, number>, station?: string): Craft => ({ out, cost, station });
+/** a recipe a hermit crab's scroll teaches (src/dungeon/critters.ts) */
+const S = (out: string, cost: Record<string, number>): Craft => ({ out, cost, scroll: true });
 const ALL: Craft[] = [
   C('scissors', { rustyNail: 3, ironOre: 1 }),
   C('whetstone', { riverStone: 3, ironOre: 1 }),
@@ -38,11 +41,37 @@ const ALL: Craft[] = [
   C('pufferSpines', { urchinSpine: 4, coralShard: 1 }, 'inkStill'),
   C('rubberDuck', { cork: 4, coralShard: 1 }, 'toyBench'),
   C('starfish', { coralShard: 3, pearl: 1 }, 'toyBench'),
+  // v8: taught by the hermit crabs' recipe scrolls
+  S('shellArmor', { spareShell: 1, seashell: 3, kelp: 2 }),
+  S('slugInk', { urchinSpine: 2, kelp: 2, seaGlass: 1 }),
+  S('pearlPouch', { kelp: 3, pearl: 1, lineScrap: 2 }),
+  S('bunnyCharm', { cork: 2, pearl: 1, seaGlass: 2 }),
+  S('nudiBait', { kelp: 2, urchinSpine: 1, rustyHook: 1 }),
 ];
 /** recipes whose output and every ingredient exist in the item table */
 export const CRAFTS: Craft[] = ALL.filter((c) => ITEMS[c.out] && Object.keys(c.cost).every((k) => ITEMS[k]));
 
-export function craftAvailable(c: Craft) { return !c.station || stationsBuilt().includes(c.station); }
+export function craftAvailable(c: Craft) { return (!c.station || stationsBuilt().includes(c.station)) && (!c.scroll || knowsRecipe(c.out)); }
+/** why a craft is locked (null when it isn't) */
+export function craftLock(c: Craft): string | null {
+  if (c.scroll && !knowsRecipe(c.out)) return 'trade a hermit crab for its recipe scroll';
+  if (c.station && !stationsBuilt().includes(c.station)) return `build a ${stationName(c.station)} first`;
+  return null;
+}
+
+// ------------------------------------------------------------------ v8: recipe scrolls (hermit crabs)
+/** the recipes a scroll can teach */
+export const SCROLL_CRAFTS = (): Craft[] => CRAFTS.filter((c) => c.scroll);
+export function knowsRecipe(id: string) { return (META.recipes ?? []).includes(id); }
+/** the scroll recipes not learned yet */
+export function unknownScrollRecipes(): string[] { return SCROLL_CRAFTS().map((c) => c.out).filter((id) => !knowsRecipe(id)); }
+/** learn a recipe (saved at once: a scroll read on a run is kept even if the run is lost) */
+export function learnRecipe(id: string): boolean {
+  if (knowsRecipe(id)) return false;
+  (META.recipes ??= []).push(id);
+  saveMeta();
+  return true;
+}
 export function stationName(id: string) { return BLUEPRINTS[id]?.name ?? id; }
 
 export function craft(c: Craft): ItemInst | null {

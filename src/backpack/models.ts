@@ -28,8 +28,9 @@ import { GEAR_MODELS } from './models/gear';
 import { BUILD_MODELS } from './models/builds';
 import { BIG_MODELS } from './models/big';
 import { HUD_MODELS } from './models/hud';
+import { CRITTER_MODELS } from './models/critters';
 
-const MODELS: Record<string, Build> = { ...MATERIAL_MODELS, ...TOOL_MODELS, ...TRINKET_MODELS, ...CORE_MODELS, ...GEAR_MODELS, ...BUILD_MODELS, ...BIG_MODELS };
+const MODELS: Record<string, Build> = { ...MATERIAL_MODELS, ...TOOL_MODELS, ...TRINKET_MODELS, ...CORE_MODELS, ...GEAR_MODELS, ...BUILD_MODELS, ...BIG_MODELS, ...CRITTER_MODELS };
 
 // ------------------------------------------------------------------ cache + merge + fit
 const templates = new Map<string, THREE.Object3D>();
