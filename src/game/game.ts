@@ -183,19 +183,20 @@ export class Game {
   }
 }
 
-/** hand-painted cursors: a pink fin pointer, a fin with a sparkle (hover), a bubble crosshair (aim), a grab */
+/** hand-painted cursors (v8b flat): a bone fin pointer, the same with a gold tick (hover), a ring crosshair (aim), a grab */
 function makeCursors(): Record<string, THREE.Texture> {
   const fin = (sparkle: boolean, grab: boolean) => {
     const p = new Px(18, 18);
     const pts: [number, number][] = grab ? [[2, 4], [12, 3], [15, 8], [13, 14], [5, 15], [2, 10]] : [[1, 1], [12, 8], [8, 9], [11, 15], [8, 16], [5, 10], [1, 13]];
-    p.poly(pts, (x, y) => (y < 6 ? [255, 214, 222] : y < 11 ? [244, 165, 182] : [214, 112, 140]));
-    p.outline('#3a0e1e', 255, true);
-    if (sparkle) { p.set(14, 2, '#ffffff'); p.set(13, 2, '#fff0a0'); p.set(15, 2, '#fff0a0'); p.set(14, 1, '#fff0a0'); p.set(14, 3, '#fff0a0'); }
+    // v8b: flat, the kit's bone with an ink outline; hover adds a small gold tick
+    p.poly(pts, () => [239, 231, 212]);
+    p.outline('#0b111c', 255, true);
+    if (sparkle) { p.set(14, 2, '#d4b273'); p.set(13, 2, '#d4b273'); p.set(15, 2, '#d4b273'); p.set(14, 1, '#d4b273'); p.set(14, 3, '#d4b273'); }
     return p.texture({ mip: false });
   };
   const aim = new Px(18, 18);
-  aim.ellipse(9, 9, 6.5, 6.5, (nx, ny) => (Math.hypot(nx, ny) > 0.78 ? [220, 250, 255] : null));
-  aim.set(9, 9, '#ffffff'); aim.set(6, 6, '#ffffff'); aim.set(6, 7, '#ffffff');
-  aim.outline('#06303f');
+  aim.ellipse(9, 9, 6.5, 6.5, (nx, ny) => (Math.hypot(nx, ny) > 0.78 ? [239, 231, 212] : null));
+  aim.set(9, 9, '#d4b273');
+  aim.outline('#0b111c');
   return { normal: fin(false, false), point: fin(true, false), grab: fin(false, true), aim: aim.texture({ mip: false }) };
 }

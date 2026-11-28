@@ -7,7 +7,8 @@
 //   POST OFFICE the manatee's mail panel: your pack as 3D models in slots (click to pick, a POST stamp on picked
 //               ones, a house mark on what home needs), six parcel stamps for her bag, the "builds at home" list with
 //               before / after bars, SEND / ALL MATERIALS / DONE
-//   PAUSE       a kit panel: where you are, RESUME / BACKPACK / QUIT TO HOME, the run-is-saved note
+//   PAUSE       the shared pause screen (src/title/pages.ts PausePanel): where you are, RESUME / BACKPACK / QUIT TO
+//               HOME, the run-is-saved note
 //
 //   const hud = new DungeonHud();  overlays: [..., hud.ui.layer];  hud.resize(w, h, pr)
 //   const act = hud.draw(dt, state, input)   -> 'resume' | 'bag' | 'quit' | 'mail:send' | 'mail:close' | 'mail:mats' | 'mail:<uid>' | null
@@ -27,6 +28,8 @@ import { hpText, hpify } from '../combat/types';
 import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
+import { PausePanel } from '../title/pages';
+import { C } from '../ui/pixel/skins';
 
 export interface HudAnchor { x: number; y: number; on: boolean }
 export interface Prompt {
@@ -100,7 +103,7 @@ export class DungeonHud {
     // (speech bubbles wait while the post office or the pause card is up: they would sit on top of the panel)
     if (!s.mail && !s.paused) extra?.(ui);
     if (s.mail) out = this.mailPanel(s.mail);
-    if (s.paused) out = this.pauseCard(s) ?? out;
+    if (s.paused) out = this.pauseCard(s, dt) ?? out;
     ui.end();
     return out;
   }
@@ -124,15 +127,16 @@ export class DungeonHud {
     const tw = ui.measure(short, 'body');
     const w = Math.round(tw + (kw ? kw + 6 : 0) + 16), h = 20;
     const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2))), y = Math.round(Math.max(6, at.y - 34)) + Math.round((1 - pop) * 6);
-    const rim = p.bad ? PAL.coral : PAL.brass;
-    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x + 2, y + 2, { alpha: 0.35 * a });
-    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x, y, { alpha: a });
+    const rim = p.bad ? C.red : C.line2;
+    ui.fill(x + 1, y + 2, w, h, '#000000', 0.22 * a);
+    ui.frame('dark', x, y, w, h, a);
+    ui.rect(x, y, w, h, rim);
     // a little pointer down to the thing
     const px = Math.round(Math.max(x + 6, Math.min(x + w - 7, at.x)));
-    for (let i = 0; i < 4; i++) { ui.fill(px - 3 + i, y + h - 1 + i, 7 - i * 2, 1, PAL.ink2, a); if (i < 3) ui.fill(px - 2 + i, y + h - 1 + i, 5 - i * 2, 1, ramp(rim)[2], a); }
+    for (let i = 0; i < 3; i++) ui.fill(px - 2 + i, y + h + i, 5 - i * 2, 1, rim, a);
     let cx = x + 8;
     if (kw) { ui.keycap(key, cx, y + Math.round((h - 13) / 2)); cx += kw + 6; }
-    ui.text(short, cx, y + Math.round((h - ui.cap('body')) / 2), { font: 'body', color: p.bad ? PAL.coral2 : PAL.cream, alpha: a });
+    ui.text(short, cx, y + Math.round((h - ui.cap('body')) / 2), { font: 'body', color: p.bad ? C.red2 : C.bone2, shadow: C.ink, alpha: a });
     // the longer explanation, when there is one: a cream note pinned under the tag for a moment
     const rest = full.replace(/^[A-Z ]+:\s*/, (m0) => (m0.includes(':') ? '' : m0));
     if (/[:·(]/.test(full) && full.toUpperCase() !== short && full.length > short.length + 3 && this.promptT < 3) {
@@ -344,48 +348,23 @@ export class DungeonHud {
   }
 
   // ---------------------------------------------------------------- pause
-  private pauseCard(s: DungeonHudState): string | null {
+  private pausePanel = new PausePanel();
+  private pauseCard(s: DungeonHudState, dt: number): string | null {
     const ui = this.ui;
-    const pop = Math.min(1, this.pauseT * 6), e = 1 + 2.4 * (pop - 1) ** 3 + 1.4 * (pop - 1) ** 2;
-    const W = 250, note = 'Your run is saved: RESUME it from home any time.';
-    const H = 16 + 22 + 8 + ui.lh('body') + ui.lh('small') + 6 + 3 * 30 + 2 + wrap(note, 'small', W - 36, ui.hd).length * ui.lh('small') + 16;
-    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - e) * 20);
-    const a = Math.min(1, this.pauseT * 8);
-    ui.fill(0, 0, ui.w, ui.h, PAL.ink2, 0.6 * a);
-    ui.block(0, 0, ui.w, ui.h);
-    ui.fill(x + 3, y + 3, W, H, '#000000', 0.35 * a);
-    ui.frame('wood', x, y, W, H, a);
-    ui.panelFx('wood', x, y, W, H, 'pausecard', a);
-    const cap = 22;
-    bigText(ui, 'PAUSED', x + W / 2, y + 16, { cap, color: PAL.cream, color2: PAL.brass2, align: 'center', alpha: a });
+    if (this.pauseF === 1) this.pausePanel.open('resume');
     // where you are: the area, metres from home, the depth
     const parts = s.where.split('·').map((q) => q.trim()).filter(Boolean);
     const area = parts[0] ?? '';
     const far = parts.find((q) => /FROM HOME/.test(q)) ?? '';
     const dep = parts.find((q) => /^-?\d+ M$/.test(q)) ?? '';
-    let ty = y + 16 + cap + 8;
-    ui.text(area, x + W / 2, ty, { font: 'body', color: PAL.brass2, align: 'center', alpha: a });
-    ty += ui.lh('body');
-    const info = [far.replace(' FROM HOME', ''), dep].filter(Boolean);
-    if (info.length) {
-      const hg = GLYPH.house(), dg = GLYPH.down();
-      const t1 = info[0] ?? '', t2 = info[1] ?? '';
-      const w1 = t1 ? hg.width + 3 + ui.measure(t1 + ' FROM HOME', 'small') : 0, w2 = t2 ? dg.width + 3 + ui.measure(t2 + ' DEEP', 'small') : 0;
-      let cx = x + W / 2 - (w1 + w2 + (t1 && t2 ? 14 : 0)) / 2;
-      if (t1) { ui.img(hg, cx, ty, { alpha: a }); ui.text(t1 + ' FROM HOME', cx + hg.width + 3, ty + 1, { font: 'small', color: PAL.cream, alpha: a }); cx += w1 + 14; }
-      if (t2) { ui.img(dg, cx, ty + 2, { alpha: a }); ui.text(t2 + ' DEEP', cx + dg.width + 3, ty + 1, { font: 'small', color: PAL.cream, alpha: a }); }
-      ty += ui.lh('small') + 6;
-    }
-    let out: string | null = null;
-    const bw = W - 48, bx = x + 24, bh = 24;
-    if (ui.button('p:resume', 'RESUME', bx, ty, bw, bh, { style: 'green', key: 'Escape', keyLabel: 'ESC' }) && this.pauseF > 1) out = 'resume';
-    ty += bh + 6;
-    if (ui.button('p:bag', 'BACKPACK', bx, ty, bw, bh, { style: 'brass', key: 'Tab' })) out = 'bag';
-    ty += bh + 6;
-    if (ui.button('p:quit', 'QUIT TO HOME', bx, ty, bw, bh, { style: 'red' })) out = 'quit';
-    ty += bh + 8;
-    ui.textBox(note, x + 18, ty, W - 36, { font: 'small', color: PAL.dim, align: 'center' });
-    return out;
+    const sub = [area, far, dep ? dep.replace('-', '') + ' DEEP' : ''].filter(Boolean).join('   -   ');
+    const id = this.pausePanel.draw(ui, dt, {
+      title: 'PAUSED', sub,
+      items: [{ id: 'resume', label: 'RESUME' }, { id: 'bag', label: 'BACKPACK' }, { id: 'quit', label: 'QUIT TO HOME', danger: true }],
+      keys: { Tab: 'bag' }, note: 'Your run is saved: RESUME it from home any time.',
+    });
+    if (id === 'close') return this.pauseF > 1 ? 'resume' : null;
+    return id;
   }
 }
 

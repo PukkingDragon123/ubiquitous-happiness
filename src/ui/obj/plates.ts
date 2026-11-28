@@ -13,47 +13,43 @@ import type { PixelUI } from '../pixel/ui';
 import { glyphs, FONTS, capH, type FontName } from '../pixel/font';
 import { ramp } from './pixtex';
 
+/** v8b: the deep-ink kit palette under the v5 names (see src/ui/pixel/skins.ts for the guide) */
 export const PAL = {
-  ink: '#0b1622', ink2: '#070d14',
-  teal0: '#0d2329', teal: '#12333a', teal1: '#1d4f55', teal2: '#2c6b70',
-  brass0: '#5a3a14', brass1: '#8a5a24', brass: '#c8913a', brass2: '#f2c66d', glint: '#fff4c8',
-  cream: '#f3e7c9', cream1: '#d9c59b', cream2: '#b8a074', paper: '#fffaf0',
-  kelp: '#5fae3f', kelp1: '#3a7a28', kelp2: '#a8e070',
-  coral: '#e0564a', coral1: '#9a2a24', coral2: '#ff9a7a',
-  sea: '#3d8fd6', sea1: '#1d5a96', sea2: '#8ac8ff',
-  text: '#f3e7c9', dim: '#9ab4b4',
+  ink: '#0b111c', ink2: '#070b12',
+  teal0: '#0e141f', teal: '#131b28', teal1: '#1a2434', teal2: '#3e4b62',
+  brass0: '#3d2f17', brass1: '#8a7044', brass: '#b8975a', brass2: '#d4b273', glint: '#efe1bd',
+  cream: '#e8dfcb', cream1: '#cdc4ae', cream2: '#a69d8a', paper: '#f6f0e2',
+  kelp: '#7c9e80', kelp1: '#4b6a52', kelp2: '#a9c9a6',
+  coral: '#c4553f', coral1: '#5a231b', coral2: '#e48a74',
+  sea: '#5f80b0', sea1: '#34507a', sea2: '#a9c0e0',
+  text: '#e8dfcb', dim: '#9aa3b4',
 };
 
 // ------------------------------------------------------------------ big text
-const JERSEY: FontName[] = ['hd10', 'hd15', 'hd20'];
-/** the Jersey cut and integer blow-up whose cap is closest to `cap` canvas px */
+/** v8b: big text is Alagard 16 blown up by the integer k whose cap (11 font px) is nearest the asked cap */
 function pick(capCanvas: number): [FontName, number] {
-  let best: [FontName, number] = ['hd20', 1], err = 1e9;
-  for (const f of JERSEY) {
-    if (!FONTS[f]) continue;
-    const c = capH(f);
-    for (let n = 1; n <= 8; n++) {
-      // prefer the bigger cut at the same size (more detail per glyph), and slightly under over slightly over
-      const d = c * n - capCanvas, e = Math.abs(d) / capCanvas + (d > 0 ? 0.02 : 0) - c * 0.002;
-      if (e < err) { err = e; best = [f, n]; }
-    }
-  }
-  return best;
+  const c = Math.max(1, capH('body'));
+  return ['body', Math.max(1, Math.round(capCanvas / c))];
 }
+void FONTS;
 export interface BigOpts { cap: number; color?: string; color2?: string; outline?: string | null; shadow?: string | null; align?: 'left' | 'center' | 'right'; alpha?: number }
 function hdOf(ui: PixelUI) { return ui.hd || 1; }
+/** (v8b: no outline unless asked; a 1 font px ink drop shadow) */
+const outOf = (o: BigOpts) => (o.outline === undefined ? null : o.outline);
+const shOf = (o: BigOpts) => (o.shadow === undefined ? PAL.ink2 : o.shadow);
 /** width (UI px) bigText would draw */
 export function bigMeasure(ui: PixelUI, str: string, o: BigOpts): number {
   if (!str) return 0;
   const hd = hdOf(ui), [f, n] = pick(o.cap * hd);
-  const g = glyphs(str, { font: f, color: '#fff', outline: o.outline === undefined ? PAL.ink : o.outline, shadow: o.shadow === undefined ? PAL.ink2 : o.shadow });
-  return ((g.w - (o.outline !== null ? 2 : 0) - (o.shadow !== null ? 1 : 0)) * n) / hd;
+  const outline = outOf(o), shadow = shOf(o);
+  const g = glyphs(str, { font: f, color: '#fff', outline, shadow });
+  return ((g.w - (outline ? 2 : 0) - (shadow ? 1 : 0)) * n) / hd;
 }
 /** big crisp pixel text with its cap top at y (UI px); returns the drawn width in UI px */
 export function bigText(ui: PixelUI, str: string, x: number, y: number, o: BigOpts): number {
   if (!str) return 0;
   const hd = hdOf(ui), [f, n] = pick(o.cap * hd);
-  const outline = o.outline === undefined ? PAL.ink : o.outline, shadow = o.shadow === undefined ? PAL.ink2 : o.shadow;
+  const outline = outOf(o), shadow = shOf(o);
   const g = glyphs(str, { font: f, color: o.color ?? PAL.text, color2: o.color2, outline, shadow });
   const tw = (g.w - (outline ? 2 : 0) - (shadow ? 1 : 0)) * n;
   const ctx = ui.ctx, m = ctx.getTransform();
@@ -140,6 +136,9 @@ export function plate(w: number, h: number, kind: PlateKind = 'lacquer', o: Plat
   const hit = plateCache.get(key);
   if (hit) return hit;
   const p = new Px(w, h);
+  // v8b: every plate is the kit's flat look (a face, a 1 px border, softened corners); the v6 painters below stay
+  // for reference / other callers but plate() no longer uses them
+  if (FLAT) { const cv = flatPlate(p, w, h, kind, o); plateCache.set(key, cv); if (plateCache.size > 600) plateCache.clear(); return cv; }
   const PAINT: Record<PlateKind, () => void> = {
     // v5 ocean + woody: the instrument plates are DRIFTWOOD boards now ('lacquer' kept as the name callers use)
     lacquer: () => paintBoard(p, o), board: () => paintBoard(p, o), glass: () => paintLacquer(p, o, true), brass: () => paintBrass(p, o),
@@ -153,6 +152,35 @@ export function plate(w: number, h: number, kind: PlateKind = 'lacquer', o: Plat
   plateCache.set(key, cv);
   if (plateCache.size > 600) plateCache.clear();
   return cv;
+}
+
+const FLAT = true;
+/** the flat plate (v8b): kinds map onto the kit's surfaces */
+function flatPlate(p: Px, w: number, h: number, kind: PlateKind, o: PlateOpts): HTMLCanvasElement {
+  let face = '#131b28', border = '#3e4b62', fa = 245;
+  switch (kind) {
+    case 'brass': face = '#d4b273'; border = '#8a7044'; fa = 255; break;
+    case 'cream': face = '#ddd3bd'; border = '#8f8572'; fa = 255; break;
+    case 'well': case 'drum': case 'alcove': face = o.face && o.face !== '#2a1a0c' ? '#0e141f' : '#0e141f'; border = '#222c3e'; fa = 240; break;
+    case 'ribbon': border = '#d4b273'; break;
+    case 'nameplate': border = '#c4553f'; break;
+    case 'glass': fa = o.alpha ?? 200; break;
+    default: break;
+  }
+  if (o.rim && kind !== 'brass') border = o.rim === '#c8913a' ? '#3e4b62' : o.rim;
+  if (kind === 'disc') {
+    const r = Math.min(w, h) / 2;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const d = Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2);
+      if (d > r) continue;
+      p.set(x, y, d > r - 1 ? border : face, d > r - 1 ? 255 : fa);
+    }
+    return p.done();
+  }
+  p.rect(0, 0, w, h, face, fa);
+  p.hline(0, w - 1, 0, border); p.hline(0, w - 1, h - 1, border); p.vline(0, 0, h - 1, border); p.vline(w - 1, 0, h - 1, border);
+  for (const [x, y] of [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]]) p.set(x, y, '#000000', 0);
+  return p.done();
 }
 
 /** rounded-rect distance to the edge (-1 outside; corners cut by r px) */
@@ -740,26 +768,18 @@ export interface BarOpts {
   gain?: number;
   gainCol?: string;
 }
-/** a crisp banded bar: ink frame, trough, the fill in three tones, a chip, ticks (UI px) */
+/** a flat bar (v8b): a 1 px ink border, a dark trough, a flat fill, a pale chip, a gain preview, quiet ticks (UI px) */
 export function bar(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, o: BarOpts) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
-  const R = ramp(o.col);
-  ui.fill(x, y, w, h, PAL.ink2);
-  ui.fill(x + 1, y + 1, w - 2, h - 2, o.back ?? '#0a1820');
-  ui.fill(x + 1, y + h - 2, w - 2, 1, '#13262e');
+  ui.fill(x, y, w, h, PAL.ink);
+  ui.fill(x + 1, y + 1, w - 2, h - 2, o.back && o.back !== '#0a1820' ? o.back : '#0e141f');
   const iw = w - 2, ih = h - 2;
   const fv = Math.round(iw * Math.max(0, Math.min(1, v)));
-  if (o.gain !== undefined && o.gain > v) { const gw = Math.round(iw * Math.min(1, o.gain)); ui.fill(x + 1 + fv, y + 1, gw - fv, ih, o.gainCol ?? PAL.brass2, 0.75); }
-  if (o.chip !== undefined && o.chip > v) { const cw = Math.round(iw * Math.min(1, o.chip)); ui.fill(x + 1 + fv, y + 1, cw - fv, ih, PAL.cream, 0.9); }
-  if (fv > 0) {
-    ui.fill(x + 1, y + 1, fv, ih, R[3]);
-    if (ih >= 3) { ui.fill(x + 1, y + 1, fv, 1, R[5]); ui.fill(x + 1, y + 1 + ih - 1, fv, 1, R[1]); }
-    if (ih >= 6) ui.fill(x + 1, y + 2, fv, Math.max(1, Math.floor(ih * 0.3)) - 1, R[4]);
-    // the leading edge
-    if (fv < iw) ui.fill(x + fv, y + 1, 1, ih, R[5]);
-  }
-  if (o.ticks) for (let t = o.ticks; t < 0.999; t += o.ticks) ui.fill(x + 1 + Math.round(iw * t), y + 1, 1, ih, PAL.ink2, 0.55);
-  if (o.flash && o.flash > 0) ui.fill(x + 1, y + 1, Math.max(fv, 1), ih, '#ffffff', Math.min(1, o.flash) * 0.8);
+  if (o.gain !== undefined && o.gain > v) { const gw = Math.round(iw * Math.min(1, o.gain)); ui.fill(x + 1 + fv, y + 1, gw - fv, ih, o.gainCol ?? PAL.brass2, 0.6); }
+  if (o.chip !== undefined && o.chip > v) { const cw = Math.round(iw * Math.min(1, o.chip)); ui.fill(x + 1 + fv, y + 1, cw - fv, ih, PAL.cream, 0.55); }
+  if (fv > 0) ui.fill(x + 1, y + 1, fv, ih, o.col);
+  if (o.ticks) for (let t = o.ticks; t < 0.999; t += o.ticks) ui.fill(x + 1 + Math.round(iw * t), y + 1, 1, ih, PAL.ink, 0.5);
+  if (o.flash && o.flash > 0) ui.fill(x + 1, y + 1, Math.max(fv, 1), ih, '#ffffff', Math.min(1, o.flash) * 0.4);
 }
 
 export interface TubeOpts {
@@ -786,6 +806,10 @@ export interface TubeOpts {
  * front and bubbles rising through it, the chip of what was just spent. Every element is a placed shape.
  */
 export function tube(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, o: TubeOpts) {
+  // v8b: the glass tube is retired: a flat bar in the liquid's colour
+  bar(ui, x, y, w, Math.max(4, h), v, { col: o.col, chip: o.chip, flash: o.flash, ticks: o.ticks, gain: o.gain, gainCol: o.gainCol });
+}
+export function tubeV6(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, o: TubeOpts) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.max(5, Math.round(h));
   const L = ramp(o.col), B = ramp(PAL.brass), t = o.t ?? 0;
   const cap = o.crystal ? Math.max(4, Math.round(h * 0.7)) : Math.max(5, Math.round(h * 0.85));
@@ -862,8 +886,11 @@ export function tube(ui: PixelUI, x: number, y: number, w: number, h: number, v:
   }
 }
 
+const KELP_OFF = true;
 /** a strand of kelp hanging from (x, y), `len` px, swaying from its root (drawn per frame: a few dozen pixels) */
 export function kelp(ui: PixelUI, x: number, y: number, len: number, t: number, ph: number, alpha: number) {
+  // v8b: retired (no kelp in the kit)
+  if (KELP_OFF) return;
   const K = ['#1f4a16', '#3a7a28', '#5fae3f', '#a6e07a'];
   let px = x;
   for (let k = 0; k < len; k++) {

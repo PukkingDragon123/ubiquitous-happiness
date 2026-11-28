@@ -21,14 +21,11 @@ import type { Input } from '../../core/input';
 import { audio } from '../../audio/audio';
 import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
 import { drawText, measure, wrap, lineH, capH, setTextDensity, type FontName, type TextOpts } from './font';
-import { skin, btnSkin, btnFace, PAD, BTN, LIP, KIT, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, bubbleArt, causticTile, type SkinKind, type BtnStyle, type BtnState } from './skins';
+import { skin, btnSkin, btnFace, btnText, PAD, LIP, KIT, C, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, bubbleArt, causticTile, type SkinKind, type BtnStyle, type BtnState } from './skins';
 import { icon, iconTex, mouseTex, cursorTex, type CursorName } from './art';
 import { easeOutBack } from '../../core/math';
 import { iconAt } from '../../backpack/icons';
 
-/** frond and rope ramps for the live decorations (dark -> light) */
-const KELP = ['#0c200e', '#183a14', '#28561c', '#3c7426', '#559234', '#78b04a', '#a8d06c'];
-const ROPE = ['#1e1309', '#3e2b12', '#644a22', '#8c6e38', '#b49250', '#d6b874', '#efdba4'];
 
 export type TipLine = string | { text: string; color?: string; font?: FontName; icon?: HTMLCanvasElement; gap?: number; /** a keycap drawn before the text (hint rows) */ key?: string };
 
@@ -434,8 +431,9 @@ export class PixelUI {
   }
 
   // ---------------------------------------------------------------- ocean motion (v5): all small overlays over cached skins
-  /** set false (or &uideco=0) to switch off the living decorations (bubbles, kelp, rope, caustics, hover splashes) */
-  deco = new URLSearchParams(location.search).get('uideco') !== '0';
+  /** v8b: the kit is calm: the v6 living decorations (bubbles, splashes) are off unless &uideco=1 (kelp, rope and
+   *  caustics are retired for good: those calls draw nothing) */
+  deco = new URLSearchParams(location.search).get('uideco') === '1';
   private fx: { x: number; y: number; vx: number; vy: number; t: number; life: number; r: number; kind: 'bubble' | 'drop'; ph: number; delay: number }[] = [];
   private emit = new Map<string, number>();
   private pats = new Map<string, CanvasPattern | null>();
@@ -463,7 +461,7 @@ export class PixelUI {
     for (const p of this.fx) {
       if (p.delay > 0) continue;
       const a = Math.min(1, (p.life - p.t) / 0.25) * Math.min(1, p.t / 0.08);
-      if (p.kind === 'drop') { this.ctx.globalAlpha = a; this.ctx.fillStyle = '#bff0ff'; this.ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1); this.ctx.globalAlpha = 1; continue; }
+      if (p.kind === 'drop') { this.ctx.globalAlpha = a; this.ctx.fillStyle = C.steel2; this.ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1); this.ctx.globalAlpha = 1; continue; }
       const b = bubbleArt(p.r), S = b.width;
       this.ctx.globalAlpha = a; this.ctx.drawImage(b, Math.round(p.x - p.r), Math.round(p.y - p.r), S, S); this.ctx.globalAlpha = 1;
     }
@@ -472,100 +470,21 @@ export class PixelUI {
    * a slow caustic-light shimmer over a rect (two layers of the caustic web sliding past each other). Cheap: two
    * pattern fills. Draw it over a skin's inset, under the content.
    */
-  caustic(x: number, y: number, w: number, h: number, alpha = 0.1) {
-    if (!this.deco || w < 4 || h < 4) return;
-    // the 1x tile in UI space (so its lines are chunky UI pixels), slid by whole UI pixels (pixel-snapped motion)
-    let pat = this.pats.get('1');
-    if (pat === undefined) { pat = this.ctx.createPattern(causticTile(), 'repeat'); this.pats.set('1', pat); }
-    if (!pat) return;
-    const c = this.ctx;
-    const X = Math.round(x), Y = Math.round(y + this.liftY), Wd = Math.round(w), Hd = Math.round(h);
-    c.save();
-    c.beginPath(); c.rect(X, Y, Wd, Hd); c.clip();
-    c.imageSmoothingEnabled = false;
-    c.fillStyle = pat;
-    for (const [sx, sy, k] of [[6, 3.5, 1], [-4.5, 5, 0.7]] as const) {
-      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.round(this.t * sx + (k < 1 ? 41 : 0)), Math.round(this.t * sy + (k < 1 ? 17 : 0))]));
-      c.globalAlpha = alpha * k * this.fadeK;
-      c.fillRect(X, Y, Wd, Hd);
-    }
-    c.restore();
-  }
+  caustic(_x: number, _y: number, _w: number, _h: number, _alpha = 0.1) { /* v8b: retired (the kit has no texture) */ void causticTile; }
   /**
    * a kelp frond draped over an edge at (x, y), hanging down and swaying (side -1 hangs out to the left, +1 right): a
    * ruffled ribbon one UI px per row (ink rim, a lit left margin, a paler midrib, a shaded right margin), a cast
    * shadow, a gas bladder at its stipe, all on whole UI pixels so the motion steps chunkily
    */
-  kelp(x: number, y: number, side: -1 | 1, len = 12, phase = 0) {
-    const K = KELP;
-    const rows: [number, number, number][] = [];
-    // the stipe runs out over the edge for 3 px, then the frond hangs
-    for (let i = 0; i < 3; i++) rows.push([Math.round(x + side * i), Math.round(y + (i > 1 ? 1 : 0)), 2]);
-    const L = len * 2;
-    for (let i = 0; i < L; i++) {
-      const k = i / L;
-      const sway = Math.sin(this.t * 1.6 + phase - i * 0.2) * Math.pow(k, 1.4) * 3.2 + Math.sin(this.t * 0.7 + phase * 1.3) * k * 1.2;
-      const cx = x + side * 3 + side * Math.sin(k * 2.4) * 2 + sway;
-      const w = k > 0.86 ? 1 : k > 0.7 ? 2 : 3 + ((i >> 2) % 2);
-      rows.push([Math.round(cx - w / 2), Math.round(y + 2 + i), w]);
-    }
-    for (const [rx, ry, w] of rows) this.fill(rx + 1, ry + 1, w, 1, '#000000', 0.28);
-    for (const [rx, ry, w] of rows) this.fill(rx - 1, ry - 1, w + 2, 3, K[0]);
-    rows.forEach(([rx, ry, w], i) => {
-      if (w === 1) { this.fill(rx, ry, 1, 1, K[4]); return; }
-      this.fill(rx, ry, w, 1, K[3]);
-      this.fill(rx, ry, 1, 1, K[5]);
-      this.fill(rx + w - 1, ry, 1, 1, K[2]);
-      if (w >= 3) this.fill(rx + Math.floor(w / 2), ry, 1, 1, (i >> 1) % 3 === 0 ? K[6] : K[4]);
-    });
-    // a gas bladder where the frond leaves the stipe
-    const [bx, by] = rows[4];
-    this.fill(bx - side * 2 - 1, by - 1, 4, 4, K[0]);
-    this.fill(bx - side * 2, by, 2, 2, '#a08a2c'); this.fill(bx - side * 2, by, 1, 1, '#ecd878'); this.fill(bx - side * 2 + 1, by + 1, 1, 1, '#6e5c1c');
-  }
-  /** a loose rope end hanging from (x, y), swaying, its strands twisting, frayed at the tip */
-  ropeEnd(x: number, y: number, len = 6, phase = 0) {
-    const P = ROPE;
-    const seg: [number, number][] = [];
-    for (let i = 0; i < len * 2; i++) seg.push([Math.round(x + Math.sin(this.t * 1.3 + phase - i * 0.18) * (i / (len * 2)) * 1.6), y + i]);
-    for (const [qx, qy] of seg) this.fill(qx + 1, qy + 1, 2, 1, '#000000', 0.3);
-    for (const [qx, qy] of seg) this.fill(qx - 1, qy - 1, 4, 3, P[0]);
-    seg.forEach(([qx, qy], i) => { const k = i % 3; this.fill(qx, qy, 1, 1, k === 2 ? P[2] : P[5]); this.fill(qx + 1, qy, 1, 1, k === 0 ? P[2] : k === 1 ? P[3] : P[1]); });
-    // the whipping (a binding of darker twine) and the frayed tip
-    const [ex, ey] = seg[seg.length - 1];
-    this.fill(ex - 1, ey - 3, 4, 2, P[0]); this.fill(ex, ey - 3, 2, 1, P[2]);
-    for (const [dx, h, c] of [[-1, 3, 4], [0, 4, 5], [1, 3, 3], [2, 2, 4]] as const) this.fill(ex + dx, ey + 1, 1, h, P[c]);
-  }
+  kelp(_x: number, _y: number, _side: -1 | 1, _len = 12, _phase = 0) { /* v8b: retired */ }
+  /** v6: a loose rope end. v8b: retired (draws nothing) */
+  ropeEnd(_x: number, _y: number, _len = 6, _phase = 0) { /* v8b: retired */ }
   /**
    * the living decorations of a panel (called by panel(); call it yourself after ui.frame() for a hand-drawn panel):
    * the caustic shimmer over the inset, and on big plank frames a swaying kelp strand draped over a side, a rope end
    * dangling from a bottom lashing, and a bubble now and then rising off the top edge. `key` keeps them steady.
    */
-  panelFx(kind: SkinKind, x: number, y: number, w: number, h: number, key = `${kind}|${w}x${h}`, alpha = 1) {
-    if (!this.deco) return;
-    const plank = kind === 'wood' || kind === 'stone' || kind === 'cream';
-    if (plank || kind === 'dark' || kind === 'inset') {
-      const p = PAD[kind];
-      const ins = plank ? 7 : kind === 'dark' ? 4 : 1;
-      this.caustic(x + ins, y + ins, w - 2 * ins, h - 2 * ins, (kind === 'cream' ? 0.2 : 0.11) * alpha);
-      void p;
-    }
-    const h0 = hashStr(key);
-    if (plank && w >= 110 && h >= 70) {
-      // the kelp hangs off whichever side has more room; it starts below the corner (clear of a close key)
-      const side: -1 | 1 = x > this.w - (x + w) ? -1 : 1;
-      this.kelp(side > 0 ? x + w - 4 : x + 4, y + 18 + (h0 % 9), side, 15 + (h0 % 6), h0 % 7);
-      this.ropeEnd(side > 0 ? x + 4 : x + w - 6, y + h - 3, 5 + (h0 % 3), h0 % 5);
-    }
-    if ((plank || kind === 'dark') && w >= 90 && h >= 50) {
-      const next = this.emit.get(key) ?? this.t + 0.6 + (h0 % 10) / 10;
-      if (this.t >= next) {
-        const n = Math.floor(this.t * 3.1 + h0);
-        this.bubble(x + 10 + (n * 53 % Math.max(1, w - 20)), y + 3, { r: 1 + (n % 3 === 0 ? 1 : 0), vy: -12 - (n % 4) * 3 });
-        this.emit.set(key, this.t + 1.3 + ((n * 7) % 10) / 6);
-      } else this.emit.set(key, next);
-    }
-  }
+  panelFx(_kind: SkinKind, _x: number, _y: number, _w: number, _h: number, _key = '', _alpha = 1) { /* v8b: retired: panels are calm */ }
 
   // ---------------------------------------------------------------- primitives
   fill(x: number, y: number, w: number, h: number, col: string, alpha = 1) {
@@ -601,9 +520,9 @@ export class PixelUI {
     lines.forEach((l, i) => this.text(l, o.align === 'center' ? x + w / 2 : o.align === 'right' ? x + w : x, y + i * lh, o));
     return lines.length * lh;
   }
-  measure(str: string, font: FontName = 'body') { return measure(str, font, this.hd); }
-  lh(font: FontName = 'body') { return lineH(font, this.hd); }
-  cap(font: FontName = 'body') { return capH(font, this.hd); }
+  measure(str: string, font: FontName = 'body', size?: number) { return measure(str, font, this.hd, size); }
+  lh(font: FontName = 'body', size?: number) { return lineH(font, this.hd, size); }
+  cap(font: FontName = 'body', size?: number) { return capH(font, this.hd, size); }
   /** wrap text to a width in this canvas's screen font */
   wrap(str: string, font: FontName, maxW: number) { return wrap(str, font, maxW, this.hd); }
   img(cv: CanvasImageSource & { width: number; height: number }, x: number, y: number, o: { w?: number; h?: number; alpha?: number; flipX?: boolean } = {}) {
@@ -633,7 +552,7 @@ export class PixelUI {
     const tw = label ? this.measure(label, 'small') : 0;
     const w = Math.max(KEYCAP_H, Math.ceil(tw) + 7);
     this.img(keycapBody(w, KEYCAP_H, dark, down), x, y, { w, h: KEYCAP_H });
-    if (label) this.text(label, x + w / 2, y + (down ? 3 : 1) + Math.round((8 - this.cap('small')) / 2), { font: 'small', color: dark ? KIT.text : KIT.ink, shadow: null, align: 'center' });
+    if (label) this.text(label, x + Math.round(w / 2), y + Math.round((KEYCAP_H - 1 - this.cap('small')) / 2) + (down ? 1 : 0), { font: 'small', color: dark ? KIT.text : KIT.textInk, shadow: null, align: 'center' });
     return w;
   }
   /** the width keycap(label) takes */
@@ -649,12 +568,11 @@ export class PixelUI {
   block(x: number, y: number, w: number, h: number) { if (this.hover(x, y, w, h)) this.overNext = true; }
 
   /**
-   * a panel: the skin, an optional title (a driftwood plank sign on the frame for 'wood' / 'stone' / 'cream', a
-   * heading inside for the others), a POP-IN the first frames it is drawn (the frame springs from 86% with an
-   * overshoot and a damped water wobble, bubbles burst off its bottom edge, the content fades + rises in), and the
-   * live ocean decorations of panelFx() (caustic light, a swaying kelp strand, a dangling rope end, bubbles). The pop
-   * is keyed by o.id, else kind + title (+ its order among same-keyed panels this frame); pass a stable o.id for
-   * panels whose title changes, o.pop: false to skip the pop, o.deco: false to skip the decorations.
+   * a panel (v8b): the flat skin; a title set into the top border like a legend (main kinds 'wood' / 'stone' /
+   * 'cream') or as a gold heading inside the top-left (the others); a calm OPEN the first frames it is drawn (it fades
+   * in and rises 4 px, the content follows a beat later). The open is keyed by o.id, else kind + title (+ its order
+   * among same-keyed panels this frame); pass a stable o.id for panels whose title changes, o.pop: false to skip it.
+   * (o.deco is kept for old callers: there are no decorations any more.)
    */
   panel(kind: SkinKind, x: number, y: number, w: number, h: number, title?: string, o: { titleStyle?: TextOpts; alpha?: number; id?: string; pop?: boolean; deco?: boolean } = {}) {
     this.block(x, y, w, h);
@@ -662,48 +580,36 @@ export class PixelUI {
     let key = o.id ?? `${kind}|${title ?? ''}`;
     const n = this.panelN.get(key) ?? 0; this.panelN.set(key, n + 1);
     if (!o.id) key += '#' + n;
-    const D = 0.2;
     const pt = this.pop && o.pop !== false ? this.anim('panel:' + key) : 9;
-    let fx = x, fy = y, fa = o.alpha ?? 1, amp = 0;
-    const fw = w, fh = h;
-    if (pt < 0.45) {
-      // rise in from 8 px below with an overshoot, fading in, while a damped WATER WOBBLE runs through the frame: its
-      // rows slide sideways on a travelling wave by whole UI pixels, so the art stays chunky the whole way in
-      const k = Math.min(1, pt / D);
-      fy = y + Math.round((1 - easeOutBack(k, 2.2)) * 8);
-      amp = 2.4 * Math.exp(-pt * 7);
-      fa *= Math.min(1, pt / 0.07);
-      // a burst of bubbles off the bottom edge as it lands
-      if (pt === 0 && this.deco && o.deco !== false && w >= 60 && (kind === 'wood' || kind === 'stone' || kind === 'cream' || kind === 'dark')) for (let i = 0; i < 6; i++) this.bubble(x + 10 + ((i * 37 + w) % Math.max(1, w - 20)), y + 2, { vy: -18 - (i % 3) * 6, r: 1 + (i % 2), delay: i * 0.05, life: 0.9 });
-    }
-    if (amp < 0.5) this.frame(kind, fx, fy, fw, fh, fa);
-    else {
-      const c = this.ctx, cv = skin(kind, Math.round(w), Math.round(h));
-      c.globalAlpha = fa;
-      for (let sy = 0; sy < cv.height; sy += 2) {
-        const dx = Math.round(Math.sin(sy * 0.19 - pt * 32) * amp), sh = Math.min(2, cv.height - sy);
-        c.drawImage(cv, 0, sy, cv.width, sh, Math.round(fx) + dx, Math.round(fy) + sy, cv.width, sh);
-      }
-      c.globalAlpha = 1;
-    }
-    if (this.deco && o.deco !== false) this.panelFx(kind, fx, fy, fw, fh, key, fa);
+    const k = Math.min(1, pt / 0.18), e = 1 - (1 - k) ** 3;
+    const fx = x, fy = y + Math.round((1 - e) * 4), fw = w, fh = h;
+    const fa = (o.alpha ?? 1) * Math.min(1, pt / 0.12);
+    // a soft drop shadow on the scene, then the face
+    this.fill(fx + 2, fy + 3, fw, fh, '#000000', 0.22 * fa);
+    this.frame(kind, fx, fy, fw, fh, fa);
     if (title) {
-      const lacq = kind === 'wood' || kind === 'stone' || kind === 'cream';
-      const st: TextOpts = o.titleStyle ?? (lacq ? { font: 'title', color: KIT.ink, shadow: '#e6dec8' } : kind === 'paper' || kind === 'insetCream' ? { font: 'title', color: KIT.textInk, shadow: null } : kind === 'blueprint' || kind === 'card' ? { font: 'title', color: '#ffffff', shadow: '#0a2046' } : { font: 'title', color: KIT.cream[3], outline: KIT.ink, shadow: '#000000' });
+      const legend = kind === 'wood' || kind === 'stone' || kind === 'cream';
+      const paper = kind === 'paper' || kind === 'insetCream' || kind === 'cream' || kind === 'sail' || kind === 'plaque';
+      const st: TextOpts = o.titleStyle ?? (paper ? { font: 'title', color: KIT.textInk, shadow: null } : { font: 'title', color: C.gold2, shadow: C.ink });
       const f = st.font ?? 'title';
-      const tw = this.measure(title, f);
-      if (lacq) {
-        // a driftwood plank sign nailed over the top frame
-        const pw = Math.ceil(tw) + 22, ph = Math.round(this.cap(f)) + 9;
-        const px = fx + Math.round((fw - pw) / 2), py = fy - Math.round(ph / 2) + 3;
+      const tw = Math.ceil(this.measure(title, f)), cap = Math.round(this.cap(f));
+      if (legend && paper) {
+        // a parchment panel: the title on a small parchment tag set over the top edge (ink stays on parchment)
+        const pw = tw + 16, ph = cap + 9, px = fx + Math.round((fw - pw) / 2), py = fy - Math.round(ph / 2);
         this.frame('plaque', px, py, pw, ph, fa);
-        this.text(title, fx + fw / 2, py + Math.round((ph - this.cap(f)) / 2) - 1, { ...st, align: 'center', alpha: (st.alpha ?? 1) * Math.min(1, fa) });
+        this.text(title, px + 8, py + Math.round((ph - cap) / 2), { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
+      } else if (legend) {
+        // the legend: the border breaks around the word, a 2 px gold tick each side; the word straddles the top line
+        const gx = fx + Math.round((fw - tw) / 2), pad = 7;
+        this.fill(gx - pad, fy, tw + pad * 2, 1, C.navy, fa);
+        this.fill(gx - pad - 1, fy - 1, 2, 3, C.gold, fa); this.fill(gx + tw + pad - 1, fy - 1, 2, 3, C.gold, fa);
+        this.text(title, gx, fy - Math.round(cap / 2), { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
       } else this.text(title, fx + PAD[kind][0] + 2, fy + PAD[kind][1] + 2, { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
     }
     if (pt < 0.3) {
-      // the content fades in and rises 3 px as the frame settles
-      const c = Math.max(0, Math.min(1, (pt - 0.06) / 0.14));
-      this.fadeK = c; this.liftY = Math.round((1 - c) * 3);
+      // the content fades in and rises 2 px a beat after the frame
+      const c = Math.max(0, Math.min(1, (pt - 0.05) / 0.16));
+      this.fadeK = c; this.liftY = Math.round((1 - c) * 2);
     }
   }
   /** content rect inside a panel skin */
@@ -723,48 +629,25 @@ export class PixelUI {
   }
 
   /**
-   * a chunky button: 3 states (hover lifts 1 px with a glint sweeping the face, press sinks 2 px), an optional icon,
-   * and the keycap of its hotkey on the right. Styles: green = go, red = close / danger, wood (brass) = neutral,
-   * gold = the important neutral, dark = secondary, blue = info. Recommended heights: 18 (compact), 22 (standard),
-   * 26 (primary). The face is h - 5 tall (1 px headroom for the lift + a 2 px lip + outlines).
+   * a flat button (v8b): a face with a 1 px border; hover fills it (primary styles fill gold, red fills red), a press
+   * nudges the label 1 px, `on` is a toggled choice (a gold border and underline). An optional icon, and the keycap
+   * of its hotkey on the right (not on touch screens). Styles: green / gold / brass = primary, wood / stone / dark =
+   * neutral, red = danger, blue / tv = info. Heights: 18 (compact), 22 (standard), 26 (primary).
    */
   button(id: string, label: string, x: number, y: number, w: number, h: number, o: ButtonOpts = {}): boolean {
     const st = o.style ?? 'wood';
     const { over, held, clicked: c0 } = this.interact(id, x, y, w, h, o.disabled);
     let clicked = c0;
     if (o.key && !o.disabled && this.input?.keyHit(o.key)) clicked = true;
-    const state: BtnState = o.state ?? (o.disabled ? 'disabled' : held ? 'down' : o.on ? 'on' : over ? 'hover' : 'normal');
-    // a soft cast shadow on whatever it rests on (1 px under the lip and down the right edge; none while pressed)
-    if (state !== 'down') { this.fill(x + 2, y + h, w - 2, 1, '#000000', 0.32); this.fill(x + w, y + 3, 1, h - 2, '#000000', 0.24); }
-    this.img(btnSkin(st, state, w, h), x, y, { w: Math.max(6, Math.round(w)), h: Math.max(8, Math.round(h)) });
-    const P = BTN[st];
+    const state: BtnState = o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : o.on ? 'on' : 'normal');
+    // a calm ease on the hover fill: the face cross-fades over ~80 ms
+    const hk = this.ease(id + ':hov', state === 'hover' || state === 'down' ? 1 : 0, 26);
+    const W = Math.max(6, Math.round(w)), H = Math.max(8, Math.round(h));
+    const base: BtnState = state === 'hover' || state === 'down' ? (o.on ? 'on' : 'normal') : state;
+    this.img(btnSkin(st, base, W, H), x, y, { w: W, h: H });
+    if (hk > 0.01 && state !== 'disabled') this.img(btnSkin(st, state === 'down' ? 'down' : 'hover', W, H), x, y, { w: W, h: H, alpha: hk });
     const [ft, fh] = btnFace(state, h);
     const fy = y + ft;
-    // a slow caustic shimmer: every few seconds a soft band of light drifts across the face
-    if (this.deco && state !== 'disabled' && w >= 24) {
-      const hh = hashStr(id), per = 5 + (hh % 30) / 10, ph = (this.t + (hh % 100) / 17) % per;
-      if (ph < 1.1) {
-        const bx0 = x - 10 + (w + 20) * (ph / 1.1);
-        for (let r = 1; r < fh - 1; r++) {
-          const sx = Math.round(bx0 + (fh - r) * 0.5 + Math.sin(r * 0.9 + this.t * 3) * 0.6);
-          const a0 = Math.max(x + 2, sx), b0 = Math.min(x + w - 2, sx + 5);
-          if (b0 > a0) this.fill(a0, fy + r, b0 - a0, 1, '#dffcff', 0.13);
-        }
-      }
-    }
-    // the hover glint: a bright diagonal sweeping across the face once, and a little splash of bubbles
-    if (state === 'hover') {
-      const g = this.anim(id + ':glint');
-      if (g === 0 && this.deco) this.splash(x + w / 2 + ((hashStr(id) % 11) - 5), fy, w >= 40 ? 4 : 2);
-      if (g < 0.4) {
-        const gx = x - 8 + (w + 16) * (g / 0.4);
-        for (let r = 1; r < fh - 1; r++) {
-          const sx = Math.round(gx + (fh - r) * 0.6);
-          const a = Math.max(x + 2, sx), b = Math.min(x + w - 2, sx + 3);
-          if (b > a) this.fill(a, fy + r, b - a, 1, '#ffffff', 0.35);
-        }
-      }
-    }
     const font = o.font ?? 'body';
     const ty = fy + Math.round((fh - this.cap(font)) / 2);
     // kit icons are 1 texel per UI px, like the rest of the kit; a caller's canvas is taken as UI px
@@ -773,19 +656,22 @@ export class PixelUI {
     const kc = o.key && !PixelUI.touch ? (o.keyLabel ?? labelForKey(o.key)) : '';
     const kcW = kc ? this.keycapW(kc) : 0;
     const tw = label ? this.measure(label, font) : 0;
-    const total = (ic ? ic.width + (label ? 3 : 0) : 0) + tw;
-    let cx = x + 6;
-    if (o.align !== 'left') cx = x + Math.round((w - total - (kc ? kcW + 4 : 0)) / 2);
-    if (ic) { this.img(ic.cv, cx, fy + Math.round((fh - ic.height) / 2), { alpha: state === 'disabled' ? 0.5 : 1, w: ic.width, h: ic.height }); cx += ic.width + 3; }
-    const brass = st === 'wood' || st === 'brass' || st === 'gold';
-    if (label) this.text(label, cx, ty, state === 'disabled' ? { font, color: '#b4b0a6', shadow: '#2a2a2a' } : brass ? { font, color: P.text, shadow: P.textSh } : { font, color: P.text, outline: P.textSh });
-    if (kc) this.keycap(kc, x + w - kcW - 4, fy + Math.round((fh - KEYCAP_H) / 2), st === 'dark' || st === 'tv', state === 'down');
+    const total = (ic ? ic.width + (label ? 4 : 0) : 0) + tw;
+    let cx = x + 8;
+    if (o.align !== 'left') cx = x + Math.round((w - total - (kc ? kcW + 6 : 0)) / 2);
+    if (ic) { this.img(ic.cv, cx, fy + Math.round((fh - ic.height) / 2), { alpha: state === 'disabled' ? 0.45 : 1, w: ic.width, h: ic.height }); cx += ic.width + 4; }
+    if (label) {
+      const c1 = btnText(st, state === 'hover' || state === 'down' ? 'normal' : state), c2 = btnText(st, 'hover');
+      this.text(label, cx, ty, { font, color: c1, shadow: null, alpha: 1 - hk });
+      if (hk > 0.01 && state !== 'disabled') this.text(label, cx, ty, { font, color: c2, shadow: null, alpha: hk });
+    }
+    if (kc) this.keycap(kc, x + w - kcW - 5, fy + Math.round((fh - KEYCAP_H) / 2), true, state === 'down');
     if (over && o.tip) this.tooltip(o.tip);
     if (clicked && this.sfx && o.sfx !== '') audio.play(o.sfx ?? (o.disabled ? 'k_err1' : 'k_click1'), { vol: 0.4, dry: true });
     return clicked;
   }
 
-  /** square icon button (an icon 'close' with style 'red' draws the brass-ringed close widget) */
+  /** square icon button (an icon 'close' with style 'red' draws the close widget) */
   iconButton(id: string, ic: string, x: number, y: number, o: ButtonOpts & { size?: number } = {}) {
     const s = o.size ?? 16;
     if (ic === 'close' && (o.style ?? 'red') === 'red') return this.closeButton(id, x, y - 1, { size: s + 1, key: o.key ?? null, disabled: o.disabled, tip: o.tip, sfx: o.sfx });
@@ -793,9 +679,8 @@ export class PixelUI {
   }
 
   /**
-   * the big close widget: a brass-bezelled coral key with a cream X, `size` wide (default 20) and size + 3 tall (1 px
-   * lift room + a 2 px lip); put it on the panel's top-right corner, e.g. (x + w - 16, y - 5). `key` defaults to
-   * Escape (null: none).
+   * the close widget: a small flat square with an X (red on hover), `size` wide (default 20); its canvas is size + 3
+   * tall (the v6 layout room). Put it in the panel's top-right corner. `key` defaults to Escape (null: none).
    */
   closeButton(id: string, x: number, y: number, o: { size?: number; key?: string | null; disabled?: boolean; tip?: TipLine[]; sfx?: string; state?: 'normal' | 'hover' | 'down' | 'disabled' } = {}): boolean {
     const s = Math.max(11, Math.round(o.size ?? 20));
@@ -822,38 +707,27 @@ export class PixelUI {
       const w = o.w ?? Math.ceil(this.measure(l, font)) + 16;
       const on = i === sel;
       const { over, clicked } = this.interact(id + ':' + i, cx, y, w, h);
-      const dy = on ? 0 : over ? 2 : 3;
+      const dy = on ? 0 : 2;
       this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy), cx, y + dy, { w: Math.round(w), h: h - dy });
-      this.text(l, cx + w / 2, y + dy + Math.round((h - dy - this.cap(font)) / 2) + (on ? 0 : -1), { font, color: on ? KIT.cream[3] : over ? KIT.cream[2] : KIT.textDim, outline: on ? KIT.ink : null, shadow: on ? null : '#06141a', align: 'center' });
+      this.text(l, cx + w / 2, y + dy + Math.round((h - dy - this.cap(font)) / 2), { font, color: on ? C.gold2 : over ? C.bone : C.dim, shadow: null, align: 'center' });
       if (clicked && !on) { out = i; if (this.sfx) audio.play('tab1', { vol: 0.4, dry: true }); }
       cx += w + (o.gap ?? 2);
     });
     return out;
   }
 
-  /** horizontal slider (a recessed track, a kelp fill, a brass knob); returns the new value. 12 UI px tall */
+  /** horizontal slider (v8b: a 2 px slate track, a gold fill, a slim bone handle); returns the new value. 12 UI px tall */
   slider(id: string, v: number, x: number, y: number, w: number, o: { min?: number; max?: number; step?: number; style?: 'wood' | 'tv' | 'blue' } = {}): number {
     const min = o.min ?? 0, max = o.max ?? 1;
     const { over, held } = this.interact(id, x - 4, y - 3, w + 8, 16);
     const k = Math.max(0, Math.min(1, (v - min) / (max - min || 1)));
-    const fillC = o.style === 'blue' || o.style === 'tv' ? KIT.sea : KIT.kelp;
-    // track: a groove cut in a driftwood rail (shadowed top row, lit lower lip), the filled part a kelp ribbon
-    const ty = y + 3;
-    this.fill(x - 1, ty - 1, w + 2, 8, '#845230');
-    this.fill(x - 1, ty - 1, w + 2, 1, '#bd8751'); this.fill(x - 1, ty + 6, w + 2, 1, '#48291f');
-    this.fill(x, ty, w, 6, KIT.ink);
-    this.fill(x + 1, ty + 1, w - 2, 4, '#0a1a25');
-    this.fill(x + 1, ty + 1, w - 2, 1, '#030a10');
-    this.fill(x + 1, ty + 4, w - 2, 1, '#204a56');
-    const fw = Math.round((w - 2) * k);
-    if (fw > 0) {
-      this.fill(x + 1, ty + 1, fw, 4, fillC[2]); this.fill(x + 1, ty + 1, fw, 1, fillC[3]); this.fill(x + 1, ty + 4, fw, 1, fillC[1]);
-      // ruffles along the ribbon, a pale bead of light at its end
-      for (let i = 3; i < fw - 2; i += 5) { this.fill(x + 1 + i, ty + 2, 1, 1, fillC[3]); this.fill(x + 2 + i, ty + 3, 1, 1, fillC[1]); }
-      this.fill(x + fw - 1, ty + 1, 1, 2, '#ffffff', 0.5);
-    }
-    // brass notches under the rail
-    for (let i = 1; i < 4; i++) { const nx = x + Math.round((w - 1) * i / 4); this.fill(nx, ty + 7, 1, 2, '#a86a24'); this.fill(nx, ty + 7, 1, 1, '#f8d880'); }
+    const fillC = o.style === 'blue' || o.style === 'tv' ? C.steel : C.gold;
+    const ty = y + 5;
+    this.fill(x, ty, w, 2, over || held ? C.line2 : C.line);
+    const fw = Math.round((w - 1) * k);
+    if (fw > 0) this.fill(x, ty, fw, 2, fillC);
+    // four quiet ticks under the track
+    for (let i = 0; i <= 4; i++) this.fill(x + Math.round((w - 1) * i / 4), ty + 4, 1, 2, C.line);
     const kx = x + Math.round((w - 1) * k) - 4;
     this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal'), kx, y - 1, { w: 9, h: 14 });
     if (held) {
@@ -867,31 +741,31 @@ export class PixelUI {
     return v;
   }
 
-  /** a labelled checkbox (a 13 px cream box, a kelp tick); returns the new state */
+  /** a labelled checkbox (a 13 px dark box, a gold square when on); returns the new state */
   toggle(id: string, on: boolean, label: string, x: number, y: number, o: { style?: BtnStyle; font?: FontName; color?: string } = {}): boolean {
     const font = o.font ?? 'body';
     const w = 13 + 5 + Math.ceil(this.measure(label, font));
     const { over, held, clicked } = this.interact(id, x, y, w, 13);
     this.img(checkArt(on, over, held, 13), x, y, { w: 13, h: 13 });
-    this.text(label, x + 18, y + Math.round((13 - this.cap(font)) / 2), { font, color: o.color ?? (over ? '#ffffff' : KIT.text), shadow: '#06141a' });
+    this.text(label, x + 19, y + Math.round((13 - this.cap(font)) / 2), { font, color: o.color ?? (over ? C.bone2 : KIT.text), shadow: null });
     if (clicked) { if (this.sfx) audio.play('k_toggle2', { vol: 0.35, dry: true }); return !on; }
     return on;
   }
 
-  /** ◄ value ► stepper (18 px tall brass arrow keys); returns -1, 0 or +1 */
+  /** ◄ value ► stepper (18 px tall arrow keys); returns -1, 0 or +1 */
   stepper(id: string, value: string, x: number, y: number, w: number, o: { style?: BtnStyle; font?: FontName; color?: string; canL?: boolean; canR?: boolean } = {}): number {
     let r = 0;
     const st = o.style ?? 'wood';
     if (this.button(id + ':l', '', x, y, 16, 18, { style: st, icon: 'left', disabled: o.canL === false, sfx: 'k_tick4' })) r = -1;
     if (this.button(id + ':r', '', x + w - 16, y, 16, 18, { style: st, icon: 'right', disabled: o.canR === false, sfx: 'k_tick4' })) r = 1;
     const font = o.font ?? 'body';
-    this.text(value, x + w / 2, y + 1 + Math.round((15 - this.cap(font)) / 2), { font, color: o.color ?? KIT.cream[3], outline: KIT.ink, align: 'center' });
+    this.text(value, x + w / 2, y + Math.round((18 - this.cap(font)) / 2), { font, color: o.color ?? C.bone2, shadow: null, align: 'center' });
     if (this.hover(x, y, w, 18) && this.wheel) r = this.wheel > 0 ? 1 : -1;
     return r;
   }
 
   /**
-   * a tooltip near the mouse, drawn on top at end(): a clean cream card. A first line in font 'title' becomes the
+   * a tooltip near the mouse, drawn on top at end(): a clean parchment card. A first line in font 'title' becomes the
    * card's heading (with a rule under it). Lines with `key` draw that keycap first (a hint row: { key: 'E', text:
    * 'use' }). kind 'dark' gives a dark card (pass light colours).
    */
@@ -911,7 +785,7 @@ export class PixelUI {
       { text: `${d.rarity} ${d.kind}`.toUpperCase(), font: 'small', color: KIT.textInkDim, gap: 1 },
       { text: d.desc, color: KIT.textInk, gap: 3 },
     ];
-    if (d.note) out.push({ text: d.note(level), color: '#1f5a8a', gap: 2 });
+    if (d.note) out.push({ text: d.note(level), color: '#2c4a72', gap: 2 });
     return out.concat(extra);
   }
 
@@ -929,10 +803,10 @@ export class PixelUI {
       const ok = have >= n;
       this.item(id, cx, y, size, size);
       const label = o.showHave && o.have ? `${Math.min(have, 999)}/${n}` : `${n}`;
-      const col = onCream ? (ok ? '#2a6a1a' : '#a8241c') : ok ? KIT.goodLight : KIT.badLight;
-      const tw = this.text(label, cx + size + 2, y + Math.round((size - this.cap(font)) / 2), onCream ? { font, color: col, shadow: null } : { font, color: col, outline: KIT.ink });
+      const col = onCream ? (ok ? '#33563a' : '#9a3a2a') : ok ? KIT.goodLight : KIT.badLight;
+      const tw = this.text(label, cx + size + 2, y + Math.round((size - this.cap(font)) / 2), onCream ? { font, color: col, shadow: null } : { font, color: col, shadow: C.ink });
       const hov = this.hover(cx, y, size + tw + 2, size);
-      if (hov && ITEMS[id]) this.tooltip([{ text: getItem(id).name, font: 'body', color: KIT.textInk }, { text: o.have ? `have ${o.have[id] ?? 0} · need ${n}` : `need ${n}`, font: 'small', color: ok ? '#2a6a1a' : '#a8241c' }]);
+      if (hov && ITEMS[id]) this.tooltip([{ text: getItem(id).name, font: 'body', color: KIT.textInk }, { text: o.have ? `have ${o.have[id] ?? 0} - need ${n}` : `need ${n}`, font: 'small', color: ok ? '#33563a' : '#9a3a2a' }]);
       cx += size + 2 + Math.ceil(tw) + (o.gap ?? 6);
     }
     return cx - x;
@@ -954,7 +828,7 @@ export class PixelUI {
       this.img(g, x, y + Math.round((KEYCAP_H - g.height) / 2), { w: gw, h: g.height }); w = gw + 3;
     } else w = this.keycap(key, x, y, o.dark) + 4;
     const f = o.font ?? 'small';
-    w += this.text(label, x + w, y + Math.round((KEYCAP_H - 2 - this.cap(f)) / 2), { font: f, color: o.color ?? KIT.text, shadow: '#06141a' });
+    w += this.text(label, x + w, y + Math.round((KEYCAP_H - 1 - this.cap(f)) / 2), { font: f, color: o.color ?? KIT.text, shadow: C.ink });
     return Math.ceil(w) + 10;
   }
   /** the width hint() takes */
@@ -963,7 +837,7 @@ export class PixelUI {
 
   /**
    * a scrollable list of n rows; row(i, x, y, w, hovered) draws one. Returns the clicked row or -1.
-   * Wheel scrolls; a brass scrollbar appears when the content overflows.
+   * Wheel scrolls; a slim scrollbar appears when the content overflows.
    */
   list(id: string, x: number, y: number, w: number, h: number, n: number, rowH: number, row: (i: number, x: number, y: number, w: number, hov: boolean) => void, o: { style?: 'wood' | 'tv' | 'blue' | 'dark'; cols?: number } = {}): number {
     const cols = o.cols ?? 1;
@@ -994,22 +868,15 @@ export class PixelUI {
     this.unclip();
     if (maxScroll > 0) {
       const tx = x + w - sbW;
-      // the track: a recessed groove (shadowed left, lit right lip); the thumb: a bevelled brass bar with grip grooves
-      this.fill(tx, y, sbW, h, KIT.ink);
-      this.fill(tx + 1, y + 1, sbW - 2, h - 2, '#0a1a25');
-      this.fill(tx + 1, y + 1, 1, h - 2, '#030a10'); this.fill(tx + sbW - 2, y + 1, 1, h - 2, '#204a56');
+      // the track: a 1 px line; the thumb: a slim slate bar (gold while held)
+      this.fill(tx + Math.floor(sbW / 2), y, 1, h, C.line);
       const th = Math.max(14, Math.round((h * h) / contentH));
       const ty = y + Math.round(((h - th) * sc) / maxScroll);
       const sbHover = this.hover(tx - 2, y, sbW + 2, h);
       if (sbHover && this.pressed) { s.drag = this.my - ty; if (s.drag < 0 || s.drag > th) s.drag = th / 2; }
       if (s.drag >= 0) { if (!this.down) s.drag = -1; else { s.target = s.scroll = Math.max(0, Math.min(maxScroll, ((this.my - s.drag - y) / (h - th)) * maxScroll)); } }
       const lit = s.drag >= 0 || sbHover;
-      const B = lit ? ['#7a4416', '#cc9236', '#e8b850', '#f8d880', '#fff4c8'] : ['#4a240e', '#a86a24', '#cc9236', '#e8b850', '#f8d880'];
-      this.fill(tx, ty, sbW, th, KIT.ink);
-      this.fill(tx + 1, ty + 1, sbW - 2, th - 2, B[2]);
-      this.fill(tx + 1, ty + 1, sbW - 2, 1, B[4]); this.fill(tx + 1, ty + 1, 1, th - 2, B[3]);
-      this.fill(tx + sbW - 2, ty + 1, 1, th - 2, B[1]); this.fill(tx + 1, ty + th - 2, sbW - 2, 1, B[0]);
-      for (const gy of [-3, -1, 1]) { this.fill(tx + 2, ty + Math.round(th / 2) + gy, sbW - 4, 1, B[0]); this.fill(tx + 2, ty + Math.round(th / 2) + gy + 1, sbW - 4, 1, B[4]); }
+      this.fill(tx + 1, ty, sbW - 2, th, lit ? C.gold : C.slate);
     }
     return clicked;
   }
@@ -1017,7 +884,7 @@ export class PixelUI {
 
   /**
    * v5: a goal / objective card, the shared language for "what to do next" (home goal board, run goals, tutorials):
-   * a pinned cream card with a checkbox, the text, and either a count / percentage on the right with a kelp progress
+   * a parchment card with a checkbox, the text, and either a count / percentage on the right with a thin progress
    * bar along the bottom, or (o.cost) material icons with have/need counts in green / red. When done it ticks the
    * box and turns green (no strike-through); o.ready shows a pulsing READY! stamp (the goal can be completed now).
    *
@@ -1050,39 +917,40 @@ export class PixelUI {
     const pt = this.pop ? this.anim('objective:' + id) : 9;
     const dx = pt < 0.25 ? Math.round((1 - easeOutBack(pt / 0.25, 1.4)) * -14) : 0;
     const a = Math.min(1, pt / 0.12);
-    // the card: a drop shadow, an ink outline, cream body, lit top, a card edge, and a teal tab on the left
+    // the card: a soft drop shadow and a flat parchment card; ready / pulse: a gold outline that breathes
     const X = x + dx;
-    this.fill(X + 2, y + 2, w, h, '#000000', 0.28 * a);
+    this.fill(X + 2, y + 2, w, h, '#000000', 0.22 * a);
     this.frame('paper', X, y, w, h, a);
-    if (done) this.fill(X + 1, y + 1, w - 2, h - 4, '#d6efc0', 0.55 * a);
+    if (done) this.fill(X + 1, y + 1, w - 2, h - 2, '#c9d6bf', 0.6 * a);
     if (ready || o.pulse) {
-      const p = 0.5 + 0.5 * Math.sin(this.t * 6);
-      this.rect(X - 1, y - 1, w + 2, h + 2, ready ? KIT.kelp[2] : KIT.brass[3]);
-      this.fill(X + 1, y + 1, w - 2, h - 4, ready ? '#c8f0a0' : '#fff4b0', 0.22 * p * a);
+      const p = 0.5 + 0.5 * Math.sin(this.t * 4);
+      this.rect(X - 1, y - 1, w + 2, h + 2, ready ? C.sage : C.gold);
+      this.fill(X + 1, y + 1, w - 2, h - 2, ready ? '#c9d6bf' : '#efe1bd', 0.25 * p * a);
     }
     // checkbox
     const bx = X + 6, by = y + 3 + Math.round((rowH - 11) / 2);
-    this.img(checkArt(done, false, false, 11), bx, by, { alpha: a, w: 11, h: 11 });
+    // a parchment checkbox: a 1 px ink-brown square, a sage square inside when done
+    this.rect(bx + 1, by + 1, 9, 9, '#6f6858'); if (done) this.fill(bx + 3, by + 3, 5, 5, '#4b6a52', a);
     let cx = X + 22;
     if (o.icon) { this.item(o.icon, cx, y + 3 + Math.round((rowH - 14) / 2), 14, 14, 1, a); cx += iconW; }
     const ty = y + 3 + Math.round((rowH - cap) / 2);
-    this.text(text, cx, ty, { font: F, color: done ? '#2a5a1a' : KIT.textInk, shadow: null, alpha: a });
+    this.text(text, cx, ty, { font: F, color: done ? '#33563a' : KIT.textInk, shadow: null, alpha: a });
     let rx = X + w - 7;
     if (stamp) {
       const sw = stampW - 4, sh = Math.round(this.cap('small')) + 5;
       const p = 1 + Math.round(Math.max(0, Math.sin(this.t * 6)) * 1);
       const sx = rx - sw, sy = y + 3 + Math.round((rowH - sh) / 2) - (p - 1);
-      this.fill(sx, sy, sw, sh, KIT.ink, a); this.fill(sx + 1, sy + 1, sw - 2, sh - 2, KIT.kelp[2], a); this.fill(sx + 1, sy + 1, sw - 2, 1, KIT.kelp[3], a);
-      this.text(stamp, sx + sw / 2, sy + 3, { font: 'small', color: '#ffffff', outline: KIT.kelp[0], align: 'center', alpha: a });
+      this.fill(sx, sy, sw, sh, '#33563a', a);
+      this.text(stamp, sx + sw / 2, sy + 3, { font: 'small', color: C.bone2, shadow: null, align: 'center', alpha: a });
       rx = sx - 5;
     }
-    if (count) this.text(count, rx, ty, { font: F, color: done ? '#2a6a1a' : '#7a4a14', shadow: null, align: 'right', alpha: a });
+    if (count) this.text(count, rx, ty, { font: F, color: done ? '#33563a' : '#6f5730', shadow: null, align: 'right', alpha: a });
     if (barH) {
       const bx2 = X + 22, bw = X + w - 7 - bx2, by2 = y + 3 + rowH;
-      this.fill(bx2, by2, bw, 4, KIT.cream[0], a); this.fill(bx2 + 1, by2 + 1, bw - 2, 2, '#e9dbb6', a);
+      this.fill(bx2, by2 + 1, bw, 2, '#b9ae96', a);
       const shown = this.ease(id + ':bar', frac, 8);
-      const fw = Math.round((bw - 2) * shown);
-      if (fw > 0) { this.fill(bx2 + 1, by2 + 1, fw, 2, done ? KIT.kelp[2] : KIT.brass[2], a); this.fill(bx2 + 1, by2 + 1, fw, 1, done ? KIT.kelp[3] : KIT.brass[3], a); }
+      const fw = Math.round(bw * shown);
+      if (fw > 0) this.fill(bx2, by2 + 1, fw, 2, done ? '#4b6a52' : C.gold0, a);
     }
     if (o.cost) {
       const fk = this.fadeK; this.fadeK = fk * a;
@@ -1097,10 +965,11 @@ export class PixelUI {
   }
 
   /**
-   * a bar (hp, progress, xp): an ink-outlined recessed trough with a lit fill. With o.id it EASES to new values and
-   * FLASHES on change (a pale chip trails a drop, a bright flash marks a gain); o.ticks draws segment notches.
+   * a bar (hp, progress, xp), v8b flat: a 1 px ink border round a dark trough and a flat fill. With o.id it EASES to
+   * new values and FLASHES on change (a pale chip trails a drop, a bright flash marks a gain); o.ticks draws quiet
+   * segment notches.
    */
-  bar(x: number, y: number, w: number, h: number, v: number, col: string, back = '#0c1c22', o: { id?: string; ticks?: number; chip?: string } = {}) {
+  bar(x: number, y: number, w: number, h: number, v: number, col: string, back: string = C.well, o: { id?: string; ticks?: number; chip?: string } = {}) {
     v = Math.max(0, Math.min(1, v));
     let shown = v, chip = v, flash = 0;
     if (o.id) {
@@ -1114,24 +983,14 @@ export class PixelUI {
       b.last = this.frameNo; this.bars.set(o.id, b);
       shown = b.v; chip = b.chip; flash = Math.max(0, 1 - (this.t - b.flashT) / 0.3);
     }
-    this.fill(x, y, w, h, KIT.ink);
-    this.fill(x + 1, y + 1, w - 2, h - 2, back);
-    if (h > 4) this.fill(x + 1, y + 1, w - 2, 1, '#000000', 0.35);
+    this.fill(x, y, w, h, C.ink);
+    this.fill(x + 1, y + 1, w - 2, h - 2, back === '#0c1c22' ? C.well : back);
     const iw = w - 2;
     const cwid = Math.round(iw * chip), fw = Math.round(iw * shown);
-    if (cwid > fw) this.fill(x + 1 + fw, y + 1, cwid - fw, h - 2, o.chip ?? '#f3e7c9', 0.85);
-    if (fw > 0) {
-      // the fill: a lit top row, a soft upper band, the body, a shaded bottom row, a glint at its left end and a
-      // brighter meniscus at its leading edge
-      this.fill(x + 1, y + 1, fw, h - 2, col);
-      if (h > 3) this.fill(x + 1, y + 1, fw, 1, '#ffffff', 0.42);
-      if (h > 6) this.fill(x + 1, y + 2, fw, Math.floor((h - 4) / 3), '#ffffff', 0.14);
-      if (h > 5) this.fill(x + 1, y + h - 2, fw, 1, '#000000', 0.3);
-      if (h > 4 && fw > 6) { this.fill(x + 2, y + 2, 2, 1, '#ffffff', 0.7); this.fill(x + 2, y + 3, 1, 1, '#ffffff', 0.45); }
-      if (fw > 2 && fw < iw) this.fill(x + fw, y + 1, 1, h - 2, '#ffffff', 0.35);
-    }
-    if (o.ticks && o.ticks > 1) for (let i = 1; i < o.ticks; i++) this.fill(x + 1 + Math.round((iw * i) / o.ticks), y + 1, 1, h - 2, KIT.ink, 0.55);
-    if (flash > 0) this.fill(x + 1, y + 1, Math.max(fw, cwid), h - 2, '#ffffff', flash * 0.6);
+    if (cwid > fw) this.fill(x + 1 + fw, y + 1, cwid - fw, h - 2, o.chip ?? C.bone, 0.55);
+    if (fw > 0) this.fill(x + 1, y + 1, fw, h - 2, col);
+    if (o.ticks && o.ticks > 1) for (let i = 1; i < o.ticks; i++) this.fill(x + 1 + Math.round((iw * i) / o.ticks), y + 1, 1, h - 2, C.ink, 0.5);
+    if (flash > 0) this.fill(x + 1, y + 1, Math.max(fw, cwid), h - 2, '#ffffff', flash * 0.35);
   }
 
   /** pixel corner brackets around a screen-space box (selection reticle) */
@@ -1177,26 +1036,19 @@ export function drawCard(ui: PixelUI, lines: { text: string; color?: string; fon
   const a = o.alpha ?? 1;
   const pad = PAD[kind];
   const dark = kind !== 'paper' && kind !== 'insetCream' && kind !== 'cream';
-  ui.fill(x + 2, y + 2, w, h, '#000000', 0.25 * a);
+  ui.fill(x + 2, y + 2, w, h, '#000000', 0.22 * a);
   ui.frame(kind, x, y, w, h, a);
   if (o.pin) {
-    // hung on a short rope loop: two strands rising from the card's top edge to a knot
+    // pinned to its thing: a short 1 px stem up from the card's top edge, a gold dot
     const cx = x + Math.floor(w / 2);
-    for (let i = 0; i <= 5; i++) {
-      for (const sx of [-1, 1]) { const px = cx + sx * (6 - i), py = y - Math.round(i * 0.9); ui.fill(px - 1, py - 1, 3, 3, KIT.ink, a); }
-    }
-    for (let i = 0; i <= 5; i++) {
-      for (const sx of [-1, 1]) { const px = cx + sx * (6 - i), py = y - Math.round(i * 0.9); ui.fill(px, py, 1, 1, i % 2 ? '#b09254' : '#d6bc80', a); }
-    }
-    ui.fill(cx - 2, y - 8, 5, 4, KIT.ink, a); ui.fill(cx - 1, y - 7, 3, 2, '#b09254', a); ui.fill(cx - 1, y - 7, 1, 1, '#f0dca6', a);
+    ui.fill(cx, y - 5, 1, 5, dark ? C.line2 : '#8f8572', a); ui.fill(cx - 1, y - 7, 3, 2, C.gold, a);
   }
   let cy = y + pad[1] + 1;
   rows.forEach((r, i) => {
     cy += r.gap;
     if (i > 0 && rows[i - 1].head && !r.head) {
       // the rule under the heading
-      ui.fill(x + pad[0], cy - 4, w - pad[0] - pad[2], 1, dark ? KIT.teal[3] : KIT.cream[1], a);
-      ui.fill(x + pad[0], cy - 3, w - pad[0] - pad[2], 1, dark ? KIT.ink : KIT.cream[3], a);
+      ui.fill(x + pad[0], cy - 3, w - pad[0] - pad[2], 1, dark ? C.line2 : '#b9ae96', a);
     }
     let cx = x + pad[0] + 1;
     const rh = rowH(r);
@@ -1204,7 +1056,7 @@ export function drawCard(ui: PixelUI, lines: { text: string; color?: string; fon
     if (r.icon) { ui.img(r.icon, cx, cy, { alpha: a }); cx += r.icon.width + 3; }
     const ih = Math.max(r.icon ? r.icon.height : 0, r.key ? KEYCAP_H - 2 : 0);
     const col = r.color ?? (dark ? KIT.text : KIT.textInk);
-    ui.text(r.text, cx, cy + Math.max(0, Math.round((ih - ui.cap(r.font)) / 2)), dark ? { font: r.font, color: col, shadow: '#06141a', alpha: a } : { font: r.font, color: col, shadow: null, alpha: a });
+    ui.text(r.text, cx, cy + Math.max(0, Math.round((ih - ui.cap(r.font)) / 2)), dark ? { font: r.font, color: col, shadow: C.ink, alpha: a } : { font: r.font, color: col, shadow: null, alpha: a });
     cy += rh;
   });
   ui.block(x, y, w, h);

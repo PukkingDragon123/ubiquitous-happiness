@@ -268,12 +268,34 @@ const CURSORS: Record<CursorName, { rows: string[]; hx: number; hy: number }> = 
   busy: { hx: 4, hy: 5, rows: ['bbbbbbb', '.ccccc.', '..cyc..', '...y...', '..cyc..', '.cyyyc.', 'BBBBBBB'] },
 };
 const curCache = new Map<string, { cv: HTMLCanvasElement; hx: number; hy: number; w: number; h: number }>();
+/**
+ * v8b: cursors are FLAT: one bone fill, a 1 px ink outline (8-neighbour), a 1 px soft shadow down-right; 'y' cells
+ * are the gold accent (the busy glass), everything else is bone. No bevel, no shading.
+ */
+function paintFlat(rows: string[]): HTMLCanvasElement {
+  const mw = Math.max(...rows.map((r) => r.length)), mh = rows.length;
+  const W = mw + 3, H = mh + 3;
+  const on = (x: number, y: number) => { const ch = rows[y - 1]?.[x - 1]; return !!ch && ch !== '.'; };
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d')!;
+  const put = (x: number, y: number, c: string, a = 1) => { ctx.globalAlpha = a; ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+  const edge = (x: number, y: number) => !on(x, y) && [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]].some(([dx, dy]) => on(x + dx, y + dy));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!on(x, y) && !edge(x, y) && (on(x - 1, y - 1) || edge(x - 1, y - 1))) put(x, y, '#000000', 0.3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (edge(x, y)) { put(x, y, '#0b111c'); continue; }
+    if (!on(x, y)) continue;
+    const ch = rows[y - 1][x - 1];
+    put(x, y, ch === 'k' ? '#0b111c' : ch === 'y' || ch === 'Y' ? '#d4b273' : ch === 'b' || ch === 'B' ? '#56637a' : '#efe7d4');
+  }
+  ctx.globalAlpha = 1;
+  return cv;
+}
 /** a cursor at d texels per UI px: { cv, hx, hy (hot spot, UI px), w, h (UI px) } */
 export function cursorTex(name: CursorName, d = 1) {
   d = Math.max(1, Math.min(6, Math.round(d)));
   const key = name + '|' + d;
   let c = curCache.get(key);
-  if (!c) { const def = CURSORS[name] ?? CURSORS.arrow; const base = paintMap(def.rows, true); c = { cv: up(base, d), hx: def.hx, hy: def.hy, w: base.width, h: base.height }; curCache.set(key, c); }
+  if (!c) { const def = CURSORS[name] ?? CURSORS.arrow; const base = paintFlat(def.rows); c = { cv: up(base, d), hx: def.hx, hy: def.hy, w: base.width, h: base.height }; curCache.set(key, c); }
   return c;
 }
 /** a cursor at 1x (classic API): { cv, hx, hy } */

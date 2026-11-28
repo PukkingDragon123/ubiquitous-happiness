@@ -54,13 +54,13 @@ export interface Line {
 }
 
 /** inline colours, light enough to read as floating text on the dark outline */
-const COLORS: Record<string, string> = { red: '#ff8a76', gold: '#ffd45e', blue: '#8cc8ff', green: '#90e68a', pink: '#ff9ccc', grey: '#b8b2ba', white: '#ffffff' };
-const INK = '#fbf5e8';
+const COLORS: Record<string, string> = { red: '#e48a74', gold: '#d4b273', blue: '#b3c6e2', green: '#b8d3b5', pink: '#e2b0c4', grey: '#b0aca4', white: '#f6f0e2' };
+const INK = '#f3ecdc';
 const FONT: FontName = 'body';
 const TIER: Tier = 'body';
 /** the floating line's leading (UI px): a touch more air than a panel's, for the outline */
-const LH = 15;
-const EDGE = '#06121a';
+const LH = 17;
+const EDGE = '#0b111c';
 /** how long a finished line takes to lift away, and a bark to fade */
 const LEAVE = 0.22;
 const BARK_FADE = 0.35;
@@ -259,7 +259,7 @@ export class Dialogue {
     a.out = 0;
     this.leaving.push(a);
     // a few bubbles from the words, popping a moment later
-    const n = Math.min(5, 1 + Math.floor(a.shown / 14));
+    const n = this.ui.deco ? Math.min(5, 1 + Math.floor(a.shown / 14)) : 0;
     for (let i = 0; i < n; i++) {
       const li = Math.floor(Math.random() * a.lines.length);
       this.fx.add(a.px - a.lw[li] / 2 + Math.random() * a.lw[li], a.py + li * LH + 2 + Math.random() * 4, { r: 1.2 + Math.random() * 1.3, life: 0.15 + Math.random() * 0.35, vy: -16 - Math.random() * 10 });
@@ -461,7 +461,7 @@ export class Dialogue {
       const nst = this.nameStyle(a.sp.color);
       const art = seaArt(a.sp.name, nst, 'small', hd);
       const left = a.anchored ? Math.round((cx - a.w / 2) * hd) : Math.round(cx * hd - art.adv / 2);
-      const X = left, Y = Math.round((top - 11) * hd);
+      const X = left, Y = Math.round((top - 13) * hd);
       seaDraw(ctx, art, X, Y, pass, alpha * Math.max(0, Math.min(1, (a.t - a.wait) / 0.2)));
       if (pass === 'fill') {
         // a short rule in their colour after the name (and before it on a centred caption)
@@ -496,9 +496,9 @@ export class Dialogue {
       }
     });
     if (pass !== 'fill' || a.out >= 0) return;
-    // bubbles: a speck now and then from a fresh letter while typing, a slow trickle off the words once they sit
+    // (v8b: the words are calm: no bubbles off the letters unless the kit's decorations are on)
     a.bubT -= this.dtLast();
-    if (a.bubT <= 0 && shown > 0) {
+    if (ui.deco && a.bubT <= 0 && shown > 0) {
       const typing = a.shown < a.chs.length;
       a.bubT = typing ? 0.28 + Math.random() * 0.3 : 0.7 + Math.random() * 1.1;
       const i = typing ? Math.max(0, shown - 1) : Math.floor(Math.random() * shown);
@@ -527,14 +527,16 @@ export class Dialogue {
     const len = Math.hypot(dx, dy);
     if (len < 8) return;
     const fade = Math.max(0, Math.min(1, (a.t - a.wait) / 0.3)) * (a.bark && a.doneT > a.life ? Math.max(0, 1 - (a.doneT - a.life) / BARK_FADE) : 1);
-    [[4, 1.6], [12, 1.2], [19, 0.9]].forEach(([d, r], i) => {
+    // (v8b: three small flat dots, shrinking toward the speaker, each with an ink rim)
+    [[4, 2], [11, 2], [17, 1]].forEach(([d, r], i) => {
       if (d > len - 3) return;
       const k = d / len;
-      const x = sx + dx * k + Math.sin(t * 2.6 + i * 1.9 + a.seed) * 0.8, y = sy + dy * k + Math.sin(t * 2.1 + i * 1.3) * 0.6;
-      const D = Math.max(3, Math.round(r * 2 * hd));
-      ctx.globalAlpha = fade;
-      ctx.drawImage(bubbleSprite(D), Math.round(x * hd - D / 2), Math.round(y * hd - D / 2));
+      const x = sx + dx * k + Math.sin(t * 2.6 + i * 1.9 + a.seed) * 0.5, y = sy + dy * k;
+      const D = Math.max(1, Math.round(r * hd)), X = Math.round(x * hd - D / 2), Y = Math.round(y * hd - D / 2), e = Math.max(1, Math.round(hd / 2));
+      ctx.globalAlpha = fade * 0.8; ctx.fillStyle = EDGE; ctx.fillRect(X - e, Y - e, D + 2 * e, D + 2 * e);
+      ctx.globalAlpha = fade; ctx.fillStyle = INK; ctx.fillRect(X, Y, D, D);
     });
+    void bubbleSprite;
   }
 
   private lastDt = 1 / 60;
@@ -567,14 +569,14 @@ export class Dialogue {
     const ui = this.ui;
     const w = ui.keycapW(label);
     ui.img(keycapBody(w, KEYCAP_H, dark, down), x, y, { w, h: KEYCAP_H, alpha });
-    ui.text(label, x + w / 2, y + (down ? 3 : 1) + Math.round((8 - ui.cap('small')) / 2), { font: 'small', color: dark ? KIT.text : KIT.ink, shadow: null, align: 'center', alpha });
+    ui.text(label, x + Math.round(w / 2), y + Math.round((KEYCAP_H - 1 - ui.cap('small')) / 2) + (down ? 1 : 0), { font: 'small', color: dark ? KIT.text : KIT.textInk, shadow: null, align: 'center', alpha });
     return w;
   }
 
   private choices(a: Active) {
     const ui = this.ui;
     const cs = a.line.choices!;
-    const rowH = 17;
+    const rowH = 20;
     const hd = Math.max(1, ui.hd);
     let w = 0;
     for (const c of cs) w = Math.max(w, ui.measure(c.text, FONT) + ui.keycapW('1') + 12);
@@ -596,7 +598,7 @@ export class Dialogue {
       if (hov) { this.hoverChoice = i; ui.cursor = 'point'; }
       rows.push({ i, yy, hov, appear });
     });
-    const st = inkStyle(INK), hot: SeaStyle = { top: '#fff4c8', bottom: '#ffcf5a', edge: EDGE };
+    const st = inkStyle(INK), hot: SeaStyle = { top: '#efe1bd', bottom: '#d4b273', edge: EDGE };
     rawCanvas(ui, (ctx) => {
       for (const pass of ['edge', 'fill'] as const) for (const r of rows) {
         const tx = x + ui.keycapW('1') + 5 + (r.hov ? 2 : 0);
@@ -606,8 +608,6 @@ export class Dialogue {
     });
     for (const r of rows) {
       this.keycap(String(r.i + 1), x + (r.hov ? 1 : 0), r.yy, !r.hov, r.hov && ui.down, r.appear);
-      // a small bubble marks the hovered answer
-      if (r.hov && Math.random() < 0.06) this.fx.add(x - 4, r.yy + 6, { r: 1 + Math.random() * 0.6, life: 0.5 });
     }
   }
 }

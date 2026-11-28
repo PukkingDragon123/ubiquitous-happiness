@@ -291,7 +291,7 @@ export default function make(game: Game): Screen {
     ui.panel('wood', X, Y + 8, 300, 196, 'TYPE', { id: 'type' });
     let y = Y + 26;
     ui.text('BIG 1234', X + 12, y, { font: 'big', color: KIT.brass[3], outline: KIT.ink, shadow: '#000000' }); y += 30;
-    ui.text('Title Jersey 15', X + 12, y, { font: 'title', color: KIT.cream[3], outline: KIT.ink }); y += 22;
+    ui.text('Title Alagard', X + 12, y, { font: 'title', color: KIT.cream[3], outline: KIT.ink }); y += 22;
     ui.text('Body text: the quick blobfish', X + 12, y, { font: 'body', color: KIT.text }); y += 16;
     ui.text('Small: labels, hints, counts 3/5', X + 12, y, { font: 'small', color: KIT.textDim }); y += 14;
     ui.text('good', X + 12, y, { font: 'body', color: KIT.goodLight }); ui.text('bad', X + 60, y, { font: 'body', color: KIT.badLight }); ui.text('info', X + 100, y, { font: 'body', color: KIT.infoLight }); ui.text('gold', X + 140, y, { font: 'body', color: KIT.gold }); y += 18;

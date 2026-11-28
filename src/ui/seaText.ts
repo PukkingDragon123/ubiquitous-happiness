@@ -2,8 +2,8 @@
 // 2D pixel-font text drawn on the screen's UI canvas (src/ui/pixel, the 640x360 grid at canvas density), projected
 // from a world point each frame when they belong to something.
 //
-//   - glyphs: the kit's Jersey faces at an INTEGER canvas scale per size tier (never resampled, so always crisp), a
-//     clean stepped two-tone fill (no gradient noise, no dither)
+//   - glyphs: Alagard (the one UI face, v8b) at an INTEGER canvas scale per size tier (never resampled, so always
+//     crisp), a clean stepped two-tone fill (no gradient noise, no dither)
 //   - a soft dark outline for readability over bright sand and deep water alike: a hard one-font-pixel ring, a
 //     see-through one-UI-pixel halo round it and a drop shadow one UI pixel down (flat alpha bands, no blur)
 //   - small, real-looking air bubbles as accents (SeaBubbles): round at canvas density, a thin bright rim lit from
@@ -16,7 +16,7 @@
 //   const fx = new SeaBubbles(); fx.add(x, y, { r: 2 }); fx.step(dt); fx.draw(ui)   (UI px)
 //   onScreenUI((ui) => ...)    draw on the screen UI that is drawing now, else on the next one to finish a frame
 import * as THREE from 'three';
-import { glyphs, capH, measure, screenFont, type FontName } from './pixel/font';
+import { glyphs, capH, measure, fontK, type FontName } from './pixel/font';
 import { PixelUI } from './pixel/ui';
 import { POST } from '../gfx/post';
 
@@ -29,31 +29,27 @@ export interface SeaStyle {
 
 /** a few ready styles (world text styles live in src/ui/text3d.ts T3D, which are SeaStyles too) */
 export const SEA = {
-  speech: { top: '#fbf6ea', bottom: '#e6dcc4', edge: '#081620' },
-  title: { top: '#fff7d6', bottom: '#ffc25a', edge: '#3a1606' },
-  hint: { top: '#f0fdff', bottom: '#a6ecff', edge: '#06283a' },
+  speech: { top: '#f3ecdc', bottom: '#e2d8c2', edge: '#0b111c' },
+  title: { top: '#f1e3bd', bottom: '#d4b273', edge: '#14100a' },
+  hint: { top: '#e6ebf2', bottom: '#b9c4d4', edge: '#0b111c' },
 } satisfies Record<string, SeaStyle>;
 
 /**
- * the size tiers (cap height in UI px, about): small 7.5, body 10, title 15, big 20, huge 30, giant 40. Each tier is
- * a Jersey face at an integer canvas scale, so its pixels are always whole.
+ * the size tiers (cap height in UI px, about): small 6.6, body 11, title 15.5, big 22, huge 33, giant 44. Each tier is
+ * Alagard 16 at an integer canvas scale (the kit's roles for small..big, then 3x / 4x UI px per font px), so its
+ * pixels are always whole.
  */
 export type Tier = 'small' | 'body' | 'title' | 'big' | 'huge' | 'giant';
 export const TIERS: Tier[] = ['small', 'body', 'title', 'big', 'huge', 'giant'];
-const TIER_LH: Record<Tier, number> = { small: 11, body: 14, title: 20, big: 26, huge: 38, giant: 50 };
+const TIER_LH: Record<Tier, number> = { small: 11, body: 15, title: 21, big: 30, huge: 46, giant: 60 };
 
 /** the face and integer canvas px per font px of a tier on a canvas of density hd */
 export function tierSpec(tier: Tier, hd: number): { face: FontName; k: number } {
   hd = Math.max(1, Math.round(hd));
   switch (tier) {
-    case 'small': case 'body': {
-      const face = screenFont(tier, hd);
-      return { face, k: Math.max(1, Math.round((capH(tier, hd) * hd) / Math.max(1, capH(face)))) };
-    }
-    case 'title': return { face: 'hd15', k: hd };
-    case 'big': return { face: 'hd20', k: hd };
-    case 'huge': return { face: 'hd15', k: hd * 2 };
-    case 'giant': return { face: 'hd20', k: hd * 2 };
+    case 'small': case 'body': case 'title': case 'big': return { face: 'body', k: fontK(tier, hd) };
+    case 'huge': return { face: 'body', k: hd * 3 };
+    case 'giant': return { face: 'body', k: hd * 4 };
   }
 }
 /** cap height of a tier in UI px */

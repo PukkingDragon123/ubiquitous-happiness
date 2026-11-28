@@ -24,7 +24,7 @@ import { UW } from '../gfx/shaders/underwater';
 import { SKY } from '../gfx/sky';
 import { SURF } from '../gfx/water/surface';
 import { PixelUI } from '../ui/pixel/ui';
-import { KIT } from '../ui/pixel/skins';
+import { KIT, C } from '../ui/pixel/skins';
 import { audio } from '../audio/audio';
 import { META } from '../meta/meta';
 import { damp, clamp01 } from '../core/math';
@@ -32,7 +32,7 @@ import { TravelSet, floorAt } from './travel';
 import type { BoardId } from './sign';
 import { SettingsPanel, SETTINGS_W, SETTINGS_H, CreditsPanel, CREDITS_W, CREDITS_H } from './pages';
 import { Logo } from './logo';
-import { TitleMenu, type ItemId, type MenuItem } from './menu2d';
+import { TitleMenu, ROW, type ItemId, type MenuItem } from './menu2d';
 
 export interface TitleOpts {
   /** NEW GAME */ onNew: () => void;
@@ -181,7 +181,7 @@ export class TitleScreen implements Screen {
     const i = this.items().indexOf(id);
     if (i < 0) return null;
     // the middle of the word's first letters (from the layout: right even before the menu has slid in)
-    const ux = this.menuX + 30, uy = this.menuY + i * 30 + 10;
+    const ux = this.menuX + 30, uy = this.menuY + i * ROW + 8;
     const k = this.ui.scale / this.game.renderer.getPixelRatio();
     return [Math.round(ux * k), Math.round(uy * k)];
   }
@@ -279,8 +279,8 @@ export class TitleScreen implements Screen {
     // ---- the 2D layer: logo, menu, caption bar, pages
     const bar = this.barH();
     this.logo.prepare(ui);
-    this.logoX = 24; this.logoY = bar + 6;
-    this.menuX = this.logoX + 46; this.menuY = this.logoY + this.logo.h + 6;
+    this.logoX = 30; this.logoY = bar + 16;
+    this.menuX = this.logoX + 22; this.menuY = this.logoY + this.logo.h + 22;
     this.drawShade();
     if (this.logoT >= 0) {
       this.logo.draw(ui, this.logoX, this.logoY, { t: this.t, appear: this.logoT });
@@ -366,7 +366,7 @@ export class TitleScreen implements Screen {
     // stepped columns (8 px bands), darkest at the left edge
     for (let x = 0; x < W; x += 8) {
       const f = 1 - x / W;
-      ui.fill(x, 0, 8, ui.h, '#03121c', 0.34 * f * f * k);
+      ui.fill(x, 0, 8, ui.h, C.ink, 0.55 * f * f * k);
     }
   }
 
@@ -389,7 +389,7 @@ export class TitleScreen implements Screen {
     if (it) {
       const a = clamp01((this.menuT - 0.4) * 3), cx = Math.min(this.menuX - 4, 24), room = ui.w - 10 - hintsW - cx - 8;
       const font = ui.measure(it.desc, 'body') <= room ? 'body' : 'small';
-      ui.text(it.desc, cx, y + (font === 'body' ? 2 : 3), { font, color: it.warn ? KIT.badLight : KIT.text, shadow: '#000000', alpha: a });
+      ui.text(it.desc, cx, y + (font === 'body' ? 1 : 3), { font, color: it.warn ? KIT.badLight : KIT.text, shadow: C.ink, alpha: a });
     }
     let x = ui.w - 10;
     // (a touch screen: the words are the buttons, no keys to show)
@@ -400,7 +400,7 @@ export class TitleScreen implements Screen {
     x -= w1;
     ui.keycap('', x, y); this.arrow(x + 4, y + 4, -1);
     ui.keycap('', x + 15, y); this.arrow(x + 19, y + 4, 1);
-    ui.text('choose', x + 32, y + Math.round((13 - 2 - ui.cap('small')) / 2), { font: 'small', color: KIT.textDim, shadow: '#06141a' });
+    ui.text('choose', x + 32, y + Math.round((13 - 1 - ui.cap('small')) / 2), { font: 'small', color: KIT.textDim, shadow: C.ink });
   }
   /** a tiny ink arrow (up -1 / down 1) inside a keycap */
   private arrow(x: number, y: number, d: number) {
@@ -410,7 +410,7 @@ export class TitleScreen implements Screen {
 
   private drawPage(dt: number) {
     const ui = this.ui, input = this.game.input;
-    ui.fill(0, 0, ui.w, ui.h, '#02080e', 0.35);
+    ui.fill(0, 0, ui.w, ui.h, C.ink, 0.4);
     let close = false;
     if (this.page === 'settings') close = this.settings.draw(ui, Math.round((ui.w - SETTINGS_W) / 2), Math.round((ui.h - SETTINGS_H) / 2) + 4, dt);
     else close = this.credits.draw(ui, Math.round((ui.w - CREDITS_W) / 2), Math.round((ui.h - CREDITS_H) / 2) + 4, dt);

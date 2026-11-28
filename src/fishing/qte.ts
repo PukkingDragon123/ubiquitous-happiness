@@ -42,7 +42,7 @@ function keycap(label: string, wide: boolean, pressed: boolean): THREE.Texture {
   const cv = p.canvas();
   const ctx = cv.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
-  const t = textTexture(label, { font: label.length > 1 ? 'Tiny5' : 'M6x11', px: label.length > 1 ? 8 : 16, fill: '#3a2a1a' });
+  const t = textTexture(label, { font: 'Alagard', px: 16, fill: '#1a1d26' });
   const img = t.tex.image as HTMLCanvasElement;
   ctx.drawImage(img, Math.round((W - img.width) / 2), Math.round((H - 6 - img.height) / 2) + off + 1);
   const tx = new THREE.CanvasTexture(cv);

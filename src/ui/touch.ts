@@ -4,7 +4,7 @@
 //   - a floating MOVE STICK on the left of the screen: its ring appears where the thumb lands and the knob follows it
 //     (the ring trails the thumb if it wanders off); it feeds Input.axis() (analog) and, past half-way, the arrow
 //     keys (menus, the fishing QTE's arrow sequences)
-//   - round brass BUTTONS on the right, thumb-sized, clustered around the big ATTACK: DASH (held = Shift held: tap to
+//   - round flat BUTTONS on the right (v8b: translucent ink discs, a 1 px bone ring, mono glyphs), thumb-sized, clustered around the big ATTACK: DASH (held = Shift held: tap to
 //     dart, hold to charge, let go to launch), GUARD (ability), SKILL (the selected slot) and the little CYCLE chip
 //     (ability2), USE (interact, with the screen's word on it), HEAL (the clams), BOMB; BAG and PAUSE up top right
 //   - context: each screen says what makes sense right now (Screen.touch() -> TouchSpec); anything not listed is
@@ -16,7 +16,8 @@
 //
 //   const t = new TouchLayer(input); each frame: t.update(dt, spec, w, h, pixelRatio); overlays.push(t.layer) when t.visible
 import { PixelUI } from './pixel/ui';
-import { Px, hx, R, lerpC, type C } from './pixel/decor';
+import { Px, hx, type C } from './pixel/decor';
+import { C as K } from './pixel/skins';
 import type { Input, TouchHook } from '../core/input';
 import { audio } from '../audio/audio';
 import { clamp01, damp } from '../core/math';
@@ -56,73 +57,39 @@ interface Laid { id: TouchBtn; x: number; y: number; r: number; code: string; o:
 
 // ------------------------------------------------------------------ art (1 texel per UI px, cached)
 const cache = new Map<string, HTMLCanvasElement>();
-const INK = hx('#0b1622');
-const GLASS = R.water, BRASS = R.brass;
+const INK = hx(K.ink);
 
-/** a round brass-bezelled glass key (r in UI px): the bezel lit from the top left, a dark sea-glass face with a soft
- *  sheen, sunk and lit up while pressed */
+/** a round key (r in UI px), v8b flat: a translucent ink disc, a crisp 1 px ring (gold while pressed), a faint
+ *  inner ring in the tint colour when there is one */
 function keyArt(r: number, down: boolean, tint: string | undefined): HTMLCanvasElement {
   const key = `key|${r}|${down ? 1 : 0}|${tint ?? ''}`;
   const hit = cache.get(key); if (hit) return hit;
   const S = r * 2 + 2, px = new Px(S, S), c = r + 0.5;
-  const bw = Math.max(2, Math.round(r * 0.15));
-  const tc = tint ? hx(tint) : null;
+  const ring = hx(down ? K.gold : '#cdc4ae'), face = hx(down ? '#2a2a24' : K.navy), tc = tint ? hx(tint) : null;
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const dx = x + 0.5 - c - 0.5, dy = y + 0.5 - c - 0.5, d = Math.hypot(dx, dy);
+    const d = Math.hypot(x + 0.5 - c - 0.5, y + 0.5 - c - 0.5);
     if (d > r + 0.5) continue;
-    const nx = dx / (d || 1), ny = dy / (d || 1);
-    const lit = -(nx * 0.62 + ny * 0.78);
-    if (d > r - 0.6) { px.set(x, y, INK, 235); continue; }
-    if (d > r - 0.6 - bw) {
-      // the brass bezel: banded by which way it faces the light, a dark inner lip
-      const inner = d < r - 0.6 - bw + 1;
-      const t = inner ? 1 : lit > 0.55 ? 6 : lit > 0.15 ? 5 : lit > -0.3 ? 4 : lit > -0.7 ? 3 : 2;
-      px.set(x, y, BRASS[down && !inner ? Math.max(1, t - 1) : t], 255);
-      continue;
-    }
-    // the glass face: a hollow dish (dark at the top left under the bezel, lighter toward the bottom right)
-    const fr = d / (r - bw - 1);
-    let t = 2 + Math.round(clamp01(0.5 - lit * 0.45 * fr) * 3) + (down ? 2 : 0);
-    if (fr > 0.88) t = Math.max(1, t - 1);
-    let col: C = GLASS[Math.min(9, t)];
-    if (tc) col = lerpC(col, tc, down ? 0.55 : 0.32);
-    px.set(x, y, col, down ? 235 : 205);
-  }
-  // a crescent of sheen on the glass, top left
-  const sr = (r - bw - 1) * 0.72;
-  for (let a = -2.5; a < -1.35; a += 0.04) {
-    const x = Math.round(c + Math.cos(a) * sr), y = Math.round(c + Math.sin(a) * sr);
-    px.set(x, y, hx('#d0fff0'), down ? 150 : 110);
+    if (d > r - 0.5) { px.set(x, y, ring, down ? 255 : 200); continue; }
+    if (tc && d > r - 2.5 && d <= r - 1.5) { px.set(x, y, tc, 150); continue; }
+    px.set(x, y, face, down ? 200 : 150);
   }
   const cv = px.done();
   cache.set(key, cv);
   return cv;
 }
 
-/** the stick's ring: a thin brass rim round a faint dish of dark water, four little chevrons pointing out */
+/** the stick's ring: a thin bone circle round a faint dark dish, four small ticks pointing out */
 function ringArt(r: number): HTMLCanvasElement {
   const key = `ring|${r}`;
   const hit = cache.get(key); if (hit) return hit;
   const S = r * 2 + 2, px = new Px(S, S), c = r + 0.5;
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const dx = x + 0.5 - c - 0.5, dy = y + 0.5 - c - 0.5, d = Math.hypot(dx, dy);
+    const d = Math.hypot(x + 0.5 - c - 0.5, y + 0.5 - c - 0.5);
     if (d > r + 0.5) continue;
-    const lit = -((dx / (d || 1)) * 0.62 + (dy / (d || 1)) * 0.78);
-    if (d > r - 0.6) px.set(x, y, INK, 200);
-    else if (d > r - 2.6) px.set(x, y, BRASS[lit > 0.3 ? 6 : lit > -0.3 ? 4 : 2], 230);
-    else if (d > r - 3.6) px.set(x, y, BRASS[1], 200);
-    else px.set(x, y, GLASS[d < r * 0.5 ? 3 : 2], 90);
+    if (d > r - 0.5) px.set(x, y, hx('#cdc4ae'), 170);
+    else px.set(x, y, hx(K.navy), 70);
   }
-  // chevrons on the four ways
-  const ch = Math.max(3, Math.round(r * 0.1));
-  for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const bx = c + ax * (r - 8), by = c + ay * (r - 8);
-    for (let i = -ch; i <= ch; i++) {
-      const k = ch - Math.abs(i);
-      const x = Math.round(bx + ax * k + (ay ? i : 0)), y = Math.round(by + ay * k + (ax ? i : 0));
-      px.set(x, y, hx('#bfe8dc'), 200);
-    }
-  }
+  for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let i = 3; i < 7; i++) px.set(Math.round(c + ax * (r - i)), Math.round(c + ay * (r - i)), hx('#cdc4ae'), 170);
   const cv = px.done();
   cache.set(key, cv);
   return cv;
@@ -259,9 +226,10 @@ const GLYPH: Record<string, string[]> = {
     '..k..k..k..',
   ],
 };
+/** v8b: the glyphs are drawn mono (bone with a dim shade side), gold for 'y', red for 'r', ink lines kept */
 const GPAL: Record<string, string> = {
-  k: '#0b1622', w: '#fff4d8', m: '#c4ccd0', M: '#7a8690', y: '#f2c24e', Y: '#b07a22', b: '#a8693a', B: '#6a3c20',
-  r: '#ff8a76', R: '#c0443a', p: '#fff0f4', c: '#8fd6d0', g: '#6fae3f',
+  k: '#0b111c', w: '#f6f0e2', m: '#e8dfcb', M: '#9aa3b4', y: '#d4b273', Y: '#8a7044', b: '#e8dfcb', B: '#9aa3b4',
+  r: '#e48a74', R: '#c4553f', p: '#f6f0e2', c: '#e8dfcb', g: '#e8dfcb',
 };
 function glyph(name: string, s: number): HTMLCanvasElement {
   const key = `g|${name}|${s}`;
@@ -284,7 +252,7 @@ function phoneArt(land: boolean): HTMLCanvasElement {
     const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1;
     const rim = x === 1 || y === 1 || x === w - 2 || y === h - 2;
     if ((x === 0 || x === w - 1) && (y === 0 || y === h - 1)) continue;
-    px.set(x, y, edge ? INK : rim ? BRASS[5] : GLASS[land ? 6 : 3]);
+    px.set(x, y, edge ? INK : rim ? hx('#cdc4ae') : hx(land ? K.navy2 : K.navy));
   }
   const cv = px.done();
   cache.set(key, cv);
@@ -450,9 +418,9 @@ export class TouchLayer implements TouchHook {
         const dx = this.knob.x - ox, dy = this.knob.y - oy, d = Math.hypot(dx, dy), m = Math.min(d, R0 - KR * 0.4);
         if (d > 0) { kx = ox + (dx / d) * m; ky = oy + (dy / d) * m; }
       }
-      const kn = keyArt(KR, active, '#e8b850');
+      const kn = keyArt(KR, active, undefined);
       ui.img(kn, Math.round(kx - KR - 0.5), Math.round(ky - KR - 0.5), { alpha: active ? 1 : 0.45 });
-      if (!active) ui.text('MOVE', Math.round(ox), Math.round(oy + R0 + 3), { font: 'small', color: '#d8f0ea', shadow: '#06141a', align: 'center', alpha: 0.5 });
+      if (!active) ui.text('MOVE', Math.round(ox), Math.round(oy + R0 + 4), { font: 'small', color: K.bone, shadow: K.ink, align: 'center', alpha: 0.55 });
     }
     // ---- the buttons
     const heldIds = new Set([...this.held.values()].map((b) => b.id));
@@ -463,35 +431,32 @@ export class TouchLayer implements TouchHook {
       const a = f * (b.o.dim ? 0.38 : 0.9);
       const pop = 1 + Math.sin(Math.min(1, 1 - p) * Math.PI) * 0.06 * (p > 0 ? 1 : 0);
       const r = Math.round(b.r * pop);
-      const art = keyArt(r, down, b.o.color ?? (b.id === 'attack' ? '#e0564a' : b.id === 'dash' ? '#3d8fd6' : b.id === 'ability' ? '#5fae3f' : undefined));
+      const art = keyArt(r, down, b.o.color ?? (b.id === 'attack' ? K.gold : undefined));
       const sink = down ? 1 : 0;
       // a soft drop shadow, then the key
-      ui.img(keyArt(r, false, '#000000'), Math.round(b.x - r - 0.5) + 1, Math.round(b.y - r - 0.5) + 2, { alpha: a * 0.25 });
       ui.img(art, Math.round(b.x - r - 0.5), Math.round(b.y - r - 0.5) + sink, { alpha: a });
       // the glyph (2x on the big keys) or the word
       const word = b.id === 'interact' ? (b.o.label ?? 'USE') : b.o.label;
       if (word && b.id === 'interact') {
         const font = r >= 22 ? 'body' : 'small';
-        ui.text(word.slice(0, 5), b.x, Math.round(b.y - ui.cap(font) / 2) - 1 + sink, { font, color: '#fff4d8', outline: '#0b1622', align: 'center', alpha: Math.min(1, a * 1.2) });
+        ui.text(word.slice(0, 5), b.x, Math.round(b.y - ui.cap(font) / 2) + sink, { font, color: K.bone2, shadow: K.ink, align: 'center', alpha: Math.min(1, a * 1.2) });
       } else {
         const s = r >= 16 ? 2 : 1;
         const g = glyph(b.id, b.id === 'cycle' && r < 16 ? 1 : s);
         ui.img(g, Math.round(b.x - g.width / 2), Math.round(b.y - g.height / 2) + sink, { alpha: Math.min(1, a * 1.15) });
-        if (word) ui.text(word, b.x, Math.round(b.y + r + 2), { font: 'small', color: '#fff4d8', outline: '#0b1622', align: 'center', alpha: a });
+        if (word) ui.text(word, b.x, Math.round(b.y + r + 3), { font: 'small', color: K.bone, shadow: K.ink, align: 'center', alpha: a });
       }
       if (b.o.count !== undefined) {
         const cx = Math.round(b.x + r * 0.62), cy = Math.round(b.y + r * 0.38);
-        ui.text(String(b.o.count), cx, cy, { font: 'small', color: b.o.count > 0 ? '#fff4d8' : '#ff9a84', outline: '#0b1622', align: 'center', alpha: Math.min(1, a * 1.2) });
+        ui.text(String(b.o.count), cx, cy, { font: 'small', color: b.o.count > 0 ? K.bone2 : K.red2, shadow: K.ink, align: 'center', alpha: Math.min(1, a * 1.2) });
       }
-      // a ring of bubbles off a fresh press
-      if (p > 0.95) for (let i = 0; i < 3; i++) ui.bubble(b.x - r * 0.5 + i * r * 0.5, b.y - r * 0.7, { r: 1 + (i % 2), vy: -22 - i * 4, life: 0.6 });
     }
     for (const id of [...this.fade.keys()]) if (!this.laid.some((b) => b.id === id)) this.fade.delete(id);
   }
 
   private drawPortrait() {
     const ui = this.ui;
-    ui.fill(0, 0, ui.w, ui.h, '#02121c', 0.92);
+    ui.fill(0, 0, ui.w, ui.h, K.ink, 0.94);
     const cx = Math.round(ui.w / 2), cy = Math.round(ui.h / 2);
     const land = Math.floor(this.t * 0.9) % 2 === 1;
     const ph = phoneArt(land);
@@ -499,8 +464,8 @@ export class TouchLayer implements TouchHook {
     // the phone sits in a 34 x 34 box (so it does not jump as it turns), well above the words
     const box = 34 * s;
     ui.img(ph, Math.round(cx - (ph.width * s) / 2), Math.round(cy - 24 - box / 2 - (ph.height * s) / 2), { w: ph.width * s, h: ph.height * s });
-    ui.text('TURN IT SIDEWAYS', cx, cy, { font: 'big', color: '#fff0b0', color2: '#e8b850', outline: '#2e1a1c', align: 'center' });
-    ui.text('the sea is wide: hold your phone in landscape', cx, cy + 34, { font: 'small', color: '#cfe8e0', shadow: '#000', align: 'center' });
+    ui.text('TURN IT SIDEWAYS', cx, cy, { font: 'big', color: K.bone2, shadow: K.ink, align: 'center' });
+    ui.text('the sea is wide: hold your phone in landscape', cx, cy + 34, { font: 'small', color: K.dim, shadow: null, align: 'center' });
   }
 }
 

@@ -285,12 +285,8 @@ export class MenuScreen implements Screen {
 
 const CREDITS: [string, string][] = [
   ['Made with three.js', ''],
-  ['Fonts', ''],
-  ['Alagard — Hewett Tsoi', ''],
-  ['m6x11plus, m5x7 — Daniel Linssen (managore)', ''],
-  ['Jersey 10 / 15 / 20 — Sarah Cadigan-Fried (OFL)', ''],
-  ['Jacquard 24, Tiny5, Pixelify Sans — SIL OFL', ''],
-  ['TBME Goofy — from Chewy by Font Diner (Apache 2.0)', ''],
+  ['Font', ''],
+  ['Alagard - Hewett Tsoi', ''],
   ['Sound & music: CC0 / public domain', ''],
   ['Kenney, rubberduck, You\'re Perfect Studio, Memoraphile', ''],
   ['cynicmusic, joth, TAD, umplix, Zane Little Music', ''],

@@ -31,7 +31,7 @@ import { CamRig } from './camera';
 import { StashPanel, WorkshopPanel, panelRect, stashRect, WORK_SIZE } from './panels';
 import { WardrobePanel, wardRect } from './wardrobe';
 import { AchievementsPanel, ACH_W, ACH_H } from './achPanel';
-import { SettingsPanel, SETTINGS_W, SETTINGS_H } from '../title/pages';
+import { SettingsPanel, SETTINGS_W, SETTINGS_H, PausePanel } from '../title/pages';
 import { defaultHero, type HideoutHero, type HeroFactory } from './hero';
 import { HubPlayer } from './player';
 import { Tag, type TagLine } from './tag';
@@ -326,7 +326,7 @@ export class HideoutScreen implements Screen {
     if (p === 'trophy') { this.ach.open(); audio.play('shimmer1', { vol: 0.3 }); }
     if (p === 'settings') this.settings.open();
     if (p === 'codex') { this.codexBook.open(); audio.play('page1', { vol: 0.45, dry: true }); }
-    if (p === 'pause') audio.play('k_open1', { vol: 0.35, dry: true });
+    if (p === 'pause') { audio.play('k_open1', { vol: 0.35, dry: true }); this.pausePanel.open('back'); }
     if (p === 'mail') { this.mail.open(); audio.play('creak1', { vol: 0.35 }); audio.play('page1', { vol: 0.3, dry: true, delay: 0.15 }); }
   }
   private closePanel() {
@@ -345,7 +345,7 @@ export class HideoutScreen implements Screen {
       case 'wardrobe': return wardRect(ui);
       case 'trophy': return { x: Math.round((ui.w - ACH_W) / 2), y: Math.max(4, Math.round((ui.h - ACH_H) / 2)), w: ACH_W, h: ACH_H };
       case 'settings': return { x: Math.round((ui.w - SETTINGS_W) / 2), y: Math.round((ui.h - SETTINGS_H) / 2), w: SETTINGS_W, h: SETTINGS_H };
-      case 'pause': return { x: Math.round((ui.w - 176) / 2), y: Math.round((ui.h - 126) / 2) + 6, w: 176, h: 126 };
+      case 'pause': return { x: 0, y: 0, w: ui.w, h: ui.h };
       case 'codex': return { x: 0, y: 0, w: ui.w, h: ui.h };
       case 'mail': return mailRect(ui);
     }
@@ -366,7 +366,7 @@ export class HideoutScreen implements Screen {
       case 'trophy': close = this.ach.draw(ui, r.x, r.y, dt); break;
       case 'mail': close = this.mail.draw(ui, dt); break;
       case 'settings': close = this.settings.draw(ui, r.x, r.y, dt); break;
-      case 'pause': close = this.pauseCard(r); break;
+      case 'pause': close = this.pauseCard(dt); break;
       // the codex closes itself (Esc, its button, a click outside the book)
       case 'codex': if (!this.codexBook.draw(ui, dt)) { this.panel = null; this.mode = 'free'; this.modeT = 0; } return;
     }
@@ -376,20 +376,16 @@ export class HideoutScreen implements Screen {
     if (live && this.modeT > 0.1 && input.keyHit('Escape')) close = true;
     if (close && this.panel === p) this.closePanel();
   }
-  private pauseCard(r: { x: number; y: number; w: number; h: number }): boolean {
-    const ui = this.ui;
-    ui.fill(0, 0, ui.w, ui.h, '#000000', 0.35);
-    ui.panel('wood', r.x, r.y, r.w, r.h, undefined, { id: 'home:pause' });
-    brassPlate(ui, 'HOME', r.x + r.w / 2, r.y - 9, { font: 'title' });
-    let close = ui.closeButton('pz:x', r.x + r.w - 16, r.y - 5, { size: 20, key: null });
-    let yy = r.y + 22;
-    const bw = r.w - 28, bh = 22;
-    if (ui.button('pz:back', 'CONTINUE', r.x + 14, yy, bw, bh, { style: 'green', font: 'body' })) close = true;
-    yy += bh + 8;
-    if (ui.button('pz:set', 'SETTINGS', r.x + 14, yy, bw, bh, { style: 'wood', font: 'body' })) { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
-    yy += bh + 8;
-    if (ui.button('pz:title', 'SIGNPOST', r.x + 14, yy, bw, bh, { style: 'dark', font: 'body' })) { this.panel = null; this.mode = 'free'; this.opts.onMenu?.(); return false; }
-    return close;
+  private pausePanel = new PausePanel();
+  /** the home's pause screen (the shared PausePanel): CONTINUE / SETTINGS / MAIN MENU */
+  private pauseCard(dt: number): boolean {
+    const id = this.pausePanel.draw(this.ui, dt, {
+      title: 'HOME', sub: 'YOUR HOUSE ON THE SEABED',
+      items: [{ id: 'back', label: 'CONTINUE' }, { id: 'set', label: 'SETTINGS' }, { id: 'title', label: 'MAIN MENU' }],
+    });
+    if (id === 'set') { this.panel = 'settings'; this.settings.open(); this.modeT = 0; return false; }
+    if (id === 'title') { this.panel = null; this.mode = 'free'; this.opts.onMenu?.(); return false; }
+    return id === 'back' || id === 'close';
   }
   private wardPreview(id: string | null) {
     const rig = (this.hero as unknown as { rig?: CosmeticRig }).rig;
