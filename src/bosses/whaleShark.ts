@@ -833,16 +833,16 @@ export class WhaleShark extends BossBase {
     const secs = Math.max(0, Math.ceil(left));
     onScreenUI((ui) => {
       const pulse = left < 5 && Math.floor(left * 4) % 2 === 0;
-      const w = 184, h = 54, x = Math.round(ui.w / 2 - w / 2), y = 10;
-      ui.fill(x + 2, y + 3, w, h, '#000000', 0.22);
-      ui.fill(x, y, w, h, KC.navy, 0.95);
-      ui.rect(x, y, w, h, pulse ? KC.red : KC.line2);
-      ui.text('SURVIVE', x + 10, y + 9, { font: 'small', color: pulse ? KC.red2 : KC.gold, shadow: null });
-      ui.text(`${secs}`, x + w - 10, y + 6, { font: 'big', color: pulse ? KC.red2 : KC.bone2, shadow: KC.ink, align: 'right' });
-      ui.fill(x + 10, y + 34, w - 20, 1, KC.line);
-      ui.text('OR TEAR THE VALVE', x + 10, y + 40, { font: 'small', color: KC.dim, shadow: null });
+      const w = 188, h = 60, x = Math.round(ui.w / 2 - w / 2), y = 10;
+      ui.fill(x + 3, y + 5, w, h, '#000000', 0.14); ui.fill(x + 1, y + 2, w, h, '#000000', 0.22);
+      ui.frame('wood', x, y, w, h);
+      if (pulse) ui.rect(x + 1, y + 1, w - 2, h - 2, KC.red);
+      ui.text('SURVIVE', x + 12, y + 11, { font: 'small', color: pulse ? KC.red2 : KC.gold, shadow: null });
+      ui.text(`${secs}`, x + w - 12, y + 8, { font: 'big', color: pulse ? KC.red2 : KC.bone2, shadow: KC.ink, align: 'right' });
+      ui.fill(x + 12, y + 35, w - 24, 1, '#06090e', 0.7); ui.fill(x + 12, y + 36, w - 24, 1, '#3e4b62', 0.8);
+      ui.text('OR TEAR THE VALVE', x + 12, y + 41, { font: 'small', color: KC.dim, shadow: null });
       const n = this.valveNeed, ps = 6;
-      for (let i = 0; i < n; i++) { const px = x + w - 10 - (n - i) * (ps + 3) + 3; ui.fill(px, y + 40, ps, ps, i < this.valveHits ? KC.gold : KC.well); if (i >= this.valveHits) ui.rect(px, y + 40, ps, ps, KC.line2); }
+      for (let i = 0; i < n; i++) { const px = x + w - 12 - (n - i) * (ps + 3) + 3; ui.frame(i < this.valveHits ? 'brass' : 'slot', px, y + 41, ps, ps); }
     });
     this.title = `SURVIVE ${secs}`;
     if (left <= 0) this.beginCough(w, 'time');

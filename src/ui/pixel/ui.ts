@@ -466,6 +466,16 @@ export class PixelUI {
       this.ctx.globalAlpha = a; this.ctx.drawImage(b, Math.round(p.x - p.r), Math.round(p.y - p.r), S, S); this.ctx.globalAlpha = 1;
     }
   }
+  /** a slow glint: a soft diagonal band of light sliding across a forged piece every `period` seconds */
+  sheen(x: number, y: number, w: number, h: number, period = 6, phase = 0, alpha = 1) {
+    const k = ((this.t + phase) % period) / 0.9;
+    if (k > 1) return;
+    const c = this.ctx; c.save(); c.beginPath(); c.rect(Math.round(x), Math.round(y + this.liftY), Math.round(w), Math.round(h)); c.clip();
+    const bx = x - h + (w + h * 2) * k;
+    for (let i = 0; i < h; i++) { this.fill(Math.round(bx + i * 0.6), y + i, 6, 1, '#ffffff', 0.1 * alpha); this.fill(Math.round(bx + 9 + i * 0.6), y + i, 2, 1, '#ffffff', 0.07 * alpha); }
+    c.restore();
+  }
+
   // ---------------------------------------------------------------- primitives
   fill(x: number, y: number, w: number, h: number, col: string, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK; c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y + this.liftY), Math.round(w), Math.round(h)); c.globalAlpha = 1;
@@ -486,7 +496,7 @@ export class PixelUI {
   frame(kind: SkinKind, x: number, y: number, w: number, h: number, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK;
     w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
-    c.drawImage(skin(kind, w, h), Math.round(x), Math.round(y + this.liftY), w, h);
+    c.drawImage(skin(kind, w, h, this.hd), Math.round(x), Math.round(y + this.liftY), w, h);
     c.globalAlpha = 1;
   }
   text(str: string, x: number, y: number, o: TextOpts = {}) {
@@ -531,7 +541,7 @@ export class PixelUI {
   keycap(label: string, x: number, y: number, dark = false, down = false) {
     const tw = label ? this.measure(label, 'small') : 0;
     const w = Math.max(KEYCAP_H, Math.ceil(tw) + 7);
-    this.img(keycapBody(w, KEYCAP_H, dark, down), x, y, { w, h: KEYCAP_H });
+    this.img(keycapBody(w, KEYCAP_H, dark, down, this.hd), x, y, { w, h: KEYCAP_H });
     if (label) this.text(label, x + Math.round(w / 2), y + Math.round((KEYCAP_H - 1 - this.cap('small')) / 2) + (down ? 1 : 0), { font: 'small', color: dark ? KIT.text : KIT.textInk, shadow: null, align: 'center' });
     return w;
   }
@@ -564,8 +574,9 @@ export class PixelUI {
     const k = Math.min(1, pt / 0.18), e = 1 - (1 - k) ** 3;
     const fx = x, fy = y + Math.round((1 - e) * 4), fw = w, fh = h;
     const fa = (o.alpha ?? 1) * Math.min(1, pt / 0.12);
-    // a soft drop shadow on the scene, then the face
-    this.fill(fx + 2, fy + 3, fw, fh, '#000000', 0.22 * fa);
+    // a soft two-step drop shadow that seats the slab on the scene (light from the upper left), then the slab
+    this.fill(fx + 3, fy + 5, fw, fh, '#000000', 0.16 * fa);
+    this.fill(fx + 1, fy + 2, fw, fh, '#000000', 0.22 * fa);
     this.frame(kind, fx, fy, fw, fh, fa);
     if (title) {
       const legend = kind === 'wood' || kind === 'stone' || kind === 'cream';
@@ -579,11 +590,11 @@ export class PixelUI {
         this.frame('plaque', px, py, pw, ph, fa);
         this.text(title, px + 8, py + Math.round((ph - cap) / 2), { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
       } else if (legend) {
-        // the legend: the border breaks around the word, a 2 px gold tick each side; the word straddles the top line
-        const gx = fx + Math.round((fw - tw) / 2), pad = 7;
-        this.fill(gx - pad, fy, tw + pad * 2, 1, C.navy, fa);
-        this.fill(gx - pad - 1, fy - 1, 2, 3, C.gold, fa); this.fill(gx + tw + pad - 1, fy - 1, 2, 3, C.gold, fa);
-        this.text(title, gx, fy - Math.round(cap / 2), { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
+        // the title on a nacre tablet with pewter end caps, set over the top bezel (ink text on the pearl)
+        const pw = tw + 30, ph = cap + 12, px = fx + Math.round((fw - pw) / 2), py = fy - Math.round(ph / 2) + 1;
+        this.fill(px + 1, py + 3, pw, ph, '#000000', 0.3 * fa);
+        this.frame('plaque', px, py, pw, ph, fa);
+        this.text(title, px + 15, py + Math.round((ph - cap) / 2), { font: f, color: '#1d1a22', shadow: null, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
       } else this.text(title, fx + PAD[kind][0] + 2, fy + PAD[kind][1] + 2, { ...st, alpha: (st.alpha ?? 1) * Math.min(1, fa) });
     }
     if (pt < 0.3) {
@@ -624,8 +635,8 @@ export class PixelUI {
     const hk = this.ease(id + ':hov', state === 'hover' || state === 'down' ? 1 : 0, 26);
     const W = Math.max(6, Math.round(w)), H = Math.max(8, Math.round(h));
     const base: BtnState = state === 'hover' || state === 'down' ? (o.on ? 'on' : 'normal') : state;
-    this.img(btnSkin(st, base, W, H), x, y, { w: W, h: H });
-    if (hk > 0.01 && state !== 'disabled') this.img(btnSkin(st, state === 'down' ? 'down' : 'hover', W, H), x, y, { w: W, h: H, alpha: hk });
+    this.img(btnSkin(st, base, W, H, this.hd), x, y, { w: W, h: H });
+    if (hk > 0.01 && state !== 'disabled') this.img(btnSkin(st, state === 'down' ? 'down' : 'hover', W, H, this.hd), x, y, { w: W, h: H, alpha: hk });
     const [ft, fh] = btnFace(state, h);
     const fy = y + ft;
     const font = o.font ?? 'body';
@@ -668,7 +679,7 @@ export class PixelUI {
     let clicked = c0;
     const key = o.key === undefined ? 'Escape' : o.key;
     if (key && !o.disabled && this.input?.keyHit(key)) clicked = true;
-    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal')), x, y, { w: s, h: s + 3 });
+    this.img(closeArt(s, o.state ?? (o.disabled ? 'disabled' : held ? 'down' : over ? 'hover' : 'normal'), this.hd), x, y, { w: s, h: s + 3 });
     if (over && o.tip) this.tooltip(o.tip);
     if (clicked && this.sfx && o.sfx !== '') audio.play(o.sfx ?? 'k_close1', { vol: 0.4, dry: true });
     return clicked;
@@ -688,7 +699,7 @@ export class PixelUI {
       const on = i === sel;
       const { over, clicked } = this.interact(id + ':' + i, cx, y, w, h);
       const dy = on ? 0 : 2;
-      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy), cx, y + dy, { w: Math.round(w), h: h - dy });
+      this.img(tabSkin(on ? 'on' : over ? 'hover' : 'off', Math.round(w), h - dy, this.hd), cx, y + dy, { w: Math.round(w), h: h - dy });
       this.text(l, cx + w / 2, y + dy + Math.round((h - dy - this.cap(font)) / 2), { font, color: on ? C.gold2 : over ? C.bone : C.dim, shadow: null, align: 'center' });
       if (clicked && !on) { out = i; if (this.sfx) audio.play('tab1', { vol: 0.4, dry: true }); }
       cx += w + (o.gap ?? 2);
@@ -709,7 +720,7 @@ export class PixelUI {
     // four quiet ticks under the track
     for (let i = 0; i <= 4; i++) this.fill(x + Math.round((w - 1) * i / 4), ty + 4, 1, 2, C.line);
     const kx = x + Math.round((w - 1) * k) - 4;
-    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal'), kx, y - 1, { w: 9, h: 14 });
+    this.img(knobArt(held ? 'down' : over ? 'hover' : 'normal', this.hd), kx, y - 1, { w: 9, h: 14 });
     if (held) {
       let nv = min + ((this.mx - x) / (w - 1)) * (max - min);
       if (o.step) nv = Math.round(nv / o.step) * o.step;
@@ -726,7 +737,7 @@ export class PixelUI {
     const font = o.font ?? 'body';
     const w = 13 + 5 + Math.ceil(this.measure(label, font));
     const { over, held, clicked } = this.interact(id, x, y, w, 13);
-    this.img(checkArt(on, over, held, 13), x, y, { w: 13, h: 13 });
+    this.img(checkArt(on, over, held, 13, this.hd), x, y, { w: 13, h: 13 });
     this.text(label, x + 19, y + Math.round((13 - this.cap(font)) / 2), { font, color: o.color ?? (over ? C.bone2 : KIT.text), shadow: null });
     if (clicked) { if (this.sfx) audio.play('k_toggle2', { vol: 0.35, dry: true }); return !on; }
     return on;
@@ -963,12 +974,18 @@ export class PixelUI {
       b.last = this.frameNo; this.bars.set(o.id, b);
       shown = b.v; chip = b.chip; flash = Math.max(0, 1 - (this.t - b.flashT) / 0.3);
     }
-    this.fill(x, y, w, h, C.ink);
-    this.fill(x + 1, y + 1, w - 2, h - 2, back === '#0c1c22' ? C.well : back);
+    // a recessed trough (forged), the fill a little glass tube: a lit top row, a shaded foot, a slow glint
+    if (h >= 4) this.frame('slot', x - 1, y - 1, w + 2, h + 2); else { this.fill(x, y, w, h, C.ink); }
+    this.fill(x + 1, y + 1, w - 2, h - 2, back === '#0c1c22' ? C.well : back, 0.85);
     const iw = w - 2;
     const cwid = Math.round(iw * chip), fw = Math.round(iw * shown);
     if (cwid > fw) this.fill(x + 1 + fw, y + 1, cwid - fw, h - 2, o.chip ?? C.bone, 0.55);
-    if (fw > 0) this.fill(x + 1, y + 1, fw, h - 2, col);
+    if (fw > 0) {
+      this.fill(x + 1, y + 1, fw, h - 2, col);
+      if (h >= 4) { this.fill(x + 1, y + 1, fw, 1, '#ffffff', 0.32); this.fill(x + 1, y + h - 2, fw, 1, '#000000', 0.28); }
+      const gx = ((this.t * 40 + x * 0.7) % (iw + 60)) - 30;
+      if (h >= 4 && gx > 0 && gx < fw - 3) this.fill(x + 1 + Math.round(gx), y + 1, 3, h - 2, '#ffffff', 0.18);
+    }
     if (o.ticks && o.ticks > 1) for (let i = 1; i < o.ticks; i++) this.fill(x + 1 + Math.round((iw * i) / o.ticks), y + 1, 1, h - 2, C.ink, 0.5);
     if (flash > 0) this.fill(x + 1, y + 1, Math.max(fw, cwid), h - 2, '#ffffff', flash * 0.35);
   }

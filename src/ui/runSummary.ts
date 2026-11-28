@@ -132,7 +132,7 @@ export class RunSummaryCard {
     // ------------------------------------------------ the blobfish
     this.drawBlob(ui, dt, stage, planes, kk, bx0, byRest, W, H);
     if (k <= 0) { this.hideModels(); return null; }
-    planes.draw(skin('wood', W, H), bx, by, { alpha: e, shadow: 3 });
+    planes.draw(skin('wood', W, H, ui.hd), bx, by, { w: W, h: H, alpha: e, shadow: 3 });
     const T0 = appear + 0.35;
 
     // ------------------------------------------------ the result, as a wordmark, and the cause under it
@@ -160,7 +160,7 @@ export class RunSummaryCard {
       const ta = Math.min(1, Math.max(0, (t - t0 + 0.1) * 6));
       const cx = lx0 + i * colW, cw = colW - gap;
       if (ta <= 0) return;
-      ui.fill(cx, ty, cw, th, C.well, ta); ui.rect(cx, ty, cw, th, C.line);
+      ui.frame('inset', cx, ty, cw, th, ta);
       const v = Math.round(tl.value * (1 - (1 - kk2) ** 3));
       if (v !== this.ticked[tl.key] && kk2 < 1 && Math.floor(t * 30) !== Math.floor((t - dt) * 30)) audio.play('k_tick1', { vol: 0.1, dry: true, rate: 0.8 + kk2 * 0.7 });
       if (kk2 >= 1 && this.ticked[tl.key] !== tl.value) audio.play('k_tick2', { vol: 0.25, dry: true });
@@ -183,7 +183,7 @@ export class RunSummaryCard {
     const lbl = loot.length ? `MADE IT HOME  ·  ${loot.length} THING${loot.length > 1 ? 'S' : ''}` : 'MADE IT HOME';
     if (sa > 0) sectionHead(ui, lbl, lx0, hy, rx0 - lx0, { alpha: sa });
     const wy2 = hy + 13, wh = Math.max(40, byy - 12 - wy2);
-    planes.draw(skin('inset', rx0 - lx0, wh), lx0, wy2, { alpha: sa });
+    planes.draw(skin('inset', rx0 - lx0, wh, ui.hd), lx0, wy2, { w: rx0 - lx0, h: wh, alpha: sa });
     const floorY = Math.min(wy2 + wh - 6, wy2 + Math.round(wh / 2) + 26);
     if (loot.length) {
       const slot = 56, per = Math.max(1, Math.floor((rx0 - lx0 - 10) / slot));

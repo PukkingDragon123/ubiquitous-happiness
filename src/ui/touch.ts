@@ -21,6 +21,7 @@ import { C as K } from './pixel/skins';
 import type { Input, TouchHook } from '../core/input';
 import { audio } from '../audio/audio';
 import { clamp01, damp } from '../core/math';
+import { forge, M, disc } from './obj/forge';
 
 export type TouchBtn = 'attack' | 'ability' | 'skill' | 'cycle' | 'dash' | 'interact' | 'flask' | 'bomb' | 'bag' | 'pause' | 'rotate';
 type Anchor = 'br' | 'tr' | 'tl' | 'tc' | 'bl';
@@ -59,9 +60,19 @@ interface Laid { id: TouchBtn; x: number; y: number; r: number; code: string; o:
 const cache = new Map<string, HTMLCanvasElement>();
 const INK = hx(K.ink);
 
-/** a round key (r in UI px), v8b flat: a translucent ink disc, a crisp 1 px ring (gold while pressed), a faint
- *  inner ring in the tint colour when there is one */
-function keyArt(r: number, down: boolean, tint: string | undefined): HTMLCanvasElement {
+/** a round key (r in UI px), forged (src/ui/obj/forge.ts): a ceramic disc in a pewter bezel, its face sea-glass /
+ *  coral when it has a tint; pressed: the face sinks and darkens. Drawn at density d (place it at S x S UI px) */
+function keyArt(r: number, down: boolean, tint: string | undefined, d = 1): HTMLCanvasElement {
+  const S = r * 2 + 2;
+  const fz = forge(`touchKey|${r}|${down}|${tint ?? ''}`, S, S, d, (g) => {
+    g.add(disc(r, M.pewter, { depth: 3 }));
+    const face = tint ? (tint === K.gold ? M.glass : M.coral) : M.ceramic;
+    g.add(disc(r - 2.2, down ? M.ceramicDim : face, { depth: down ? 1.2 : 2.6, z: 2.4 }));
+  }, { light: down ? 0.8 : 1 });
+  if (fz) return fz;
+  return flatKey(r, down, tint);
+}
+function flatKey(r: number, down: boolean, tint: string | undefined): HTMLCanvasElement {
   const key = `key|${r}|${down ? 1 : 0}|${tint ?? ''}`;
   const hit = cache.get(key); if (hit) return hit;
   const S = r * 2 + 2, px = new Px(S, S), c = r + 0.5;
@@ -418,8 +429,8 @@ export class TouchLayer implements TouchHook {
         const dx = this.knob.x - ox, dy = this.knob.y - oy, d = Math.hypot(dx, dy), m = Math.min(d, R0 - KR * 0.4);
         if (d > 0) { kx = ox + (dx / d) * m; ky = oy + (dy / d) * m; }
       }
-      const kn = keyArt(KR, active, undefined);
-      ui.img(kn, Math.round(kx - KR - 0.5), Math.round(ky - KR - 0.5), { alpha: active ? 1 : 0.45 });
+      const kn = keyArt(KR, active, undefined, ui.hd);
+      ui.img(kn, Math.round(kx - KR - 0.5), Math.round(ky - KR - 0.5), { alpha: active ? 1 : 0.6, w: KR * 2 + 2, h: KR * 2 + 2 });
       if (!active) ui.text('MOVE', Math.round(ox), Math.round(oy + R0 + 4), { font: 'small', color: K.bone, shadow: K.ink, align: 'center', alpha: 0.55 });
     }
     // ---- the buttons
@@ -431,10 +442,10 @@ export class TouchLayer implements TouchHook {
       const a = f * (b.o.dim ? 0.38 : 0.9);
       const pop = 1 + Math.sin(Math.min(1, 1 - p) * Math.PI) * 0.06 * (p > 0 ? 1 : 0);
       const r = Math.round(b.r * pop);
-      const art = keyArt(r, down, b.o.color ?? (b.id === 'attack' ? K.gold : undefined));
+      const art = keyArt(r, down, b.o.color ?? (b.id === 'attack' ? K.gold : undefined), ui.hd);
       const sink = down ? 1 : 0;
       // a soft drop shadow, then the key
-      ui.img(art, Math.round(b.x - r - 0.5), Math.round(b.y - r - 0.5) + sink, { alpha: a });
+      ui.img(art, Math.round(b.x - r - 0.5), Math.round(b.y - r - 0.5) + sink, { alpha: Math.min(1, a * 1.05), w: r * 2 + 2, h: r * 2 + 2 });
       // the glyph (2x on the big keys) or the word
       const word = b.id === 'interact' ? (b.o.label ?? 'USE') : b.o.label;
       if (word && b.id === 'interact') {

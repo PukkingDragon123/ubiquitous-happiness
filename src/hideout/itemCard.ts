@@ -40,10 +40,11 @@ export function footprint(id: string) {
  */
 export function modelWindow(ui: PixelUI, x: number, y: number, s: number, rarity?: string, hot = 0) {
   x = Math.round(x); y = Math.round(y);
-  ui.fill(x - 1, y - 1, s + 2, s + 2, hot > 0 ? C.gold : C.line2);
-  ui.fill(x, y, s, s, C.well);
-  ui.fill(x + 6, y + Math.round(s * 0.8), s - 12, 1, C.line, 0.9);
-  if (rarity) { ui.fill(x + s - 8, y + 3, 5, 5, C.ink); ui.fill(x + s - 7, y + 4, 3, 3, RARITY_UI[rarity] ?? rarity); }
+  // a forged display case: a recessed well in a sea-glass bezel when hot, a faint floor glow for the model to stand on
+  ui.frame(hot > 0 ? 'cardSel' : 'dark', x - 3, y - 3, s + 6, s + 6);
+  ui.frame('inset', x, y, s, s);
+  ui.fill(x + 6, y + Math.round(s * 0.78), s - 12, 2, '#3e7672', 0.18);
+  if (rarity) { ui.fill(x + s - 9, y + 3, 6, 6, C.ink); ui.fill(x + s - 8, y + 4, 4, 4, RARITY_UI[rarity] ?? rarity); ui.fill(x + s - 8, y + 4, 1, 1, '#ffffff', 0.6); }
 }
 
 /** the item's footprint as a tiny cell diagram (k px per cell): flat cells */

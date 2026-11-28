@@ -1,12 +1,12 @@
-// The title's menu (v8b): a short list of words over the scene, 2D, no boxes, in the kit's calm style. Each item is
-// Alagard at the 'title' role in bone; the chosen one turns gold, eases 6 px to the right and gets a small gold bar
-// beside it that glides from item to item. Activating an item blinks it once. Items fade in one after another.
+// The title's menu (v8b forged kit): each item is a physical tile, a ceramic slab in a pewter bezel (src/ui/obj/
+// forge.ts), the word in Alagard on it. The chosen tile turns to sea-glass enamel, tips toward you and slides 6 px out;
+// a nacre lozenge glides beside it. Activating presses the tile in. Tiles rise in one after another.
 //
 //   const m = new TitleMenu();                      (TitleMenu<string> for other lists: the pause screen)
 //   const r = m.draw(ui, x, y, { items, t, appear, live, align? });   r.activate = the item picked this frame (or null)
 //   m.sel / m.select(id) / m.rect(id) (UI px) ; m.flash(id) when the screen activates an item itself
 import type { PixelUI } from '../ui/pixel/ui';
-import { C } from '../ui/pixel/skins';
+import { C, btnSkin } from '../ui/pixel/skins';
 import { clamp01, damp } from '../core/math';
 import { audio } from '../audio/audio';
 
@@ -92,25 +92,35 @@ export class TitleMenu<T extends string = ItemId> {
       const label = it.warn ?? it.label;
       if (it.warn) this.warnT += dt; else if (on) this.warnT = 0;
       const w = Math.ceil(ui.measure(label, FONT));
+      const TW = Math.max(160, w + 40), TH = ROW - 3;
       const x0 = center ? Math.round(x - w / 2) : x;
       const nudge = center ? 0 : Math.round(s.hov * 6);
       const rise = Math.round((1 - k) * 6);
       const shake = it.warn ? Math.round(Math.sin(t * 40) * 1.5 * Math.exp(-this.warnT * 4)) : 0;
       const wx = x0 + nudge + shake - (center ? 0 : Math.round((1 - k) * 8)), wy = y + i * ROW + rise;
-      this.rects.set(it.id, center ? [x0 - 24, y + i * ROW - 6, w + 48, ROW] : [x - 22, y + i * ROW - 6, Math.max(w + 44, 150), ROW]);
-      if (on) { selY = wy; selX = wx; }
-      const blink = this.flashId === it.id && this.flashT >= 0 && this.flashT < 0.36 ? (Math.floor(this.flashT * 16) % 2 ? 0.35 : 1) : 1;
-      const col = it.warn ? C.red2 : on ? C.gold2 : it.danger ? '#c99083' : C.bone;
-      ui.text(label, wx, wy, { font: FONT, color: col, shadow: C.ink, alpha: k * blink * (on || it.warn ? 1 : 0.9) });
+      // the tile: a forged slab under the word (the chosen one sea-glass, tipped toward you; pressed when activated)
+      const tx0 = (center ? Math.round(x - TW / 2) : x - 14) + (center ? 0 : Math.round(s.hov * 6)) - (center ? 0 : Math.round((1 - k) * 8)), ty0 = y + i * ROW - 6 + rise;
+      this.rects.set(it.id, [tx0, ty0, TW, TH]);
+      const pressedNow = this.flashId === it.id && this.flashT >= 0 && this.flashT < 0.2;
+      const style = it.warn || it.danger ? 'red' : 'green';
+      ui.fill(tx0 + 2, ty0 + 3, TW, TH, '#000000', 0.25 * k);
+      ui.img(btnSkin('dark', 'normal', TW, TH, ui.hd), tx0, ty0, { w: TW, h: TH, alpha: k * (1 - s.hov) * 0.92 });
+      if (s.hov > 0.02) ui.img(btnSkin(style, pressedNow ? 'down' : 'hover', TW, TH, ui.hd), tx0, ty0, { w: TW, h: TH, alpha: k * s.hov });
+      const lx = center ? Math.round(tx0 + TW / 2 - w / 2) : tx0 + 14 + nudge * 0, ly = ty0 + Math.round((TH - cap) / 2) + (pressedNow ? 1 : 0);
+      void wx;
+      if (on) { selY = ly; selX = lx; }
+      const col = it.warn ? '#f6e6de' : on ? '#fffaf0' : it.danger ? '#d9a296' : C.bone;
+      ui.text(label, lx, ly, { font: FONT, color: col, shadow: C.ink, alpha: k * (on || it.warn ? 1 : 0.92) });
     });
     // ---- the marker: a small gold bar gliding to the chosen item
     if (selY >= 0 && o.appear > 0.15) {
-      const ty = selY + Math.round(cap / 2) - 1, tx = center ? selX - 14 : x - 12;
+      const ty = selY + Math.round(cap / 2) - 1, tx = center ? selX - 30 : x - 22;
       if (this.barY < 0) { this.barY = ty; this.barX = tx; }
       this.barY = damp(this.barY, ty, 18, dt); this.barX = damp(this.barX, tx, 18, dt);
       const a = clamp01((o.appear - 0.15) * 4);
-      ui.fill(Math.round(this.barX), Math.round(this.barY), 6, 2, C.gold, a);
-      if (center) { const it = items.find((q) => q.id === this.sel); const w = it ? Math.ceil(ui.measure(it.warn ?? it.label, FONT)) : 0; ui.fill(Math.round(selX + w + 8), Math.round(this.barY), 6, 2, C.gold, a); }
+      // a nacre lozenge beside the chosen tile, gliding from tile to tile
+      const bx = Math.round(this.barX) - (center ? 0 : 6), by = Math.round(this.barY);
+      ui.fill(bx - 1, by - 2, 3, 5, C.ink, a * 0.6); ui.fill(bx, by - 3, 1, 7, '#e7ddcb', a); ui.fill(bx - 1, by - 1, 3, 3, '#e7ddcb', a); ui.fill(bx, by, 1, 1, '#ffffff', a);
     }
     return { activate, over };
   }

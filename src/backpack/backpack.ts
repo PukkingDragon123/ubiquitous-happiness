@@ -327,19 +327,24 @@ export class BackpackScreen implements Screen {
   // ---------------------------------------------------------------- drawing
   private drawPack(slide: number) {
     const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
-    const art = packArt(GRID_W, GRID_H, C);
+    const art = { width: GRID_W * C + SIDE * 2 + EXT * 2, height: TOP + GRID_H * C + BOT };
     const x = L.packX, y = L.packY + slide;
     // a soft drop shadow, then the bag
-    ui.fill(x + EXT + 2, y + 10, art.width - EXT * 2, art.height - 7, '#000000', 0.22);
-    ui.img(art, x, y);
+    ui.fill(x + EXT + 3, y + 12, art.width - EXT * 2, art.height - 7, '#000000', 0.14);
+    ui.fill(x + EXT + 1, y + 9, art.width - EXT * 2, art.height - 7, '#000000', 0.22);
+    // the bag: a forged slab (ceramic in a pewter bezel, nacre studs) holding a well of recessed pockets
+    ui.frame('wood', x + EXT, y + 7, art.width - EXT * 2, art.height - 7);
+    ui.frame('inset', L.gridX - 3, L.gridY + slide - 3, GRID_W * C + 6, GRID_H * C + 6);
+    for (let j = 0; j < GRID_H; j++) for (let i = 0; i < GRID_W; i++) ui.frame('slot', L.gridX + i * C + 1, L.gridY + j * C + 1 + slide, C - 2, C - 2);
     // the title set into the top border (the kit's legend), the capacity as a small tag at the right
     const used = packCells(run.items).used, full = used >= GRID_CELLS;
     const cap = `${fg.count('bp:used', used)}/${GRID_CELLS}`;
     const tw = Math.ceil(fg.measure('BACKPACK', 'title')), tcap = Math.round(fg.cap('title'));
-    const lx = x + EXT + 16, ly = y + 7;
-    fg.fill(lx - 7, ly, tw + 14, 1, KC.navy);
-    fg.fill(lx - 8, ly - 1, 2, 3, KC.gold); fg.fill(lx + tw + 6, ly - 1, 2, 3, KC.gold);
-    fg.text('BACKPACK', lx, ly - Math.round(tcap / 2), { font: 'title', color: KC.gold2, shadow: KC.ink });
+    const lx = x + EXT + 22, ly = y + 7;
+    const pw = tw + 30, ph = tcap + 12;
+    fg.fill(lx - 15 + 1, ly - Math.round(ph / 2) + 4, pw, ph, '#000000', 0.3);
+    fg.frame('plaque', lx - 15, ly - Math.round(ph / 2) + 1, pw, ph);
+    fg.text('BACKPACK', lx, ly - Math.round(tcap / 2) + 1, { font: 'title', color: '#1d1a22', shadow: null });
     const capW = Math.ceil(fg.measure(cap, 'small')) + 8;
     tag(fg, cap, x + art.width - EXT - SIDE - capW, ly + 5, full ? 'red' : 'dim');
     // an empty bag says what it is for
@@ -354,7 +359,7 @@ export class BackpackScreen implements Screen {
     const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
     const y = L.trayY + slide;
     ui.fill(L.trayX + 2, y + 3, L.trayW, L.trayH, '#000000', 0.22);
-    ui.img(trayArt(L.trayW, L.trayH), L.trayX, y);
+    ui.frame('inset', L.trayX, y, L.trayW, L.trayH);
     // the label row: ON THE SEABED, and what that means
     const loose = run.items.filter((i) => i.gx < 0 && ITEMS[i.id]).length;
     const ly = L.labY + slide;
@@ -384,7 +389,7 @@ export class BackpackScreen implements Screen {
       const col = target ? KC.gold : RARITY_UI[d.rarity];
       for (const [cx, cy] of cells) {
         const X = L.gridX + (it.gx + cx) * C, Y = L.gridY + (it.gy + cy) * C + slide;
-        ui.fill(X + 1, Y + 1, C - 2, C - 2, LN.occ, 1);
+        ui.fill(X + 3, Y + 3, C - 6, C - 6, LN.occ, 0.6);
         if (hov || target) ui.fill(X + 1, Y + 1, C - 2, C - 2, col, target ? 0.16 + 0.06 * Math.sin(this.t * 6) : 0.1);
         const a = hov || target ? 1 : 0.45, i = 2;
         if (!set.has(cx + ',' + (cy - 1))) ui.fill(X + i, Y + i, C - i * 2, 1, col, a);

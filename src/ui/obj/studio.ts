@@ -13,7 +13,7 @@ import { itemModel } from '../../backpack/models';
 import { ITEMS } from '../../game/items';
 
 let R: THREE.WebGLRenderer | null = null;
-function renderer(): THREE.WebGLRenderer | null {
+export function renderer(): THREE.WebGLRenderer | null {
   if (R) return R;
   try {
     R = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'low-power' });

@@ -15,7 +15,7 @@ import { C, RARITY_UI, sectionHead } from '../ui/pixel/skins';
 import { audio } from '../audio/audio';
 import { easeInOut } from '../core/math';
 import { K, KIND_LABEL, itemPhoto } from './itemCard';
-import { wellArt, rowArt, pearlArt, emptyMailArt } from './panelArt';
+import { well, row, pearlArt, emptyMailArt } from './panelArt';
 import { pop, panelRect, frame, detail } from './panels';
 import { mailValue, receiveMail, disposeMail, pearls, isMaterial, mailTotal } from './mail';
 
@@ -103,9 +103,9 @@ export class MailPanel {
     if (!list.length && !this.flyers.length) {
       this.empty(ui, inner.x, ly, inner.w, lh);
     } else {
-      ui.img(wellArt(lw, lh), inner.x, ly);
+      well(ui, inner.x, ly, lw, lh);
       const hov = this.rows(ui, list, inner.x, ly, lw, lh);
-      ui.img(wellArt(dw, lh), dx, ly);
+      well(ui, dx, ly, dw, lh);
       const show = hov ?? list.find((m) => m.uid === this.sel && !this.leaving.has(m.uid)) ?? live[0];
       if (show) this.info(ui, show, dx, ly, dw, lh);
       else ui.text('All sorted!', dx + dw / 2, ly + lh / 2 - 6, { font: 'title', color: C.bone2, shadow: C.ink, align: 'center' });
@@ -142,7 +142,7 @@ export class MailPanel {
   /** the purse: a well with a pearl and the count (counting up as pearls land, bumping on each) */
   private drawPurse(ui: PixelUI, x: number, y: number, w: number, h: number, dt: number) {
     this.bump = Math.max(0, this.bump - dt * 4);
-    ui.img(wellArt(w, h), x, y);
+    well(ui, x, y, w, h);
     const pa = pearlArt(9), b = this.bump > 0 ? 1 : 0;
     const px = x + 6, py = y + Math.round((h - pa.height) / 2) - b;
     ui.img(pa, px, py);
@@ -197,7 +197,7 @@ export class MailPanel {
     const d = known ? getItem(m.id) : null;
     const sel = this.sel === m.uid;
     const st = sel ? 'sel' : hov ? 'hover' : 'off';
-    ui.img(rowArt(w, ROW - 2, st, i, 26), x, y, { alpha });
+    row(ui, x, y, w, ROW - 2, st, 26, alpha); void i;
     if (l?.kind === 'dispose') ui.fill(x + 1, y + 1, w - 2, ROW - 4, C.red0, 0.6 * (1 - alpha));
     if (l?.kind === 'receive') ui.fill(x + 1, y + 1, w - 2, ROW - 4, C.sage0, 0.6 * (1 - alpha));
     // the photo in its slot, a rarity pip, the stack count
@@ -236,7 +236,7 @@ export class MailPanel {
 
   /** no mail: the mailbox with its flag down, and how mail gets here */
   private empty(ui: PixelUI, x: number, y: number, w: number, h: number) {
-    ui.img(wellArt(w, h), x, y);
+    well(ui, x, y, w, h);
     const art = emptyMailArt();
     const ax = x + Math.round((w - art.width) / 2), ay = y + 26;
     ui.img(art, ax, ay);

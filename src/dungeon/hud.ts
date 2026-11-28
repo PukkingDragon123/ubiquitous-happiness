@@ -21,7 +21,7 @@ import { contactShadow } from '../ui/obj/stage';
 import { audio } from '../audio/audio';
 import { ITEMS, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
-import { skin, PAD, RARITY_UI, sectionHead, tag } from '../ui/pixel/skins';
+import { skin, PAD, RARITY_UI, sectionHead, tag, rule } from '../ui/pixel/skins';
 import { hpText, hpify } from '../combat/types';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
@@ -167,11 +167,10 @@ export class DungeonHud {
     // under the stand (the seabed's foreground is quiet), a pointer up to it; kept clear of the HUD's top row
     const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2)));
     const y = Math.round(Math.max(96, Math.min(ui.h - h - 8, at.y + 16))) + Math.round((1 - pop) * 6);
-    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22 * a);
-    ui.fill(x, y, w, h, C.navy, 0.97 * a);
-    ui.rect(x, y, w, h, C.line2);
+    ui.fill(x + 3, y + 5, w, h, '#000000', 0.14 * a); ui.fill(x + 1, y + 2, w, h, '#000000', 0.22 * a);
+    ui.frame('wood', x, y, w, h, a);
     const px = Math.round(Math.max(x + 12, Math.min(x + w - 13, at.x)));
-    for (let i = 0; i < 4; i++) { ui.fill(px - i, y - 1 - i, i * 2 + 1, 1, C.line2, a); if (i < 3) ui.fill(px - i + 1, y - i, Math.max(0, i * 2 - 1), 1, C.navy, a); }
+    for (let i = 0; i < 4; i++) { ui.fill(px - i, y - 1 - i, i * 2 + 1, 1, i === 3 ? '#77839a' : '#aab4c2', a); }
     const ix = x + 12, iy = y + 12;
     ui.frame('slot', ix, iy, 38, 38, a);
     if (d) ui.item(sh.id, ix + 3, iy + 3, 32, 32, 1, a);
@@ -185,7 +184,7 @@ export class DungeonHud {
     for (const l of lines) { ui.text(l, tx, ly, { font: 'small', color: C.sage, shadow: null, alpha: a }); ly += ui.lh('small'); }
     // the price and BUY, under a rule
     const by = y + h - 26;
-    ui.fill(x + 10, by - 4, w - 20, 1, C.line, a);
+    rule(ui, x + 12, by - 5, w - 24, { alpha: a, notch: false });
     const can = !p.bad;
     const pearl = hudArt('pearl');
     ui.img(pearl, x + 12, by + 3, { alpha: a });
@@ -221,8 +220,10 @@ export class DungeonHud {
     // the title set into the top border (the kit's legend), one line of what this is, the close X
     const title = 'POST OFFICE';
     const tw = Math.ceil(ui.measure(title, 'title')), tcap = Math.round(ui.cap('title')), tlx = Math.round(x + W / 2 - tw / 2);
-    ui.fill(tlx - 7, y, tw + 14, 1, C.navy, a); ui.fill(tlx - 8, y - 1, 2, 3, C.gold, a); ui.fill(tlx + tw + 6, y - 1, 2, 3, C.gold, a);
-    ui.text(title, tlx, y - Math.round(tcap / 2), { font: 'title', color: C.gold2, shadow: C.ink, alpha: a });
+    const pw = tw + 30, ph = tcap + 12;
+    ui.fill(tlx - 14, y - Math.round(ph / 2) + 4, pw, ph, '#000000', 0.3 * a);
+    ui.frame('plaque', tlx - 15, y - Math.round(ph / 2) + 1, pw, ph, a);
+    ui.text(title, tlx, y - Math.round(tcap / 2) + 1, { font: 'title', color: '#1d1a22', shadow: null, alpha: a });
     let out: string | null = null;
     if (ui.closeButton('mail:x', x + W - 24, y + 8, { size: 15, key: null })) out = 'mail:close';
     ui.text('The manatee mails your loot home. It stays safe even if you sink.', x + pad, y + 14, { font: 'small', color: C.dim, shadow: null, alpha: a });

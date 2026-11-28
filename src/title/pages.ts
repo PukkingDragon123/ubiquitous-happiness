@@ -167,12 +167,15 @@ export class PausePanel {
     const capS = Math.round(ui.cap('small'));
     const blockH = th + 12 + (o.sub ? capS + 12 : 0) + 16 + n * ROW + (o.note ? 10 + capS : 0);
     let y = Math.round((ui.h - blockH) / 2) - 6;
+    // the whole card sits on a forged slab (ceramic in a pewter bezel, nacre studs)
+    const PW = Math.max(tw + 70, 240), PH = blockH + 34;
+    ui.panel('wood', Math.round((ui.w - PW) / 2), y - 16, PW, PH, undefined, { id: 'pause:slab' });
     jw.draw(ui, Math.round((ui.w - tw) / 2), y, this.t, this.t * 1.6);
     y += th + 12;
     if (o.sub) { ui.text(o.sub, ui.w / 2, y, { font: 'small', color: C.gold, shadow: C.ink, align: 'center', alpha: clamp01(this.t * 4 - 0.4) }); y += capS + 12; }
     // a short rule with the notch in the middle
     const ra = clamp01(this.t * 4 - 0.5);
-    ui.fill(Math.round(ui.w / 2 - 40), y, 80, 1, C.line2, ra); ui.fill(Math.round(ui.w / 2 - 1), y - 1, 2, 3, C.gold, ra);
+    rule(ui, Math.round(ui.w / 2 - 50), y, 100, { alpha: ra, notch: false }); ui.fill(Math.round(ui.w / 2 - 1), y - 2, 3, 5, '#e7ddcb', ra);
     y += 16;
     const items: MenuItem<string>[] = o.items.map((it) => ({ id: it.id, label: it.label, desc: it.desc ?? '', danger: it.danger }));
     const r = this.menu.draw(ui, Math.round(ui.w / 2), y, { items, t: this.t, appear: this.t * 1.8, live: this.t > 0.15, align: 'center', idPrefix: 'pause:' });

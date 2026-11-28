@@ -50,9 +50,9 @@ export function drawTag(ui: PixelUI, lines: TagLine[], style: TagStyle, maxW: nu
 // A compact, quiet card: the kit's navy face with a 1 px slate border, a rule with its gold notch under the name,
 // bone text in two sizes, material chips as icon + have/need, and a small pointer under it at the thing it names.
 // Small enough to sit beside furniture without covering the room.
-const F = { ink: C.ink as string, rim: C.line2 as string, body: C.navy as string, name: C.bone2 as string, sub: C.dim as string, brass: C.gold0 as string, brassL: C.gold as string, good: C.sage as string, bad: C.red2 as string };
+const F = { ink: C.ink as string, rim: '#77839a', body: C.navy as string, name: C.bone2 as string, sub: C.dim as string, brass: C.gold0 as string, brassL: C.gold as string, good: C.sage as string, bad: C.red2 as string };
 export const FLOAT = F;
-const PADX = 7, PADY = 5, CHIP = 11;
+const PADX = 8, PADY = 6, CHIP = 11;
 interface FRow { line: TagLine; font: FontName; h: number; w: number; text: string[] }
 function floatRows(ui: PixelUI, lines: TagLine[], maxW: number): { rows: FRow[]; w: number; h: number } {
   const rows: FRow[] = [];
@@ -80,15 +80,13 @@ export function drawFloat(ui: PixelUI, lines: TagLine[], maxW: number, x: number
   const { rows, w, h } = floatRows(ui, lines, maxW);
   x = Math.round(x); y = Math.round(y);
   const a = alpha;
-  // the plate: a soft shadow, the navy face, a 1 px slate border with softened corners
-  ui.fill(x + 2, y + 2, w, h, '#000000', 0.22 * a);
-  ui.fill(x + 1, y + 1, w - 2, h - 2, F.body, 0.97 * a);
-  ui.fill(x + 1, y, w - 2, 1, F.rim, a); ui.fill(x + 1, y + h - 1, w - 2, 1, F.rim, a);
-  ui.fill(x, y + 1, 1, h - 2, F.rim, a); ui.fill(x + w - 1, y + 1, 1, h - 2, F.rim, a);
+  // the plate: a forged ceramic slab in a pewter bezel, seated by a two-step shadow
+  ui.fill(x + 3, y + 4, w, h, '#000000', 0.14 * a); ui.fill(x + 1, y + 2, w, h, '#000000', 0.22 * a);
+  ui.frame('dark', x, y, w, h, a);
   // the pointer under the plate: a small slate triangle
   if (px !== -1) {
     const pxx = Math.round(Math.max(x + 6, Math.min(x + w - 7, px ?? x + w / 2)));
-    for (let i = 0; i < 3; i++) { ui.fill(pxx - 3 + i, y + h - 1 + i, 7 - i * 2, 1, F.rim, a); if (i < 2) ui.fill(pxx - 2 + i, y + h - 1 + i, 5 - i * 2, 1, F.body, a); }
+    for (let i = 0; i < 4; i++) { ui.fill(pxx - 4 + i, y + h - 1 + i, 9 - i * 2, 1, '#77839a', a); if (i < 3) ui.fill(pxx - 3 + i, y + h - 1 + i, 7 - i * 2, 1, '#aab4c2', a); }
   }
   let yy = y + PADY;
   rows.forEach((r, i) => {

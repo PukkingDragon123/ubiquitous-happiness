@@ -28,7 +28,7 @@ import { UiStage, PlanePool } from './obj/stage';
 import { pixelize } from './obj/pixtex';
 import { HP_PER, HEAL_ITEM, hpify } from '../combat/types';
 import { audio } from '../audio/audio';
-import { C } from './pixel/skins';
+import { C, gaugeArt, gaugeNeedle } from './pixel/skins';
 
 export type PoiType = 'treasure' | 'shop' | 'post' | 'challenge' | 'secret' | 'boss' | 'arena' | 'start';
 
@@ -321,18 +321,24 @@ export class Hud {
   // ---------------------------------------------------------------- shared bits
   /** a flat panel (the kit's 'dark' skin) with an optional coloured border over it */
   private box(ui: PixelUI, x: number, y: number, w: number, h: number, a = 1, border?: string, ba = 1) {
-    ui.fill(x + 1, y + 2, w, h, '#000000', 0.2 * a);
-    ui.frame('dark', x, y, w, h, a);
-    if (border) { ui.fill(x + 1, y, w - 2, 1, border, ba * a); ui.fill(x + 1, y + h - 1, w - 2, 1, border, ba * a); ui.fill(x, y + 1, 1, h - 2, border, ba * a); ui.fill(x + w - 1, y + 1, 1, h - 2, border, ba * a); }
+    // a forged slab: ceramic in a pewter bezel with nacre studs (src/ui/obj/forge.ts), seated by a two-step shadow
+    ui.fill(x + 3, y + 5, w, h, '#000000', 0.14 * a); ui.fill(x + 1, y + 2, w, h, '#000000', 0.2 * a);
+    ui.frame('wood', x, y, w, h, a);
+    if (border) { ui.fill(x + 2, y + 1, w - 4, 1, border, ba * a); ui.fill(x + 2, y + h - 2, w - 4, 1, border, ba * a); ui.fill(x + 1, y + 2, 1, h - 4, border, ba * a); ui.fill(x + w - 2, y + 2, 1, h - 4, border, ba * a); }
   }
   /** a flat bar: ink border, dark trough, a pale chip, a gain segment, the fill, quiet ticks */
   private meter(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, col: string, o: { chip?: number; chipCol?: string; gain?: number; gainCol?: string; ticks?: number; flash?: number } = {}) {
-    ui.fill(x, y, w, h, C.ink);
-    ui.fill(x + 1, y + 1, w - 2, h - 2, C.well);
+    // a recessed trough, the fill a glass tube (a lit top row, a shaded foot, a slow glint)
+    ui.frame('slot', x - 1, y - 1, w + 2, h + 2);
     const iw = w - 2, ih = h - 2, fv = Math.round(iw * clamp01(v));
     if (o.gain !== undefined && o.gain > v) ui.fill(x + 1 + fv, y + 1, Math.round(iw * clamp01(o.gain)) - fv, ih, o.gainCol ?? C.sage, 0.7);
     if (o.chip !== undefined && o.chip > v) ui.fill(x + 1 + fv, y + 1, Math.round(iw * clamp01(o.chip)) - fv, ih, o.chipCol ?? C.bone, 0.45);
-    if (fv > 0) ui.fill(x + 1, y + 1, fv, ih, col);
+    if (fv > 0) {
+      ui.fill(x + 1, y + 1, fv, ih, col);
+      if (ih >= 2) { ui.fill(x + 1, y + 1, fv, 1, '#ffffff', 0.3); ui.fill(x + 1, y + ih, fv, 1, '#000000', 0.3); }
+      const gx = ((this.t * 34 + x) % (iw + 80)) - 40;
+      if (gx > 0 && gx < fv - 3) ui.fill(x + 1 + Math.round(gx), y + 1, 3, ih, '#ffffff', 0.16);
+    }
     if (o.ticks && o.ticks > 1 && o.ticks <= 40) for (let i = 1; i < o.ticks; i++) ui.fill(x + 1 + Math.round((iw * i) / o.ticks), y + 1, 1, ih, C.ink, 0.45);
     if (o.flash && o.flash > 0) ui.fill(x + 1, y + 1, Math.max(1, fv), ih, '#ffffff', Math.min(1, o.flash) * 0.35);
   }
@@ -346,19 +352,28 @@ export class Hud {
     const hasStam = !!c && c.staminaMax > 0, hasMana = !!s.maxMana;
     const nF = c?.flasksMax ?? 0;
     const capT = Math.round(ui.cap('title')), capS = Math.round(ui.cap('small'));
-    const W = 184;
-    const H = 9 + capT + 7 + 6 + (hasStam ? 7 : 0) + (hasMana ? 7 : 0) + 9;
+    const GZ = 40, OX = GZ + 8;
+    const W = 184 + OX;
+    const H = Math.max(GZ + 16, 9 + capT + 7 + 6 + (hasStam ? 7 : 0) + (hasMana ? 7 : 0) + 9);
     const shake = this.hurtT > 0.6 ? Math.round(Math.sin(this.t * 55) * 1) : 0;
     const x = M + shake, y = M;
     const pulse = crit ? 0.5 + 0.5 * Math.sin(this.t * 6) : 0;
     this.box(ui, x, y, W, H, 1, crit || units <= 0 ? C.red : undefined, crit ? 0.35 + 0.5 * pulse : 1);
+    // the pressure gauge: a forged dial whose needle reads your health (it shivers when you are hurt)
+    const gz = gaugeArt(GZ, ui.hd), gx = x + 8, gy = y + Math.round((H - GZ) / 2);
+    if (gz) {
+      ui.fill(gx + 1, gy + 3, GZ, GZ, '#000000', 0.25);
+      ui.img(gz, gx, gy, { w: GZ, h: GZ });
+      const jit = this.hurtT > 0.5 ? Math.sin(this.t * 60) * 0.02 : 0;
+      gaugeNeedle(ui, gx + GZ / 2, gy + GZ / 2, GZ / 2 - 7, clamp01(this.hpBar + jit), crit ? lerpHex(C.red, C.red2, pulse) : '#9a4538');
+    }
     // --- "HP" and the number
     const shown = Math.round(this.hpShown), maxShown = Math.round(maxU * HP_PER);
     const ty = y + 9;
     const heal = this.hpDeltas.some((d) => d.n > 0 && d.t < 0.8);
     const numCol = units <= 0 ? C.red : crit ? lerpHex(C.bone2, C.red2, pulse) : this.hpFlash > 0 ? lerpHex(C.bone2, heal ? C.sage2 : C.red2, this.hpFlash) : C.bone2;
-    const lw = ui.text('HP', x + 9, ty + capT - capS, { font: 'small', color: C.dim, shadow: null });
-    const nx = x + 9 + Math.ceil(lw) + 6;
+    const lw = ui.text('HP', x + 9 + OX, ty + capT - capS, { font: 'small', color: C.dim, shadow: null });
+    const nx = x + 9 + OX + Math.ceil(lw) + 6;
     const nw = ui.text(String(shown), nx, ty, { font: 'title', color: numCol, shadow: C.ink });
     const mw = ui.text(`/ ${maxShown}`, nx + Math.ceil(nw) + 4, ty + capT - capS, { font: 'small', color: crit ? C.red2 : C.dim, shadow: null });
     if (s.soul && s.soul > 0) ui.text(`+${Math.round(s.soul * HP_PER)}`, nx + Math.ceil(nw) + 8 + Math.ceil(mw), ty + capT - capS, { font: 'small', color: C.steel2, shadow: null });
@@ -382,20 +397,20 @@ export class Hud {
     }
     // --- the bars
     let by = ty + capT + 7;
-    const bw = W - 18;
+    const bw = W - 18 - OX;
     const hpCol = units <= 0 ? C.red0 : crit ? lerpHex(C.red, C.red2, pulse * 0.6) : C.red;
     const tickN = Math.round(maxU * HP_PER / 10);
-    this.meter(ui, x + 9, by, bw, 6, this.hpBar, hpCol, { chip: this.hpChip, chipCol: C.red2, gain: frac > this.hpBar + 0.002 ? frac : undefined, ticks: tickN, flash: this.hurtT > 0.7 ? (this.hurtT - 0.7) * 3 : 0 });
+    this.meter(ui, x + 9 + OX, by, bw, 6, this.hpBar, hpCol, { chip: this.hpChip, chipCol: C.red2, gain: frac > this.hpBar + 0.002 ? frac : undefined, ticks: tickN, flash: this.hurtT > 0.7 ? (this.hurtT - 0.7) * 3 : 0 });
     by += 6;
     if (hasStam && c) {
       by += 2;
       const broken = c.guard === 'guardBroken' || (c.stamina <= 0 && Math.sin(this.t * 20) > 0);
       const col = broken ? C.red : this.stamFlash > 0.3 ? C.gold2 : c.guard === 'riposte' ? C.gold : '#b9b2a2';
       by += 1;
-      this.meter(ui, x + 9, by, bw, 4, this.stamShown, col, { chip: this.stamChip });
+      this.meter(ui, x + 9 + OX, by, bw, 4, this.stamShown, col, { chip: this.stamChip });
       by += 4;
     }
-    if (hasMana) { by += 3; this.meter(ui, x + 9, by, bw, 4, this.manaShown, C.steel, { chip: this.manaChip }); by += 4; }
+    if (hasMana) { by += 3; this.meter(ui, x + 9 + OX, by, bw, 4, this.manaShown, C.steel, { chip: this.manaChip }); by += 4; }
     return { right: x + W, bottom: y + H };
   }
 
@@ -466,7 +481,7 @@ export class Hud {
         else { ui.rect(sx, sy, 5, 5, C.line2); }
       }
       yy += capB + 4;
-      ui.fill(x + 9, yy, W - 18, 1, C.line);
+      ui.fill(x + 9, yy, W - 18, 1, '#06090e', 0.7); ui.fill(x + 9, yy + 1, W - 18, 1, '#3e4b62', 0.8);
       yy += 5;
     }
     const row = (g: HTMLCanvasElement, num: string, unit: string, label: string, col: string) => {
@@ -506,8 +521,8 @@ export class Hud {
       this.cdPrev[i] = cd;
       this.readyT[i] += dt;
       const ready = clamp01(1 - this.readyT[i] / 0.5);
-      ui.fill(x + 1, y + 2, SS, SS, '#000000', 0.2);
-      ui.fill(x, y, SS, SS, C.navy, 0.95);
+      ui.fill(x + 1, y + 3, SS, SS, '#000000', 0.22);
+      ui.frame(sel ? 'cardSel' : 'dark', x, y, SS, SS);
       const it = skillItem(sl.id);
       if (it) ui.item(it.id, x + 3, y + 3, SS - 6, SS - 6, 1, cd > 0 || noMana ? 0.55 : 1);
       else ui.fill(x + 6, y + 6, SS - 12, SS - 12, sl.color);
@@ -521,9 +536,9 @@ export class Hud {
         if (ui.measure('MANA', 'small') <= SS - 4) ui.text('MANA', x + SS / 2, y + Math.round((SS - ui.cap('small')) / 2), { font: 'small', color: C.steel2, shadow: C.ink, align: 'center' });
         ui.fill(x + 2, y + SS - 4, SS - 4, 2, C.steel);
       }
-      const border = pressed ? C.bone2 : sel ? C.gold : ready > 0 ? lerpHex(C.line2, C.gold2, ready) : C.line2;
-      ui.rect(x, y, SS, SS, border);
-      if (sel) ui.fill(x + 4, y - 4, SS - 8, 1, C.gold);
+      if (pressed) ui.rect(x + 1, y + 1, SS - 2, SS - 2, C.bone2);
+      else if (ready > 0) ui.rect(x + 1, y + 1, SS - 2, SS - 2, C.gold2);
+      if (sel) { ui.fill(x + SS / 2 - 3, y - 5, 6, 2, '#e7ddcb'); ui.fill(x + SS / 2 - 1, y - 6, 2, 4, '#e7ddcb'); }
       // the slot's key (not on a touch screen: its button says it)
       if (!PixelUI.touch) ui.text(String(i + 1), x + 3, y + 3, { font: 'small', color: sel ? C.gold2 : C.dim, shadow: C.ink });
     });
@@ -544,12 +559,13 @@ export class Hud {
     const ny = by - 6 - capT;
     ui.text(name, cx + shake, ny, { font: 'title', color: C.bone2, shadow: C.ink, align: 'center', alpha: fade });
     if (b.title) ui.text(clean(b.title).toUpperCase(), cx, ny - 4 - Math.round(ui.cap('small')), { font: 'small', color: C.dim, shadow: C.ink, align: 'center', alpha: fade });
-    ui.fill(bx - 1, by - 1, BW + 2, 10, '#000000', 0.25 * fade);
-    ui.fill(bx, by, BW, 8, C.ink, fade);
-    ui.fill(bx + 1, by + 1, BW - 2, 6, C.well, fade);
+    // a long pewter-bezelled tube with nacre studs at its ends, the coral fill a lit glass column
+    ui.fill(bx - 3, by - 1, BW + 8, 14, '#000000', 0.25 * fade);
+    ui.frame('wood', bx - 6, by - 5, BW + 12, 18, fade);
+    ui.frame('slot', bx - 1, by - 1, BW + 2, 10, fade);
     const iw = BW - 2, fv = Math.round(iw * this.bossShown), cw = Math.round(iw * this.bossChip);
     if (cw > fv) ui.fill(bx + 1 + fv, by + 1, cw - fv, 6, C.red2, 0.45 * fade);
-    if (fv > 0) ui.fill(bx + 1, by + 1, fv, 6, C.red, fade);
+    if (fv > 0) { ui.fill(bx + 1, by + 1, fv, 6, C.red, fade); ui.fill(bx + 1, by + 1, fv, 1, '#ffffff', 0.3 * fade); ui.fill(bx + 1, by + 6, fv, 1, '#000000', 0.3 * fade); }
     if (this.bossFlash > 0) ui.fill(bx + 1, by + 1, Math.max(1, fv), 6, '#ffffff', this.bossFlash * 0.4 * fade);
     // the phase thresholds: a notch at each, the poise as a thin gold line under the bar
     if (b.phases > 1) for (let i = 1; i < b.phases; i++) { const px = bx + 1 + Math.round(iw * (1 - i / b.phases)); ui.fill(px, by - 2, 1, 12, i < b.phase ? C.line2 : C.gold, fade); }

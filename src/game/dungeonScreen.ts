@@ -1455,7 +1455,7 @@ export class DungeonScreen implements Screen {
     if (!s || s.a <= 0.01) return;
     const at = this.anchor(s.bx, s.by + s.bh / 2 + 0.2), under = this.anchor(s.bx, s.by - s.bh / 2 - 0.2);
     const tw = Math.max(ui.measure(s.name, 'title'), ui.measure(s.note, 'body'));
-    const w = Math.round(tw + 22), h = Math.round(ui.lh('title') + ui.lh('body') + 12);
+    const w = Math.round(tw + 30), h = Math.round(ui.lh('title') + ui.lh('body') + 16);
     const pop = 1 - (1 - Math.min(1, s.t * 6)) ** 3, a = s.a;
     const x = Math.max(6, Math.min(ui.w - w - 6, Math.round(at.on ? at.x - w / 2 : ui.w / 2 - w / 2)));
     // over the board, or under it when over would sit on the instruments (the vitals + resources top left, the
@@ -1467,14 +1467,13 @@ export class DungeonScreen implements Screen {
     y = Math.max(6, Math.min(ui.h - h - 46, y)) + Math.round((1 - pop) * (flip ? -6 : 6));
     // the kit's flat tag: navy face, a 1 px border (red when it is dangerous), the place in bone, the route words
     const rim = s.danger >= 2 ? KC.red : KC.line2;
-    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22 * a);
-    ui.fill(x, y, w, h, KC.navy, 0.96 * a);
-    ui.rect(x, y, w, h, rim);
-    ui.text(s.name, x + Math.round((w - ui.measure(s.name, 'title')) / 2), y + 6, { font: 'title', color: KC.bone2, shadow: KC.ink, alpha: a });
-    ui.text(s.note, x + Math.round((w - ui.measure(s.note, 'body')) / 2), y + 6 + ui.lh('title'), { font: 'body', color: s.danger >= 2 ? KC.red2 : KC.dim, shadow: null, alpha: a });
+    ui.fill(x + 3, y + 5, w, h, '#000000', 0.14 * a); ui.fill(x + 1, y + 2, w, h, '#000000', 0.22 * a);
+    ui.frame(s.danger >= 2 ? 'tv' : 'wood', x, y, w, h, a);
+    ui.text(s.name, x + Math.round((w - ui.measure(s.name, 'title')) / 2), y + 8, { font: 'title', color: KC.bone2, shadow: KC.ink, alpha: a });
+    ui.text(s.note, x + Math.round((w - ui.measure(s.note, 'body')) / 2), y + 8 + ui.lh('title'), { font: 'body', color: s.danger >= 2 ? KC.red2 : KC.dim, shadow: null, alpha: a });
     // a little pointer to the board (down from over it, up from under it)
     const px = Math.round(Math.max(x + 8, Math.min(x + w - 9, at.x)));
-    for (let i = 0; i < 3; i++) ui.fill(px - 2 + i, flip ? y - 1 - i : y + h + i, 5 - i * 2, 1, rim, a);
+    for (let i = 0; i < 3; i++) ui.fill(px - 2 + i, flip ? y - 1 - i : y + h + i, 5 - i * 2, 1, s.danger >= 2 ? KC.red : '#aab4c2', a); void rim;
   }
 
   /** an undecided fork whose choice the player is at: the camera frames its lanes */

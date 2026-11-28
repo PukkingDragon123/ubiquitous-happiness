@@ -22,7 +22,7 @@ import * as THREE from 'three';
 import type { Input } from '../core/input';
 import { PixelUI } from '../ui/pixel/ui';
 import type { FontName } from '../ui/pixel/font';
-import { KIT, keycapBody, KEYCAP_H } from '../ui/pixel/skins';
+import { KIT, keycapBody, KEYCAP_H, btnSkin } from '../ui/pixel/skins';
 import { mouseTex } from '../ui/pixel/art';
 import { audio } from '../audio/audio';
 import { SeaBubbles, seaArt, seaDraw, rawCanvas, letterboxBar, readable, bubbleSprite, type SeaStyle, type Tier } from '../ui/seaText';
@@ -378,6 +378,19 @@ export class Dialogue {
     const taken: [number, number, number, number][] = [];
     for (const a of [...(this.cur ? [this.cur] : []), ...this.barks]) if (a.out < 0) this.place(a, dt, taken);
     const bar = this.bar();
+    // the conversation line sits on a forged slab (ceramic in a pewter bezel), drifting with the words
+    const c0 = this.cur;
+    if (c0 && c0.placed && !c0.bark) {
+      const q = c0.out >= 0 ? 1 - Math.min(1, c0.out / LEAVE) : Math.min(1, (c0.t - c0.wait) / 0.2 + 0.4);
+      if (q > 0.02) {
+        const ox = Math.sin(this.t * 0.55 + c0.seed) * 1.6, oy = Math.sin(this.t * 0.9 + c0.seed * 1.3) * 1.3;
+        const nameH = c0.sp.name ? 14 : 0;
+        const left = c0.anchored ? c0.px - c0.w / 2 : c0.px - c0.w / 2;
+        const bx = Math.round(left + ox - 10), by = Math.round(c0.py + oy - nameH - 8), bw = Math.round(c0.w + 20), bh = Math.round(c0.h + nameH + 14);
+        ui.fill(bx + 3, by + 5, bw, bh, '#000000', 0.16 * q); ui.fill(bx + 1, by + 2, bw, bh, '#000000', 0.22 * q);
+        ui.frame('wood', bx, by, bw, bh, 0.96 * q);
+      }
+    }
     // every line's soft outline first, then the letters, so no outline ever cuts into a neighbour's glyphs
     rawCanvas(ui, (ctx, hd) => {
       for (const a of all) this.tail(a, ctx, hd);
@@ -598,7 +611,13 @@ export class Dialogue {
       if (hov) { this.hoverChoice = i; ui.cursor = 'point'; }
       rows.push({ i, yy, hov, appear });
     });
-    const st = inkStyle(INK), hot: SeaStyle = { top: '#efe1bd', bottom: '#d4b273', edge: EDGE };
+    // each choice on a forged tile (sea-glass and tipped toward you under the pointer)
+    for (const r of rows) {
+      const tw = w + 12, th = rowH - 1;
+      ui.fill(x - 4 + 2, r.yy - 2 + 3, tw, th, '#000000', 0.22 * r.appear);
+      ui.img(btnSkin(r.hov ? 'green' : 'dark', r.hov ? (ui.down ? 'down' : 'hover') : 'normal', tw, th, ui.hd), x - 4, r.yy - 2, { w: tw, h: th, alpha: r.appear });
+    }
+    const st = inkStyle(INK), hot: SeaStyle = { top: '#fffaf0', bottom: '#efe1bd', edge: EDGE };
     rawCanvas(ui, (ctx) => {
       for (const pass of ['edge', 'fill'] as const) for (const r of rows) {
         const tx = x + ui.keycapW('1') + 5 + (r.hov ? 2 : 0);
@@ -609,5 +628,6 @@ export class Dialogue {
     for (const r of rows) {
       this.keycap(String(r.i + 1), x + (r.hov ? 1 : 0), r.yy, !r.hov, r.hov && ui.down, r.appear);
     }
+    void 0;
   }
 }

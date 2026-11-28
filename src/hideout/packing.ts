@@ -733,13 +733,19 @@ export class Packing {
     const art = satchelArt(bulge);
     const shake = this.flash.t > 1.2 && this.flash.text === 'SATCHEL FULL' ? Math.round(Math.sin(this.t * 50) * 2) : 0;
     const ax = x - bulge + shake;
-    ui.img(art, ax, y);
+    // the satchel: a forged slab holding a well of recessed pockets
+    ui.fill(ax + 3, y + 11, art.width, art.height - 6, '#000000', 0.14); ui.fill(ax + 1, y + 8, art.width, art.height - 6, '#000000', 0.22);
+    ui.frame('wood', ax, y + 6, art.width, art.height - 6);
+    ui.frame('inset', ax + SAT.gx + bulge - 3, y + SAT.gy - 3, GRID_W * CELL + 6, GRID_H * CELL + 6);
+    for (let j = 0; j < GRID_H; j++) for (let i = 0; i < GRID_W; i++) ui.frame('slot', ax + SAT.gx + bulge + i * CELL, y + SAT.gy + j * CELL, CELL, CELL);
     ui.block(ax, y, art.width, art.height);
     ui.mark('pack:satchel', ax, y, art.width, art.height);
     // the title in the top border (the kit's legend), the pockets in use as a bar and a count under the grid
-    const tw = Math.ceil(ui.measure('SATCHEL', 'title')), tcap = Math.round(ui.cap('title')), lx = Math.round(ax + art.width / 2 - tw / 2), ly = y + 6;
-    ui.fill(lx - 7, ly, tw + 14, 1, C.navy); ui.fill(lx - 8, ly - 1, 2, 3, C.gold); ui.fill(lx + tw + 6, ly - 1, 2, 3, C.gold);
-    ui.text('SATCHEL', lx, ly - Math.round(tcap / 2), { font: 'title', color: C.gold2, shadow: C.ink });
+    const tw = Math.ceil(ui.measure('SATCHEL', 'title')), tcap = Math.round(ui.cap('title')), lx = Math.round(ax + art.width / 2 - tw / 2), ly = y + 7;
+    const pw = tw + 30, ph = tcap + 12;
+    ui.fill(lx - 14, ly - Math.round(ph / 2) + 4, pw, ph, '#000000', 0.3);
+    ui.frame('plaque', lx - 15, ly - Math.round(ph / 2) + 1, pw, ph);
+    ui.text('SATCHEL', lx, ly - Math.round(tcap / 2) + 1, { font: 'title', color: '#1d1a22', shadow: null });
     const used = this.cellsUsed(), cnt = ui.count('pack:cells', used, { dur: 0.35 }), full = used >= GRID_W * GRID_H;
     const by0 = y + SAT.pocketY + 10, bw0 = GRID_W * CELL;
     ui.bar(ax + SAT.gx + bulge, by0, bw0 - 46, 4, used / (GRID_W * GRID_H), full ? C.red : C.gold, C.well, { id: 'pack:cellsBar' });
@@ -851,13 +857,13 @@ export class Packing {
     sectionHead(ui, 'ABILITIES', x0, ry - 16, n * (S + G) - G);
     for (let i = 0; i < n; i++) {
       const x = x0 + i * (S + G), m = this.medals[i];
-      if (!m) { ui.fill(x, ry, S, S, C.well, 0.85); ui.rect(x, ry, S, S, C.line); continue; }
+      if (!m) { ui.frame('slot', x, ry, S, S); continue; }
       const age = this.t - m.born, k = Math.min(1, age / 0.25), y = ry + Math.round((1 - k) * 4);
       const hov = !this.drag && ui.hover(x, y, S, S);
-      ui.fill(x, y, S, S, hov ? C.navy2 : C.navy, 0.95 * k);
+      ui.fill(x + 1, y + 3, S, S, '#000000', 0.22 * k);
+      ui.frame(hov || age < 0.8 ? 'cardSel' : 'dark', x, y, S, S, k);
       const it = skillItem(m.id);
-      if (it) ui.item(it.id, x + 3, y + 3, S - 6, S - 6, 1, k);
-      ui.rect(x, y, S, S, hov ? C.gold : age < 0.8 ? C.gold0 : C.line2);
+      if (it) ui.item(it.id, x + 4, y + 4, S - 8, S - 8, 1, k);
       ui.block(x, y, S, S);
       if (hov) ui.tooltip([{ text: SKILL_NAMES[m.id] ?? (ABILITY_NAME as Record<string, string>)[m.id] ?? m.id, font: 'title', color: C.gold }, { text: it ? `from your ${it.name}` : 'granted by your gear', color: C.dim, font: 'small' }], { kind: 'dark', maxW: 170 });
     }

@@ -10,7 +10,7 @@ import type { ItemInst } from '../game/run';
 import { CRAFTS, craft, craftAvailable, craftLock, upgradable, upgradeCost, upgrade, type Craft } from './recipes';
 import { audio } from '../audio/audio';
 import { itemHead, itemBody, photoWindow, itemPhoto } from './itemCard';
-import { wellArt, rowArt, emptyChestArt, trayArt, PANEL_IN, type PanelKind } from './panelArt';
+import { well, row as listRow, tray, emptyChestArt, PANEL_IN, type PanelKind } from './panelArt';
 import { C, RARITY_UI, sectionHead } from '../ui/pixel/skins';
 import { mailCount } from '../meta/meta';
 import { PIECES, costOf, isBuilt } from './rebuild';
@@ -126,7 +126,7 @@ export class StashPanel {
     const total = Math.ceil(list.length / TRAY_COLS), maxOff = Math.max(0, total - rows);
     if (ui.hover(tx, ty, tw, th) && ui.wheel) this.rowOff = Math.max(0, Math.min(maxOff, this.rowOff + Math.sign(ui.wheel)));
     this.rowOff = Math.min(this.rowOff, maxOff);
-    ui.img(trayArt(TRAY_COLS, rows, TRAY_C), tx, ty);
+    tray(ui, tx, ty, TRAY_COLS, rows, TRAY_C);
     let hov: (typeof list)[number] | null = null;
     for (let j = 0; j < rows; j++) for (let i = 0; i < TRAY_COLS; i++) {
       const k = (j + this.rowOff) * TRAY_COLS + i, e = list[k];
@@ -159,7 +159,7 @@ export class StashPanel {
     }
     // ---- the detail pane
     const dx = tx + tw + 9, dw = inner.x + inner.w - dx;
-    ui.img(wellArt(dw, th), dx, ty);
+    well(ui, dx, ty, dw, th);
     const e = hov ?? list.find((q) => q.uid === this.sel) ?? list[0];
     if (e) {
       const used = detail(ui, e.id, e.level, dx + 8, ty + 8, dw - 16, th - 16);
@@ -205,13 +205,13 @@ export class WorkshopPanel {
     const cy = inner.y + 26, ch = inner.h - 28;
     const listW = Math.min(232, Math.round(inner.w * 0.4));
     const dx = inner.x + listW + 8, dw = inner.x + inner.w - dx;
-    ui.img(wellArt(listW, ch), inner.x, cy);
-    ui.img(wellArt(dw, ch), dx, cy);
+    well(ui, inner.x, cy, listW, ch);
+    well(ui, dx, cy, dw, ch);
     const rowH = 24;
     const row = (x: number, y: number, w: number, sel: boolean, hov: boolean, id: string, level: number, dim: boolean, right: string, rightCol: string, lock: boolean, i: number) => {
       // a flat row with an icon slot (gold-trimmed when selected)
       void i;
-      ui.img(rowArt(w - 3, rowH - 2, sel ? 'sel' : hov ? 'hover' : 'off', 0, 18), x + 1, y + 1);
+      listRow(ui, x + 1, y + 1, w - 3, rowH - 2, sel ? 'sel' : hov ? 'hover' : 'off', 18);
       const pic = itemPhoto(id, level, 16 * ui.hd);
       if (pic) ui.img(pic, x + 5, y + 4, { w: 16, h: 16, alpha: dim ? 0.45 : 1 }); else ui.item(id, x + 5, y + 4, 16, 16, level, dim ? 0.45 : 1);
       let name = getItem(id).name;

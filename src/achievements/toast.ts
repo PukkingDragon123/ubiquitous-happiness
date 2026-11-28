@@ -177,10 +177,8 @@ export class Toasts {
     let x = Math.round(c.x), y = Math.round(c.y);
     if (lane.from === 'bottom') y += off; else if (lane.from === 'top') y -= off; else if (lane.from === 'right') x += off; else x -= off;
     const al = fade;
-    ui.fill(x + 2, y + 3, W, H, '#000000', 0.22 * al);
-    ui.fill(x, y, W, H, C.navy, 0.97 * al);
-    ui.rect(x, y, W, H, C.line2);
-    ui.fill(x, y + 2, 2, H - 4, C.gold, al);
+    ui.fill(x + 3, y + 5, W, H, '#000000', 0.14 * al); ui.fill(x + 1, y + 2, W, H, '#000000', 0.22 * al);
+    ui.frame(lane.compact ? 'dark' : 'wood', x, y, W, H, al);
     if (lane.compact) {
       // one line: the reward in a little slot, the unlock text
       ui.frame('slot', x + 6, y + 4, 20, 20, al);

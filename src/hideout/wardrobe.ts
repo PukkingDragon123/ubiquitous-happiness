@@ -6,7 +6,7 @@ import { SLOTS, SLOT_NAME, bySlot, owned, equippedLook, equip, COSMETIC, type Sl
 import { cosmeticIcon } from '../cosmetics/icons';
 import { achFor, progress } from '../achievements';
 import { audio } from '../audio/audio';
-import { PANEL_IN, cellArt } from './panelArt';
+import { PANEL_IN, cell } from './panelArt';
 import { C, tag } from '../ui/pixel/skins';
 
 const CELL = 28, ROW = 46;
@@ -50,7 +50,7 @@ export class WardrobePanel {
         ui.mark('ward:' + c.id, cx, cy, CELL - 2, CELL - 2);
         ui.block(cx, cy, CELL - 2, CELL - 2);
         // a slot per piece (gold when worn); the icon at 1x like the kit
-        ui.img(cellArt(CELL - 2, on ? 'on' : over ? 'hover' : 'off'), cx, cy);
+        cell(ui, cx, cy, CELL - 2, on ? 'on' : over ? 'hover' : 'off');
         const S = CELL - 6;
         ui.img(cosmeticIcon(c.id, S), cx + 2, cy + 2, { w: S, h: S, alpha: own ? 1 : 0.3 });
         if (!own) ui.icon('lock', cx + CELL - 12, cy + CELL - 13);

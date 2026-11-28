@@ -283,6 +283,12 @@ export class TitleScreen implements Screen {
     this.menuX = this.logoX + 22; this.menuY = this.logoY + this.logo.h + 22;
     this.drawShade();
     if (this.logoT >= 0) {
+      // the wordmark sits on a sculpted plate: a forged ceramic slab in a pewter bezel, a slow glint across it
+      const la = Math.min(1, this.logoT * 2.5), pw = this.logo.w + 40, ph = this.logo.h + 22;
+      const px = this.logoX - 20, py = this.logoY - 12 + Math.round((1 - la) * 6);
+      ui.fill(px + 4, py + 6, pw, ph, '#000000', 0.16 * la); ui.fill(px + 1, py + 3, pw, ph, '#000000', 0.24 * la);
+      ui.frame('wood', px, py, pw, ph, 0.94 * la);
+      ui.sheen(px + 6, py + 6, pw - 12, ph - 12, 7, 1.5, la);
       this.logo.draw(ui, this.logoX, this.logoY, { t: this.t, appear: this.logoT });
       // a click on the logo pokes it
       const r = this.logo.rect(this.logoX, this.logoY);

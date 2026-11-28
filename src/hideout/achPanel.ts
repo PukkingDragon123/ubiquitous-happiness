@@ -7,7 +7,7 @@ import { ACHIEVEMENTS, progress, isDone } from '../achievements';
 import { medal } from '../achievements/medals';
 import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC, SLOT_NAME } from '../cosmetics';
-import { PANEL_IN, cushionArt, plateArt, cellArt } from './panelArt';
+import { PANEL_IN, cell } from './panelArt';
 import { C, sectionHead } from '../ui/pixel/skins';
 
 const COLS = 8, CW = 38, CH = 56, DW = 160;
@@ -28,8 +28,8 @@ export class AchievementsPanel {
     const done = META.achievements.unlocked.length;
     // the tally, top left
     const tl = `${done}/${ACHIEVEMENTS.length} EARNED`;
-    ui.text(tl, x + il + 2, y + 9, { font: 'small', color: C.dim, shadow: null });
-    ui.bar(x + il + 8 + ui.measure(tl, 'small'), y + 10, 56, 5, Math.min(1, done / ACHIEVEMENTS.length), C.gold);
+    ui.text(tl, x + il + 2, y + 12, { font: 'small', color: C.dim, shadow: null });
+    ui.bar(x + il + 8 + ui.measure(tl, 'small'), y + 13, 56, 5, Math.min(1, done / ACHIEVEMENTS.length), C.gold);
     if (inp?.keyHit('ArrowRight')) this.sel = (this.sel + 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowLeft')) this.sel = (this.sel + ACHIEVEMENTS.length - 1) % ACHIEVEMENTS.length;
     if (inp?.keyHit('ArrowDown')) this.sel = Math.min(ACHIEVEMENTS.length - 1, this.sel + COLS);
@@ -44,7 +44,7 @@ export class AchievementsPanel {
       if (over) { this.sel = i; ui.cursor = 'point'; }
       const on = this.sel === i;
       // a slot per medal (gold-bordered when selected)
-      ui.img(cushionArt(CW - 2, CH - 2, on ? 'on' : over ? 'hover' : 'off'), cx, cy);
+      ui.frame(on ? 'cardSel' : 'slot', cx, cy, CW - 2, CH - 2); if (over && !on) ui.fill(cx + 2, cy + 2, CW - 6, CH - 6, '#ffffff', 0.05);
       ui.img(medal(a.emblem, a.tier, !got), cx + Math.round((CW - 2 - 28) / 2), cy + 4 - (on ? 1 : 0), { alpha: got ? 1 : 0.55 });
       ui.bar(cx + 4, cy + 37, CW - 10, 3, got ? 1 : p / a.goal, got ? C.gold : C.steel);
       let label = got ? 'DONE' : `${p}/${a.goal}`;
@@ -55,7 +55,7 @@ export class AchievementsPanel {
     // ---- the card: a sub panel
     const a = ACHIEVEMENTS[this.sel], got = isDone(a.id), p = progress(a);
     const dx = gx + COLS * CW + 6, dy = gy, dw = DW - 4, dh = ROWS * CH - 2;
-    ui.img(plateArt(dw, dh), dx, dy);
+    ui.frame('dark', dx, dy, dw, dh);
     ui.img(medal(a.emblem, a.tier, !got), dx + 8, dy + 8, { alpha: got ? 1 : 0.55 });
     let ty = dy + 9;
     ty += ui.textBox(a.name.toUpperCase(), dx + 42, ty, dw - 48, { font: 'body', color: got ? C.gold : C.bone2, shadow: C.ink });
@@ -69,7 +69,7 @@ export class AchievementsPanel {
     const ry = dy + dh - 44;
     sectionHead(ui, 'REWARD', dx + 9, ry, dw - 18);
     if (c) ui.text(SLOT_NAME[c.slot], dx + dw - 9, ry + 12, { font: 'small', color: C.faint, shadow: null, align: 'right' });
-    ui.img(cellArt(26, got ? 'on' : 'off'), dx + 9, ry + 13);
+    cell(ui, dx + 9, ry + 13, 26, got ? 'on' : 'off');
     ui.img(cosmeticIcon(a.reward, 22), dx + 11, ry + 15, { w: 22, h: 22, alpha: got ? 1 : 0.4 });
     if (c) ui.textBox(c.name.toUpperCase(), dx + 42, ry + 24, dw - 48, { font: 'small', color: got ? C.bone : C.dim, shadow: null });
     // the bottom rail: browse keys and BACK

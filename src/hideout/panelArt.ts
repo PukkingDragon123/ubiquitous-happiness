@@ -149,3 +149,29 @@ export function emptyMailArt(): HTMLCanvasElement {
     return p.cv;
   });
 }
+
+// ------------------------------------------------------------------ v8b forged pieces, drawn straight into a PixelUI
+// (the kit's 3D-forged skins at the canvas density: see src/ui/obj/forge.ts)
+type UiF = { frame(kind: import('../ui/pixel/skins').SkinKind, x: number, y: number, w: number, h: number, alpha?: number): void; fill(x: number, y: number, w: number, h: number, col: string, alpha?: number): void };
+/** a recessed well */
+export function well(ui: UiF, x: number, y: number, w: number, h: number, a = 1) { ui.frame('inset', x, y, w, h, a); }
+/** an item slot; on = a sea-glass bezel, hover = a faint lift */
+export function cell(ui: UiF, x: number, y: number, s: number, state: 'off' | 'hover' | 'on' = 'off', a = 1) {
+  ui.frame(state === 'on' ? 'cardSel' : 'slot', x, y, s, s, a);
+  if (state === 'hover') ui.fill(x + 2, y + 2, s - 4, s - 4, '#ffffff', 0.06 * a);
+}
+/** a sub-panel card */
+export function plate(ui: UiF, x: number, y: number, w: number, h: number, a = 1) { ui.frame('dark', x, y, w, h, a); }
+/** a list row: sel = a raised ceramic tile in a sea-glass bezel, hover = a raised tile, off = an engraved groove under
+ *  it; `cubby` = an inset icon slot at its left */
+export function row(ui: UiF, x: number, y: number, w: number, h: number, state: RowState, cubby = 0, a = 1) {
+  if (state === 'sel') ui.frame('cardSel', x, y, w, h, a);
+  else if (state === 'hover') ui.frame('dark', x, y, w, h, a);
+  else { ui.fill(x + 2, y + h - 1, w - 4, 1, '#06090e', 0.7 * a); ui.fill(x + 2, y + h, w - 4, 1, '#2c384c', 0.7 * a); }
+  if (cubby > 0) ui.frame('slot', x + 3, y + Math.round((h - cubby) / 2), cubby, cubby, a);
+}
+/** a grid of cols x rows slots (pitch s) in a well */
+export function tray(ui: UiF, x: number, y: number, cols: number, rows: number, s: number) {
+  ui.frame('inset', x, y, cols * s + 4, rows * s + 4);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) ui.frame('slot', x + 3 + i * s, y + 3 + j * s, s - 2, s - 2);
+}

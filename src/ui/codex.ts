@@ -155,7 +155,6 @@ export class CodexBook {
     const list = codexEntries(this.tab);
     const cell = 46, cols = Math.max(1, Math.floor((half - 20) / cell));
     const gx = x + 12, gy = y + 40, rows = Math.ceil(list.length / cols), viewH = H - 52;
-    ui.frame('inset', gx - 3, gy - 3, cols * cell + 4, viewH + 6);
     this.scroll = Math.max(0, Math.min(Math.max(0, rows * cell - viewH), this.scroll - (ui.hover(gx, gy, cols * cell, viewH) ? ui.wheel * 0.3 : 0)));
     ui.clip(gx - 2, gy - 2, cols * cell + 2, viewH + 4);
     list.forEach((e, i) => {
@@ -165,8 +164,8 @@ export class CodexBook {
       const hov = ui.hover(cx, cy, cell - 4, cell - 4) && ui.hover(gx, gy, cols * cell, viewH);
       const selNow = this.sel === e.id;
       // a slot per entry: gold-bordered when it is the page you are reading
-      ui.fill(cx, cy, cell - 4, cell - 4, selNow || hov ? C.navy2 : C.navy);
-      ui.rect(cx, cy, cell - 4, cell - 4, selNow ? C.gold : hov ? C.slate : C.line);
+      ui.frame(selNow ? 'cardSel' : 'slot', cx, cy, cell - 4, cell - 4);
+      if (hov && !selNow) ui.fill(cx + 2, cy + 2, cell - 8, cell - 8, '#ffffff', 0.05);
       const pic = known ? photoOf(e, 84) : silhouetteOf(e, 84);
       if (pic) ui.img(pic, cx + 2, cy + 7, { w: cell - 8, h: Math.round((cell - 8) * 0.66) });
       else ui.text('?', cx + (cell - 4) / 2, cy + 14, { font: 'title', color: C.faint, shadow: null, align: 'center' });
@@ -177,7 +176,7 @@ export class CodexBook {
     // the selected page (right pane)
     const e = REG.get(this.sel);
     const px = x + half + 8, pw = W - half - 20;
-    ui.fill(px - 8, y + 14, 1, H - 26, C.line);
+    ui.fill(px - 9, y + 14, 1, H - 26, '#06090e', 0.7); ui.fill(px - 8, y + 14, 1, H - 26, '#3e4b62', 0.8);
     if (e) {
       const known = !!seen[e.id], s = seen[e.id];
       const pic = known ? photoOf(e, 180) : silhouetteOf(e, 180);
