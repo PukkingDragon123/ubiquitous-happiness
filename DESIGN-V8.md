@@ -37,14 +37,16 @@ phone landscape 844x390 for touch). Never commit; never kill processes you didn'
 ## v8b (2026-11-28): UI remake, new art style, Alagard text
 User: "the font is ugly, needs a big remake; the UI shouldn't feel like this saturated art style at all, a new art style;
 text uses Alagard (from my other project); polish the UI, not this AI-slop over-detailed kinda-3D look, not lazy and weird."
+CORRECTION (user, angry): they did NOT want minimal/flat. Read it as: "polish the UI; not this AI slop; DETAILED, kinda
+3D, not lazy and weird". The flat minimal navy kit from step 5 is WRONG.
 Meaning:
-- ALL UI text uses Alagard (public/fonts/alagard.ttf, already loaded as font-family 'Alagard'), pixel-crisp at integer
-  sizes (its native size is 16px-ish; use multiples). Drop Jersey/M6x11/M5x7/Tiny5/Goofy/Pixelify/Jacquard from UI.
-- A NEW, restrained art style replaces the saturated wood/kelp/algae/brass/porthole/rope kit: calm, desaturated
-  deep-sea palette (ink navy, slate, bone/parchment text, one warm accent e.g. muted gold, one danger red), clean flat
-  shapes, crisp 1px outlines, generous spacing and clear hierarchy. No fake-3D bevels, no busy texture, no glossy
-  highlights, no clutter of ornaments. Few, deliberate details (a thin rule, a small corner notch). Think a polished
-  indie game (Dredge / Hollow Knight / Inscryption menus), not a texture dump.
+- ALL UI text uses Alagard (kept from step 5: pixel-exact at 16px, whole-number scales).
+- A NEW art style that is NOT the old saturated look, but is rich, DETAILED and DIMENSIONAL (kinda 3D): layered frames
+  with real depth (bevels, inner/outer shadows, inset panels, rims, rivets/inlays), materials that read as crafted
+  (e.g. weathered dark metal + aged bone/ivory + deep-sea glass/enamel inlay, or carved driftwood stained dark), soft
+  lighting from one direction, drop shadows that seat panels on the scene, animated touches (glints, sway, pulse).
+  Harmonious, slightly desaturated palette with controlled accents; no garish saturation, no noise/dither, no random
+  ornament clutter. Polished premium indie quality (Hades / Dead Cells / Dredge level), coherent everywhere.
 - Consistent everywhere: title, settings, pause, HUD, run summary, death screen, home tags/panels, stash, mailbox,
   loadout, item cards, dialogue name lines, toasts, touch buttons, codex, shop, crossroads signs.
 | Step | Area | Owner |
