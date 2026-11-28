@@ -1,647 +1,151 @@
-// v6 home panel frames ("chunky + detailed"): every frame is painted at ONE texel per UI pixel with the kit's sea
-// toolbox (src/ui/pixel/decor.ts): heavy weathered planks (long wandering grain, knots the grain wraps round, seams
-// with lit end grain, split ends, nail heads with rust runs, worm holes, flakes of old paint), and the sea moved in --
-// barnacle clusters, limpets, a snail, a sea star, coralline crust, algae films with their diatom fringe, a kelp
-// holdfast with its frond climbing the side, sea-grass tufts. Every detail is placed by rule (never noise):
+// Home panel art (v8b deep-ink kit, src/ui/pixel/skins.ts): every piece is a flat 1-texel-per-UI-px canvas, the
+// same calm look as the HUD and the title: navy faces, 1 px slate borders, wells for content, gold only where
+// something is chosen. The exports keep their v6 names so the panels that draw with them did not have to change
+// shape:
 //
-//   panelArt('chest', w, h)      the SEA CHEST: ruddy ship timber, rusty iron straps and corner plates, a dark NORI
-//                                lining (pressed seaweed: fibres, flecks)
-//   panelArt('bench', w, h)      the WORKBENCH: thick grey driftwood lashed with rope, tool nicks, a stitched leather
-//                                work mat with old cut marks
-//   panelArt('wardrobe', w, h)   the WARDROBE: sea-worn grey-green driftwood, sea-glass knobs in the top rail, brass corners,
-//                                a deep teal kelp-paper back
-//   panelArt('trophy', w, h)     the TROPHY CASE: driftwood with brass corners round a navy back strung with net
-//   PANEL_IN[kind]               the inner content rect insets [l, t, r, b]
-//   wellArt(w, h, tone)          a recessed dark-water well (the kit's inset) or a dark driftwood board (light text)
-// Animated life (bubbles, swaying kelp, caustics) is drawn per frame on top by the panels (seaFx.ts).
-import { Px, R, hx, hash, stamp, SPR, algae, coralline, kelpBlade, bladePath, holdfast, grass, nail, rivet, planks as band, wraps, type C } from '../ui/pixel/decor';
-import { skin } from '../ui/pixel/skins';
+//   panelArt(kind, w, h)          a home panel (the kit's main panel: navy face, slate border, gold corner notches);
+//                                 the panel title is set into the top border by the caller (ui.panel legend style)
+//   PANEL_IN[kind]                the inner content rect insets [l, t, r, b]
+//   wellArt(w, h)                 a recessed well (the kit's inset) for lists and detail panes
+//   rowArt(w, h, state)           a list row: flat; hover lifts it, sel adds a gold border and a 2 px gold bar
+//   cellArt(s, state)             an item slot (on: gold border)
+//   drawerArt / cushionArt / plateArt / windowArt / trayArt          wells, slots and grids in the same style
+//   emptyChestArt / emptyMailArt  two small flat pictograms for empty states; pearlArt(s) the pearl currency icon
+import { skin, C } from '../ui/pixel/skins';
 
 export type PanelKind = 'chest' | 'bench' | 'wardrobe' | 'trophy' | 'post';
-export const PANEL_IN: Record<PanelKind, [number, number, number, number]> = { chest: [12, 22, 12, 12], bench: [12, 22, 12, 12], wardrobe: [11, 22, 11, 11], trophy: [12, 22, 12, 12], post: [14, 24, 14, 14] };
+export const PANEL_IN: Record<PanelKind, [number, number, number, number]> = { chest: [12, 18, 12, 12], bench: [12, 18, 12, 12], wardrobe: [11, 18, 11, 11], trophy: [12, 18, 12, 12], post: [12, 18, 12, 12] };
 
 const cache = new Map<string, HTMLCanvasElement>();
-function cached(key: string, f: () => HTMLCanvasElement) { let c = cache.get(key); if (!c) { c = f(); cache.set(key, c); if (cache.size > 60) { const k = cache.keys().next().value; if (k !== undefined) cache.delete(k); } } return c; }
-const ramp = (...s: string[]) => s.map(hx);
+function cached(key: string, f: () => HTMLCanvasElement) {
+  let c = cache.get(key);
+  if (!c) { c = f(); cache.set(key, c); if (cache.size > 300) { const k = cache.keys().next().value; if (k !== undefined) cache.delete(k); } }
+  return c;
+}
+/** a flat canvas painter (rects only) */
+class Flat {
+  cv: HTMLCanvasElement; x: CanvasRenderingContext2D;
+  constructor(public w: number, public h: number) { this.cv = document.createElement('canvas'); this.cv.width = w; this.cv.height = h; this.x = this.cv.getContext('2d')!; }
+  rect(x: number, y: number, w: number, h: number, c: string, a = 1) { if (w <= 0 || h <= 0) return; this.x.globalAlpha = a; this.x.fillStyle = c; this.x.fillRect(x, y, w, h); this.x.globalAlpha = 1; }
+  border(x: number, y: number, w: number, h: number, c: string) { this.rect(x, y, w, 1, c); this.rect(x, y + h - 1, w, 1, c); this.rect(x, y, 1, h, c); this.rect(x + w - 1, y, 1, h, c); }
+  round() { for (const [x, y] of [[0, 0], [this.w - 1, 0], [0, this.h - 1], [this.w - 1, this.h - 1]]) this.x.clearRect(x, y, 1, 1); return this; }
+}
+/** a flat box canvas */
+function box(w: number, h: number, face: string, border: string) { const p = new Flat(w, h); p.rect(0, 0, w, h, face); p.border(0, 0, w, h, border); return p.round().cv; }
 
-/** 9-tone wood ramps per panel, dark -> light (hue-shifted: cool shadows, warm lights) */
-const TIMBER = ramp('#170a0a', '#2c1210', '#46201a', '#642e22', '#82402a', '#9e5634', '#b87044', '#d08e5a', '#e8b47e');
-const DRIFT = ramp('#14100e', '#2a221c', '#40352a', '#584a3a', '#72624c', '#8c7a60', '#a69476', '#c0b090', '#dcceb0');
-/** v7 the SEA POST (mailbox): driftwood under sea-worn teal post-office paint */
-const POSTW = ramp('#06181c', '#0b262a', '#11363a', '#184848', '#205a58', '#2c6e68', '#3e847a', '#5a9c8c', '#80b8a4');
-/** sea-worn grey-green driftwood (the wardrobe: light text sits on its top rail) */
-const PALE = ramp('#101412', '#1e2622', '#2e3832', '#3e4a42', '#505c52', '#647064', '#7a8676', '#94a08e', '#b4bea8');
-const INK = R.ink;
-
-/** an L-shaped corner plate (iron or brass) over a corner, riveted */
-function cornerPlate(px: Px, x: number, y: number, fx: 1 | -1, fy: 1 | -1, metal: C[], L = 11, Wd = 5) {
-  for (let j = 0; j < L; j++) for (let i = 0; i < L; i++) {
-    if (i >= Wd && j >= Wd) continue;
-    const X = x + i * fx, Y = y + j * fy;
-    const edge = i === 0 || j === 0 || (i === L - 1) || (j === L - 1) || (i === Wd - 1 && j >= Wd) || (j === Wd - 1 && i >= Wd);
-    const litE = (fy > 0 && j === 0) || (fx > 0 && i === 0);
-    px.set(X, Y, edge ? (litE ? metal[4] : metal[1]) : metal[(i + j) % 5 === 0 ? 2 : 3]);
-  }
-  for (const [i, j] of [[2, 2], [L - 3, 2], [2, L - 3]]) { const X = x + i * fx - 1, Y = y + j * fy - 1; rivet(px, X, Y, metal.length >= 8 ? metal : R.brass); }
+/** a home panel: the kit's main panel at w x h */
+export function panelArt(_kind: PanelKind, w: number, h: number): HTMLCanvasElement {
+  return skin('wood', Math.max(40, Math.round(w)), Math.max(40, Math.round(h)));
 }
 
-/** a dark lining sheet into the inner rect: nori (pressed seaweed), wardrobe kelp paper, or the leather mat */
-function lining(px: Px, x: number, y: number, w: number, h: number, kind: 'nori' | 'teal' | 'leather') {
-  const N = kind === 'nori' ? ramp('#070d0a', '#0d1612', '#132019', '#1a2b21', '#24392b', '#30483a')
-    : kind === 'teal' ? ramp('#050f0e', '#0a1a18', '#0f2522', '#16312d', '#20403a', '#2e544b')
-      : ramp('#0e1012', '#15181b', '#1c2024', '#252a2f', '#30363c', '#4a5258');
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) px.set(x + i, y + j, N[2]);
-  if (kind !== 'leather') {
-    // fibres: long strands, wavering, broken unevenly; a few paler; seaweed flecks
-    for (let j = 0, yy = 3; yy < h - 1; j++, yy += 4 + Math.round(hash(j, 5) * 3)) {
-      let xx = Math.round(hash(j, 3) * 20) - 12;
-      const ph = hash(j, 9) * 20;
-      while (xx < w) {
-        const L = 8 + Math.round(hash(j, xx + 40) * 22), gap = 5 + Math.round(hash(xx + 7, j) * 12);
-        const c = hash(j * 3, xx) > 0.8 ? N[4] : N[3];
-        for (let i = 0; i < L; i++) { const X = xx + i; if (X >= 0 && X < w) { const Y = yy + Math.round(Math.sin((X + ph) / 10) * 1.1); if (Y >= 0 && Y < h) px.set(x + X, y + Y, c); } }
-        xx += L + gap;
-      }
-    }
-    for (let j = 0, yy = 6; yy < h - 3; j++, yy += 13) for (let i = 0, xx = 8 + (j % 2) * 14; xx < w - 3; i++, xx += 29) {
-      if (hash(i + 40, j + 40) > 0.6) continue;
-      px.set(x + xx, y + yy, N[5]); px.set(x + xx + 1, y + yy, N[4]); px.set(x + xx + 1, y + yy - 1, N[4]); px.set(x + xx + 2, y + yy - 1, N[1]);
-    }
-  } else {
-    // the leather mat: a stitched border 3 px in, a few old knife cuts
-    for (let i = 4; i < w - 4; i++) if (i % 4 < 2) { px.set(x + i, y + 3, N[5]); px.set(x + i, y + h - 4, N[5]); }
-    for (let j = 4; j < h - 4; j++) if (j % 4 < 2) { px.set(x + 3, y + j, N[5]); px.set(x + w - 4, y + j, N[5]); }
-    for (let k = 0; k < 5; k++) {
-      const cx = x + 12 + Math.round(hash(k, 1) * (w - 30)), cy = y + 10 + Math.round(hash(k, 2) * (h - 24)), L = 4 + Math.round(hash(k, 3) * 5), dir = hash(k, 4) > 0.5 ? 1 : -1;
-      for (let i = 0; i < L; i++) { px.set(cx + i, cy + Math.round(i * 0.5) * dir, N[0]); px.set(cx + i, cy + Math.round(i * 0.5) * dir + 1, N[4]); }
-    }
-  }
-  // the frame's cast shadow over the top and the left
-  for (let i = 0; i < w; i++) { px.shade(x + i, y, 0.45); px.shade(x + i, y + 1, 0.7); }
-  for (let j = 0; j < h; j++) { px.shade(x, y + j, 0.55); px.shade(x + 1, y + j, 0.8); }
-}
-
-/** the frame of a panel of a kind, exactly w x h */
-export function panelArt(kind: PanelKind, w: number, h: number): HTMLCanvasElement {
-  w = Math.max(40, Math.round(w)); h = Math.max(40, Math.round(h));
-  return cached(`${kind}|${w}|${h}`, () => {
-    const px = new Px(w, h);
-    const [il, it, ir, ib] = PANEL_IN[kind];
-    const ix = il, iy = it, iw = w - il - ir, ih = h - it - ib;
-    const W = kind === 'chest' ? TIMBER : kind === 'wardrobe' ? PALE : kind === 'post' ? POSTW : DRIFT;
-    const seed = kind.length * 7 + (kind === 'trophy' ? 3 : 0);
-    // the bands: the top rail and bottom rail run the full width; the sides between them
-    const sTop = band(px, 1, 1, w - 2, it - 3, true, W, seed, { lit: 1, flakes: kind !== 'chest' });
-    const sBot = band(px, 1, h - ib + 1, w - 2, ib - 2, true, W, seed + 3, { lit: -1 });
-    band(px, 1, it - 2, h - it - ib + 3, il - 1, false, W, seed + 5, { lit: 0 });
-    band(px, w - ir, it - 2, h - it - ib + 3, ir - 1, false, W, seed + 9, { lit: -1 });
-    // the outline, the outer lit edge / dark edge, a dark seam where the sides meet the rails
-    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-      const dx = Math.min(x, w - 1 - x), dy = Math.min(y, h - 1 - y);
-      if ((dx === 0 && dy < 2) || (dy === 0 && dx < 2)) continue;
-      if (dx === 0 || dy === 0 || (dx === 1 && dy === 1)) { px.set(x, y, INK); continue; }
-    }
-    for (let x = 2; x < w - 2; x++) { px.set(x, 1, W[8]); px.set(x, h - 2, W[1]); }
-    for (let y = 2; y < h - 2; y++) { px.set(1, y, W[7]); px.set(w - 2, y, W[2]); }
-    for (let x = 2; x < il; x++) px.shade(x, it - 3, 0.5);
-    for (let x = w - ir; x < w - 2; x++) px.shade(x, it - 3, 0.5);
-    // the inner well, sunk into the frame: a dark lip on top / left, a lit lip below / right
-    for (let x = ix - 2; x < ix + iw + 2; x++) { px.set(x, iy - 2, INK); px.set(x, iy + ih + 1, W[6]); }
-    for (let y = iy - 2; y < iy + ih + 2; y++) { px.set(ix - 2, y, INK); px.set(ix + iw + 1, y, W[5]); }
-    for (let x = ix - 1; x < ix + iw + 1; x++) { px.set(x, iy - 1, INK); px.set(x, iy + ih, INK); }
-    for (let y = iy - 1; y < iy + ih + 1; y++) { px.set(ix - 1, y, INK); px.set(ix + iw, y, INK); }
-    if (kind === 'chest') lining(px, ix, iy, iw, ih, 'nori');
-    else if (kind === 'bench') lining(px, ix, iy, iw, ih, 'leather');
-    else if (kind === 'wardrobe' || kind === 'post') lining(px, ix, iy, iw, ih, 'teal');
-    else {
-      // a navy back strung with fishing net: diagonal cords knotted where they cross
-      const NV = ramp('#070b1c', '#0d1430', '#141c3c', '#1c2650', '#2a3664', '#3e4c84');
-      for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
-        const P = 16, a = (x + y) % P, b = (x - y + 8 * P) % P;
-        px.set(ix + x, iy + y, a === 0 || b === 0 ? NV[3] : a === 1 || b === 15 ? NV[1] : NV[2]);
-      }
-      for (let y = 8; y < ih; y += 8) for (let x = (y / 8) % 2 ? 8 : 0; x < iw; x += 16) if (x > 0 && x < iw - 1) { px.set(ix + x - 1, iy + y - 1, NV[5]); px.set(ix + x, iy + y - 1, NV[4]); px.set(ix + x - 1, iy + y, NV[4]); px.set(ix + x, iy + y, NV[1]); }
-      for (let i = 0; i < iw; i++) { px.shade(ix + i, iy, 0.45); px.shade(ix + i, iy + 1, 0.7); }
-    }
-    // nails at the plank ends of the rails (pairs on the double top rail), with rust runs
-    for (const s of sTop) for (const a of s.at) { nail(px, 1 + a + 2, 1 + s.b + 2, 2); nail(px, 1 + a - 4, 1 + s.b + 2, 2); }
-    for (const s of sBot) for (const a of s.at) nail(px, 1 + a + 2, h - ib + 3, 2);
-    for (const y of [it + 8, h - ib - 10]) { nail(px, 4, y, 2); nail(px, w - ir + 4, y, 2); }
-    // ---- fittings per kind
-    if (kind === 'chest') {
-      // rusty iron straps over the rails, riveted; iron corner plates
-      const I = ramp('#140c0a', '#2e1a14', '#4a2a1e', '#6a3c28', '#8e5034', '#ac6c48', '#c88a60', '#e0aa80');
-      for (const sx of [Math.round(w * 0.25), Math.round(w * 0.75)]) for (const [sy, sh] of [[1, it - 3], [h - ib + 1, ib - 2]]) {
-        for (let y = sy; y < sy + sh; y++) for (let x = sx - 4; x <= sx + 4; x++) {
-          const e = x === sx - 4 || x === sx + 4;
-          px.set(x, y, e ? INK : x === sx - 3 ? I[5] : x === sx + 3 ? I[1] : (y + x) % 7 === 0 ? I[2] : I[3]);
-        }
-        rivet(px, sx - 1, sy + 2, I); rivet(px, sx - 1, sy + sh - 5, I);
-      }
-      cornerPlate(px, 1, 1, 1, 1, I); cornerPlate(px, w - 2, 1, -1, 1, I); cornerPlate(px, 1, h - 2, 1, -1, I); cornerPlate(px, w - 2, h - 2, -1, -1, I);
-    } else if (kind === 'post') {
-      // the AIRMAIL border: red / cream / navy chevrons painted round the well, brass corners, rope lashing the sides
-      const RD = hx('#c03a2a'), RDd = hx('#7e1e18'), CR = hx('#efe4c6'), NV2 = hx('#22346c'), NVd = hx('#121c40');
-      for (let x = ix - 5; x < ix + iw + 5; x++) for (let y = iy - 5; y < iy + ih + 5; y++) {
-        const ring = x < ix - 2 || x >= ix + iw + 2 || y < iy - 2 || y >= iy + ih + 2;
-        if (!ring) continue;
-        const k = ((x + y) % 18 + 18) % 18;
-        const c = k < 5 ? RD : k < 9 ? CR : k < 14 ? NV2 : CR;
-        const edge = x === ix - 5 || y === iy - 5 || x === ix + iw + 4 || y === iy + ih + 4;
-        px.set(x, y, edge ? INK : (y === iy - 4 || x === ix - 4) ? (c === RD ? hx('#e06a50') : c === NV2 ? hx('#3a52a0') : hx('#fffaf0')) : y >= iy + ih + 2 || x >= ix + iw + 2 ? (c === RD ? RDd : c === NV2 ? NVd : hx('#c8bc9e')) : c);
-      }
-      for (const [cx, cy, fx, fy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]] as const) cornerPlate(px, cx, cy, fx, fy, R.brass);
-      wraps(px, 1, Math.round(h * 0.42), il - 1, false); wraps(px, w - ir, Math.round(h * 0.42), ir - 1, false);
-      // the brass post-horn badge on the bottom rail
-      const HN = ['..bbbb.....', '.b....b..BB', 'b......bBBB', 'b......bBBB', '.b....b..BB', '..bbbb.....'];
-      const hxp = Math.round(w / 2) - 6, hyp = h - ib + 2;
-      HN.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.') px.set(hxp + i, hyp + j, row[i] === 'b' ? R.brass[6] : R.brass[4]); });
-    } else if (kind === 'bench') {
-      // rope wraps lashing the rails to the sides; tool nicks along the bottom rail
-      wraps(px, il + 2, 1, it - 3, true); wraps(px, w - ir - 11, 1, it - 3, true);
-      wraps(px, 1, h - ib - 12, il - 1, false); wraps(px, w - ir, h - ib - 12, ir - 1, false);
-      for (let i = 0; i < 6; i++) { const nx = Math.round(w * (0.14 + i * 0.13)), ny = h - ib + 4; px.set(nx, ny, W[1]); px.set(nx + 1, ny, W[1]); px.set(nx + 1, ny + 1, W[7]); px.set(nx + 2, ny + 1, W[7]); }
-    } else {
-      // brass corner plates
-      for (const [cx, cy, fx, fy] of [[1, 1, 1, 1], [w - 2, 1, -1, 1], [1, h - 2, 1, -1], [w - 2, h - 2, -1, -1]] as const) cornerPlate(px, cx, cy, fx, fy, R.brass);
-      if (kind === 'wardrobe') {
-        // sea-glass knobs set into the top rail
-        for (const [gx, gi] of [[0.3, 0], [0.5, 1], [0.7, 2]] as const) {
-          const G = [R.glass, ramp('#16305a', '#2a5a9a', '#5a92d6', '#a8d4ff', '#f0faff'), ramp('#2a4a16', '#4a7a2a', '#86b85a', '#c4e8a0', '#f4ffe4')][gi];
-          const x = Math.round(w * gx) - 3, y = 6;
-          for (let j = 0; j < 6; j++) for (let i = 0; i < 7; i++) {
-            const e = ((i - 3) / 3.5) ** 2 + ((j - 2.5) / 3) ** 2; if (e > 1) continue;
-            px.set(x + i, y + j, e > 0.7 ? G[0] : i + j < 4 ? G[3] : i + j > 8 ? G[1] : G[2]);
-          }
-          px.set(x + 2, y + 1, G[4]); px.shade(x + 7, y + 4, 0.6); px.shade(x + 6, y + 6, 0.6);
-        }
-      }
-    }
-    // ---- the sea moved in
-    const onFrame = (X: number, Y: number) => X >= 1 && Y >= 1 && X < w - 1 && Y < h - 1 && !(X >= ix - 2 && X < ix + iw + 2 && Y >= iy - 2 && Y < iy + ih + 2);
-    const nearFrame = (X: number, Y: number) => X >= 1 && Y >= 1 && X < w - 1 && Y < h - 1 && !(X >= ix + 2 && X < ix + iw - 2 && Y >= iy + 2 && Y < iy + ih - 2);
-    algae(px, w * 0.38, h - ib / 2, 9, 3.2, seed, { inside: nearFrame });
-    algae(px, w * 0.52, h - ib / 2 - 1, 6, 2.8, seed + 2.3, { inside: nearFrame });
-    algae(px, w * 0.86, h - ib / 2, 7, 3, seed + 1.1, { inside: nearFrame });
-    algae(px, w - ir / 2, h * 0.68, 3.6, 10, seed + 4.2, { inside: nearFrame, brown: true });
-    algae(px, il / 2, h * 0.42, 3.4, 8, seed + 0.7, { inside: nearFrame, brown: true });
-    coralline(px, 20, h - ib / 2, 7, 3, seed + 3, { inside: onFrame });
-    coralline(px, w - ir / 2 + 1, h - ib - 22, 3, 5, seed + 8, { inside: onFrame });
-    // barnacles crusted on the top rail past the left corner and on the bottom rail at the right
-    for (const [sp, x, y] of [[SPR.barnacleL, 18, 4], [SPR.barnacleM, 23, 6], [SPR.barnacleS, 16, 8], [SPR.barnacleM, 27, 3], [SPR.barnacleL, w - 34, h - ib + 4], [SPR.barnacleS, w - 28, h - ib + 6], [SPR.barnacleM, 4, it + 22], [SPR.barnacleS, 5, it + 27]] as const) stamp(px, sp, x, y, { onlyOn: true });
-    stamp(px, SPR.limpet, Math.round(w * 0.56), h - ib + 3, { onlyOn: true });
-    stamp(px, SPR.limpet, w - ir + 2, Math.round(h * 0.4), { onlyOn: true });
-    stamp(px, SPR.star, Math.round(w * 0.2), h - ib + 2, { onlyOn: true });
-    stamp(px, SPR.snail, Math.round(w * 0.7), h - ib + 2, { onlyOn: true });
-    stamp(px, SPR.scallop, Math.round(w * 0.9), h - ib + 3, { onlyOn: true });
-    grass(px, Math.round(w * 0.31), h - ib + 2, 4, seed, 8, { inside: (X, Y) => X > 0 && Y > 0 && X < w - 1 && Y < h - 1 });
-    grass(px, Math.round(w * 0.79), h - ib + 2, 3, seed + 4, 6, { inside: (X, Y) => X > 0 && Y > 0 && X < w - 1 && Y < h - 1 });
-    // a kelp holdfast clamped low on the left side, its frond climbing the side
-    const hy = h - ib - 6;
-    kelpBlade(px, bladePath(5, hy - 1, 0, -1, Math.min(48, Math.round(h * 0.4)), 1.6, seed), 4, { inside: (X, Y) => X > 0 && Y > 0 && X < il + 1 });
-    kelpBlade(px, bladePath(8, hy - 1, 0.3, -1, 16, 1, seed + 2), 3, { inside: (X, Y) => X > 0 && Y > 0 && X < il + 1 });
-    holdfast(px, 5, hy, 1);
-    return px.done();
-  });
-}
-
-/** a recessed well (the kit's dark-water inset), or a dark driftwood board of three planks (light text) */
+/** a recessed well (the kit's inset); 'plank' (v6: a dark board for light text) is now a sub panel */
 export function wellArt(w: number, h: number, tone: 'dark' | 'plank' = 'dark'): HTMLCanvasElement {
   w = Math.max(8, Math.round(w)); h = Math.max(8, Math.round(h));
-  if (tone === 'dark') return skin('inset', w, h);
-  return cached(`well|${tone}|${w}|${h}`, () => {
-    const px = new Px(w, h);
-    const D = ramp('#0c0a08', '#1a1612', '#28221c', '#352d25', '#433a2f', '#53483a', '#655847', '#7c6c58', '#958470');
-    const ph = Math.ceil((h - 2) / 3);
-    for (let i = 0; i < 3; i++) band(px, 1, 1 + i * ph, w - 2, Math.min(ph, h - 2 - i * ph), true, D, 31 + i * 5, { lit: -1 });
-    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-      const dx = Math.min(x, w - 1 - x), dy = Math.min(y, h - 1 - y);
-      if ((dx === 0 && dy < 2) || (dy === 0 && dx < 2)) { px.set(x, y, INK, 0); continue; }
-      if (dx === 0 || dy === 0 || (dx === 1 && dy === 1)) px.set(x, y, INK);
-    }
-    for (let x = 2; x < w - 2; x++) { px.set(x, 1, D[7]); px.set(x, h - 2, D[1]); }
-    for (const x of [6, w - 8]) for (let i = 0; i < 3; i++) if (h > 20) nail(px, x, 1 + i * ph + Math.floor(ph / 2) - 1, 1);
-    if (w > 60 && h > 24) {
-      stamp(px, SPR.barnacleM, w - 14, h - 6, { onlyOn: true }); stamp(px, SPR.barnacleS, w - 18, h - 5, { onlyOn: true });
-      algae(px, 14, h - 3, 7, 2.2, 1.3, { inside: (X, Y) => X > 0 && Y > 0 && X < w - 1 && Y < h - 1 });
-      coralline(px, w * 0.62, h - 3, 4, 1.6, 6, { inside: (X, Y) => X > 0 && Y > 0 && X < w - 1 && Y < h - 1 });
-    }
-    return px.done();
-  });
-}
-
-
-// ------------------------------------------------------------------ interiors (v6): rows, cells, drawers, plates
-// The pieces the home panels draw their content on, painted 1x with the same hand-placed detail as the frames:
-//
-//   rowArt(w, h, state, seed, cubby)   a list row: a dark driftwood plank strip (light text on it) with a recessed
-//                                      icon cubby at its left; hover: a paler plank and a teal edge; sel: brass-trimmed
-//   cellArt(s, state, gem?)            an item cubby: a wooden rim (shadowed top / left, lit bottom / right), dark water,
-//                                      a glass glint, a sand bed; on: a brass rim; gem: a sea-glass gem in that colour
-//   drawerArt(w, h)                    a wardrobe drawer: a grey-green plank rim, a teal kelp-paper bed, a lit front lip
-//   cushionArt(w, h, state)            a velvet medal cushion with a brass hook (trophy case); on: brass-framed
-//   plateArt(w, h)                     a brass-bezelled navy velvet card (the trophy case's detail card)
-//   windowArt(s)                       the item display window: a riveted, engraved brass bezel round dark water with
-//                                      light shafts and a sand mound to stand a model on
-//   emptyChestArt()                    the empty sea chest scene (the stash's empty state)
-const small = new Map<string, HTMLCanvasElement>();
-function cachedS(key: string, f: () => HTMLCanvasElement) { let c = small.get(key); if (!c) { c = f(); small.set(key, c); if (small.size > 400) { const k = small.keys().next().value; if (k !== undefined) small.delete(k); } } return c; }
-const WA = R.water, SA = R.sand, BRS = R.brass, WD = R.wood;
-/** a rounded-rect ring index (2 px rounded corners), -1 outside */
-function rr(x: number, y: number, w: number, h: number, r = 2) {
-  const dx = Math.min(x, w - 1 - x), dy = Math.min(y, h - 1 - y);
-  if (r >= 2 && ((dx === 0 && dy < 2) || (dy === 0 && dx < 2))) return -1;
-  if (r >= 1 && dx === 0 && dy === 0) return -1;
-  if (r >= 2 && dx === 1 && dy === 1) return 0;
-  return Math.min(dx, dy);
-}
-/** a dark-water cubby into px at (x, y) s x s: ink rim, a wooden lip (shaded top / left, lit bottom / right), water, glint, sand */
-function cubby(px: Px, x: number, y: number, s: number, o: { brass?: boolean; lit?: number } = {}) {
-  const lit = o.lit ?? 0, rim = o.brass ? BRS : WD;
-  const rimW = s >= 20 ? 2 : 1;
-  for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
-    const r = rr(i, j, s, s, s > 12 ? 2 : 1);
-    if (r < 0) continue;
-    const X = x + i, Y = y + j;
-    if (r === 0) { px.set(X, Y, INK); continue; }
-    if (r <= rimW) {
-      const tl = j < s / 2 ? i <= j || i < s - 1 - j : i < s - 1 - j;
-      const g = ((i * 3 + j * 5) % 11) < 2;
-      px.set(X, Y, rim[Math.max(0, Math.min(rim.length - 1, (tl ? (r === 1 ? 2 : 3) : r === 1 ? 6 : 5) + lit - (g ? 1 : 0)))]);
-      continue;
-    }
-    const fj = j - rimW - 1, fh = s - 2 * rimW - 2;
-    let c: C = WA[Math.min(9, (fj < fh * 0.45 ? 5 : 4) + lit)];
-    if (r === rimW + 1 && (j <= rimW + 1 || i <= rimW + 1)) c = WA[1];
-    else if (r === rimW + 2 && (j <= rimW + 2 || i <= rimW + 2)) c = WA[2 + lit];
-    if (s >= 14 && i + j === rimW * 2 + 6 && j < s * 0.55) c = WA[7 + Math.min(1, lit)];
-    if (s >= 14 && i + j === rimW * 2 + 8 && j < s * 0.45) c = WA[6 + Math.min(1, lit)];
-    if (s >= 18 && j >= s - rimW - 4) {
-      const cr = s - rimW - 4 + (Math.sin(i * 0.8 + s) > 0.2 ? 1 : 0);
-      if (j === cr) c = SA[3]; else if (j > cr) c = (i * 2 + j) % 7 === 0 ? SA[1] : SA[2];
-    }
-    if (o.brass) c = [Math.min(255, c[0] + 22), Math.min(255, c[1] + 12), c[2]];
-    px.set(X, Y, c);
-  }
+  return skin(tone === 'dark' ? 'inset' : 'dark', w, h);
 }
 
 export type RowState = 'off' | 'hover' | 'sel';
-/** a list row (see above); `cubby` = the icon cubby's size (0: none), placed 2 px in from the left / top */
-export function rowArt(w: number, h: number, state: RowState, seed = 0, cubbyS = 0): HTMLCanvasElement {
+/** a list row; `cubbyS` = an icon slot's size (0: none), placed 2 px in from the left / top */
+export function rowArt(w: number, h: number, state: RowState, _seed = 0, cubbyS = 0): HTMLCanvasElement {
   w = Math.max(16, Math.round(w)); h = Math.max(8, Math.round(h));
-  const sd = ((seed % 4) + 4) % 4;
-  return cachedS(`row|${w}|${h}|${state}|${sd}|${cubbyS}`, () => {
-    const px = new Px(w, h);
-    const D = state === 'sel' ? ramp('#120a08', '#26140c', '#3a2210', '#4e3016', '#62401e', '#78522a', '#906838', '#ac844c', '#c8a468')
-      : state === 'hover' ? ramp('#0e1414', '#1a2422', '#26332f', '#33433d', '#41534b', '#52645a', '#66786c', '#7e9282', '#9cae9c')
-        : ramp('#0c0a08', '#18140f', '#241e17', '#30281f', '#3c3328', '#4a3f32', '#5a4d3d', '#6e5f4b', '#88765e');
-    band(px, 1, 1, w - 2, h - 2, true, D, 40 + sd * 7, { lit: -1 });
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const r = rr(x, y, w, h);
-      if (r < 0) { px.set(x, y, INK, 0); continue; }
-      if (r === 0) { px.set(x, y, INK); continue; }
-      if (r === 1) {
-        const tl = y === 1 || x === 1;
-        if (state === 'sel') px.set(x, y, BRS[tl ? 6 : 2]);
-        else if (state === 'hover') px.set(x, y, tl ? R.paint[6] : R.paint[2]);
-        else px.set(x, y, D[tl ? 7 : 1]);
-      }
-    }
-    if (cubbyS > 0) cubby(px, 2, 2, cubbyS, { brass: state === 'sel', lit: state === 'hover' ? 1 : 0 });
-    // a nail at the right end; a little sea life on some rows
-    nail(px, w - 6, Math.floor(h / 2) - 1, 1);
-    if (sd === 1) stamp(px, SPR.barnacleS, w - 12, h - 4, { onlyOn: true });
-    if (sd === 3) algae(px, w * 0.62, h - 2, 6, 1.6, 2 + seed, { inside: (X, Y) => rr(X, Y, w, h) >= 1 });
-    return px.done();
+  return cached(`row|${w}|${h}|${state}|${cubbyS}`, () => {
+    const p = new Flat(w, h);
+    if (state === 'sel') { p.rect(0, 0, w, h, C.navy2); p.border(0, 0, w, h, C.gold0); p.rect(0, 1, 2, h - 2, C.gold); }
+    else if (state === 'hover') { p.rect(0, 0, w, h, '#172031'); p.border(0, 0, w, h, C.line2); }
+    else { p.rect(0, h - 1, w, 1, C.line, 0.8); }
+    if (cubbyS > 0) { const y = Math.round((h - cubbyS) / 2); p.rect(3, y, cubbyS, cubbyS, C.well); p.border(3, y, cubbyS, cubbyS, state === 'sel' ? C.gold0 : C.line); }
+    return p.round().cv;
   });
 }
 
-/** a wooden (or brass) cubby for one item, s px square; state hover lightens it; gem: a rarity gem in the corner */
+/** an item slot, s px square; hover lifts its border; on: gold border */
 export function cellArt(s: number, state: 'off' | 'hover' | 'on' = 'off', gem?: string): HTMLCanvasElement {
   s = Math.max(8, Math.round(s));
-  return cachedS(`cell|${s}|${state}|${gem ?? ''}`, () => {
-    const px = new Px(s, s);
-    cubby(px, 0, 0, s, { brass: state === 'on', lit: state === 'hover' ? 1 : 0 });
-    if (gem) {
-      const g = hx(gem), dk: C = [g[0] * 0.45, g[1] * 0.45, g[2] * 0.5].map(Math.round) as C, lt: C = g.map((v) => Math.round(v + (255 - v) * 0.6)) as C;
-      const gx = s - 6, gy = s - 6;
-      for (const [i, j, c] of [[1, 0, INK], [2, 0, INK], [0, 1, INK], [3, 1, INK], [0, 2, INK], [3, 2, INK], [1, 3, INK], [2, 3, INK], [1, 1, lt], [2, 1, g], [1, 2, g], [2, 2, dk]] as [number, number, C][]) px.set(gx + i, gy + j, c);
-      px.shade(gx + 4, gy + 2, 0.6); px.shade(gx + 3, gy + 3, 0.6); px.shade(gx + 2, gy + 4, 0.6);
-    }
-    return px.done();
+  return cached(`cell|${s}|${state}|${gem ?? ''}`, () => {
+    const p = new Flat(s, s);
+    p.rect(0, 0, s, s, state === 'hover' ? '#121a27' : C.well);
+    p.border(0, 0, s, s, state === 'on' ? C.gold : state === 'hover' ? C.slate : C.line);
+    if (gem) { p.rect(s - 7, s - 7, 5, 5, C.ink); p.rect(s - 6, s - 6, 3, 3, gem); }
+    return p.round().cv;
   });
 }
 
-/** a wardrobe drawer, w x h: a grey-green plank rim, a teal kelp-paper bed with fibres, a lit front lip, brass brackets */
+/** a drawer (a wardrobe row's bed): a well with a 1 px border */
 export function drawerArt(w: number, h: number): HTMLCanvasElement {
-  w = Math.max(20, Math.round(w)); h = Math.max(12, Math.round(h));
-  return cachedS(`drawer|${w}|${h}`, () => {
-    const px = new Px(w, h);
-    lining(px, 2, 2, w - 4, h - 6, 'teal');
-    band(px, 1, h - 4, w - 2, 3, true, PALE, 77, { lit: 1 });
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const r = rr(x, y, w, h);
-      if (r < 0) continue;
-      if (r === 0) { px.set(x, y, INK); continue; }
-      if (r === 1 && y < h - 4) px.set(x, y, y === 1 || x === 1 ? PALE[2] : PALE[5]);
-    }
-    for (let x = 2; x < w - 2; x++) px.set(x, h - 5, INK);
-    // brass corner brackets at the top
-    for (const [bx, fx] of [[2, 1], [w - 3, -1]] as const) {
-      for (let i = 0; i < 4; i++) { px.set(bx + i * fx, 2, BRS[i === 0 ? 6 : 4]); px.set(bx, 2 + i, BRS[i === 0 ? 6 : 3]); }
-      px.set(bx + fx, 3, BRS[2]); px.shade(bx + 4 * fx, 3, 0.6);
-    }
-    return px.done();
-  });
+  return skin('inset', Math.max(20, Math.round(w)), Math.max(12, Math.round(h)));
 }
 
-const NV = ramp('#070b1c', '#0d1430', '#141c3c', '#1c2650', '#2a3664', '#3e4c84', '#5a6aa8');
-/** a velvet medal cushion with a brass hook at its top; hover: a paler cushion; on: framed in brass with rivets */
+/** a medal slot (trophy case); hover lifts it; on: gold border */
 export function cushionArt(w: number, h: number, state: 'off' | 'hover' | 'on'): HTMLCanvasElement {
   w = Math.max(12, Math.round(w)); h = Math.max(12, Math.round(h));
-  return cachedS(`cush|${w}|${h}|${state}`, () => {
-    const px = new Px(w, h);
-    const lit = state === 'off' ? 0 : 1;
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const r = rr(x, y, w, h);
-      if (r < 0) continue;
-      if (state === 'on' && r <= 2) {
-        const tl = y < h / 2 ? x <= y || x < w - 1 - y : x < w - 1 - y;
-        px.set(x, y, r === 0 ? INK : r === 1 ? BRS[tl ? 6 : 2] : BRS[tl ? 4 : 3]);
-        continue;
-      }
-      if (r === 0) { px.set(x, y, NV[0]); continue; }
-      // the velvet: a soft pile, lit at the top, a seam of buttons tufting it
-      const k = y / h;
-      let t = (k < 0.18 ? 4 : k < 0.6 ? 3 : 2) + lit;
-      if (r === 1 && (y === 1 || x === 1)) t = 5 + lit; else if (r === 1) t = 1;
-      if (y === Math.round(h * 0.68) && x > 3 && x < w - 4 && x % 6 === 3) t = 1;
-      px.set(x, y, NV[Math.max(0, Math.min(6, t))]);
-    }
-    if (state === 'on') for (const [x, y] of [[2, 2], [w - 5, 2], [2, h - 5], [w - 5, h - 5]]) rivet(px, x, y);
-    // the brass hook the medal hangs on
-    const cx = Math.floor(w / 2);
-    for (const [dx, dy, t] of [[-1, 1, 6], [0, 1, 5], [1, 1, 3], [-1, 2, 5], [1, 2, 2], [-1, 3, 4], [0, 3, 3], [1, 3, 2]] as const) px.set(cx + dx, dy + (state === 'on' ? 2 : 0), BRS[t]);
-    px.shade(cx + 2, state === 'on' ? 4 : 2, 0.6); px.shade(cx + 2, state === 'on' ? 5 : 3, 0.6);
-    return px.done();
-  });
+  return cached(`cush|${w}|${h}|${state}`, () => box(w, h, state === 'off' ? C.well : C.navy2, state === 'on' ? C.gold : state === 'hover' ? C.slate : C.line));
 }
 
-/** a brass-bezelled navy velvet card with rivets at its corners and an engraved line inside the bezel */
-export function plateArt(w: number, h: number): HTMLCanvasElement {
-  w = Math.max(16, Math.round(w)); h = Math.max(16, Math.round(h));
-  return cachedS(`plate|${w}|${h}`, () => {
-    const px = new Px(w, h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const r = rr(x, y, w, h);
-      if (r < 0) continue;
-      const tl = y < h / 2 ? x <= y || x < w - 1 - y : x < w - 1 - y;
-      if (r === 0) { px.set(x, y, INK); continue; }
-      if (r === 1) { px.set(x, y, BRS[tl ? 7 : 2]); continue; }
-      if (r === 2) { px.set(x, y, BRS[tl ? 5 : 3]); continue; }
-      if (r === 3) { px.set(x, y, BRS[tl ? 1 : 6]); continue; }
-      if (r === 4) { px.set(x, y, INK); continue; }
-      const k = (y - 5) / (h - 10);
-      let t = k < 0.08 ? 1 : k < 0.3 ? 3 : 2;
-      if (x === 5 || y === 5) t = 1;
-      if (r === 6 && x > 6 && y > 6) t = 3;
-      px.set(x, y, NV[t]);
-    }
-    for (const [x, y] of [[1, 1], [w - 4, 1], [1, h - 4], [w - 4, h - 4]]) rivet(px, x, y);
-    px.set(3, h - 4, R.verd[2]); px.set(w - 3, h - 5, R.verd[1]);
-    return px.done();
-  });
-}
+/** a detail card (the trophy case's): a sub panel */
+export function plateArt(w: number, h: number): HTMLCanvasElement { return skin('dark', Math.max(16, Math.round(w)), Math.max(16, Math.round(h))); }
 
-/** the item display window, s px square (drawn 1 px outside the content box): see above */
+/** the item display window, s px square: a well with a slate border and a floor line */
 export function windowArt(s: number): HTMLCanvasElement {
   s = Math.max(16, Math.round(s));
-  return cachedS(`win|${s}`, () => {
-    const px = new Px(s, s);
-    const B = 4; // ink + 3 px of brass
-    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
-      const r = rr(x, y, s, s, 1);
-      if (r < 0) continue;
-      const tl = y < s / 2 ? x <= y || x < s - 1 - y : x < s - 1 - y;
-      if (r === 0) { px.set(x, y, INK); continue; }
-      if (r === 1) { px.set(x, y, BRS[tl ? (y === 1 && x < s * 0.5 ? 7 : 6) : 2]); continue; }
-      if (r === 2) { px.set(x, y, tl ? BRS[1] : BRS[6]); continue; }          // the engraved line: dark, lit below
-      if (r === 3) { px.set(x, y, BRS[tl ? 2 : 4]); continue; }
-      if (r === B) { px.set(x, y, INK); continue; }
-      // the back wall: dark water, deeper at the top, two light shafts, a glass streak
-      const ix = x - B - 1, iy = y - B - 1, IW = s - 2 * B - 2, IH = IW;
-      const k = iy / IH;
-      let t = k < 0.25 ? 2 : k < 0.55 ? 3 : 4;
-      for (const [fx, wd] of [[0.28, 0.12], [0.62, 0.08]]) { const c = fx * IW + iy * 0.35; if (Math.abs(ix - c) < wd * IW * (1 - k * 0.6) && k < 0.75) { t += 1; break; } }
-      if (ix + iy === Math.round(IW * 0.12) && k < 0.4) t = 7;
-      if (iy < 2 || ix < 1) t = 1;
-      let c: C = WA[t];
-      // a low sand mound the model stands on (a lit crest, a shaded underside, its shadow) on a darker sand floor
-      const my = IH * 0.8, mrx = IW * 0.3, mry = Math.max(2, IH * 0.075);
-      const e = ((ix - IW / 2) / mrx) ** 2 + ((iy - my) / mry) ** 2;
-      const fl = IH * 0.9 + Math.round(Math.sin(ix * 0.35) * 0.8);
-      const SW = SA.map((q) => [Math.round(q[0] * 0.66 + WA[4][0] * 0.34), Math.round(q[1] * 0.66 + WA[4][1] * 0.34), Math.round(q[2] * 0.66 + WA[4][2] * 0.34)] as C);
-      if (e <= 1) c = iy < my - mry * 0.45 ? SW[5] : iy < my ? SW[4] : iy < my + mry * 0.5 ? SW[3] : SW[2];
-      else if (iy >= fl) c = iy === Math.ceil(fl) ? SW[3] : (ix + iy * 3) % 8 === 0 ? SW[0] : SW[1];
-      else if (e <= 1.5 && iy > my) c = WA[1];
-      px.set(x, y, c);
+  return cached(`win|${s}`, () => { const p = new Flat(s, s); p.rect(0, 0, s, s, C.well); p.border(0, 0, s, s, C.line2); p.rect(6, Math.round(s * 0.8), s - 12, 1, C.line); return p.cv; });
+}
+
+/** a grid of cols x rows slots, s px pitch (2 px gutters), on a well: the sea chest's tray */
+export function trayArt(cols: number, rows: number, s: number): HTMLCanvasElement {
+  return cached(`tray|${cols}|${rows}|${s}`, () => {
+    const W = cols * s + 4, H = rows * s + 4, p = new Flat(W, H);
+    p.rect(0, 0, W, H, '#0c121c'); p.border(0, 0, W, H, C.line);
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const x = 2 + i * s + 2, y = 2 + j * s + 2, S = s - 2;
+      p.rect(x, y, S, S, C.well); p.border(x, y, S, S, '#1f2939');
     }
-    // rivets in the bezel's corners, verdigris beside them
-    for (const [x, y] of [[0, 0], [s - 3, 0], [0, s - 3], [s - 3, s - 3]]) rivet(px, x, y);
-    px.set(2, s - 5, R.verd[2]); px.set(s - 5, s - 2, R.verd[1]);
-    return px.done();
+    return p.round().cv;
   });
 }
 
-/** the empty sea chest: an open chest on the sand with nothing in it but a little water, a sea star, kelp (~132 x 70) */
-export function emptyChestArt(): HTMLCanvasElement {
-  return cachedS('emptyChest', () => {
-    const W = 132, H = 70, px = new Px(W, H);
-    // a soft light pool on the sand (no alpha noise: two flat steps)
-    for (let y = 48; y < H; y++) for (let x = 0; x < W; x++) {
-      const e = ((x - W / 2) / 64) ** 2 + ((y - 60) / 12) ** 2;
-      if (e > 1) continue;
-      const cr = 50 + Math.round(Math.sin(x / 13) * 1.2);
-      if (y < cr) continue;
-      const p = (y + Math.round(Math.sin(x / 9) * 1.4) + 60) % 6;
-      let c = e < 0.45 ? SA[3] : SA[2];
-      if (p === 0) c = e < 0.45 ? SA[2] : SA[1]; else if (p === 1) c = e < 0.45 ? SA[4] : SA[3];
-      if (y === cr) c = e < 0.45 ? SA[5] : SA[4];
-      px.set(x, y, c, e > 0.82 ? 150 : 255);
-    }
-    // the chest's shadow on the sand
-    for (let y = 57; y < 64; y++) for (let x = 34; x < 100; x++) { const e = ((x - 66) / 34) ** 2 + ((y - 60) / 3.5) ** 2; if (e < 1) px.shade(x, y, 0.55); }
-    // the open lid, tipped back: its inside face (dark planks between iron bands), its top edge catching the light
-    const X0 = 40, X1 = 92, LT = 12, LB = 35;
-    const lin = (y: number) => Math.round((LB - y) * 0.34);
-    for (let y = LT; y < LB; y++) {
-      const inset = lin(y);
-      for (let x = X0 + inset; x < X1 - inset; x++) {
-        const edge = x === X0 + inset || x === X1 - inset - 1 || y === LT;
-        const v = y - LT, pl = Math.floor(v / 5);
-        let c = TIMBER[pl % 2 ? 1 : 2];
-        if (v % 5 === 0) c = TIMBER[0];
-        else if (((x + pl * 7) % 13) < 3 && v % 5 === 2) c = TIMBER[0];
-        if (y === LT + 1) c = TIMBER[7]; else if (y === LT + 2) c = TIMBER[5];
-        if (x === X0 + inset + 1 && !edge) c = TIMBER[4];
-        px.set(x, y, edge ? INK : c);
-      }
-    }
-    for (const fb of [0.22, 0.78]) for (let y = LT + 1; y < LB; y++) {
-      const inset = lin(y), x0 = X0 + inset, x1 = X1 - inset, xx = Math.round(x0 + (x1 - x0) * fb) - 1;
-      px.set(xx, y, R.iron[3]); px.set(xx + 1, y, R.iron[2]); px.set(xx + 2, y, R.iron[1]);
-    }
-    // the body: planks, iron bands with rivets, a brass lock plate; the top open on the empty dark inside
-    const BT = 35, BB = 59, B0 = 38, B1 = 94;
-    band(px, B0 + 1, BT + 7, B1 - B0 - 2, BB - BT - 8, true, TIMBER, 12, { lit: 0 });
-    for (let y = BT; y < BB; y++) for (let x = B0; x < B1; x++) {
-      const out = x === B0 || x === B1 - 1 || y === BB - 1 || y === BT;
-      if (out) { px.set(x, y, INK); continue; }
-      if (y < BT + 7) {
-        // the inside: the back wall's planks in shadow, then nothing but dark water down in it
-        const v = y - BT;
-        px.set(x, y, v <= 2 ? (((x + 3) % 11) === 0 ? TIMBER[0] : TIMBER[1]) : v === 3 ? TIMBER[0] : WA[v === 4 ? 1 : 0]);
-      }
-    }
-    for (let x = B0 + 1; x < B1 - 1; x++) { px.set(x, BT + 7, TIMBER[8]); px.set(x, BT + 8, TIMBER[6]); }
-    for (const bx of [B0 + 8, B1 - 11]) {
-      for (let y = BT + 7; y < BB - 1; y++) { px.set(bx, y, INK); px.set(bx + 1, y, R.iron[4]); px.set(bx + 2, y, R.iron[3]); px.set(bx + 3, y, R.iron[2]); px.set(bx + 4, y, INK); }
-      rivet(px, bx + 1, BT + 10, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')])); rivet(px, bx + 1, BB - 6, R.iron.concat([hx('#e0e4e8'), hx('#ffffff')]));
-    }
-    const lx = 62;
-    for (let y = BT + 7; y < BT + 16; y++) for (let x = lx; x < lx + 9; x++) {
-      const e = x === lx || x === lx + 8 || y === BT + 7 || y === BT + 15;
-      px.set(x, y, e ? INK : y === BT + 8 ? BRS[7] : x === lx + 1 ? BRS[6] : y === BT + 14 ? BRS[2] : BRS[4]);
-    }
-    px.set(lx + 4, BT + 11, INK); px.set(lx + 4, BT + 12, INK); px.set(lx + 3, BT + 12, INK);
-    // sea life: barnacles on the body, algae along its foot, a sea star and a kelp blade on the sand
-    stamp(px, SPR.barnacleM, B0 + 2, BB - 6, { onlyOn: true }); stamp(px, SPR.barnacleS, B0 + 6, BB - 4, { onlyOn: true });
-    algae(px, 66, BB - 2, 18, 2, 3.1, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 && y > BT + 8 });
-    coralline(px, B1 - 4, BT + 16, 2, 4, 9, { inside: (x, y) => x > B0 && x < B1 - 1 && y < BB - 1 && y > BT + 8 });
-    stamp(px, SPR.star, 104, 54);
-    stamp(px, SPR.scallop, 18, 55);
-    kelpBlade(px, bladePath(26, 54, 0.1, -1, 34, 1.6, 0.8), 4, { free: true });
-    kelpBlade(px, bladePath(31, 55, 0.25, -1, 22, 1.2, 2.1), 3, { free: true });
-    holdfast(px, 27, 55, 1, { free: true });
-    grass(px, 112, 59, 4, 5, 8, { free: true });
-    return px.done();
-  });
-}
-
-/** a pearl (the home's currency), s px (5..9): a lustrous cream bead, lit top-left, a pink-lilac shadow side, a glint */
+/** a pearl (the home's currency), s px (5..11): a flat bone bead, one shade step, one glint pixel */
 export function pearlArt(s = 7): HTMLCanvasElement {
   s = Math.max(5, Math.min(11, Math.round(s)));
-  return cachedS(`pearl|${s}`, () => {
-    const px = new Px(s + 1, s + 1);
-    const P = ramp('#3a2a3e', '#8a7896', '#c4b4c8', '#e8dcd8', '#fbf4ea', '#ffffff');
+  return cached(`pearl|${s}`, () => {
+    const p = new Flat(s + 1, s + 1);
     const r = s / 2, c = (s - 1) / 2;
     for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
       const dx = x - c, dy = y - c, d = Math.hypot(dx, dy);
       if (d > r - 0.05) continue;
-      const l = (-dx - dy) / (r * 1.4);
-      px.set(x, y, d > r - 1 ? P[0] : l > 0.45 ? P[4] : l > 0.05 ? P[3] : l > -0.45 ? P[2] : P[1]);
+      p.rect(x, y, 1, 1, d > r - 1 ? '#6f6878' : dx + dy > r * 0.5 ? '#bdb3bd' : C.bone2);
     }
-    px.set(Math.round(c - r * 0.4), Math.round(c - r * 0.4), P[5]);
-    for (let y = 0; y <= s; y++) for (let x = 0; x <= s; x++) if (!px.a(x, y) && px.a(x - 1, y - 1)) px.set(x, y, hx('#000000'), 70);
-    return px.done();
+    p.rect(Math.round(c - r * 0.35), Math.round(c - r * 0.35), 1, 1, '#ffffff');
+    return p.cv;
   });
 }
 
-/** the mail panel's empty state: the mailbox on its post with the flag down, on a patch of sand with kelp (80 x 64) */
+/** the empty sea chest: a small flat open chest pictogram (~64 x 40) */
+export function emptyChestArt(): HTMLCanvasElement {
+  return cached('emptyChest', () => {
+    const W = 64, H = 40, p = new Flat(W, H);
+    // the lid, tipped back
+    p.rect(12, 2, 40, 10, C.navy2); p.border(12, 2, 40, 10, C.slate);
+    // the box
+    p.rect(8, 14, 48, 24, C.navy2); p.border(8, 14, 48, 24, C.slate);
+    p.rect(9, 15, 46, 5, C.well); p.rect(9, 20, 46, 1, C.line2);
+    // the band and the gold clasp
+    p.rect(8, 27, 48, 1, C.line2);
+    p.rect(29, 24, 6, 7, C.ink); p.rect(30, 25, 4, 5, C.gold); p.rect(31, 27, 2, 2, C.gold0);
+    p.rect(4, 38, 56, 1, C.line);
+    return p.cv;
+  });
+}
+
+/** the empty mailbox: a small flat mailbox-on-a-post pictogram with its flag down (~48 x 48) */
 export function emptyMailArt(): HTMLCanvasElement {
-  return cachedS('emptyMail', () => {
-    const W = 80, H = 64, px = new Px(W, H);
-    const T = ramp('#0a2226', '#123a3e', '#1b5455', '#2a706a', '#3f8c7e', '#62ab94', '#93cdb0');
-    const RD = ramp('#2e0a10', '#5c1418', '#8e2420', '#c03a2a', '#e06440', '#f4986a');
-    const DR = R.salt;
-    // the post (behind the box), bleached driftwood: lit left, shaded right, grain lines, barnacles low down
-    for (let y = 28; y < 58; y++) for (let x = 36; x < 43; x++) {
-      const g = (x + Math.round(Math.sin(y * 0.3))) % 3;
-      px.set(x, y, x === 36 ? DR[5] : x === 42 ? DR[1] : x === 41 ? DR[2] : g === 0 ? DR[3] : DR[4]);
-    }
-    for (let y = 44; y < 47; y++) for (let x = 36; x < 43; x++) px.set(x, y, (x + y) % 2 ? R.rope[4] : R.rope[2]);
-    // the box side: a lying half-cylinder (lit crown, shaded foot) of teal planks, brass hoops
-    for (let y = 12; y < 32; y++) for (let x = 24; x < 64; x++) {
-      if (y < 14 && (x < 26 || x > 61)) continue;
-      const k = y < 14 ? 6 : y < 17 ? 5 : y < 23 ? 4 : y < 28 ? 3 : 2;
-      let c = T[k];
-      if ((y - 12) % 5 === 0 && y > 14) c = T[Math.max(0, k - 2)];
-      if (x === 34 || x === 35 || x === 52 || x === 53) c = y < 17 ? R.brass[6] : y < 26 ? R.brass[4] : R.brass[3];
-      px.set(x, y, c);
-    }
-    // the flag down along the side: a brass arm, the red pennant at its front end
-    for (let x = 42; x < 60; x++) { px.set(x, 24, R.brass[5]); px.set(x, 25, R.brass[3]); }
-    px.set(59, 23, R.brass[6]); px.set(59, 24, R.brass[6]); px.set(60, 24, R.brass[4]);
-    for (let y = 21; y < 29; y++) for (let x = 39; x < 46; x++) { if (y > 26 && x > 42) continue; px.set(x, y, y === 21 ? RD[5] : y > 26 ? RD[2] : RD[3]); }
-    // the door face: an arch (a brass lip round teal planks), Marge's stamp, the latch
-    for (let y = 6; y < 33; y++) for (let x = 13; x < 32; x++) {
-      const cy = 15, rr = 9.5;
-      const inArch = y >= cy ? true : Math.hypot(x + 0.5 - 22.5, y + 0.5 - cy) <= rr;
-      if (!inArch) continue;
-      const rim = y >= cy ? (x <= 14 || x >= 30 || y >= 31) : Math.hypot(x + 0.5 - 22.5, y + 0.5 - cy) > rr - 2;
-      px.set(x, y, rim ? (x < 22 && y < 22 ? R.brass[6] : R.brass[3]) : (x - 15) % 5 === 0 ? T[2] : x < 20 ? T[5] : T[4]);
-    }
-    for (let y = 16; y < 24; y++) for (let x = 18; x < 27; x++) px.set(x, y, (x === 18 || x === 26 || y === 16 || y === 23) ? ((x + y) % 2 ? R.chalk[3] : R.chalk[2]) : x === 19 || x === 25 || y === 17 || y === 22 ? RD[3] : R.chalk[4]);
-    for (const [x, y, c] of [[21, 19, R.barn[2]], [22, 19, R.barn[3]], [23, 19, R.barn[3]], [24, 19, R.barn[2]], [21, 20, R.barn[4]], [22, 20, R.barn[5]], [23, 20, R.barn[5]], [24, 20, R.barn[4]], [21, 18, hx('#22346c')], [22, 18, hx('#22346c')], [23, 18, hx('#22346c')], [24, 18, hx('#22346c')]] as [number, number, C][]) px.set(x, y, c);
-    for (let x = 20; x < 25; x++) px.set(x, 9, R.brass[5]);
-    px.set(22, 10, R.brass[3]);
-    // the ink outline round everything painted so far
-    const out: [number, number][] = [];
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!px.a(x, y) && (px.a(x - 1, y) || px.a(x + 1, y) || px.a(x, y - 1) || px.a(x, y + 1))) out.push([x, y]);
-    for (const [x, y] of out) px.set(x, y, INK);
-    // barnacles on the post, sand at its foot (under everything), kelp
-    stamp(px, SPR.barnacleS, 37, 51, { onlyOn: true }); stamp(px, SPR.barnacleM, 39, 54, { onlyOn: true });
-    for (let y = 55; y < H; y++) for (let x = 6; x < 74; x++) {
-      const e = ((x - 40) / 34) ** 2 + ((y - 60) / 6) ** 2;
-      if (e > 1 || px.a(x, y)) continue;
-      const p = (y + Math.round(Math.sin(x / 7) * 1.2)) % 4;
-      px.set(x, y, p === 0 ? R.sand[2] : p === 1 ? R.sand[5] : R.sand[4], e > 0.85 ? 160 : 255);
-    }
-    for (let x = 33; x < 47; x++) px.shade(x, 58, 0.6);
-    kelpBlade(px, bladePath(52, 60, 0.15, -1, 20, 1.4, 1.2), 3, { free: true });
-    kelpBlade(px, bladePath(56, 61, 0.3, -1, 13, 1.1, 2.6), 3, { free: true });
-    holdfast(px, 53, 60, 1, { free: true });
-    stamp(px, SPR.star, 16, 56);
-    grass(px, 26, 60, 3, 4, 6, { free: true });
-    return px.done();
-  });
-}
-
-/**
- * v7 the sea chest's TRAY: a fitted wooden tray of cols x rows compartments (s px each), like a tackle box: a lit
- * rim, plank dividers with lit top / left edges and shaded feet, and in each compartment a sunken nori-velvet floor
- * with its inner shadow and a lip of pale sand in the far corner. Painted once per size (1x, hand-placed detail).
- */
-export function trayArt(cols: number, rows: number, s: number): HTMLCanvasElement {
-  return cached(`tray|${cols}|${rows}|${s}`, () => {
-    const W = cols * s + 4, H = rows * s + 4, px = new Px(W, H);
-    const TW = ramp('#1c0e0c', '#2e1812', '#45241a', '#5e3222', '#7a442c', '#965838', '#b06e46', '#c88a5a');
-    const NV = ramp('#05100e', '#091a17', '#0e2420', '#13302a', '#1a3e36', '#25504a');
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const outer = x < 2 || y < 2 || x >= W - 2 || y >= H - 2;
-      if (outer) { px.set(x, y, x === 0 || y === 0 || x === W - 1 || y === H - 1 ? INK : x === 1 || y === 1 ? TW[6] : TW[2]); continue; }
-      const cx = (x - 2) % s, cy = (y - 2) % s, ci = Math.floor((x - 2) / s), cj = Math.floor((y - 2) / s);
-      // the dividers: 2 px of plank, lit on the top / left face, shaded under
-      if (cx < 2 || cy < 2) {
-        const lit = (cx === 0 && cy >= 2) || (cy === 0 && cx >= 2);
-        const g = ((x * 3 + y * 5 + ci * 7) % 13) < 2;
-        px.set(x, y, lit ? TW[g ? 4 : 5] : TW[g ? 2 : 3]);
-        continue;
-      }
-      // the compartment floor: sunken velvet, the inner shadow down its top and left wall, a soft weave
-      const ix = cx - 2, iy = cy - 2, iw = s - 2;
-      let c = (ix + iy * 2 + ci + cj) % 7 === 0 ? NV[2] : NV[3];
-      if (iy < 1 || ix < 1) c = NV[0]; else if (iy < 3 || ix < 2) c = NV[1];
-      if (iy === iw - 1 || ix === iw - 1) c = NV[4];
-      // pale sand drifted into the bottom-right corner (a different heap per compartment, by rule)
-      const sd = 2 + ((ci * 3 + cj * 5) % 3);
-      if (ix + iy > iw * 2 - sd - 4 && ix > iw - sd - 3 && iy > iw - sd - 3) c = R.sand[(ix + iy) % 3 === 0 ? 2 : 3];
-      px.set(x, y, c);
-    }
-    // nails where the dividers meet the rim, a barnacle and a little algae on the rim
-    for (let i = 1; i < cols; i++) { nail(px, 2 + i * s - 1, 1, 1); nail(px, 2 + i * s - 1, H - 3, 1); }
-    stamp(px, SPR.barnacleS, W - 9, H - 4, { onlyOn: true });
-    algae(px, W * 0.3, H - 1.5, 9, 1.4, 4.2, { inside: (X, Y) => (X < 2 || Y < 2 || X >= W - 2 || Y >= H - 2) && X > 0 && Y > 0 && X < W - 1 && Y < H - 1 });
-    return px.done();
+  return cached('emptyMail', () => {
+    const W = 48, H = 48, p = new Flat(W, H);
+    p.rect(22, 22, 4, 24, C.slate);
+    p.rect(8, 6, 32, 18, C.navy2); p.border(8, 6, 32, 18, C.slate);
+    p.rect(12, 10, 12, 10, C.well); p.border(12, 10, 12, 10, C.line2);
+    // the flag, down
+    p.rect(34, 14, 2, 8, C.dim); p.rect(36, 18, 5, 4, C.red);
+    p.rect(6, 46, 36, 1, C.line);
+    return p.cv;
   });
 }

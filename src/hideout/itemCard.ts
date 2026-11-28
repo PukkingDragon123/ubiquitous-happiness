@@ -1,7 +1,7 @@
-// v5 "diver's kit" item info, shared by the backpack screen, the stash / workbench panels and the packing scene, so
-// an item reads the same everywhere: a brass-bezelled DISPLAY WINDOW (the caller puts a turning 3D model or a studio
-// photo in it), the name in its rarity colour, kind + footprint + stack, the stat lines, the flavour line, its SET
-// chips with progress, and what it fuses with. All text is light ink on a dark lacquer card.
+// Item info (v8b deep-ink kit), shared by the backpack screen, the stash / workbench panels and the packing scene, so
+// an item reads the same everywhere: a flat DISPLAY WINDOW (a dark well with a 1 px border; the caller puts a turning
+// 3D model or a studio photo in it), the name in bone with its rarity as a small coloured label, footprint + stack,
+// the stat lines, the flavour line, its SET chips with progress, and what it fuses with. Bone text on navy.
 //
 //   modelWindow(ui, x, y, size, rarity)                 the recessed window art (draw the model over it)
 //   const h = itemHead(ui, id, x, y, w, { level, n })    name / kind / footprint; returns its height
@@ -9,18 +9,21 @@
 //   buildLines(items)                                   what packed gear adds up to (+1 heart, +20% crit ...)
 //   statePips(ui, ...) / setRow(ui, ...)                the set-bonus list rows
 import type { PixelUI } from '../ui/pixel/ui';
-import { getItem, ITEMS, RARITY_COLOR, statLines, stackCap, recipesWith, SETS, applyItems, STAT_LABEL, SKILL_NAMES, type SetState } from '../game/items';
+import { getItem, ITEMS, statLines, stackCap, recipesWith, SETS, applyItems, STAT_LABEL, SKILL_NAMES, type SetState } from '../game/items';
 import { BASE_STATS, type ItemInst, type Stats } from '../game/run';
 import { photo } from '../ui/obj/studio';
 import { itemModel } from '../backpack/models';
-import { windowArt, cellArt } from './panelArt';
+import { C, RARITY_UI, soft, slot } from '../ui/pixel/skins';
 
-/** the v5 palette (DESIGN-UI.md) */
+/**
+ * the v5 palette names, now pointing at the deep-ink kit (src/ui/pixel/skins.ts): teal* are navy / slate steps,
+ * brass* the gold accent, cream bone text, kelp the sage "ready", coral the danger red, sea the steel info blue
+ */
 export const K = {
-  ink: '#0b1622', ink2: '#071018', teal0: '#0d2529', teal1: '#12333a', teal2: '#1d4f55', teal3: '#2f6e72',
-  brassD: '#4a2c0c', brass0: '#8a5a24', brass1: '#c8913a', brass2: '#f2c66d', brassW: '#fff4c8',
-  cream: '#f3e7c9', cream2: '#d9c59b', dim: '#9fb6b4', dim2: '#6f8c8c',
-  kelp: '#5fae3f', kelpL: '#9be07a', coral: '#e0564a', coralL: '#ff9a84', sea: '#3d8fd6', seaL: '#8fd0ff',
+  ink: C.ink as string, ink2: C.ink as string, teal0: C.well, teal1: C.navy2, teal2: C.line2, teal3: C.slate,
+  brassD: '#3d2f17', brass0: C.gold0, brass1: '#b8975a', brass2: C.gold, brassW: C.gold2,
+  cream: C.bone, cream2: '#c9c0ac', dim: C.dim, dim2: C.faint,
+  kelp: '#5e7f63', kelpL: C.sage, coral: C.red, coralL: C.red2, sea: C.steel, seaL: C.steel2,
 };
 
 export const KIND_LABEL: Record<string, string> = { tool: 'TOOL', trinket: 'TRINKET', ability: 'CORE', material: 'MATERIAL', weapon: 'WEAPON', armor: 'ARMOUR' };
@@ -32,35 +35,21 @@ export function footprint(id: string) {
 }
 
 /**
- * the display window (v6, painted 1x: panelArt.windowArt): a riveted, engraved brass bezel round dark water with light
- * shafts and a sand mound the model stands on; the rarity gem sits on the top rail. The content box is s x s from
- * (x, y); the bezel's outline sits 1 px outside it.
+ * the display window: a dark well with a 1 px border (gold when hot), a faint floor line for the model to stand on,
+ * and the rarity pip in its top-right corner. The content box is s x s from (x, y); the border sits 1 px outside it.
  */
 export function modelWindow(ui: PixelUI, x: number, y: number, s: number, rarity?: string, hot = 0) {
   x = Math.round(x); y = Math.round(y);
-  ui.img(windowArt(s + 2), x - 1, y - 1);
-  if (hot > 0) ui.fill(x + 4, y + 4, s - 8, s - 8, '#ffe8a0', 0.07 * hot);
-  if (rarity) {
-    // a faceted sea-glass gem in the rarity colour, set into the top rail
-    const col = RARITY_COLOR[rarity as keyof typeof RARITY_COLOR] ?? rarity;
-    const gx = x + s - 13, gy = y - 2;
-    ui.fill(gx + 1, gy, 5, 7, K.ink2); ui.fill(gx, gy + 1, 7, 5, K.ink2);
-    ui.fill(gx + 1, gy + 1, 5, 5, col);
-    ui.fill(gx + 1, gy + 1, 2, 2, '#ffffff', 0.65); ui.fill(gx + 3, gy + 1, 1, 1, '#ffffff', 0.3);
-    ui.fill(gx + 4, gy + 4, 2, 2, '#000000', 0.35); ui.fill(gx + 5, gy + 2, 1, 2, '#000000', 0.2);
-    ui.fill(gx + 7, gy + 2, 1, 5, '#000000', 0.3); ui.fill(gx + 2, gy + 7, 5, 1, '#000000', 0.3);
-  }
+  ui.fill(x - 1, y - 1, s + 2, s + 2, hot > 0 ? C.gold : C.line2);
+  ui.fill(x, y, s, s, C.well);
+  ui.fill(x + 6, y + Math.round(s * 0.8), s - 12, 1, C.line, 0.9);
+  if (rarity) { ui.fill(x + s - 8, y + 3, 5, 5, C.ink); ui.fill(x + s - 7, y + 4, 3, 3, RARITY_UI[rarity] ?? rarity); }
 }
 
-/** the item's footprint as a tiny cell diagram (k px per cell): bevelled cells, lit top / left, shaded bottom / right */
-export function shapeGlyph(ui: PixelUI, id: string, x: number, y: number, k = 4, col = K.dim) {
+/** the item's footprint as a tiny cell diagram (k px per cell): flat cells */
+export function shapeGlyph(ui: PixelUI, id: string, x: number, y: number, k = 4, col: string = K.dim) {
   const d = getItem(id);
-  for (const [cx, cy] of d.shape) {
-    const X = x + cx * (k + 1), Y = y + cy * (k + 1);
-    ui.fill(X, Y, k, k, col);
-    ui.fill(X, Y, k, 1, '#ffffff', 0.4); ui.fill(X, Y + 1, 1, k - 1, '#ffffff', 0.2);
-    ui.fill(X, Y + k - 1, k, 1, '#000000', 0.35); ui.fill(X + k - 1, Y + 1, 1, k - 2, '#000000', 0.22);
-  }
+  for (const [cx, cy] of d.shape) ui.fill(x + cx * (k + 1), y + cy * (k + 1), k, k, col);
   const f = footprint(id);
   return { w: f.w * (k + 1) - 1, h: f.h * (k + 1) - 1 };
 }
@@ -85,19 +74,21 @@ export interface InfoOpts {
 export function itemHead(ui: PixelUI, id: string, x: number, y: number, w: number, o: InfoOpts = {}): number {
   const d = getItem(id), lv = o.level ?? 1, draw = o.draw !== false;
   const name = d.name + (lv > 1 ? ` +${lv - 1}` : '');
-  const tb = (s: string, yy: number, font: 'title' | 'body' | 'small', color: string, outline?: string) => draw ? ui.textBox(s, x, yy, w, { font, color, outline: outline ?? K.ink2 }) : ui.textBox(s, -9999, -9999, w, { font, color });
+  const tb = (s: string, yy: number, font: 'title' | 'body' | 'small', color: string) => draw ? ui.textBox(s, x, yy, w, { font, color, shadow: C.ink }) : ui.textBox(s, -9999, -9999, w, { font, color });
   let yy = y;
-  yy += tb(name, yy, 'title', RARITY_COLOR[d.rarity]) + 2;
-  const kind = `${d.rarity} ${KIND_LABEL[d.kind] ?? d.kind}`.toUpperCase();
-  if (draw) ui.text(kind, x, yy, { font: 'small', color: K.dim, shadow: K.ink2 });
+  yy += tb(name, yy, 'title', C.bone2) + 2;
+  if (draw) {
+    const rw = ui.text(d.rarity.toUpperCase(), x, yy, { font: 'small', color: RARITY_UI[d.rarity], shadow: null });
+    ui.text(KIND_LABEL[d.kind] ?? d.kind.toUpperCase(), x + rw + 5, yy, { font: 'small', color: K.dim, shadow: null });
+  }
   yy += ui.lh('small') + 3;
   // the footprint diagram + cells / stack
   const k = Math.max(3, Math.min(5, Math.round(ui.cap('small') * 0.6)));
-  const g = draw ? shapeGlyph(ui, id, x, yy, k, RARITY_COLOR[d.rarity]) : (() => { const f = footprint(id); return { w: f.w * (k + 1) - 1, h: f.h * (k + 1) - 1 }; })();
+  const g = draw ? shapeGlyph(ui, id, x, yy, k, C.slate) : (() => { const f = footprint(id); return { w: f.w * (k + 1) - 1, h: f.h * (k + 1) - 1 }; })();
   const cap = stackCap(id);
   const cells = d.shape.length;
   const lab = `${cells} CELL${cells > 1 ? 'S' : ''}` + (cap > 1 ? `  ·  STACK ${o.n ?? 1}/${cap}` : '');
-  if (draw) ui.text(lab, x + g.w + 6, yy + Math.max(0, Math.round((g.h - ui.cap('small')) / 2)), { font: 'small', color: cap > 1 && (o.n ?? 1) >= cap ? K.brass2 : K.cream2, shadow: K.ink2 });
+  if (draw) ui.text(lab, x + g.w + 6, yy + Math.max(0, Math.round((g.h - ui.cap('small')) / 2)), { font: 'small', color: cap > 1 && (o.n ?? 1) >= cap ? K.brass2 : K.dim, shadow: null });
   yy += Math.max(g.h, ui.cap('small')) + 2;
   return yy - y;
 }
@@ -126,13 +117,12 @@ export function itemBody(ui: PixelUI, id: string, x: number, y: number, w: numbe
       const cw = 9 + ui.measure(lab, 'small') + 5 + ui.measure(cnt, 'small') + 6;
       if (cx + cw > bx + bw && cx > bx) { yy += ch + 3; [bx, bw] = col(yy); cx = bx; }
       if (draw) {
-        // a little chip: a dark bed, a border in the set's colour (lit top edge, shaded bottom), a gem pip
-        ui.fill(cx, yy, cw, ch, K.ink2); ui.rect(cx, yy, cw, ch, s.color);
-        ui.fill(cx + 1, yy + 1, cw - 2, 1, '#ffffff', 0.18); ui.fill(cx + 1, yy + ch - 2, cw - 2, 1, '#000000', 0.4);
-        ui.fill(cx + 1, yy + 1, cw - 2, ch - 2, s.color, 0.1);
+        // a flat chip: a navy bed, a 1 px border in the set's (calmed) colour, a square pip
+        const sc = soft(s.color);
+        ui.fill(cx, yy, cw, ch, C.navy); ui.rect(cx, yy, cw, ch, sc);
         const py = yy + Math.round(ch / 2) - 2;
-        ui.fill(cx + 3, py, 4, 4, s.color); ui.fill(cx + 3, py, 2, 1, '#ffffff', 0.6); ui.fill(cx + 3, py + 3, 4, 1, '#000000', 0.35);
-        const tx = cx + 10 + ui.text(lab, cx + 10, yy + 2, { font: 'small', color: s.color, shadow: null }) + 4;
+        ui.fill(cx + 3, py, 4, 4, sc);
+        const tx = cx + 10 + ui.text(lab, cx + 10, yy + 2, { font: 'small', color: sc, shadow: null }) + 4;
         ui.text(cnt, tx, yy + 2, { font: 'small', color: o.loose ? K.brass2 : K.cream, shadow: null });
       }
       cx += cw + 4;
@@ -150,13 +140,13 @@ export function itemBody(ui: PixelUI, id: string, x: number, y: number, w: numbe
       const other = r.a === id ? r.b : r.a;
       const [fx, fw] = col(yy);
       if (draw) {
-        ui.img(cellArt(ic), fx, yy); ui.item(other, fx + 1, yy + 1, ic - 2, ic - 2);
+        slot(ui, fx, yy, ic, ic); ui.item(other, fx + 1, yy + 1, ic - 2, ic - 2);
         ui.text('+', fx + ic + 3, yy + Math.round((ic - ui.cap('small')) / 2), { font: 'small', color: K.dim, shadow: null });
         const ox = fx + ic + 10;
-        ui.img(cellArt(ic, 'on'), ox, yy); ui.item(r.out, ox + 1, yy + 1, ic - 2, ic - 2);
+        slot(ui, ox, yy, ic, ic, 'on'); ui.item(r.out, ox + 1, yy + 1, ic - 2, ic - 2);
         let name = '= ' + getItem(r.out).name;
         while (name.length > 4 && ui.measure(name, 'small') > fw - (ox + ic + 4 - fx)) name = name.slice(0, -2) + '…';
-        ui.text(name, ox + ic + 4, yy + Math.round((ic - ui.cap('small')) / 2), { font: 'small', color: RARITY_COLOR[getItem(r.out).rarity], shadow: K.ink2 });
+        ui.text(name, ox + ic + 4, yy + Math.round((ic - ui.cap('small')) / 2), { font: 'small', color: RARITY_UI[getItem(r.out).rarity], shadow: null });
       }
       yy += ic + 2;
     }
@@ -199,32 +189,31 @@ export function setRow(ui: PixelUI, s: SetState, x: number, y: number, w: number
   const textH = ui.textBox(line, -9999, -9999, lw, { font: 'small' });
   const h = ui.lh('body') + textH + 1;
   if (!draw) return h;
-  if (o.hot) { ui.fill(x - 3, y - 2, w + 6, h + 2, s.color, 0.12); ui.rect(x - 3, y - 2, w + 6, h + 2, s.color); }
-  ui.fill(x, y + 2, 6, 6, s.color); ui.fill(x, y + 2, 2, 2, '#ffffff', 0.6);
-  ui.text(s.name.toUpperCase(), x + 10, y, { font: 'body', color: s.tier ? s.color : K.cream, shadow: K.ink2 });
+  const sc = soft(s.color);
+  if (o.hot) { ui.fill(x - 3, y - 2, w + 6, h + 2, C.navy2); ui.rect(x - 3, y - 2, w + 6, h + 2, sc); }
+  ui.fill(x, y + 3, 5, 5, sc);
+  ui.text(s.name.toUpperCase(), x + 10, y, { font: 'body', color: s.tier ? sc : K.cream, shadow: C.ink });
   // pips: filled up to the count, a gap after each tier threshold
   let px = x + w - pipsW;
   const blink = o.plus && Math.sin(ui.t * 8) > 0;
   for (let i = 1; i <= top; i++) {
     const on = i <= s.count, next = o.plus && i === s.count + 1;
-    ui.fill(px, y + 2, pip, pip, K.ink2);
-    ui.fill(px + 1, y + 3, pip - 2, pip - 2, on ? s.color : next && blink ? s.color : K.teal1);
-    if (on) ui.fill(px + 1, y + 3, pip - 2, 1, '#ffffff', 0.45);
+    ui.fill(px, y + 2, pip, pip, on || (next && blink) ? sc : C.well);
+    if (!on && !(next && blink)) ui.rect(px, y + 2, pip, pip, C.line2);
     px += pip + gap;
     if (s.tiers.some((t) => t.n === i) && i < top) px += 3;
   }
-  ui.textBox(line, x + 10, y + ui.lh('body') + 1, lw, { font: 'small', color: act ? K.cream : K.dim2, shadow: K.ink2 });
+  ui.textBox(line, x + 10, y + ui.lh('body') + 1, lw, { font: 'small', color: act ? K.cream : K.dim, shadow: null });
   return h;
 }
 
-/** a brass name plate (the kit's engraved, riveted brass), sized to its text, text centred; returns its width */
+/** a flat name plate (navy face, gold border, gold-light text), sized to its text, centred on cx; returns its width */
 export function brassPlate(ui: PixelUI, text: string, cx: number, y: number, o: { font?: 'title' | 'body' | 'small'; minW?: number; h?: number } = {}) {
   const font = o.font ?? 'title';
-  const tw = ui.measure(text, font), w = Math.max(o.minW ?? 0, tw + 26), h = o.h ?? ui.cap(font) + 12;
+  const tw = ui.measure(text, font), w = Math.max(o.minW ?? 0, tw + 20), h = o.h ?? ui.cap(font) + 10;
   const x = Math.round(cx - w / 2);
-  ui.fill(x + 2, y + 2, w, h, '#000000', 0.45);
-  ui.frame('brass', x, y, w, h);
-  ui.text(text, x + w / 2, y + Math.round((h - ui.cap(font)) / 2), { font, color: '#3a2008', shadow: '#f8dc90', align: 'center' });
+  ui.fill(x, y, w, h, C.navy); ui.rect(x, y, w, h, C.gold0);
+  ui.text(text, x + w / 2, y + Math.round((h - ui.cap(font)) / 2), { font, color: C.gold2, shadow: C.ink, align: 'center' });
   return w;
 }
 

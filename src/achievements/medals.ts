@@ -1,6 +1,5 @@
-// Pixel medals for the achievements: a ribbon in the tier colour over a round bronze / silver / gold medal with
-// an embossed 9 x 9 emblem. Locked medals are a dark stone silhouette.
-import { Pix, ramp } from '../backpack/pix';
+// Pixel medals for the achievements: a round bronze / silver / gold medal with a 9 x 9 emblem on a short ribbon.
+// Locked medals are a dark slate silhouette.
 
 
 const EMB: Record<string, string[]> = {
@@ -30,15 +29,14 @@ const EMB: Record<string, string[]> = {
   wave: ['.........', '...###...', '..#...#..', '.#..#..#.', '#..#.#..#', '..#...#..', '.#.....##', '#........', '.........'],
 };
 
-// v3: painted on the icon painter (src/backpack/pix.ts): a notched two-band ribbon, a cel-shaded medal with a
-// stepped rim, the emblem embossed (lit top-left edge, shadowed bottom-right), a hard shine.
-
-const TIER: Record<string, { face: ReturnType<typeof ramp>; ribbon: [ReturnType<typeof ramp>, ReturnType<typeof ramp>]; emb: [string, string, string] }> = {
-  bronze: { face: ramp('#2a1006', '#5a2a10', '#8e5020', '#c07a3a', '#e8a868', '#fff0d0'), ribbon: [ramp('#06143a', '#0e2a6a', '#1a4a9a', '#3a7ad8', '#6aa8f0', '#c0e0ff'), ramp('#2a0606', '#6a1010', '#a82020', '#d84040', '#f07a6a', '#ffd0c0')], emb: ['#4a2008', '#f8c88a', '#7a3a14'] },
-  silver: { face: ramp('#141824', '#3a4252', '#6e7890', '#a8b2c4', '#dce4f0', '#ffffff'), ribbon: [ramp('#2a040c', '#5e0a18', '#9a1428', '#c8343e', '#f06a6a', '#ffc8c0'), ramp('#06143a', '#0e2a6a', '#1a4a9a', '#3a7ad8', '#6aa8f0', '#c0e0ff')], emb: ['#262c3a', '#ffffff', '#4a5262'] },
-  gold: { face: ramp('#3a1804', '#8a4a0a', '#c88418', '#f0bc3a', '#ffe880', '#fffde0'), ribbon: [ramp('#04200e', '#0a4a22', '#147a36', '#2aa04a', '#6ad078', '#c8f8c8'), ramp('#2a0606', '#6a1010', '#a82020', '#d84040', '#f07a6a', '#ffd0c0')], emb: ['#5a2a04', '#fffbe0', '#8a4a0a'] },
+// v8b (deep-ink kit): flat. A disc in the tier's calm metal with a 1 px ink rim, the emblem cut into it in a darker
+// step, a short navy ribbon with a stripe of the tier colour. Locked: a slate disc with a faint emblem.
+const TIER: Record<string, { face: string; dark: string; rim: string }> = {
+  bronze: { face: '#b48a62', dark: '#6e4f36', rim: '#3a281a' },
+  silver: { face: '#b8bfcb', dark: '#6c7484', rim: '#2e3440' },
+  gold: { face: '#d4b273', dark: '#8a7044', rim: '#3d2f17' },
 };
-const LOCKED = { face: ramp('#08080e', '#14141c', '#1e1e28', '#2a2a36', '#383846', '#4a4a5a'), ribbon: [ramp('#08080e', '#121218', '#1a1a22', '#24242e', '#2e2e3a', '#3a3a48'), ramp('#08080e', '#121218', '#1a1a22', '#24242e', '#2e2e3a', '#3a3a48')] as [ReturnType<typeof ramp>, ReturnType<typeof ramp>], emb: ['#0a0a10', '#3a3a48', '#14141c'] as [string, string, string] };
+const LOCKED = { face: '#232d3f', dark: '#3a465c', rim: '#0b111c' };
 
 const cache = new Map<string, HTMLCanvasElement>();
 
@@ -48,23 +46,22 @@ export function medal(emblem: string, tier: 'bronze' | 'silver' | 'gold', locked
   let c = cache.get(key);
   if (c) return c;
   const T = locked ? LOCKED : TIER[tier];
-  const p = new Pix(28, 32);
-  // the ribbon: two bands crossing into a V, notched tails
-  p.poly([[5, 0], [11, 0], [16, 12], [11, 14]], T.ribbon[0], { shade: 'flat', bevel: 1 });
-  p.poly([[23, 0], [17, 0], [12, 12], [17, 14]], T.ribbon[1], { shade: 'flat', bevel: 1 });
-  p.line([[7, 1], [11, 10]], 1); p.line([[21, 1], [17, 10]], -1);
-  // the medal
-  p.circle(14, 20, 10.6, T.face, { spec: !locked });
-  p.ring(14, 20, 8.4, 1.1, T.face, { shade: 'facet', tone: 2, edge: false });
-  for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; p.setTone(14 + Math.cos(a) * 10, 20 + Math.sin(a) * 10, i % 2 ? 2 : 4); }
-  const g = EMB[emblem] ?? EMB.crown;
-  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (g[y][x] === '#') { p.px(10 + x, 16 + y, T.emb[2]); }
-  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (g[y][x] === '#') {
-    const lit = y === 0 || g[y - 1][x] !== '#' || x === 0 || g[y][x - 1] !== '#';
-    p.px(9 + x, 15 + y, lit ? T.emb[1] : T.emb[0]);
+  c = document.createElement('canvas'); c.width = 28; c.height = 32;
+  const x = c.getContext('2d')!;
+  const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
+  // the ribbon: two flat navy tails with a stripe of the tier colour
+  f(8, 0, 5, 12, locked ? '#18202e' : '#1a2434'); f(15, 0, 5, 12, locked ? '#18202e' : '#1a2434');
+  f(10, 0, 1, 11, locked ? '#2c384c' : T.face); f(17, 0, 1, 11, locked ? '#2c384c' : T.face);
+  // the disc: rim, face, an inner ring one step darker
+  const cx = 13.5, cy = 20.5;
+  for (let py = 9; py < 32; py++) for (let px = 2; px < 26; px++) {
+    const d = Math.hypot(px - cx, py - cy);
+    if (d > 10.6) continue;
+    f(px, py, 1, 1, d > 9.6 ? T.rim : d > 8.2 && d <= 9.0 ? T.dark : T.face);
   }
-  if (!locked) { p.px(8, 13, '#ffffff'); p.px(7, 14, '#ffffff'); p.px(8, 14, T.face[5]); }
-  c = p.render();
+  // the emblem, cut in
+  const g = EMB[emblem] ?? EMB.crown;
+  for (let yy = 0; yy < 9; yy++) for (let xx = 0; xx < 9; xx++) if (g[yy][xx] === '#') f(9 + xx, 16 + yy, 1, 1, T.dark);
   cache.set(key, c);
   return c;
 }

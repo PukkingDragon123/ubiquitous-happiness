@@ -1,5 +1,5 @@
-// The unlock toast: a kit card (ship planks round dark water) with the achievement's medal, "Unlocked: ..." and the
-// cosmetic's icon in a slot, a shine sweep and a jingle. Queued; one at a time.
+// The unlock toast (v8b kit): a flat navy card with the achievement's medal, a gold small-caps label, "Unlocked: ..."
+// and the cosmetic's icon in a slot, and a jingle. Queued; one at a time.
 //
 // It never covers interactive UI: before it appears (and a few times a second while it is up) it looks at what the
 // screens actually drew this frame -- every screen PixelUI's pixels (panels, buttons, tags, the objective strip,
@@ -10,9 +10,8 @@
 // open) it waits -- or ducks out with its clock paused -- until a lane frees up.
 import type { Game } from '../game/game';
 import { PixelUI } from '../ui/pixel/ui';
-import { KIT } from '../ui/pixel/skins';
+import { C } from '../ui/pixel/skins';
 import { audio } from '../audio/audio';
-import { easeOutBack } from '../core/math';
 import { medal } from './medals';
 import { cosmeticIcon } from '../cosmetics/icons';
 import { COSMETIC } from '../cosmetics';
@@ -170,43 +169,32 @@ export class Toasts {
     // glide toward the lane (snaps on the first frame)
     const kk = 1 - Math.exp(-dt * 10);
     c.x += (lane.x - c.x) * kk; c.y += (lane.y - c.y) * kk;
-    // slide in from the lane's nearest edge with an overshoot, out the same way
+    // the kit's calm motion: a 6 px rise (from its lane's edge) and a fade in; a fade out
     const t = c.t;
-    const k = t < IN ? easeOutBack(t / IN, 1.6) : t > IN + HOLD ? 1 - (t - IN - HOLD) / OUT : 1;
-    const off = (1 - Math.max(0, k));
+    const kIn = Math.min(1, t / IN), e = 1 - (1 - kIn) ** 3;
+    const fade = t > IN + HOLD ? Math.max(0, 1 - (t - IN - HOLD) / OUT) : e;
+    const off = Math.round((1 - e) * 6);
     let x = Math.round(c.x), y = Math.round(c.y);
-    if (lane.from === 'bottom') y = Math.round(c.y + off * (ui.h - c.y + 6));
-    else if (lane.from === 'top') y = Math.round(c.y - off * (c.y + H + 10));
-    else if (lane.from === 'right') x = Math.round(c.x + off * (ui.w - c.x + 6));
-    else x = Math.round(c.x - off * (c.x + W + 10));
-    const ctx = ui.ctx;
-    ui.fill(x + 3, y + 3, W, H, '#000000', 0.3);
-    ui.frame(lane.compact ? 'dark' : 'wood', x, y, W, H);
-    ui.panelFx(lane.compact ? 'dark' : 'wood', x, y, W, H, 'toast');
-    // a shine sweep across the inset
-    const ins = lane.compact ? 4 : 7;
-    const sx = x + ((t * 240) % (W + 90)) - 45;
-    ctx.save(); ctx.beginPath(); ctx.rect(x + ins, y + ins, W - 2 * ins, H - 2 * ins); ctx.clip();
-    for (let i = 0; i < H; i++) { ui.fill(sx + i * 0.5, y + i, 7, 1, '#ffffff', 0.12); ui.fill(sx + 11 + i * 0.5, y + i, 2, 1, '#ffffff', 0.09); }
-    ctx.restore();
+    if (lane.from === 'bottom') y += off; else if (lane.from === 'top') y -= off; else if (lane.from === 'right') x += off; else x -= off;
+    const al = fade;
+    ui.fill(x + 2, y + 3, W, H, '#000000', 0.22 * al);
+    ui.fill(x, y, W, H, C.navy, 0.97 * al);
+    ui.rect(x, y, W, H, C.line2);
+    ui.fill(x, y + 2, 2, H - 4, C.gold, al);
     if (lane.compact) {
       // one line: the reward in a little slot, the unlock text
-      ui.frame('slot', x + 5, y + 4, 20, 20);
-      ui.img(cosmeticIcon(c.reward), x + 5, y + 4, { w: 20, h: 20 });
-      ui.text(unlock, x + 30, y + Math.round((H - ui.cap('body')) / 2), { font: 'body', color: KIT.cream[3], outline: KIT.ink });
+      ui.frame('slot', x + 6, y + 4, 20, 20, al);
+      ui.img(cosmeticIcon(c.reward), x + 6, y + 4, { w: 20, h: 20, alpha: al });
+      ui.text(unlock, x + 32, y + Math.round((H - ui.cap('body')) / 2), { font: 'body', color: C.bone2, shadow: C.ink, alpha: al });
       return;
     }
-    // the medal swinging on the left end, the reward in a recessed slot on the right
-    ui.img(medal(a?.emblem ?? 'crown', a?.tier ?? 'gold'), x + 8, y + 6 + Math.round(Math.sin(t * 5) * 1));
+    // the medal on the left, the reward in a slot on the right
+    ui.img(medal(a?.emblem ?? 'crown', a?.tier ?? 'gold'), x + 9, y + 9, { alpha: al });
     const ix = x + W - 38;
-    ui.frame('slot', ix, y + 9, 28, 28);
-    ui.img(cosmeticIcon(c.reward), ix + 4, y + 13);
-    for (let i = 0; i < 5; i++) {
-      const ph = t * 3 + i * 1.7;
-      if (Math.sin(ph) > 0.4) { const tx = [x + 6, x + 34, x + 30, ix - 3, ix + 30][i], ty = y + [5, 9, 38, 8, 36][i]; ui.fill(tx, ty - 1, 1, 3, '#fff6c0'); ui.fill(tx - 1, ty, 3, 1, '#fff6c0'); }
-    }
-    const tx = x + 42;
-    ui.text(label, tx, y + 11, { font: 'small', color: KIT.brass[3], outline: KIT.ink });
-    ui.text(unlock, tx, y + 24, { font: 'body', color: KIT.cream[3], outline: KIT.ink });
+    ui.frame('slot', ix, y + 9, 28, 28, al);
+    ui.img(cosmeticIcon(c.reward), ix + 4, y + 13, { alpha: al });
+    const tx = x + 44;
+    ui.text(label, tx, y + 11, { font: 'small', color: C.gold, shadow: null, alpha: al });
+    ui.text(unlock, tx, y + 24, { font: 'body', color: C.bone2, shadow: C.ink, alpha: al });
   }
 }

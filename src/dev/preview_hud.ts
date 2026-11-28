@@ -7,8 +7,6 @@ import { Hud, type HudData, type StripMap } from '../ui/hud3';
 import type { PlayerCombatHud } from '../combat/types';
 import { PixelUI } from '../ui/pixel/ui';
 import { hudArt, HUD_ART_NAMES } from '../ui/hudArt';
-import { UiStage } from '../ui/obj/stage';
-import { SkillCard3D } from '../ui/obj/cards';
 import { CodexBook, codexSeen } from '../ui/codex';
 import { RunSummaryCard } from '../ui/runSummary';
 import { itemModel } from '../backpack/models';
@@ -45,11 +43,6 @@ export default function make(game: Game): Screen {
   const hud = new Hud();
   const sheetUi = new PixelUI();
   const showSheet = q.get('sheet') !== '0';
-  // &cards=1: three full-size interactive skill cards (menus: hideout, rewards, shop); click one to fold out its ledger
-  const showCards = q.get('cards') === '1';
-  const cardStage = new UiStage();
-  const big = showCards ? ['manaBolt', 'frostNova', 'chainZap'].map((id) => new SkillCard3D(id, { w: 120 })) : [];
-  let open = -1;
   let t = Number(q.get('t') || 0);
   // &demo=goals | codex | summary | pickup: the v4 UI pieces (objective lines, the codex book, the run summary card,
   // item pickup cards)
@@ -107,16 +100,6 @@ export default function make(game: Game): Screen {
       }
       if (book.isOpen) book.draw(sheetUi, dt);
       if (summary && summary.draw(sheetUi, dt) === 'continue') summary = null;
-      if (showCards) {
-        cardStage.attach(sheetUi);
-        big.forEach((c, i) => {
-          const x = sheetUi.w / 2 + (i - 1) * 150 - (open >= 0 ? 60 : 0), y = sheetUi.h / 2 + 10;
-          const hov = sheetUi.hover(x - c.w / 2, y - c.h / 2, c.w, c.h) ? 1 : 0;
-          if (hov && sheetUi.pressed) open = open === i ? -1 : i;
-          c.update(dt, { hover: hov, mx: hov ? (sheetUi.mx - x) / (c.w / 2) : 0, my: hov ? (sheetUi.my - y) / (c.h / 2) : 0, cd: i === 1 ? ((t * 0.2) % 1) : 0, ledger: open === i, selected: open === i });
-          cardStage.put(c.root, x, y, 200 + (open === i ? 100 : 0));
-        });
-      }
       if (showSheet) {
         let x = 6, y = sheetUi.h - 120;
         sheetUi.fill(2, y - 4, Math.min(sheetUi.w - 4, 420), 92, '#000000', 0.55);

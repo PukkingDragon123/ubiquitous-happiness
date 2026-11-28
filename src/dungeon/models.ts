@@ -18,7 +18,6 @@ import { ctex, T, tone, bevel, rivet, rust, type Tones } from '../skills/texkit'
 import { chamferBox, lpCyl, lpCone, lpSphere, facet, boxUV } from '../gfx/lowpoly';
 import { hash2 } from '../core/math';
 import { measure, glyphs } from '../ui/pixel/font';
-import { plate } from '../ui/obj/plates';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const TAU = Math.PI * 2;
@@ -667,34 +666,32 @@ function paintIcon(x: CanvasRenderingContext2D, k: string, lx: number, ly: numbe
   const ic = ICONS[k]; if (!ic) return;
   const X0 = lx + 1, Y0 = ly + 1;
   const on = (cx: number, cy: number) => cy >= 0 && cy < ic.rows.length && cx >= 0 && cx < ic.rows[cy].length && ic.rows[cy][cx] !== ' ';
-  // a cast shadow down-right, the dark cut round the shape, then the pixels
-  x.fillStyle = 'rgba(26,12,4,0.45)';
-  for (let cy = 0; cy <= ic.rows.length; cy++) for (let cx = 0; cx <= iconCols(k); cx++) if (!on(cx, cy) && on(cx - 1, cy - 1)) x.fillRect(X0 + cx + 1, Y0 + cy + 1, 1, 1);
-  x.fillStyle = '#2a140a';
+  // an ink outline round the shape, then the pixels in calmed colours
+  x.fillStyle = '#0b0a0c';
   for (let cy = -1; cy <= ic.rows.length; cy++) for (let cx = -1; cx <= iconCols(k); cx++) {
     if (on(cx, cy)) continue;
     if (on(cx - 1, cy) || on(cx + 1, cy) || on(cx, cy - 1) || on(cx, cy + 1)) x.fillRect(X0 + cx, Y0 + cy, 1, 1);
   }
-  ic.rows.forEach((row, cy) => { for (let cx = 0; cx < row.length; cx++) { const ch = row[cx]; if (ch === ' ') continue; x.fillStyle = ic.pal[ch] ?? '#ff00ff'; x.fillRect(X0 + cx, Y0 + cy, 1, 1); } });
+  ic.rows.forEach((row, cy) => { for (let cx = 0; cx < row.length; cx++) { const ch = row[cx]; if (ch === ' ') continue; x.fillStyle = soft(ic.pal[ch] ?? '#888888', 0.4); x.fillRect(X0 + cx, Y0 + cy, 1, 1); } });
 }
 const arrowW = (k: string) => (ARROWS[k]?.[0].length ?? 0) * ARROW_PX;
 const arrowH = (k: string) => (ARROWS[k]?.length ?? 0) * ARROW_PX;
 function paintArrow(x: CanvasRenderingContext2D, k: string, lx: number, ly: number) {
   const rows = ARROWS[k]; if (!rows) return;
   const P = ARROW_PX;
-  for (const [dx, dy, col] of [[1, 1, '#f0d4a0'], [0, 0, '#2a140a']] as const) {
+  for (const [dx, dy, col] of [[1, 1, BOARD.shadow], [0, 0, BOARD.arrow]] as const) {
     x.fillStyle = col;
     rows.forEach((row, cy) => { for (let cx = 0; cx < row.length; cx++) if (row[cx] === 'X') x.fillRect(lx + cx * P + dx, ly + cy * P + dy, P, P); });
   }
 }
 const arrowKey = (d: SignDir) => (d === -1 ? 'left' : d === 1 ? 'right' : d === 0 ? '' : d);
 
-/** letters carved into the wood: a dark cut with a lit lower lip, one texel per font pixel */
-function carve(x: CanvasRenderingContext2D, text: string, font: 'body' | 'small' | 'title', lx: number, ly: number, cut = '#24100a', lipC = '#f2d8a8') {
-  const lip = glyphs(text, { font, color: lipC, shadow: null });
-  const c = glyphs(text, { font, color: cut, shadow: null });
+/** letters painted on the board: Alagard at one texel per font pixel, a 1 px ink shadow down-right */
+function letter(x: CanvasRenderingContext2D, text: string, font: 'body' | 'small' | 'title', lx: number, ly: number, col = BOARD.text) {
+  const sh = glyphs(text, { font, color: BOARD.shadow, shadow: null });
+  const c = glyphs(text, { font, color: col, shadow: null });
   x.imageSmoothingEnabled = false;
-  x.drawImage(lip.cv, lx + 1, ly + 1);
+  x.drawImage(sh.cv, lx + 1, ly + 1);
   x.drawImage(c.cv, lx, ly);
 }
 function planeTex(cv: HTMLCanvasElement) {
@@ -744,27 +741,38 @@ function layBoard(b: SignBoardSpec): BoardLay {
   const ch = Math.max(PAD + lines.length * 13 + (row ? 2 + rowH : 0) + PAD - 2, arrow ? arrowH(arrow) + PAD * 2 : 0);
   return { b, arrow, lines, iconsL, iconsR, row, rowH, cw, ch, textW };
 }
-/** a board face: the UI kit's driftwood plank (grain, nails, sea-worn paint rim, barnacles, algae) with the carving */
+/** a board face (v8b): a flat dark painted plank (a 1 px edge, one faint seam), the words in clean Alagard bone
+ *  lettering with a 1 px ink shadow, a gold arrow, small calm icons */
+const BOARD = { face: '#2b2a2c', seam: '#242325', edge: '#141315', text: '#e8dfcb', shadow: '#0b0a0c', arrow: '#d4b273' };
 function paintBoardFace(L: BoardLay): HTMLCanvasElement {
-  const base = plate(L.cw, L.ch, 'board', { algae: true, barnacles: L.cw >= 60, plank: L.ch > 30 ? Math.ceil((L.ch - 4) / 2) : undefined });
   const cv = document.createElement('canvas'); cv.width = L.cw; cv.height = L.ch;
   const x = cv.getContext('2d')!;
   x.imageSmoothingEnabled = false;
-  x.drawImage(base, 0, 0);
-  // where it leads, at a glance: a painted stripe in the destination's colour under the top rim
-  if (L.b.tint) { x.fillStyle = L.b.tint; x.fillRect(5, 4, L.cw - 10, 2); x.fillStyle = 'rgba(20,10,4,0.55)'; x.fillRect(5, 6, L.cw - 10, 1); }
+  const f = (px: number, py: number, w: number, h: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+  f(0, 0, L.cw, L.ch, BOARD.face);
+  if (L.ch > 30) f(1, Math.round(L.ch / 2), L.cw - 2, 1, BOARD.seam);
+  f(0, 0, L.cw, 1, BOARD.edge); f(0, L.ch - 1, L.cw, 1, BOARD.edge); f(0, 0, 1, L.ch, BOARD.edge); f(L.cw - 1, 0, 1, L.ch, BOARD.edge);
+  // where it leads, at a glance: a thin stripe in the destination's (calmed) colour under the top edge
+  if (L.b.tint) f(4, 3, L.cw - 8, 1, soft(L.b.tint));
   let cx = PAD;
   if (L.arrow) { paintArrow(x, L.arrow, cx, Math.round((L.ch - arrowH(L.arrow)) / 2)); cx += arrowW(L.arrow) + 6; }
-  L.lines.forEach((ln, i) => carve(x, ln, 'body', cx, PAD - 1 + i * 13));
+  L.lines.forEach((ln, i) => letter(x, ln, 'body', cx, PAD - 1 + i * 13));
   if (L.row) {
     const iy = PAD - 1 + L.lines.length * 13 + 1, rh = L.rowH;
     let ix = cx - 1;
-    if (L.b.danger === 0 && !L.b.giant) { carve(x, 'SAFE', 'small', ix + 1, iy + Math.round((rh - 7) / 2), '#163a12', '#d8f0b0'); ix += measure('SAFE', 'small') + 4; }
+    if (L.b.danger === 0 && !L.b.giant) { letter(x, 'SAFE', 'small', ix + 1, iy + Math.round((rh - 7) / 2), '#b8d3b5'); ix += measure('SAFE', 'small') + 4; }
     for (const k of L.iconsL) { paintIcon(x, k, ix, iy + Math.round((rh - iconH(k)) / 2)); ix += iconW(k); }
     let rx = L.cw - PAD + 1;
     for (const k of [...L.iconsR].reverse()) { rx -= iconW(k); paintIcon(x, k, rx, iy + Math.round((rh - iconH(k)) / 2)); }
   }
   return cv;
+}
+/** a saturated colour calmed toward its grey (the kit's soft(), local so the 3D module needs no UI import) */
+function soft(hexc: string, k = 0.45): string {
+  const v = parseInt(hexc.replace('#', '').slice(0, 6), 16);
+  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255, l = 0.3 * r + 0.59 * g + 0.11 * b;
+  const m = (c: number) => Math.round(Math.min(255, (c + (l - c) * k) * 0.92 + 14));
+  return '#' + [m(r), m(g), m(b)].map((c) => c.toString(16).padStart(2, '0')).join('');
 }
 
 /** a lashed driftwood log lying along x (a crossbeam over a crossroads pit), len long, centred */

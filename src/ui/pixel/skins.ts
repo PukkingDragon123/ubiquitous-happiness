@@ -315,11 +315,6 @@ export function bubbleArt(r: number, d = 1): HTMLCanvasElement {
     return p.done();
   });
 }
-/** v6 caustic tile: retired (the kit has no texture); an empty tile keeps old callers harmless */
-export function causticTile(d = 1): HTMLCanvasElement {
-  d = clampD(d);
-  return at('caustic', d, () => new Flat(8, 8).done());
-}
 
 // ------------------------------------------------------------------ v8b helpers (see the guide at the top)
 type UiLike = {
@@ -351,4 +346,26 @@ export function tag(ui: UiLike, label: string, x: number, y: number, tone: 'gold
   ui.fill(x, y, w, 1, col, a); ui.fill(x, y + h - 1, w, 1, col, a); ui.fill(x, y, 1, h, col, a); ui.fill(x + w - 1, y, 1, h, col, a);
   ui.text(label, x + 4, y + 3, { font: 'small', color: o.fill ? C.inkT : col, shadow: null, alpha: a });
   return w;
+}
+
+// ------------------------------------------------------------------ v8b (V9): muted rarity + set colours for 2D UI
+/** item rarity in the UI: the deep-ink palette's calm versions (RARITY_COLOR in items.ts stays for 3D beams / sparks) */
+export const RARITY_UI: Record<string, string> = { common: '#c3bcab', uncommon: C.sage, rare: C.steel, epic: '#a993c9', legendary: C.gold };
+/** a saturated game colour (a set's, an element's) calmed for the 2D UI: pulled toward its grey and lifted a touch */
+export function soft(hex: string, k = 0.45): string {
+  const v = parseInt(hex.replace('#', '').slice(0, 6), 16);
+  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+  const l = 0.3 * r + 0.59 * g + 0.11 * b;
+  const m = (c: number) => Math.round(Math.min(255, (c + (l - c) * k) * 0.92 + 14));
+  return '#' + [m(r), m(g), m(b)].map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+/** a rarity pip: a 5 x 5 square in the rarity colour with a 1 px ink rim (no glint) */
+export function rarityPip(ui: UiLike, x: number, y: number, rarity: string, a = 1) {
+  ui.fill(x, y, 5, 5, C.ink, a); ui.fill(x + 1, y + 1, 3, 3, RARITY_UI[rarity] ?? rarity, a);
+}
+/** a flat item slot drawn with fills: well face, 1 px border (gold when `on`, line2 on hover) */
+export function slot(ui: UiLike, x: number, y: number, w: number, h: number, state: 'off' | 'hover' | 'on' = 'off', a = 1) {
+  ui.fill(x, y, w, h, state === 'hover' ? '#121a27' : C.well, a);
+  const b = state === 'on' ? C.gold : state === 'hover' ? C.slate : C.line;
+  ui.fill(x, y, w, 1, b, a); ui.fill(x, y + h - 1, w, 1, b, a); ui.fill(x, y + 1, 1, h - 2, b, a); ui.fill(x + w - 1, y + 1, 1, h - 2, b, a);
 }

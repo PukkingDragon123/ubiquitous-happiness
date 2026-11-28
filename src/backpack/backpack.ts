@@ -21,7 +21,7 @@ import type { TouchSpec } from '../ui/touch';
 import type { Game, Screen } from '../game/game';
 import type { Run, ItemInst } from '../game/run';
 import {
-  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, GRID_W, GRID_H, GRID_CELLS, packCells, ITEMS, RARITY_COLOR,
+  getItem, installItemSystem, fits, findSpot, mergeResult, rotCells, shapeSize, GRID_W, GRID_H, GRID_CELLS, packCells, ITEMS,
   setBonuses, setCounts, stackCap, stackOnto, SETS, SET_ORDER, type ItemDef, type SetState,
 } from '../game/items';
 import { PixelUI } from '../ui/pixel/ui';
@@ -29,10 +29,8 @@ import { UiStage, contactShadow } from '../ui/obj/stage';
 import { itemModel } from './models';
 import { audio } from '../audio/audio';
 import { easeOutBack } from '../core/math';
-import { K, modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
-import { statRows, pocketMeter } from '../ui/obj/statRows';
-import { bubbles, kelp, caustics, SeaFx } from '../hideout/seaFx';
-import { Px, R, SPR, stamp, algae, coralline, grass, planks, wraps, lerpC } from '../ui/pixel/decor';
+import { modelWindow, itemHead, itemBody, buildLines, setRow, footprint } from '../hideout/itemCard';
+import { C as KC, skin, RARITY_UI, soft, sectionHead, tag } from '../ui/pixel/skins';
 
 export interface BackpackEnter { run: Run; onClose?: () => void }
 
@@ -49,199 +47,35 @@ const artCache = new Map<string, HTMLCanvasElement>();
 function cached(key: string, f: () => HTMLCanvasElement) { let c = artCache.get(key); if (!c) { c = f(); artCache.set(key, c); if (artCache.size > 200) artCache.clear(); } return c; }
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; return [c, x]; }
 
-// leather (hue-shifted: shadows toward oxblood, lights toward saddle tan), oilcloth lining, brass. Flat tones only:
-// every detail is a placed shape (grain pores on a lattice, burnished edges, stitches, bar-tacks, a sewn patch)
-const LE = { out: '#1a0a08', d3: '#2e140c', d2: '#45200f', d1: '#5e3018', b: '#7a4426', l1: '#955a34', l2: '#b07446', l3: '#cc9462', st: '#ecd2a2', stD: '#2a120a' };
-const LN = { out: '#061216', frame: '#0b1d22', base: '#173a40', twill: '#14353b', sh: '#0f2a30', lit: '#235058', wear: '#2a5c62', seam: '#7aa496', seamD: '#0c2228', tack: '#c8d8c0', occ: '#1d4850' };
-const BR = { out: '#2e1404', dd: '#5a3208', d: '#8a5a14', b: '#d8a038', l: '#f8d878', w: '#fffbe0' };
+// the kit (v8b deep ink, src/ui/pixel/skins.ts): the bag is the kit's main panel round a grid of pocket slots; the
+// seabed is a recessed well with faint slot ticks. Flat fills and 1 px lines only.
+const LN = { occ: '#172031' };
 
-/** bag frame insets around the grid: side border, the flap band + top border, the bottom border, strap overhang */
+/** bag frame insets around the grid: side border, the title band + top border, the bottom border, outer margin */
 const SIDE = 8, TOP = 26, BOT = 9, EXT = 4;
 
-function inRound(px: number, py: number, x0: number, y0: number, x1: number, y1: number, r: number) {
-  if (px < x0 || py < y0 || px > x1 || py > y1) return false;
-  const qx = Math.max(x0 + r - px, 0, px - (x1 - r)), qy = Math.max(y0 + r - py, 0, py - (y1 - r));
-  return qx * qx + qy * qy <= r * r;
-}
-type Fill = (px: number, py: number, w: number, h: number, col: string) => void;
-/** a domed brass rivet (3 x 3) */
-function rivet(f: Fill, x: number, y: number) { f(x - 1, y - 1, 4, 4, BR.out); f(x, y, 3, 3, BR.b); f(x, y, 2, 1, BR.l); f(x, y, 1, 1, BR.w); f(x + 2, y + 2, 1, 1, BR.d); }
-
-/** the satchel for an nw x nh grid of c px cells; the grid's top-left is at (EXT + SIDE, TOP) */
+/** the bag for an nw x nh grid of c px cells; the grid's top-left is at (EXT + SIDE, TOP) */
 function packArt(nw: number, nh: number, c: number): HTMLCanvasElement {
   return cached(`pack|${nw}x${nh}|${c}`, () => {
     const gw = nw * c, gh = nh * c, bw = gw + SIDE * 2, H = TOP + gh + BOT;
     const W = bw + EXT * 2;
     const [cv, x] = canvas(W, H + 1);
-    const f: Fill = (px, py, w, h, col) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
-    const bx0 = EXT, by0 = 7, bx1 = EXT + bw - 1, by1 = H - 1;
-    const inBody = (px: number, py: number, k = 0) => inRound(px, py, bx0 + k, by0 + k, bx1 - k, by1 - k, Math.max(1, 7 - k));
-    // ---- the body: ink outline, a burnished rim (bright where light rakes the top-left, dark bottom-right), leather
-    for (let py = by0; py <= by1; py++) for (let px = bx0; px <= bx1; px++) {
-      if (!inBody(px, py)) continue;
-      const u = (px - bx0) / bw, v = (py - by0) / (by1 - by0);
-      let col = LE.b;
-      if (!inBody(px, py, 1)) col = LE.out;
-      else if (!inBody(px, py, 2)) col = u + v < 0.55 ? LE.l3 : u + v < 1.1 ? LE.l2 : LE.d2;
-      else if (!inBody(px, py, 3)) col = u + v < 0.8 ? LE.l1 : u > 0.92 || v > 0.92 ? LE.d1 : LE.b;
-      else if (py > by1 - 5) col = LE.d1;
-      f(px, py, 1, 1, col);
-    }
-    // pebble grain: a pore and its lit lip on a staggered lattice (only where leather shows: the lining covers the rest)
-    for (let j = 0, py = by0 + 5; py < by1 - 3; j++, py += 6) for (let px = bx0 + 4 + (j % 2) * 4; px < bx1 - 3; px += 8) {
-      if (!inBody(px, py, 4) || !inBody(px + 2, py + 1, 4)) continue;
-      f(px, py, 2, 1, LE.d1); f(px + 1, py + 1, 1, 1, LE.l1);
-    }
-    // scuffs: a few burnished arcs where the bag rubs (bottom corners, sides)
-    for (const [sx, sy, len] of [[bx0 + 6, by1 - 4, 5], [bx1 - 12, by1 - 4, 6], [bx0 + 3, by0 + Math.round((by1 - by0) * 0.7), 4]] as [number, number, number][]) {
-      for (let i = 0; i < len; i++) f(sx + i, sy + (i === 0 || i === len - 1 ? 1 : 0), 1, 1, LE.l2);
-    }
-    // the stitched seam 3 px in: thread dashes with a dark hole after each
-    const seam = (px: number, py: number, i: number) => { const k = i % 4; if (k < 2) f(px, py, 1, 1, LE.st); else if (k === 2) f(px, py, 1, 1, LE.stD); };
-    { const sx0 = bx0 + 3, sx1 = bx1 - 3, sy1 = by1 - 3; let i = 0;
-      for (let px = sx0 + 4; px <= sx1 - 4; px++) seam(px, sy1, i++);
-      i = 0; for (let py = by0 + 14; py <= sy1 - 4; py++) { seam(sx0, py, i); seam(sx1, py, i); i++; } }
-    // ---- the lining: an inset oilcloth panel of stitched pockets (a fine twill, worn corners, bar-tacked crossings)
+    const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
+    x.drawImage(skin('wood', bw, H - 7), EXT, 7);
+    // the grid: a well, each pocket a slot with a 1 px border
     const gx0 = EXT + SIDE, gy0 = TOP;
-    f(gx0 - 3, gy0 - 3, gw + 6, gh + 6, LE.out);
-    f(gx0 - 2, gy0 - 2, gw + 4, gh + 4, LN.out);
-    f(gx0 - 1, gy0 - 1, gw + 2, gh + 2, LN.frame);
-    f(gx0 - 2, gy0 + gh + 3, gw + 4, 1, LE.l1); // the leather lip catching light under the lining
-    for (let cy = 0; cy < nh; cy++) for (let cx = 0; cx < nw; cx++) {
-      const X = gx0 + cx * c, Y = gy0 + cy * c;
-      f(X, Y, c, c, LN.base);
-      // the oilcloth's long fibres: a couple of wavering strands per pocket, broken unevenly (placed, never noise)
-      for (let k = 0, yy = 5 + ((cx * 3 + cy) % 4); yy < c - 3; k++, yy += 6 + ((cx + k) % 3)) {
-        const x0 = 3 + ((cx * 7 + cy * 5 + k * 3) % 6), L = Math.min(c - 4 - x0, 6 + ((cx * 5 + cy * 3 + k * 7) % 11));
-        for (let i = 0; i < L; i++) f(X + x0 + i, Y + yy + (((x0 + i + k * 5) >> 2) % 3 === 0 ? 1 : 0), 1, 1, (cx + cy + k) % 4 === 0 ? LN.wear : LN.twill);
-      }
-      f(X, Y, c, 2, LN.sh); f(X, Y, 2, c, LN.sh);
-      f(X + 2, Y + c - 2, c - 2, 1, LN.lit); f(X + c - 2, Y + 2, 1, c - 3, LN.lit);
-      // worn corners: the oilcloth rubbed pale where pockets crease
-      for (const [qx, qy, dx, dy] of [[X + 2, Y + 2, 1, 1], [X + c - 3, Y + 2, -1, 1], [X + 2, Y + c - 3, 1, -1], [X + c - 3, Y + c - 3, -1, -1]]) {
-        f(qx, qy, 1, 1, LN.wear); f(qx + dx, qy, 1, 1, LN.wear); f(qx, qy + dy, 1, 1, LN.wear);
-      }
+    f(gx0 - 2, gy0 - 2, gw + 4, gh + 4, KC.line); f(gx0 - 1, gy0 - 1, gw + 2, gh + 2, '#0c121c');
+    for (let j = 0; j < nh; j++) for (let i = 0; i < nw; i++) {
+      const X = gx0 + i * c, Y = gy0 + j * c;
+      f(X + 1, Y + 1, c - 2, c - 2, '#1f2939'); f(X + 2, Y + 2, c - 4, c - 4, KC.well);
     }
-    // the stitched seams between pockets: light dashes on a dark channel
-    for (let i = 1; i < nw; i++) { const X = gx0 + i * c; f(X - 1, gy0, 2, gh, LN.seamD); for (let yy = 2; yy < gh - 1; yy += 4) f(X - 1 + ((yy >> 2) & 1), gy0 + yy, 1, 2, LN.seam); }
-    for (let j = 1; j < nh; j++) { const Y = gy0 + j * c; f(gx0, Y - 1, gw, 2, LN.seamD); for (let xx = 2; xx < gw - 1; xx += 4) f(gx0 + xx, Y - 1 + ((xx >> 2) & 1), 2, 1, LN.seam); }
-    // bar-tacks where seams cross: a little thread cross
-    for (let i = 1; i < nw; i++) for (let j = 1; j < nh; j++) {
-      const X = gx0 + i * c - 1, Y = gy0 + j * c - 1;
-      f(X - 1, Y - 1, 4, 4, LN.seamD); f(X - 1, Y, 4, 2, LN.tack); f(X, Y - 1, 2, 4, LN.tack); f(X, Y, 2, 2, LN.seam);
-    }
-    // ---- the flap thrown back over the top: tooled border groove, stitched top edge, a sewn canvas patch
-    const fx0 = EXT + 2, fx1 = EXT + bw - 3, fy1 = 12;
-    const inFlap = (px: number, py: number, k = 0) => inRound(px, py, fx0 + k, k, fx1 - k, fy1 + 10 - k, Math.max(1, 8 - k));
-    for (let py = 0; py <= fy1 + 1; py++) for (let px = fx0; px <= fx1; px++) {
-      if (!inFlap(px, py)) continue;
-      let col = py > fy1 - 1 ? LE.out : LE.d1;
-      if (!inFlap(px, py, 1)) col = LE.out;
-      else if (py === 1) col = LE.l2;
-      else if (py === 2) col = LE.l1;
-      else if (py === fy1 - 2 && px > fx0 + 3 && px < fx1 - 3) col = LE.d3; // the tooled groove
-      else if (py === fy1 - 1 && px > fx0 + 3 && px < fx1 - 3) col = LE.b;
-      f(px, py, 1, 1, col);
-    }
-    for (let j = 0, py = 5; py < fy1 - 3; j++, py += 4) for (let px = fx0 + 6 + (j % 2) * 4; px < fx1 - 5; px += 8) { f(px, py, 2, 1, LE.d2); f(px + 1, py + 1, 1, 1, LE.b); }
-    for (let px = fx0 + 7, i = 0; px <= fx1 - 7; px++, i++) seam(px, 4, i);
-    f(fx0 + 2, fy1 + 1, fx1 - fx0 - 3, 1, LE.d2); // the flap's shadow on the body
-    // a canvas patch sewn on the flap's left end, its corners cross-stitched
-    { const px = fx0 + 6, py = 5, pw = 14, ph = 6;
-      f(px - 1, py - 1, pw + 2, ph + 2, LE.out); f(px, py, pw, ph, '#5e7466'); f(px, py, pw, 1, '#7e9484'); f(px, py + ph - 1, pw, 1, '#4a5c50');
-      for (let k = 2; k < pw - 2; k += 3) f(px + k, py + 2, 2, 1, '#4a5c50');
-      for (const [qx, qy] of [[px, py], [px + pw - 2, py], [px, py + ph - 2], [px + pw - 2, py + ph - 2]]) { f(qx, qy, 1, 1, LE.st); f(qx + 1, qy + 1, 1, 1, LE.st); }
-    }
-    // rivets where the flap is fixed to the body
-    rivet(f, fx0 + 2, fy1 - 2); rivet(f, fx1 - 4, fy1 - 2);
-    // ---- two rope ties hang from the flap over the top border, knotted, their ends frayed (a sea-bag's lashing)
-    const RP = ['#2a1e0e', '#8a6a3a', '#c8a464', '#ecd29a'];
-    for (const sx of [EXT + Math.round(bw * 0.16), EXT + Math.round(bw * 0.84)]) {
-      for (let yy = 4; yy < TOP - 6; yy++) {
-        const k = yy % 4;
-        f(sx - 2, yy, 1, 1, RP[0]); f(sx - 1, yy, 1, 1, k === 0 ? RP[3] : k === 1 ? RP[2] : k === 2 ? RP[1] : RP[0]);
-        f(sx, yy, 1, 1, k === 1 ? RP[3] : k === 2 ? RP[2] : k === 3 ? RP[1] : RP[0]); f(sx + 1, yy, 1, 1, RP[0]);
-      }
-      // the knot, and two frayed ends
-      const ky = TOP - 9;
-      f(sx - 4, ky, 8, 6, RP[0]); f(sx - 3, ky + 1, 6, 4, RP[2]); f(sx - 3, ky + 1, 3, 1, RP[3]); f(sx + 1, ky + 3, 2, 2, RP[1]);
-      for (const [dx, len] of [[-3, 5], [1, 4]] as [number, number][]) for (let i = 0; i < len; i++) { f(sx + dx + (i > 2 ? -1 : 0), ky + 6 + i, 1, 1, RP[2]); f(sx + dx + 1, ky + 6 + i, 1, 1, i % 2 ? RP[1] : RP[3]); }
-    }
-    // ---- brass D-rings on leather tabs at the sides, brass corner caps (riveted) at the bottom
-    for (const [rx, dir] of [[EXT - 4, -1], [EXT + bw, 1]] as [number, number][]) {
-      const ry = Math.round(H * 0.4);
-      f(rx + (dir < 0 ? 3 : -3), ry + 2, 4, 6, LE.d2);
-      f(rx, ry, 4, 10, BR.out); f(rx + (dir < 0 ? 1 : 0), ry + 1, 3, 8, BR.b); f(rx + (dir < 0 ? 2 : 0), ry + 3, 1, 4, BR.out); f(rx + 1, ry + 1, 1, 2, BR.l);
-    }
-    // a salt tide-line dried along the bottom, barnacles grown on both bottom corners
-    for (let px = bx0 + 8; px < bx1 - 8; px++) { const yy = by1 - 5 + Math.round(Math.sin(px * 0.21) * 1.2); if ((px * 5) % 11 < 8) f(px, yy, 1, 1, '#c8b49a'); }
-    // ---- the sea has been at it: algae films along the bottom, barnacles and a limpet crusted on, a sea star clinging
-    const px = new Px(W, H + 1);
-    const img = x.getImageData(0, 0, W, H + 1);
-    px.D.set(img.data);
-    const onBag = (X: number, Y: number) => inBody(X, Y, 1) && !(X >= gx0 - 3 && X < gx0 + gw + 3 && Y >= gy0 - 3 && Y < gy0 + gh + 4);
-    algae(px, bx0 + bw * 0.3, by1 - 3, 12, 2.6, 1.7, { inside: onBag });
-    algae(px, bx0 + bw * 0.62, by1 - 3, 8, 2.4, 4.1, { inside: onBag, brown: true });
-    algae(px, bx1 - 3, by0 + (by1 - by0) * 0.72, 2.4, 9, 2.6, { inside: onBag });
-    for (const [sp, sx, sy] of [[SPR.barnacleL, bx0 + 2, by1 - 6], [SPR.barnacleM, bx0 + 6, by1 - 4], [SPR.barnacleS, bx0 + 1, by1 - 9], [SPR.barnacleL, bx1 - 8, by1 - 6], [SPR.barnacleS, bx1 - 11, by1 - 4], [SPR.barnacleM, bx1 - 4, by1 - 10]] as const) stamp(px, sp, sx, sy, { onlyOn: true });
-    stamp(px, SPR.limpet, fx0 + 24, 6, { onlyOn: true });
-    stamp(px, SPR.star, bx1 - 2, Math.round(H * 0.6), { onlyOn: true });
-    coralline(px, bx0 + 2, by0 + (by1 - by0) * 0.55, 2, 4, 5, { inside: onBag });
-    return px.done();
+    return cv;
   });
 }
 
-/** the seabed tray: a driftwood frame (planks, rope wraps at the corners, a barnacle crust) round rippled sand with a
- *  few shore finds lying on it (a sea star, a scallop, a limpet, sea glass, a pebble, sea-grass tufts, a snail) */
-function trayArt(w: number, h: number): HTMLCanvasElement {
-  return cached(`tray|${w}|${h}`, () => {
-    const px = new Px(w, h);
-    const DW = R.wood.map((c) => lerpC(c, R.salt[Math.min(6, 2)], 0.25));
-    const F = 7;
-    planks(px, 1, 1, w - 2, F - 2, true, DW, 21, { lit: 1, flakes: true });
-    planks(px, 1, h - F + 1, w - 2, F - 2, true, DW, 24, { lit: -1 });
-    planks(px, 1, F - 1, h - 2 * F + 2, F - 2, false, DW, 27);
-    planks(px, w - F + 1, F - 1, h - 2 * F + 2, F - 2, false, DW, 29, { lit: -1 });
-    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-      const dx = Math.min(x, w - 1 - x), dy = Math.min(y, h - 1 - y);
-      if ((dx === 0 && dy < 2) || (dy === 0 && dx < 2)) { px.set(x, y, R.ink, 0); continue; }
-      if (dx === 0 || dy === 0 || (dx === 1 && dy === 1)) px.set(x, y, R.ink);
-    }
-    for (let x = 2; x < w - 2; x++) { px.set(x, 1, DW[8]); px.set(x, h - 2, DW[1]); }
-    for (let y = 2; y < h - 2; y++) { px.set(1, y, DW[7]); px.set(w - 2, y, DW[2]); }
-    // the sand: wet and dark under the frame's edge, ripple crests (a lit line over a shadow line), shore finds
-    const ix = F, iy = F, iw = w - F * 2, ih = h - F * 2;
-    const SA = R.sand;
-    for (let y = iy - 1; y < iy + ih + 1; y++) for (let x = ix - 1; x < ix + iw + 1; x++) {
-      if (y === iy - 1 || x === ix - 1 || y === iy + ih || x === ix + iw) { px.set(x, y, R.ink); continue; }
-      const u = x - ix, v = y - iy;
-      const wv = Math.round(Math.sin((u + 17) * 0.11) * 1.6 + Math.sin(u * 0.29 + v * 0.05) * 0.5);
-      const p = (v + wv + 90) % 9;
-      let c = p === 0 ? SA[3] : p === 1 ? SA[5] : p === 2 ? SA[4] : SA[4];
-      if (p >= 5) c = lerpC(SA[4], SA[3], 0.45);
-      if (v < 2 || u < 2) c = v < 1 || u < 1 ? SA[1] : SA[2];
-      px.set(x, y, c);
-    }
-    const ok = (X: number, Y: number) => X >= ix && Y >= iy && X < ix + iw && Y < iy + ih;
-    stamp(px, SPR.star, ix + Math.round(iw * 0.55), iy + ih - 9, { onlyOn: true });
-    stamp(px, SPR.scallop, ix + 4, iy + ih - 8, { onlyOn: true });
-    stamp(px, SPR.limpet, ix + Math.round(iw * 0.82), iy + ih - 6, { onlyOn: true });
-    stamp(px, SPR.glass, ix + Math.round(iw * 0.36), iy + ih - 6, { onlyOn: true });
-    const pb = (bx: number, by: number) => { for (const [dx, dy, c] of [[1, 0, 3], [2, 0, 4], [3, 0, 3], [0, 1, 2], [1, 1, 4], [2, 1, 3], [3, 1, 2], [4, 1, 1], [1, 2, 2], [2, 2, 1], [3, 2, 1]] as const) px.set(bx + dx, by + dy, R.barn[c]); px.shade(bx + 5, by + 2, 0.7); px.shade(bx + 4, by + 3, 0.7); };
-    pb(ix + iw - 12, iy + ih - 5);
-    grass(px, ix + Math.round(iw * 0.18), iy + ih - 1, 3, 9, 6, { inside: ok });
-    grass(px, ix + Math.round(iw * 0.7), iy + ih - 1, 4, 13, 8, { inside: ok });
-    stamp(px, SPR.snail, ix + Math.round(iw * 0.74), iy + ih - 7, { onlyOn: true });
-    // the frame's sea crust: rope wraps at the corners, barnacles, a coralline patch, algae along the bottom
-    wraps(px, F + 2, 1, F - 2, true, 2); wraps(px, w - F - 8, 1, F - 2, true, 2);
-    wraps(px, F + 2, h - F + 1, F - 2, true, 2); wraps(px, w - F - 8, h - F + 1, F - 2, true, 2);
-    const onFrame = (X: number, Y: number) => X >= 1 && Y >= 1 && X < w - 1 && Y < h - 1 && !ok(X, Y);
-    algae(px, w * 0.4, h - 4, 10, 2.4, 3.3, { inside: onFrame });
-    coralline(px, w - 4, h * 0.45, 2, 4, 2, { inside: onFrame });
-    for (const [sp, sx, sy] of [[SPR.barnacleL, Math.round(w * 0.3), 1], [SPR.barnacleS, Math.round(w * 0.3) + 5, 3], [SPR.barnacleM, 1, Math.round(h * 0.5)]] as const) stamp(px, sp, sx, sy, { onlyOn: true });
-    return px.done();
-  });
-}
+/** the seabed tray: a recessed well (the loose finds lie in it) */
+function trayArt(w: number, h: number): HTMLCanvasElement { return skin('inset', w, h); }
+
 
 // ------------------------------------------------------------------ the screen
 interface Vis { x: number; y: number; vx: number; vy: number; lift: number; pop: number; shake: number; bump: number; cs: number }
@@ -259,6 +93,7 @@ interface Layout {
   colX: number; colY: number; colW: number; cardH: number; setsY: number; setsH: number; colBot: number;
   close: number; closeX: number; closeY: number; hintY: number; M: number;
 }
+
 
 export class BackpackScreen implements Screen {
   name = 'backpack';
@@ -303,7 +138,6 @@ export class BackpackScreen implements Screen {
   private cardItem: { uid: number; key: string; o: THREE.Object3D; sh: THREE.Mesh } | null = null;
   private cardPop = 0;
   /** bubble splashes (pick up, drop, fuse, presses) */
-  private fx = new SeaFx();
   /** rows the seabed tray keeps room for (the tallest thing that might be dropped on it) */
   private reserve = 2;
 
@@ -374,7 +208,7 @@ export class BackpackScreen implements Screen {
     const x0 = Math.max(M, Math.round((ui.w - totalW) / 2)), y0 = Math.max(M, Math.round((ui.h - totalH) / 2));
     const bCols = Math.floor((trayW - TP * 2) / T);
     const labY = y0 + bagH + 8, trayY = labY + labH;
-    const close = ui.h >= 400 ? 20 : 18;
+    const close = 15;
     const colX = x0 + bagW + G, colY = y0 + 4, colBot = trayY + trayH;
     const hintH = ui.lh('small') + 8, hintY = colBot - hintH + 4;
     const cardH = Math.round((hintY - 6 - colY) * 0.62);
@@ -383,7 +217,7 @@ export class BackpackScreen implements Screen {
       packX: x0, packY: y0, gridX: x0 + EXT + SIDE, gridY: y0 + TOP,
       trayX: x0 + EXT, trayY, trayW, trayH, labY, boardX: x0 + EXT + Math.round((trayW - bCols * T) / 2), boardY: trayY + TP, bCols, bRows: this.reserve,
       colX, colY, colW, cardH, setsY, setsH: hintY - 6 - setsY, colBot,
-      close, closeX: colX + colW - close + 5, closeY: colY - 5, hintY, M,
+      close, closeX: colX + colW - 24, closeY: colY + 8, hintY, M,
     };
   }
 
@@ -460,15 +294,14 @@ export class BackpackScreen implements Screen {
       if (cb) cb(); else this.game.closeModal();
       return;
     }
-    // the bag rises in with a little overshoot; the card column slides in from the right a beat later
-    const kb = this.closing ? 1 - (1 - this.open) ** 2 : easeOutBack(Math.min(1, this.open), 1.4);
-    const kc = this.closing ? kb : easeOutBack(Math.max(0, Math.min(1, this.open * 1.25 - 0.25)), 1.3);
-    const slide = Math.round((1 - kb) * 36), cslide = Math.round((1 - kc) * 48);
+    // the kit's calm open: the bag rises 6 px as it fades in, the card column follows a beat later
+    const ease = (k: number) => 1 - (1 - Math.max(0, Math.min(1, k))) ** 3;
+    const kb = this.closing ? 1 - (1 - this.open) ** 2 : ease(this.open);
+    const kc = this.closing ? kb : ease(this.open * 1.25 - 0.25);
+    const slide = Math.round((1 - kb) * 6), cslide = Math.round((1 - kc) * 8);
     // dim the frozen world, darker toward the edges
     const fade = Math.min(1, this.open * 1.6);
-    ui.fill(0, 0, ui.w, ui.h, '#030a12', 0.74 * fade);
-    const vg = Math.round(ui.h * 0.08);
-    for (let i = 0; i < 4; i++) { const a = 0.1 * fade; ui.fill(0, i * vg / 4, ui.w, vg / 4, '#000000', a * (4 - i) / 2); ui.fill(0, ui.h - (i + 1) * vg / 4, ui.w, vg / 4, '#000000', a * (4 - i) / 2); }
+    ui.fill(0, 0, ui.w, ui.h, KC.ink, 0.72 * fade);
     ui.block(0, 0, ui.w, ui.h);
     this.drawPack(slide);
     this.drawTray(slide);
@@ -481,7 +314,6 @@ export class BackpackScreen implements Screen {
     this.drawSets(cslide);
     this.drawHints(cslide);
     this.drawPlanLabel();
-    this.drawLife(dt, slide, cslide);
     this.drawFx(dt);
     this.syncModels();
     if (fg.closeButton('bp:close', this.L.closeX + cslide, this.L.closeY, { size: this.L.close, key: null })) this.close();
@@ -497,54 +329,48 @@ export class BackpackScreen implements Screen {
     const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
     const art = packArt(GRID_W, GRID_H, C);
     const x = L.packX, y = L.packY + slide;
-    // a soft drop shadow (two flat steps), then the satchel
-    ui.fill(x + EXT + 4, y + 11, art.width - EXT * 2, art.height - 8, '#000000', 0.28);
-    ui.fill(x + EXT + 2, y + 9, art.width - EXT * 2, art.height - 8, '#000000', 0.22);
+    // a soft drop shadow, then the bag
+    ui.fill(x + EXT + 2, y + 10, art.width - EXT * 2, art.height - 7, '#000000', 0.22);
     ui.img(art, x, y);
-    // the name plate on the flap, the capacity counter riveted into its right end
+    // the title set into the top border (the kit's legend), the capacity as a small tag at the right
     const used = packCells(run.items).used, full = used >= GRID_CELLS;
     const cap = `${fg.count('bp:used', used)}/${GRID_CELLS}`;
-    const tw = fg.measure('BACKPACK', 'title'), cw = fg.measure(cap, 'body') + 10, ph = fg.cap('title') + 9;
-    const pw = tw + 20 + cw + 4, px = Math.round(x + art.width / 2 - pw / 2), py = y - 4;
-    fg.fill(px + 1, py + 2, pw, ph, '#000000', 0.45);
-    fg.frame('brass', px, py, pw, ph);
-    fg.text('BACKPACK', px + 9, py + Math.round((ph - fg.cap('title')) / 2), { font: 'title', color: '#3a2008', shadow: '#f8dc90' });
-    const cx0 = px + pw - cw - 3;
-    // the counter: a little window let into the plate (a dark rim, a shadowed top row, a lit lower lip)
-    fg.fill(cx0, py + 3, cw, ph - 6, K.ink2);
-    fg.fill(cx0 + 1, py + 4, cw - 2, ph - 8, full ? '#5a1810' : K.teal1);
-    fg.fill(cx0 + 1, py + 4, cw - 2, 1, full ? '#3a0c08' : '#0b2a30');
-    fg.fill(cx0, py + ph - 3, cw, 1, '#f8d880');
-    fg.text(cap, cx0 + cw / 2, py + Math.round((ph - fg.cap('body')) / 2), { font: 'body', color: full ? K.coralL : K.cream, shadow: K.ink2, align: 'center' });
+    const tw = Math.ceil(fg.measure('BACKPACK', 'title')), tcap = Math.round(fg.cap('title'));
+    const lx = x + EXT + 16, ly = y + 7;
+    fg.fill(lx - 7, ly, tw + 14, 1, KC.navy);
+    fg.fill(lx - 8, ly - 1, 2, 3, KC.gold); fg.fill(lx + tw + 6, ly - 1, 2, 3, KC.gold);
+    fg.text('BACKPACK', lx, ly - Math.round(tcap / 2), { font: 'title', color: KC.gold2, shadow: KC.ink });
+    const capW = Math.ceil(fg.measure(cap, 'small')) + 8;
+    tag(fg, cap, x + art.width - EXT - SIDE - capW, ly + 5, full ? 'red' : 'dim');
     // an empty bag says what it is for
     if (!run.items.some((i) => i.gx >= 0) && !this.held) {
       const msg = 'Drag your finds into the pockets', mw = fg.measure(msg, 'body') + 20, my = Math.round(y + TOP + (GRID_H * C) / 2 - fg.lh('body') / 2) - 3;
-      ui.fill(L.gridX + (GRID_W * C - mw) / 2, my, mw, fg.lh('body') + 6, LN.out, 0.75);
-      fg.text(msg, L.gridX + (GRID_W * C) / 2, my + 4, { font: 'body', color: LN.tack, shadow: LN.out, align: 'center' });
+      ui.fill(L.gridX + (GRID_W * C - mw) / 2, my, mw, fg.lh('body') + 6, KC.navy, 0.92);
+      fg.text(msg, L.gridX + (GRID_W * C) / 2, my + 4, { font: 'body', color: KC.dim, shadow: null, align: 'center' });
     }
   }
 
   private drawTray(slide: number) {
     const ui = this.ui, fg = this.fg, L = this.L, run = this.run!;
     const y = L.trayY + slide;
-    ui.fill(L.trayX + 3, y + 4, L.trayW, L.trayH, '#000000', 0.3);
+    ui.fill(L.trayX + 2, y + 3, L.trayW, L.trayH, '#000000', 0.22);
     ui.img(trayArt(L.trayW, L.trayH), L.trayX, y);
     // the label row: ON THE SEABED, and what that means
     const loose = run.items.filter((i) => i.gx < 0 && ITEMS[i.id]).length;
     const ly = L.labY + slide;
-    fg.text('ON THE SEABED', L.trayX + 2, ly + 1, { font: 'body', color: K.brass2, outline: K.ink2 });
+    fg.text('ON THE SEABED', L.trayX + 2, ly + 1 + Math.max(0, fg.cap('body') - fg.cap('small')), { font: 'small', color: KC.gold, shadow: KC.ink });
     let note = loose ? `${loose} loose · left behind when you close the bag` : 'left behind when you close the bag';
     if (fg.measure('ON THE SEABED', 'body') + fg.measure(note, 'small') + 16 > L.trayW) note = loose ? `${loose} loose · left behind` : 'left behind on close';
-    fg.text(note, L.trayX + L.trayW - 2, ly + 1 + Math.max(0, fg.cap('body') - fg.cap('small')), { font: 'small', color: loose ? K.cream : K.dim, shadow: K.ink2, align: 'right' });
+    fg.text(note, L.trayX + L.trayW - 2, ly + 1 + Math.max(0, fg.cap('body') - fg.cap('small')), { font: 'small', color: loose ? KC.bone : KC.dim, shadow: KC.ink, align: 'right' });
     // faint corner ticks mark the slots
     for (let by = 0; by < L.bRows; by++) for (let bx = 0; bx < L.bCols; bx++) {
       const X = L.boardX + bx * T, Y = L.boardY + by * T + slide;
-      ui.fill(X + 1, Y + 1, 3, 1, '#a9844f'); ui.fill(X + 1, Y + 1, 1, 3, '#a9844f');
+      ui.fill(X + 1, Y + 1, 3, 1, KC.line); ui.fill(X + 1, Y + 1, 1, 3, KC.line);
     }
     if (!loose && !(this.held && this.plan.kind === 'board')) {
       const cy = y + L.trayH / 2;
-      fg.text('Nothing down here', L.trayX + L.trayW / 2, cy - fg.lh('body') + 1, { font: 'body', color: '#6a4a26', shadow: null, align: 'center' });
-      fg.text('drag things out of the bag to leave them', L.trayX + L.trayW / 2, cy + 3, { font: 'small', color: '#5e4222', shadow: null, align: 'center' });
+      fg.text('Nothing down here', L.trayX + L.trayW / 2, cy - fg.lh('body') + 1, { font: 'body', color: KC.dim, shadow: null, align: 'center' });
+      fg.text('drag things out of the bag to leave them', L.trayX + L.trayW / 2, cy + 3, { font: 'small', color: KC.faint, shadow: null, align: 'center' });
     }
   }
 
@@ -555,11 +381,11 @@ export class BackpackScreen implements Screen {
       if (it.gx < 0 || it === this.held || !ITEMS[it.id]) continue;
       const d = getItem(it.id), cells = rotCells(d.shape, it.rot), set = new Set(cells.map(([x, y]) => x + ',' + y));
       const hov = this.hover === it, target = (this.plan.kind === 'stack' || this.plan.kind === 'fuse') && this.plan.target === it;
-      const col = target ? '#ffd860' : RARITY_COLOR[d.rarity];
+      const col = target ? KC.gold : RARITY_UI[d.rarity];
       for (const [cx, cy] of cells) {
         const X = L.gridX + (it.gx + cx) * C, Y = L.gridY + (it.gy + cy) * C + slide;
         ui.fill(X + 1, Y + 1, C - 2, C - 2, LN.occ, 1);
-        if (hov || target) ui.fill(X + 1, Y + 1, C - 2, C - 2, col, target ? 0.2 + 0.12 * Math.sin(this.t * 10) : 0.14);
+        if (hov || target) ui.fill(X + 1, Y + 1, C - 2, C - 2, col, target ? 0.16 + 0.06 * Math.sin(this.t * 6) : 0.1);
         const a = hov || target ? 1 : 0.45, i = 2;
         if (!set.has(cx + ',' + (cy - 1))) ui.fill(X + i, Y + i, C - i * 2, 1, col, a);
         if (!set.has(cx + ',' + (cy + 1))) ui.fill(X + i, Y + C - i - 1, C - i * 2, 1, col, a);
@@ -570,7 +396,7 @@ export class BackpackScreen implements Screen {
     // the free pocket under the mouse
     if (!this.held && !this.hover) {
       const gx = Math.floor((ui.mx - L.gridX) / C), gy = Math.floor((ui.my - L.gridY) / C);
-      if (gx >= 0 && gy >= 0 && gx < GRID_W && gy < GRID_H) ui.fill(L.gridX + gx * C + 2, L.gridY + gy * C + 2 + slide, C - 4, C - 4, '#ffffff', 0.04);
+      if (gx >= 0 && gy >= 0 && gx < GRID_W && gy < GRID_H) ui.rect(L.gridX + gx * C + 1, L.gridY + gy * C + 1 + slide, C - 2, C - 2, KC.line2);
     }
   }
 
@@ -655,20 +481,17 @@ export class BackpackScreen implements Screen {
     for (const [uid, m] of this.models) if (m.o.userData.seen !== this.t || !this.run?.items.some((i) => i.uid === uid)) { m.o.removeFromParent(); m.sh.removeFromParent(); this.models.delete(uid); }
   }
 
-  /** the stack count as a cream tag tied to the item's corner (drawn over the miniature) */
+  /** the stack count as a small flat tag in the item's corner (drawn over the miniature) */
   private stackBadge(it: ItemInst, px: number, py: number, w: number, h: number) {
     const cap = stackCap(it.id);
     const n = it.n ?? 1;
     if (cap <= 1 || n <= 1) return;
     const f = this.fg, full = n >= cap;
     const s = `x${n}`;
-    const tw = f.measure(s, 'body'), th = f.cap('body') + 6;
+    const tw = Math.ceil(f.measure(s, 'small')), th = Math.round(f.cap('small')) + 5;
     const bx = px + w - tw - 9, by = py + h - th - 3;
-    f.fill(bx - 5, by + 2, 5, 1, '#c8a060');
-    f.fill(bx - 1, by - 1, tw + 8, th + 2, '#2a1606');
-    f.fill(bx, by, tw + 6, th, full ? '#f8d878' : '#f3e7c9');
-    f.fill(bx, by + th - 1, tw + 6, 1, full ? '#b08a28' : '#c8b088');
-    f.text(s, bx + 3, by + 3, { font: 'body', color: full ? '#6a2a04' : '#8a1a10', shadow: null });
+    f.fill(bx, by, tw + 6, th, KC.navy); f.rect(bx, by, tw + 6, th, full ? KC.gold : KC.line2);
+    f.text(s, bx + 3, by + 3, { font: 'small', color: full ? KC.gold : KC.bone, shadow: null });
   }
 
   /** the drag preview: the cells it would take (green fits, red doesn't), gold over a stack / fuse partner */
@@ -680,18 +503,17 @@ export class BackpackScreen implements Screen {
       for (const [x, y] of p.cells) {
         if (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) continue;
         const X = L.gridX + x * C, Y = L.gridY + y * C + slide;
-        const col = p.ok ? K.kelp : K.coral, hi = p.ok ? K.kelpL : K.coralL;
-        ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.3 + 0.08 * pulse);
-        ui.rect(X + 1, Y + 1, C - 2, C - 2, hi);
-        ui.rect(X + 2, Y + 2, C - 4, C - 4, col);
-        if (!p.ok) { const k = Math.round(C * 0.18); for (let i = -k; i <= k; i++) { ui.fill(X + C / 2 + i, Y + C / 2 + i, 2, 2, K.coralL, 0.8); ui.fill(X + C / 2 + i, Y + C / 2 - i, 2, 2, K.coralL, 0.8); } }
+        const col = p.ok ? KC.sage : KC.red;
+        ui.fill(X + 2, Y + 2, C - 4, C - 4, col, 0.16 + 0.06 * pulse);
+        ui.rect(X + 1, Y + 1, C - 2, C - 2, col);
+        if (!p.ok) { const k = Math.round(C * 0.14); for (let i = -k; i <= k; i++) { ui.fill(X + C / 2 + i, Y + C / 2 + i, 1, 1, KC.red2); ui.fill(X + C / 2 + i, Y + C / 2 - i, 1, 1, KC.red2); } }
       }
     } else if (p.kind === 'board') {
       const it = this.held;
       for (const [x, y] of rotCells(getItem(it.id).shape, it.rot)) {
         const X = L.boardX + (p.bx + x) * T, Y = L.boardY + (p.by + y) * T + slide;
-        ui.fill(X + 2, Y + 2, T - 4, T - 4, p.ok ? '#fff2c8' : K.coral, 0.3);
-        ui.rect(X + 1, Y + 1, T - 2, T - 2, p.ok ? '#fff8e0' : K.coralL);
+        ui.fill(X + 2, Y + 2, T - 4, T - 4, p.ok ? KC.bone : KC.red, 0.14);
+        ui.rect(X + 1, Y + 1, T - 2, T - 2, p.ok ? KC.dim : KC.red);
       }
     }
   }
@@ -720,10 +542,9 @@ export class BackpackScreen implements Screen {
       const label = p.kind === 'stack' ? `STACK +${p.k}` : `FUSE INTO ${getItem(p.id).name.toUpperCase()}${p.id === it.id ? ` +${p.level - 1}` : ''}`;
       const lw = g.measure(label, 'body') + 14, lh = g.lh('body') + 6;
       const lx = Math.min(g.w - lw - 4, ui.mx + 14), ly = Math.max(4, ui.my - lh - 10);
-      g.fill(lx - 1, ly - 1, lw + 2, lh + 2, K.ink2);
-      g.fill(lx, ly, lw, lh, '#2a1a04');
-      g.fill(lx, ly, lw, 1, K.brass1);
-      g.text(label, lx + 7, ly + 4, { font: 'body', color: '#ffe070', shadow: K.ink2 });
+      g.fill(lx, ly, lw, lh, KC.navy);
+      g.rect(lx, ly, lw, lh, KC.gold);
+      g.text(label, lx + 7, ly + 4, { font: 'body', color: KC.gold2, shadow: KC.ink });
     }
   }
 
@@ -731,28 +552,14 @@ export class BackpackScreen implements Screen {
     const ui = this.fg;
     for (const s of this.sparks) { s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += (s.g ?? 160) * dt; s.vx *= Math.exp(-dt * 2); }
     this.sparks = this.sparks.filter((s) => s.t < s.life);
-    for (const s of this.sparks) { const a = 1 - s.t / s.life; ui.fill(Math.round(s.x), Math.round(s.y), 2, 2, s.col, a); if (a > 0.6) ui.fill(Math.round(s.x) - 1, Math.round(s.y), 4, 1, s.col, a * 0.5); }
+    for (const s of this.sparks) { const a = 1 - s.t / s.life; ui.fill(Math.round(s.x), Math.round(s.y), 2, 2, s.col, a); }
     for (const t of this.toasts) t.t += dt;
     this.toasts = this.toasts.filter((t) => t.t < 1.8);
     for (const t of this.toasts) {
       const a = Math.min(1, (1.8 - t.t) * 2), dy = Math.round(-t.t * 16);
-      ui.text(t.text, t.x, t.y + dy, { font: 'title', color: t.col, outline: '#140a04', align: 'center', alpha: a });
-      if (t.sub) ui.text(t.sub, t.x, t.y + dy + ui.lh('title') + 1, { font: 'body', color: '#fff2c8', outline: '#140a04', align: 'center', alpha: a });
+      ui.text(t.text, t.x, t.y + dy, { font: 'title', color: t.col, shadow: KC.ink, align: 'center', alpha: a });
+      if (t.sub) ui.text(t.sub, t.x, t.y + dy + ui.lh('title') + 1, { font: 'body', color: KC.bone, shadow: KC.ink, align: 'center', alpha: a });
     }
-  }
-
-  /** the sea's constant little life: caustics on the lining and the sand, bubbles off the bag, kelp on the frames */
-  private drawLife(dt: number, slide: number, cs: number) {
-    const ui = this.ui, fg = this.fg, L = this.L, t = this.t;
-    caustics(ui, L.gridX, L.gridY + slide, GRID_W * C, GRID_H * C, t, 0.05);
-    caustics(ui, L.trayX + 7, L.trayY + 7 + slide, L.trayW - 14, L.trayH - 14, t + 3, 0.1, '#fff6d8');
-    bubbles(fg, L.packX + 30, L.packY + slide + 2, GRID_W * C - 40, t, 2, 5, 26);
-    bubbles(fg, L.colX + cs + 30, L.colY - 2, L.colW - 70, t, 6, 3, 18);
-    kelp(fg, L.colX + cs + 3, L.colY + 2, 34, t, 4, 1); kelp(fg, L.colX + cs + 6, L.colY + 3, 20, t, 7, -1);
-    kelp(fg, L.colX + cs + L.colW - 5, L.setsY + 2, 20, t, 9, -1);
-    kelp(fg, L.trayX + L.trayW - 10, L.trayY + slide + 1, 18, t, 2, -1);
-    if (this.game.input && fg.pressed && !this.held) this.fx.burst(fg.mx, fg.my, 5);
-    this.fx.draw(fg, dt);
   }
 
   // ---- the card column
@@ -774,11 +581,11 @@ export class BackpackScreen implements Screen {
       const MW = Math.round(Math.max(56, Math.min(110, Math.min(w * 0.32, h * 0.5))));
       modelWindow(ui, ix, y + pad, MW, d.rarity, this.held ? 1 : 0);
       this.cardModel(it, ix + MW / 2, y + pad + MW / 2, MW);
-      const hx = ix + MW + 8, hw = x + w - pad - hx;
+      const hx = ix + MW + 8, hw = x + w - pad - hx - 16;
       const hh = itemHead(fg, it.id, hx, y + pad + 1, hw, { level: it.level ?? 1, n: it.n ?? 1 });
       // the rest flows beside the window, then under it at full width
       const yy = y + pad + 1 + hh + 4;
-      fg.fill(hx, yy - 3, x + w - pad - hx, 1, K.teal2);
+      fg.fill(hx, yy - 3, x + w - pad - hx, 1, KC.line2);
       itemBody(fg, it.id, ix, yy, iw, { level: it.level ?? 1, counts: setCounts(run.items), loose: it.gx < 0, maxFuse: 2, flow: { y: y + pad + MW + 3, x: hx, w: hw } });
     } else {
       this.hideCardModel();
@@ -786,33 +593,34 @@ export class BackpackScreen implements Screen {
       // nothing hovered: what the packed gear adds up to
       const used = packCells(run.items).used;
       let yy = y + pad;
-      fg.text('YOUR BAG', ix, yy, { font: 'title', color: K.brass2, outline: K.ink2 });
+      fg.text('YOUR BAG', ix, yy, { font: 'title', color: KC.gold2, shadow: KC.ink });
       const cnt = `${used}/${GRID_CELLS} pockets`;
-      fg.text(cnt, x + w - pad, yy + fg.cap('title') - fg.cap('body'), { font: 'body', color: used >= GRID_CELLS ? K.coralL : K.cream, shadow: K.ink2, align: 'right' });
-      yy += fg.lh('title') + 1;
-      // the pocket meter: one stitched pocket per bag cell (src/ui/obj/statRows.ts)
-      yy += pocketMeter(fg, used, GRID_CELLS, ix, yy, iw, this.t) + 8;
+      fg.text(cnt, x + w - pad - 22, yy + fg.cap('title') - fg.cap('small'), { font: 'small', color: used >= GRID_CELLS ? KC.red2 : KC.dim, shadow: null, align: 'right' });
+      yy += fg.lh('title') + 2;
+      // the pockets in use: a flat bar
+      fg.bar(ix, yy, iw, 5, used / GRID_CELLS, used >= GRID_CELLS ? KC.red : KC.gold, KC.well, { id: 'bp:pockets' });
+      yy += 5 + 10;
       const b = buildLines(run.items);
       const bottom = y + h - 8;
       if (!b.stats.length && !b.skills.length) {
         // an empty bag: how packing works, three steps with their keys
-        yy += fg.textBox('Gear in the pockets changes your stats and deals you skills.', ix, yy, iw, { font: 'body', color: K.cream2, shadow: K.ink2 }) + 8;
+        yy += fg.textBox('Gear in the pockets changes your stats and deals you skills.', ix, yy, iw, { font: 'body', color: KC.bone, shadow: KC.ink }) + 8;
         const steps: [string, string][] = PixelUI.touch
           ? [['DRAG', 'finds into the pockets'], ['ROTATE', 'turns the thing you hold'], ['DRAG', 'a twin on a twin: they stack'], ['DRAG', 'a partner on it: they fuse']]
           : [['LMB', 'drag finds into the pockets'], ['R', 'turn things to make them fit'], ['LMB', 'drop a twin on a twin: they stack'], ['LMB', 'drop a partner on it: they fuse']];
         for (const [k, t] of steps) {
           if (yy + 16 > bottom) break;
-          fg.fill(ix, yy - 2, iw, 16, K.ink2, 0.5);
-          const kw = fg.hint(k, '', ix + 4, yy);
-          fg.text(t, ix + Math.max(28, kw), yy + 1, { font: 'body', color: K.cream, shadow: K.ink2 });
-          yy += 19;
+          if (yy > y + pad + 40) fg.fill(ix, yy - 4, iw, 1, KC.line);
+          const kw = fg.hint(k, '', ix + 2, yy);
+          fg.text(t, ix + Math.max(34, kw + 4), yy + 1, { font: 'body', color: KC.bone, shadow: KC.ink });
+          yy += 20;
         }
       } else {
-        // the stat changes as carved rows: an icon in a socket, the value big, the label (src/ui/obj/statRows.ts)
-        yy += statRows(fg, b.stats, ix, yy, iw, bottom - yy - (b.skills.length ? 24 : 0), this.t) + 6;
+        // the stat changes: rows of value + label, two columns when wide, a 1 px rule under each
+        yy += statGrid(fg, b.stats, ix, yy, iw, bottom - yy - (b.skills.length ? 28 : 0)) + 6;
         if (b.skills.length && yy + 20 < bottom) {
-          fg.text('SKILLS', ix, yy, { font: 'small', color: K.brass2, shadow: K.ink2 }); yy += fg.lh('small');
-          fg.textBox(b.skills.join(' · '), ix, yy, iw, { font: 'body', color: K.seaL, shadow: K.ink2 });
+          yy += sectionHead(fg, 'SKILLS', ix, yy, iw);
+          fg.textBox(b.skills.join(' · '), ix, yy, iw, { font: 'body', color: KC.steel2, shadow: KC.ink });
         }
       }
     }
@@ -848,8 +656,7 @@ export class BackpackScreen implements Screen {
     const x = L.colX + cs, y = L.setsY, w = L.colW, h = L.setsH;
     ui.panel('wood', x, y, w, h, undefined, { id: 'bp:sets' });
     const pad = 11;
-    fg.text('SET BONUSES', x + pad, y + pad - 2, { font: 'body', color: K.brass2, outline: K.ink2 });
-    let yy = y + pad + fg.lh('body') + 1;
+    let yy = y + pad - 1 + sectionHead(fg, 'SET BONUSES', x + pad, y + pad - 1, w - pad * 2 - (0)) + 2;
     const it = this.shown?.it ?? null;
     const tags = new Set((it ? getItem(it.id).tags ?? [] : []).filter((t) => SETS[t]));
     const sets: SetState[] = setBonuses(run);
@@ -858,7 +665,7 @@ export class BackpackScreen implements Screen {
     sets.sort((a, b) => Number(tags.has(b.tag)) - Number(tags.has(a.tag)) || b.count - a.count);
     if (!sets.length) {
       // none in play: the sets there are, as chips in their colours
-      yy += fg.textBox('Pack 2, 4 or 6 things that share a tag to switch its bonus on:', x + pad, yy, w - pad * 2, { font: 'small', color: K.cream2, shadow: K.ink2 }) + 4;
+      yy += fg.textBox('Pack 2, 4 or 6 things that share a tag to switch its bonus on:', x + pad, yy, w - pad * 2, { font: 'small', color: KC.dim, shadow: null }) + 5;
       let cx = x + pad;
       const ch = fg.lh('small') + 3;
       for (const t of SET_ORDER) {
@@ -866,9 +673,10 @@ export class BackpackScreen implements Screen {
         const cw = fg.measure(d.name.toUpperCase(), 'small') + 16;
         if (cx + cw > x + w - pad) { cx = x + pad; yy += ch + 3; }
         if (yy + ch > y + h - 4) break;
-        fg.fill(cx, yy, cw, ch, K.ink2); fg.rect(cx, yy, cw, ch, d.color);
-        fg.fill(cx + 3, yy + Math.round(ch / 2) - 2, 4, 4, d.color);
-        fg.text(d.name.toUpperCase(), cx + 10, yy + 2, { font: 'small', color: d.color, shadow: null });
+        const sc = soft(d.color);
+        fg.fill(cx, yy, cw, ch, KC.navy); fg.rect(cx, yy, cw, ch, sc);
+        fg.fill(cx + 3, yy + Math.round(ch / 2) - 2, 4, 4, sc);
+        fg.text(d.name.toUpperCase(), cx + 10, yy + 2, { font: 'small', color: sc, shadow: null });
         cx += cw + 4;
       }
       return;
@@ -882,7 +690,7 @@ export class BackpackScreen implements Screen {
       yy += rh + 2; n++;
     }
     fg.unclip();
-    if (n < sets.length) fg.text(`+${sets.length - n} more`, x + w - pad, y + pad, { font: 'small', color: K.dim, shadow: null, align: 'right' });
+    if (n < sets.length) fg.text(`+${sets.length - n} more`, x + w - pad, y + h - pad - 4, { font: 'small', color: KC.faint, shadow: null, align: 'right' });
   }
 
   /** keycaps along the bottom of the card column */
@@ -962,7 +770,6 @@ export class BackpackScreen implements Screen {
     // the grab point in pocket px (a seabed find grows to pocket size around the cursor)
     this.grab = { x: Math.max(2, Math.min(f.w * k - 2, (this.ui.mx - v.x) * k)), y: Math.max(2, Math.min(f.h * k - 2, (this.ui.my - v.y) * k)) };
     v.pop = 1;
-    this.fx.burst(this.ui.mx, this.ui.my, 6);
     sfx(['k_pick1', 'cloth1', 'k_tick1'], { vol: 0.45 });
   }
 
@@ -999,7 +806,7 @@ export class BackpackScreen implements Screen {
     if (p.kind === 'stack') {
       const moved = stackOnto(p.target, it);
       if (moved > 0) {
-        this.burst(p.target, '#ffe070', 10);
+        this.burst(p.target, KC.gold, 10);
         sfx(['coin1', 'k_drop2', 'pickup1'], { vol: 0.5 });
         this.visOf(p.target).bump = 1;
         if ((it.n ?? 1) <= 0) { run.removeItem(it.uid); this.vis.delete(it.uid); this.slot.delete(it.uid); return; }
@@ -1011,8 +818,7 @@ export class BackpackScreen implements Screen {
     if (p.kind === 'grid' && p.ok) {
       it.gx = p.gx; it.gy = p.gy; this.slot.delete(it.uid);
       v.vy = 70; v.bump = 1;
-      this.dust(it, '#cfe8e0');
-      { const [tx, ty] = this.targetOf(it), f = this.footOf(it, C); this.fx.burst(tx + f.w / 2, ty + f.h / 2, 8); }
+      this.dust(it, KC.dim);
       sfx(['k_drop2', 'k_drop3', 'cloth1'], { vol: 0.55 });
       return;
     }
@@ -1022,7 +828,7 @@ export class BackpackScreen implements Screen {
       if (p.ok) this.slot.set(it.uid, { bx: p.bx, by: p.by });
       else { this.slot.delete(it.uid); this.slot.set(it.uid, this.freeBoardSlot(it) ?? { bx: 0, by: this.L.bRows }); }
       v.vy = 50; v.bump = 1;
-      this.dust(it, '#e8d0a0');
+      this.dust(it, KC.bone);
       sfx(['sand_step1', 'k_drop2'], { vol: 0.45 });
       return;
     }
@@ -1073,13 +879,12 @@ export class BackpackScreen implements Screen {
     }
     if (out.gx < 0) this.slot.set(out.uid, place.slot && this.boardFits(out, place.slot.bx, place.slot.by, out.rot) ? place.slot : this.freeBoardSlot(out) ?? { bx: 0, by: this.L.bRows });
     const v = this.visOf(out); v.x = cx; v.y = cy; v.pop = 0;
-    this.burst(out, '#ffe8a0', 22); this.burst(out, '#c8a0ff', 12);
-    { const f = this.footOf(out); this.fx.burst(cx + f.w / 2, cy + f.h / 2, 14); }
+    this.burst(out, KC.gold2, 18);
     const d = getItem(res.id);
     const isLevel = res.id === it.id && res.id === target.id;
     const [tx, ty] = this.targetOf(out);
     const f = this.footOf(out);
-    this.toasts.push({ text: isLevel ? `LEVEL ${res.level}` : 'FUSED!', sub: d.name, x: tx + f.w / 2, y: ty - 22, t: 0, col: isLevel ? '#ffe070' : '#d8b0ff' });
+    this.toasts.push({ text: isLevel ? `LEVEL ${res.level}` : 'FUSED!', sub: d.name, x: tx + f.w / 2, y: ty - 22, t: 0, col: KC.gold2 });
     this.game.flash?.('#fff2c8', 0.12);
     sfx(['magic1', 'magic2', 'powerup1'], { vol: 0.7 });
     sfx(['pickup_sparkle1', 'shimmer1'], { vol: 0.45, delay: 0.08 });
@@ -1107,6 +912,28 @@ export class BackpackScreen implements Screen {
   trayPoint(bx: number, by: number) { return this.css(this.L.boardX + (bx + 0.5) * T, this.L.boardY + (by + 0.5) * T); }
   itemPoint(uid: number) { const it = this.run?.items.find((i) => i.uid === uid); if (!it) return null; const [x, y] = this.targetOf(it); const c = rotCells(getItem(it.id).shape, it.rot)[0], k = this.cellOf(it); return this.css(x + (c[0] + 0.5) * k, y + (c[1] + 0.5) * k); }
   closePoint() { return this.css(this.L.closeX + this.L.close / 2, this.L.closeY + this.L.close / 2); }
+}
+
+/**
+ * the packed gear's stat changes as flat rows: the value (sage when it helps, red when it hurts) then its label in
+ * dim, a 1 px rule under each; two columns when there is room. Returns the height used.
+ */
+function statGrid(ui: PixelUI, lines: { text: string; good: boolean }[], x: number, y: number, w: number, maxH: number): number {
+  const rowH = 17;
+  const cols = lines.length > 3 && w >= 280 ? 2 : 1, gap = 14, cw = Math.floor((w - (cols - 1) * gap) / cols);
+  const perCol = Math.max(1, Math.min(Math.ceil(lines.length / cols), Math.floor(maxH / rowH)));
+  let used = 0;
+  lines.slice(0, perCol * cols).forEach((l, i) => {
+    const c = Math.floor(i / perCol), r = i % perCol;
+    const X = x + c * (cw + gap), Y = y + r * rowH;
+    const m = l.text.match(/^([+\-−]?[\d.]+%?)\s*(.*)$/);
+    const value = m ? m[1] : l.text, label = m ? m[2] : '';
+    const vw = ui.text(value, X, Y + 2, { font: 'body', color: l.good ? KC.sage : KC.red2, shadow: KC.ink });
+    if (label) ui.text(label, X + vw + 5, Y + 2 + Math.round(ui.cap('body') - ui.cap('small')), { font: 'small', color: KC.dim, shadow: null });
+    ui.fill(X, Y + rowH - 2, cw, 1, KC.line);
+    used = Math.max(used, (r + 1) * rowH);
+  });
+  return used;
 }
 
 export type { ItemDef };

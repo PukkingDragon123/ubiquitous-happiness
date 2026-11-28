@@ -1,11 +1,11 @@
 // The dungeon run's HUD layer: the instrument HUD (src/ui/hud3.ts: the porthole + HP readout, the stamina / mana tubes,
 // the healing clam, the resource strip, the navigation instrument, the boss, title cards, pickup cards) drawn into one
 // PixelUI together with the
-// run's own interactive bits, all in the v5 "diver's kit":
-//   PROMPTS     a lacquered tag over the thing you can use: [E] + one verb, a cream note with the long text for a
+// run's own interactive bits, all in the v8b deep-ink kit:
+//   PROMPTS     a flat tag over the thing you can use: [E] + one verb, a parchment note with the long text for a
 //               moment; at Mr. Crab's stands a SHOP CARD (the item, its rarity, two stat lines, the price, BUY)
-//   POST OFFICE the manatee's mail panel: your pack as 3D models in slots (click to pick, a POST stamp on picked
-//               ones, a house mark on what home needs), six parcel stamps for her bag, the "builds at home" list with
+//   POST OFFICE the manatee's mail panel: your pack as 3D models in slots (click to pick, a POST tag on picked
+//               ones, a house mark on what home needs), a square per parcel her bag takes, the "builds at home" list with
 //               before / after bars, SEND / ALL MATERIALS / DONE
 //   PAUSE       the shared pause screen (src/title/pages.ts PausePanel): where you are, RESUME / BACKPACK / QUIT TO
 //               HOME, the run-is-saved note
@@ -19,13 +19,10 @@ import * as THREE from 'three';
 import { itemModel } from '../backpack/models';
 import { contactShadow } from '../ui/obj/stage';
 import { audio } from '../audio/audio';
-import { ITEMS, RARITY_COLOR, getItem, statLines } from '../game/items';
+import { ITEMS, getItem, statLines } from '../game/items';
 import { wrap } from '../ui/pixel/font';
-import { skin, PAD } from '../ui/pixel/skins';
-import { closeArt } from '../ui/pixel/skins';
-import { PAL, plate, bigText, bar, GLYPH, solid, caustics, seaGrapeIcon } from '../ui/obj/plates';
+import { skin, PAD, RARITY_UI, sectionHead, tag } from '../ui/pixel/skins';
 import { hpText, hpify } from '../combat/types';
-import { ramp } from '../ui/obj/pixtex';
 import { hudArt } from '../ui/hudArt';
 import type { ItemInst } from '../game/run';
 import { PausePanel } from '../title/pages';
@@ -74,7 +71,8 @@ export interface DungeonHudState {
   menu?: boolean;
 }
 
-const INK = '#2a1a0c', INK_DIM = '#6a5638';
+const INK = C.inkT;
+const KIND: Record<string, string> = { tool: 'TOOL', trinket: 'TRINKET', ability: 'CORE', material: 'MATERIAL', weapon: 'WEAPON', armor: 'ARMOUR' };
 
 export class DungeonHud {
   ui = new PixelUI();
@@ -151,58 +149,57 @@ export class DungeonHud {
     }
   }
 
-  /** Mr. Crab's stand: what it is, what it does, what it costs */
+  /** Mr. Crab's stand: what it is, what it does, what it costs (a flat kit card with a pointer up to the stand) */
   private shopCard(p: Prompt, at: HudAnchor) {
     const ui = this.ui, sh = p.shop!;
     const d = ITEMS[sh.id];
-    const col = d ? RARITY_COLOR[d.rarity] : PAL.cream;
     // (v6: no hearts: the health goods are SEA GRAPES that restore HP)
     const name = d ? d.name : sh.id === 'heart' ? 'Sea Grapes' : sh.name;
-    const kind = d ? `${d.rarity} ${d.kind}`.toUpperCase() : sh.id === 'heart' ? `RESTORES ${hpText(2)}` : sh.id === 'key' ? 'OPENS A LOCKED CHEST' : 'BLASTS CRACKED ROCK';
+    const kind = d ? (KIND[d.kind] ?? d.kind.toUpperCase()) : sh.id === 'heart' ? `RESTORES ${hpText(2)}` : sh.id === 'key' ? 'OPENS A LOCKED CHEST' : 'BLASTS CRACKED ROCK';
+    const rar = d ? d.rarity.toUpperCase() : '';
     const lines = d ? statLines(sh.id, 1).slice(0, 2).map((l) => hpify(l.text)) : [];
     if (d && !lines.length) lines.push(...wrap(d.desc, 'small', 150, ui.hd).slice(0, 2));
     const a = this.promptA, pop = 1 - (1 - a) ** 3;
-    const tw = Math.max(ui.measure(name, 'title'), ui.measure(kind, 'small'), ...lines.map((l) => ui.measure(l, 'small')));
-    const w = Math.round(Math.max(190, tw + 64));
-    const head = 10 + ui.lh('title') + ui.lh('small') * (1 + lines.length);
-    const h = Math.round(Math.max(54, head) + 32);
+    const tw = Math.max(ui.measure(name, 'title'), ui.measure(rar + '  ' + kind, 'small'), ...lines.map((l) => ui.measure(l, 'small')));
+    const w = Math.round(Math.max(196, tw + 70));
+    const head = 12 + ui.lh('title') + ui.lh('small') * (1 + lines.length);
+    const h = Math.round(Math.max(58, head) + 30);
     // under the stand (the seabed's foreground is quiet), a pointer up to it; kept clear of the HUD's top row
     const x = Math.round(Math.max(6, Math.min(ui.w - w - 6, at.x - w / 2)));
-    const y = Math.round(Math.max(96, Math.min(ui.h - h - 8, at.y + 16))) + Math.round((1 - pop) * 8);
-    ui.fill(x + 3, y + 3, w, h, '#000000', 0.3 * a);
-    ui.frame('wood', x, y, w, h, a);
-    // the kit's living decorations; only the caustic light when the card sits high (its bubbles would rise into the HUD)
-    if (y >= 130) ui.panelFx('wood', x, y, w, h, 'shopcard', a); else ui.caustic(x + 7, y + 7, w - 14, h - 14, 0.11 * a);
+    const y = Math.round(Math.max(96, Math.min(ui.h - h - 8, at.y + 16))) + Math.round((1 - pop) * 6);
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22 * a);
+    ui.fill(x, y, w, h, C.navy, 0.97 * a);
+    ui.rect(x, y, w, h, C.line2);
     const px = Math.round(Math.max(x + 12, Math.min(x + w - 13, at.x)));
-    for (let i = 0; i < 6; i++) ui.fill(px - i, y - 1 - i + 1, i * 2 + 1, 1, i === 5 ? PAL.ink2 : '#2a6b6f', a);
-    const ix = x + 11, iy = y + 11;
+    for (let i = 0; i < 4; i++) { ui.fill(px - i, y - 1 - i, i * 2 + 1, 1, C.line2, a); if (i < 3) ui.fill(px - i + 1, y - i, Math.max(0, i * 2 - 1), 1, C.navy, a); }
+    const ix = x + 12, iy = y + 12;
     ui.frame('slot', ix, iy, 38, 38, a);
     if (d) ui.item(sh.id, ix + 3, iy + 3, 32, 32, 1, a);
-    else { const g = sh.id === 'heart' ? seaGrapeIcon() : hudArt(sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
-    const tx = ix + 46;
-    ui.text(name, tx, iy - 1, { font: 'title', color: ramp(col)[4], alpha: a });
+    else { const g = sh.id === 'heart' ? hudArt('flask') : hudArt(sh.id === 'key' ? 'key' : 'bomb'); ui.img(g, ix + 19 - g.width, iy + 19 - g.height, { w: g.width * 2, h: g.height * 2, alpha: a }); }
+    const tx = ix + 48;
+    ui.text(name, tx, iy - 1, { font: 'title', color: C.bone2, shadow: C.ink, alpha: a });
     let ly = iy - 1 + ui.lh('title');
-    ui.text(kind, tx, ly, { font: 'small', color: PAL.dim, alpha: a }); ly += ui.lh('small');
-    for (const l of lines) { ui.text(l, tx, ly, { font: 'small', color: PAL.kelp2, alpha: a }); ly += ui.lh('small'); }
-    // the price and BUY
-    const by = y + h - 27;
-    ui.fill(x + 9, by - 3, w - 18, 1, '#2a6b6f', a);
+    let kx = tx;
+    if (rar) kx += ui.text(rar, tx, ly, { font: 'small', color: RARITY_UI[d!.rarity], shadow: null, alpha: a }) + 5;
+    ui.text(kind, kx, ly, { font: 'small', color: C.dim, shadow: null, alpha: a }); ly += ui.lh('small') + 1;
+    for (const l of lines) { ui.text(l, tx, ly, { font: 'small', color: C.sage, shadow: null, alpha: a }); ly += ui.lh('small'); }
+    // the price and BUY, under a rule
+    const by = y + h - 26;
+    ui.fill(x + 10, by - 4, w - 20, 1, C.line, a);
     const can = !p.bad;
-    const pearl = this.pearlIcon();
-    ui.img(pearl, x + 13, by + 3, { alpha: a });
-    const pw = bigText(ui, String(sh.price), x + 13 + pearl.width + 4, by + 3, { cap: 12, color: can ? PAL.brass2 : PAL.coral, alpha: a });
-    ui.text('PEARLS', x + 13 + pearl.width + 8 + pw, by + 7, { font: 'small', color: PAL.dim, alpha: a });
+    const pearl = hudArt('pearl');
+    ui.img(pearl, x + 12, by + 3, { alpha: a });
+    const pw = ui.text(String(sh.price), x + 12 + pearl.width + 5, by + 1, { font: 'title', color: can ? C.gold : C.red2, shadow: C.ink, alpha: a });
+    ui.text('PEARLS', x + 12 + pearl.width + 10 + pw, by + 5, { font: 'small', color: C.dim, shadow: null, alpha: a });
     if (can) {
       const key = keyName(p.key || 'E');
       const kw = ui.keycap(key, -999, -999);
       const lw = ui.measure('BUY', 'title');
-      const bx = x + w - 13 - lw - kw - 6;
-      ui.keycap(key, bx, by + 4);
-      ui.text('BUY', bx + kw + 6, by + 2, { font: 'title', color: PAL.kelp2, alpha: a });
-    } else ui.text('NOT ENOUGH', x + w - 13, by + 5, { font: 'body', color: PAL.coral2, align: 'right', alpha: a });
+      const bx = x + w - 12 - lw - kw - 6;
+      ui.keycap(key, bx, by + 3);
+      ui.text('BUY', bx + kw + 6, by + 1, { font: 'title', color: C.gold2, shadow: C.ink, alpha: a });
+    } else ui.text("CAN'T AFFORD", x + w - 12, by + 4, { font: 'small', color: C.red2, shadow: null, align: 'right', alpha: a });
   }
-  private pearlCv: HTMLCanvasElement | null = null;
-  private pearlIcon() { if (!this.pearlCv) { const g = hudArt('pearl'); const c = document.createElement('canvas'); c.width = g.width * 2; c.height = g.height * 2; const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; x.drawImage(g, 0, 0, c.width, c.height); this.pearlCv = c; } return this.pearlCv; }
 
   // ---------------------------------------------------------------- the post office
   private mailPanel(m: MailState): string | null {
@@ -214,45 +211,45 @@ export class DungeonHud {
     const gridW = cols * (cell + gap) - gap, gridH = rows * (cell + gap) - gap;
     const goalsW = 184, P = PAD.wood, pad = P[0] + 4;
     const W = Math.min(ui.w - 12, gridW + goalsW + pad * 2 + 12);
-    const H = Math.min(ui.h - 20, gridH + 128);
+    const H = Math.min(ui.h - 20, gridH + 102);
     const pop = 1 - (1 - Math.min(1, this.mailT * 6)) ** 3;
-    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + 6 + Math.round((1 - pop) * 16);
+    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + 6 + Math.round((1 - pop) * 4);
     const a = Math.min(1, this.mailT * 7);
-    planes.draw(solid(PAL.ink2), 0, 0, { w: ui.w, h: ui.h, alpha: 0.6 * a });
+    planes.draw(solid(C.ink), 0, 0, { w: ui.w, h: ui.h, alpha: 0.55 * a });
     ui.block(0, 0, ui.w, ui.h);
     planes.draw(skin('wood', W, H, ui.hd), x, y, { w: W, h: H, alpha: a, shadow: 3 });
-    planes.drawTiled(caustics(), x + 4, y + 4, W - 8, H - 8, { tile: 128, ox: this.t * 0.012, oy: this.t * 0.008, alpha: 0.06 * a });
-    // the header: the title on a brass plaque over the top edge, one line of what this is, the close X
+    // the title set into the top border (the kit's legend), one line of what this is, the close X
     const title = 'POST OFFICE';
-    const tw = ui.measure(title, 'title');
-    planes.draw(skin('plaque', tw + 30, 25, ui.hd), x + 14, y - 11, { w: tw + 30, h: 25, alpha: a });
-    ui.text(title, x + 29, y - 11 + Math.round((23 - ui.cap('title')) / 2), { font: 'title', color: INK, shadow: null, alpha: a });
+    const tw = Math.ceil(ui.measure(title, 'title')), tcap = Math.round(ui.cap('title')), tlx = Math.round(x + W / 2 - tw / 2);
+    ui.fill(tlx - 7, y, tw + 14, 1, C.navy, a); ui.fill(tlx - 8, y - 1, 2, 3, C.gold, a); ui.fill(tlx + tw + 6, y - 1, 2, 3, C.gold, a);
+    ui.text(title, tlx, y - Math.round(tcap / 2), { font: 'title', color: C.gold2, shadow: C.ink, alpha: a });
     let out: string | null = null;
-    if (this.closeBtn('mail:x', x + W - 27, y + 6)) out = 'mail:close';
-    ui.text('The manatee mails your loot home. It stays safe even if you sink.', x + pad, y + 20, { font: 'small', color: PAL.dim, alpha: a });
-    // her bag: one stamp per parcel she still takes, the picked ones filled
-    const gx = x + pad, rowY = y + 36;
-    ui.text('PARCELS', gx, rowY + 3, { font: 'small', color: PAL.cream, alpha: a });
+    if (ui.closeButton('mail:x', x + W - 24, y + 8, { size: 15, key: null })) out = 'mail:close';
+    ui.text('The manatee mails your loot home. It stays safe even if you sink.', x + pad, y + 14, { font: 'small', color: C.dim, shadow: null, alpha: a });
+    // her bag: one square per parcel she still takes, the picked ones filled gold
+    const gx = x + pad, rowY = y + 34;
+    ui.text('PARCELS', gx, rowY + 2, { font: 'small', color: C.bone, shadow: null, alpha: a });
     const cap0 = Math.max(m.capacity, m.used, 1);
-    const sx0 = gx + ui.measure('PARCELS', 'small') + 8;
-    const pc = GLYPH.parcel(), po = GLYPH.parcelOff(), sc = 2;
+    const sx0 = gx + ui.measure('PARCELS', 'small') + 8, PS = 9;
     for (let i = 0; i < cap0; i++) {
       const on = i < m.used, over = i >= m.capacity;
       const bump = on && i === m.used - 1 ? Math.max(0, 1 - this.lastPick * 5) : 0;
-      ui.img(on ? pc : po, sx0 + i * (pc.width * sc + 3), rowY - Math.round(bump * 3), { w: pc.width * sc, h: pc.height * sc, alpha: a * (over ? 0.5 + 0.5 * Math.sin(this.t * 10) : 1) });
+      const qx = sx0 + i * (PS + 3), qy = rowY + 1 - Math.round(bump * 2);
+      ui.fill(qx, qy, PS, PS, over ? C.red : on ? C.gold : C.well, a);
+      ui.rect(qx, qy, PS, PS, over ? C.red2 : on ? C.gold2 : C.line2);
     }
     this.lastPick += 1 / 60;
     const left = m.capacity - m.used;
-    const lx = sx0 + cap0 * (pc.width * sc + 3) + 4;
-    ui.text(m.used > m.capacity ? 'TOO MANY!' : left > 0 ? `${left} LEFT` : 'BAG FULL', lx, rowY + 3, { font: 'small', color: m.used > m.capacity ? PAL.coral2 : left > 0 ? PAL.dim : PAL.brass2, alpha: a });
+    const lx = sx0 + cap0 * (PS + 3) + 4;
+    ui.text(m.used > m.capacity ? 'TOO MANY' : left > 0 ? `${left} LEFT` : 'BAG FULL', lx, rowY + 2, { font: 'small', color: m.used > m.capacity ? C.red2 : left > 0 ? C.dim : C.gold, shadow: null, alpha: a });
     // the pack: every item as a 3D model in a slot
-    const gy = rowY + 22;
+    const gy = rowY + 20;
     planes.draw(skin('inset', gridW + 8, gridH + 8, ui.hd), gx - 4, gy - 4, { w: gridW + 8, h: gridH + 8, alpha: a });
     const needs = new Set(m.goals.flatMap((g) => g.lines.filter((l) => l.have < l.need).map((l) => l.id)));
-    // every slot of the grid, the empty ones too (a dim recess with a grain of sand), so the pack reads as a pack
+    // every slot of the grid, the empty ones too, so the pack reads as a pack
     for (let i = n; i < cols * rows; i++) {
       const ix = gx + (i % cols) * (cell + gap), iy = gy + Math.floor(i / cols) * (cell + gap);
-      planes.draw(skin('slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a * 0.45 });
+      planes.draw(skin('slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a * 0.5 });
     }
     const kk = st.ui.scale.x || 1;
     m.items.forEach((it, i) => {
@@ -262,59 +259,53 @@ export class DungeonHud {
       const h = ui.hover(ix, iy, cell, cell);
       ui.mark('mail:' + it.uid, ix, iy, cell, cell);
       if (h) ui.cursor = 'point';
-      planes.draw(skin('slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a });
-      if (on) { ui.rect(ix - 1, iy - 1, cell + 2, cell + 2, PAL.ink2); ui.rect(ix, iy, cell, cell, PAL.brass2); ui.rect(ix + 1, iy + 1, cell - 2, cell - 2, PAL.brass); }
+      planes.draw(skin(on ? 'cardSel' : 'slot', cell, cell, ui.hd), ix, iy, { w: cell, h: cell, alpha: a });
+      if (h && !on) ui.rect(ix, iy, cell, cell, C.slate);
       let mo = this.mailModels.get(it.uid);
       if (!mo) { mo = itemModel(it.id); const sh2 = contactShadow(1.0, 0.8, 0.5); sh2.position.set(0.08, -0.08, -0.4); mo.add(sh2); st.ui.add(mo); this.mailModels.set(it.uid, mo); }
       const d = getItem(it.id);
       const cw = Math.max(...d.shape.map((c) => c[0])) + 1, ch = Math.max(...d.shape.map((c) => c[1])) + 1;
       mo.visible = a > 0.1;
-      mo.scale.setScalar(((cell - 9) / Math.max(cw, ch) / kk) * (h ? 1.15 : 1));
-      mo.rotation.set(0.3, -0.3 + (h || on ? Math.sin(this.t * 2.5) * 0.4 : 0), 0);
-      st.put(mo, (ix + cell / 2) / kk, (iy + cell / 2 - (on ? 2 : 0)) / kk, 100 + (on ? 10 : 0));
-      if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + cell - 3, iy + cell - ui.lh('small') + 1, { font: 'small', color: PAL.cream, align: 'right', alpha: a });
-      if (needs.has(it.id)) ui.img(GLYPH.house(), ix + 3, iy + cell - 12, { alpha: a });
-      if (on) {
-        // the POST stamp on the corner
-        const sw = ui.measure('POST', 'small') + 6;
-        ui.fill(ix + cell - sw - 1, iy + 2, sw, 11, PAL.coral1, a); ui.fill(ix + cell - sw, iy + 3, sw - 2, 9, PAL.coral, a);
-        ui.text('POST', ix + cell - sw + 2, iy + 4, { font: 'small', color: PAL.paper, shadow: null, alpha: a });
-      }
+      mo.scale.setScalar(((cell - 9) / Math.max(cw, ch) / kk) * (h ? 1.08 : 1));
+      mo.rotation.set(0.3, -0.3 + (h || on ? Math.sin(this.t * 1.6) * 0.3 : 0), 0);
+      st.put(mo, (ix + cell / 2) / kk, (iy + cell / 2 - (on ? 1 : 0)) / kk, 100 + (on ? 10 : 0));
+      if ((it.n ?? 1) > 1) ui.text('x' + String(it.n), ix + cell - 3, iy + cell - ui.lh('small') + 1, { font: 'small', color: C.bone, shadow: C.ink, align: 'right', alpha: a });
+      if (needs.has(it.id)) houseMark(ui, ix + 3, iy + cell - 9, a);
+      if (on) tag(ui, 'POST', ix + cell - Math.ceil(ui.measure('POST', 'small')) - 10, iy + 2, 'gold', { fill: true, alpha: a });
       if (h) {
         const cells = d.shape.length;
-        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [{ text: `${cells} cell${cells > 1 ? 's' : ''} - ${ITEMS[it.id]?.kind === 'material' ? (needs.has(it.id) ? 'home needs this!' : 'builds the house') : 'goes to your stash'}`, color: '#1a4a7a' }, { text: on ? 'click: take it back out' : 'click: post it home', color: '#6a5638' }]));
+        ui.tooltip(ui.itemTip(it.id, it.level ?? 1, [{ text: `${cells} cell${cells > 1 ? 's' : ''} - ${ITEMS[it.id]?.kind === 'material' ? (needs.has(it.id) ? 'home needs this!' : 'builds the house') : 'goes to your stash'}`, color: C.steel0 }, { text: on ? 'click: take it back out' : 'click: post it home', color: C.inkT2 }]));
         if (ui.pressed) { out = 'mail:' + it.uid; this.lastPick = 0; audio.play('k_click1', { vol: 0.3, dry: true }); }
       }
     });
-    if (n > cols * rows) ui.text(`+${n - cols * rows} MORE IN YOUR PACK`, gx + gridW, gy + gridH + 5, { font: 'small', color: PAL.dim, align: 'right', alpha: a });
+    if (n > cols * rows) ui.text(`+${n - cols * rows} MORE IN YOUR PACK`, gx + gridW, gy + gridH + 5, { font: 'small', color: C.dim, shadow: null, align: 'right', alpha: a });
     if (!n) {
-      ui.text('YOUR PACK IS EMPTY', gx + gridW / 2, gy + gridH / 2 - 12, { font: 'body', color: PAL.cream, align: 'center', alpha: a });
-      ui.text('Bring loot here to mail it home.', gx + gridW / 2, gy + gridH / 2 + 4, { font: 'small', color: PAL.dim, align: 'center', alpha: a });
+      ui.text('YOUR PACK IS EMPTY', gx + gridW / 2, gy + gridH / 2 - 12, { font: 'body', color: C.bone, shadow: null, align: 'center', alpha: a });
+      ui.text('Bring loot here to mail it home.', gx + gridW / 2, gy + gridH / 2 + 4, { font: 'small', color: C.dim, shadow: null, align: 'center', alpha: a });
     }
     // what the parcel builds at home
     const rx = x + W - pad - goalsW, ry = rowY - 4, rh = gy + gridH + 4 - ry;
     planes.draw(skin('inset', goalsW, rh, ui.hd), rx, ry, { w: goalsW, h: rh, alpha: a });
-    ui.text('BUILDS AT HOME', rx + 8, ry + 6, { font: 'small', color: PAL.brass2, alpha: a });
-    let yy = ry + 6 + ui.lh('small') + 3;
-    if (!m.goals.length) ui.textBox('Nothing left to build: everything you send goes to your stash.', rx + 8, yy, goalsW - 16, { font: 'small', color: PAL.dim });
+    let yy = ry + 7 + sectionHead(ui, 'BUILDS AT HOME', rx + 8, ry + 7, goalsW - 16, { alpha: a });
+    if (!m.goals.length) ui.textBox('Nothing left to build: everything you send goes to your stash.', rx + 8, yy, goalsW - 16, { font: 'small', color: C.dim, shadow: null });
     for (const g of m.goals) {
       if (yy > ry + rh - 22) break;
       const ready = g.ready, newly = g.ready && !g.readyBefore;
-      ui.text(g.name.toUpperCase(), rx + 8, yy, { font: 'body', color: ready ? PAL.kelp2 : PAL.cream, alpha: a });
-      if (newly) { const bw = ui.measure('READY!', 'small') + 8; ui.fill(rx + goalsW - bw - 8, yy, bw, 12, PAL.kelp1, a); ui.text('READY!', rx + goalsW - bw - 4, yy + 2, { font: 'small', color: PAL.paper, shadow: null, alpha: a }); }
-      else if (g.readyBefore) ui.text('READY', rx + goalsW - 8, yy + 1, { font: 'small', color: PAL.kelp2, align: 'right', alpha: a });
-      else if (g.goal) ui.text('GOAL', rx + goalsW - 8, yy + 1, { font: 'small', color: PAL.brass2, align: 'right', alpha: a });
+      ui.text(g.name.toUpperCase(), rx + 8, yy, { font: 'body', color: ready ? C.sage : C.bone, shadow: C.ink, alpha: a });
+      if (newly) { const bw = Math.ceil(ui.measure('READY', 'small')) + 8; tag(ui, 'READY', rx + goalsW - bw - 8, yy, 'sage', { fill: true, alpha: a }); }
+      else if (g.readyBefore) ui.text('READY', rx + goalsW - 8, yy + 2, { font: 'small', color: C.sage, shadow: null, align: 'right', alpha: a });
+      else if (g.goal) ui.text('GOAL', rx + goalsW - 8, yy + 2, { font: 'small', color: C.gold, shadow: null, align: 'right', alpha: a });
       yy += ui.lh('body') + 1;
       for (const l of g.lines) {
         if (yy > ry + rh - 16) break;
         const done = l.after >= l.need, add = l.after - l.have;
         ui.item(l.id, rx + 8, yy - 2, 14, 14, 1, a);
-        ui.text(l.name, rx + 26, yy, { font: 'small', color: PAL.cream, alpha: a });
+        ui.text(l.name, rx + 26, yy, { font: 'small', color: C.bone, shadow: null, alpha: a });
         const cnt = `${Math.min(l.after, l.need)}/${l.need}`;
-        ui.text(cnt, rx + goalsW - 8, yy, { font: 'small', color: done ? PAL.kelp2 : add > 0 ? PAL.brass2 : PAL.dim, align: 'right', alpha: a });
-        if (add > 0) ui.text(`+${add}`, rx + goalsW - 12 - ui.measure(cnt, 'small'), yy, { font: 'small', color: PAL.brass2, align: 'right', alpha: a });
+        ui.text(cnt, rx + goalsW - 8, yy, { font: 'small', color: done ? C.sage : add > 0 ? C.gold : C.dim, shadow: null, align: 'right', alpha: a });
+        if (add > 0) ui.text(`+${add}`, rx + goalsW - 12 - ui.measure(cnt, 'small'), yy, { font: 'small', color: C.gold, shadow: null, align: 'right', alpha: a });
         // what you had (filled) and what this parcel adds (gold)
-        bar(ui, rx + 26, yy + ui.lh('small') - 1, goalsW - 34, 5, Math.min(1, l.have / l.need), { col: done ? PAL.kelp : '#8a7a5a', gain: Math.min(1, l.after / l.need), gainCol: done ? PAL.kelp2 : PAL.brass2 });
+        gainBar(ui, rx + 26, yy + ui.lh('small') - 1, goalsW - 34, 4, Math.min(1, l.have / l.need), Math.min(1, l.after / l.need), done, a);
         yy += ui.lh('small') + 8;
       }
       yy += 3;
@@ -325,27 +316,13 @@ export class DungeonHud {
     const sendLabel = m.picked.size ? `SEND ${m.picked.size}` : 'SEND';
     if (ui.button('mail:send', sendLabel, gx, by, bw, 24, { style: 'green', disabled: !m.picked.size || m.used > m.capacity, key: 'Enter' })) out = 'mail:send';
     const hasMats = m.items.some((i) => ITEMS[i.id]?.kind === 'material');
-    if (ui.button('mail:mats', 'ALL MATERIALS', gx + bw + 6, by, 140, 24, { style: 'brass', key: 'KeyA', disabled: !hasMats })) out = 'mail:mats';
+    if (ui.button('mail:mats', 'ALL MATERIALS', gx + bw + 6, by, 140, 24, { style: 'wood', key: 'KeyA', disabled: !hasMats })) out = 'mail:mats';
     if (ui.button('mail:close', 'DONE', x + W - pad - 96, by, 96, 24, { style: 'wood', key: 'Escape' })) out = 'mail:close';
-    // kelp hanging over the panel's corners, swaying
-    ui.kelp(x + W - 5, y + 30, 1, 17, 0.5); ui.ropeEnd(x + 6, y + H - 3, 6, 1.3);
-    if (Math.floor(this.t * 0.8) !== Math.floor((this.t - 1 / 60) * 0.8)) ui.bubble(x + 20 + ((Math.floor(this.t * 0.8) * 61) % Math.max(1, W - 40)), y + 4, { r: 1 + (Math.floor(this.t) % 2), vy: -14 });
     // clicking outside the panel closes it (no way to get stuck in it)
     if (ui.pressed && !ui.hover(x - 4, y - 14, W + 8, H + 18)) out = out ?? 'mail:close';
     return out;
   }
   private lastPick = 9;
-
-  /** the kit's brass-ringed red X (returns true on click) */
-  private closeBtn(id: string, x: number, y: number, size = 20): boolean {
-    const ui = this.ui;
-    const h = ui.hover(x, y, size, size);
-    ui.mark(id, x, y, size, size);
-    if (h) ui.cursor = 'point';
-    ui.img(closeArt(size, h && ui.down ? 'down' : h ? 'hover' : 'normal', ui.hd), x, y, { w: size, h: size + 3 });
-    if (h && ui.pressed) { audio.play('k_close1', { vol: 0.4, dry: true }); return true; }
-    return false;
-  }
 
   // ---------------------------------------------------------------- pause
   private pausePanel = new PausePanel();
@@ -379,4 +356,23 @@ function shortLabel(label: string): string {
   for (const [re, w] of SHORT) if (re.test(L)) return w;
   const head = L.split(/[:·(]/)[0].trim().split(/\s+/).slice(0, 2).join(' ');
   return head || L;
+}
+
+/** a 1 x 1 canvas of a colour (stretched by the plane pool) */
+const solids = new Map<string, HTMLCanvasElement>();
+function solid(col: string) {
+  let c = solids.get(col);
+  if (!c) { c = document.createElement('canvas'); c.width = c.height = 1; const x = c.getContext('2d')!; x.fillStyle = col; x.fillRect(0, 0, 1, 1); solids.set(col, c); }
+  return c;
+}
+/** a small flat house mark (7 x 6, sage): home still needs this */
+function houseMark(ui: PixelUI, x: number, y: number, a = 1) {
+  ui.fill(x + 3, y, 1, 1, C.sage, a); ui.fill(x + 2, y + 1, 3, 1, C.sage, a); ui.fill(x + 1, y + 2, 5, 1, C.sage, a);
+  ui.fill(x + 1, y + 3, 5, 3, C.sage, a); ui.fill(x + 3, y + 4, 1, 2, C.navy, a);
+}
+/** a flat progress bar: a well trough, what you had (slate / sage when done) and what this adds (gold) */
+function gainBar(ui: PixelUI, x: number, y: number, w: number, h: number, v: number, gain: number, done: boolean, a = 1) {
+  ui.fill(x, y, w, h, C.well, a);
+  if (gain > v) ui.fill(x, y, Math.round(w * gain), h, done ? C.sage : C.gold, a);
+  ui.fill(x, y, Math.round(w * v), h, done ? C.sage : C.slate, a);
 }

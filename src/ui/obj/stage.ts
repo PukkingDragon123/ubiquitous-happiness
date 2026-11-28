@@ -92,15 +92,6 @@ export function contactShadow(w: number, h: number, alpha = 0.45): THREE.Mesh {
   return m;
 }
 
-/** a crisp text / art plaque face: a canvas texture on a plane, nearest filtered (pixel fonts stay sharp) */
-export function canvasPlane(cv: HTMLCanvasElement, w = cv.width, h = cv.height): THREE.Mesh & { tex: THREE.CanvasTexture } {
-  const tex = new THREE.CanvasTexture(cv);
-  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false })) as unknown as THREE.Mesh & { tex: THREE.CanvasTexture };
-  m.tex = tex;
-  return m;
-}
-
 /**
  * v5: painted 2D canvases (plates, panel skins, slot frames, the strip map) drawn as crisp planes BEHIND a stage's
  * 3D objects, in UI pixels, immediate-mode (no full-screen canvas upload: each canvas is a cached texture):

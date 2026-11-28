@@ -510,10 +510,10 @@ export class Critters {
   private readScroll() {
     const left = unknownScrollRecipes();
     const w = this.host.world, p = this.host.player;
-    if (!left.length) { this.host.title('AN OLD SCROLL', 'YOU KNOW EVERY HERMIT RECIPE: +3 PEARLS', '#f3e7c9'); for (let k = 0; k < 3; k++) w.spawnPickup('pearl', p.x, p.y + 0.5, { value: 1, vy: 2.5, vx: R(-1.5, 1.5) }); return; }
+    if (!left.length) { this.host.title('AN OLD SCROLL', 'YOU KNOW EVERY HERMIT RECIPE: +3 PEARLS', '#f6f0e2'); for (let k = 0; k < 3; k++) w.spawnPickup('pearl', p.x, p.y + 0.5, { value: 1, vy: 2.5, vx: R(-1.5, 1.5) }); return; }
     const id = left[Math.floor(Math.random() * left.length)];
     learnRecipe(id);
-    this.host.title('RECIPE LEARNED', `${getItem(id).name.toUpperCase()}: CRAFT IT AT THE WORKBENCH`, '#ffe08a');
+    this.host.title('RECIPE LEARNED', `${getItem(id).name.toUpperCase()}: CRAFT IT AT THE WORKBENCH`, '#efe1bd');
     sfx(w, ['page1', 'jin_rare1'], p.x, 0.6);
     w.fx.burst('star', p.x, p.y + 0.6, 14, 2.4, { color: '#fff2b0' });
   }
@@ -600,7 +600,7 @@ export class Critters {
       s.watch = d < 8.5 && !spooked && Math.hypot(p.vx, p.vy) < 4 ? s.watch + dt : Math.max(0, s.watch - dt);
       if (s.watch > 1.4 && !H.fighting()) {
         s.phase = 'out'; s.t = 0; s.step = 2;
-        H.title('SHELL SWAP', 'HERMIT CRABS QUEUE BY SIZE FOR A BIGGER HOME', '#ffd8a0');
+        H.title('SHELL SWAP', 'HERMIT CRABS QUEUE BY SIZE FOR A BIGGER HOME', '#efe1bd');
         sfx(w, ['crab_click1', 'click1'], s.plan.x, 0.6, 1.2);
       }
       for (const c of s.crabs) if (c.state === 'wander') c.state = 'idle';

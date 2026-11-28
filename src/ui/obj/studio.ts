@@ -1,11 +1,10 @@
 // The photo studio (a port of DUSTUP's CardStudio + IconFactory): a private offscreen WebGL renderer that
-// photographs 3D objects and little dioramas into 2D canvases.
+// photographs 3D objects into 2D canvases.
 //
 //   photo(obj, 96, 64, { yaw, pitch, bg })      a lit studio shot of any object (canvas, display-ready sRGB)
 //   modelIcon('copperOre', 32)                   an item icon RENDERED FROM ITS MODEL with a pixel finish:
 //                                                rendered 4x, box-downsampled, lightly posterised, a 1 px ink
 //                                                outline (a deep shade of the edge colour) and a warm rim
-//   diorama(build, 120, 90)                      a card vignette: sea backdrop, god rays, sand, the subject
 //
 // Everything is cached by key; the studio runs in its own GL context so it never disturbs the game's renderer.
 import * as THREE from 'three';
@@ -121,71 +120,3 @@ function pixelFinish(src: HTMLCanvasElement, W: number, H: number, SS: number): 
   return out;
 }
 
-// ------------------------------------------------------------------ card dioramas
-const dioCache = new Map<string, HTMLCanvasElement>();
-let backdrop: THREE.Mesh | null = null;
-/**
- * photograph a little underwater diorama for card art: a sea-gradient backdrop with god rays, a sandy floor,
- * a few pebbles and kelp, and the subject the builder adds, lit like a stage. Cached by key.
- */
-export function diorama(key: string, w: number, h: number, build: (set: THREE.Group) => void, o: { tint?: string } = {}): HTMLCanvasElement {
-  const hit = dioCache.get(key);
-  if (hit) return hit;
-  const set = new THREE.Group();
-  if (!backdrop) {
-    const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-    const x = c.getContext('2d')!;
-    const g = x.createLinearGradient(0, 0, 0, 64); g.addColorStop(0, '#5ad2e8'); g.addColorStop(0.55, '#1e6a9a'); g.addColorStop(1, '#0a2a4a');
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    x.globalAlpha = 0.18; x.fillStyle = '#ffffff';
-    for (const [x0, w0] of [[8, 6], [26, 4], [44, 7]]) { x.beginPath(); x.moveTo(x0, 0); x.lineTo(x0 + w0, 0); x.lineTo(x0 + w0 + 14, 64); x.lineTo(x0 + 10, 64); x.fill(); }
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    backdrop = new THREE.Mesh(new THREE.PlaneGeometry(6, 4.5), new THREE.MeshBasicMaterial({ map: t, toneMapped: false }));
-    backdrop.position.set(0, 0.6, -2);
-  }
-  set.add(backdrop.clone());
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.1, 0.3, 9), new THREE.MeshStandardMaterial({ color: o.tint ?? '#c8aa7a', flatShading: true, roughness: 0.95 }));
-  floor.position.set(0, -0.95, -0.4);
-  set.add(floor);
-  for (const [x, z, s] of [[-1.1, 0.1, 0.18], [1.2, -0.2, 0.14], [0.7, 0.4, 0.1]] as [number, number, number][]) {
-    const p = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), new THREE.MeshStandardMaterial({ color: '#5a5462', flatShading: true }));
-    p.position.set(x, -0.78, z); set.add(p);
-  }
-  // kelp of different heights swaying behind, coral fans and a sea-star in front, bubbles rising
-  const kelpM = new THREE.MeshStandardMaterial({ color: '#4c8a2a', flatShading: true, roughness: 0.8 });
-  for (const [x, z, h] of [[-1.5, -0.7, 1.8], [-1.2, -1.0, 2.4], [1.4, -0.8, 2.0], [1.7, -1.1, 1.4], [0.9, -1.3, 2.6]] as [number, number, number][]) {
-    const k = new THREE.Mesh(new THREE.ConeGeometry(0.07, h, 4), kelpM);
-    k.position.set(x, -0.9 + h / 2, z); k.rotation.z = x * 0.05; set.add(k);
-    const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.5), new THREE.MeshStandardMaterial({ color: '#6aa83a', side: THREE.DoubleSide, flatShading: true }));
-    leaf.position.set(x + 0.1, -0.3 + h * 0.3, z); leaf.rotation.z = -0.6; set.add(leaf);
-  }
-  const coralM = new THREE.MeshStandardMaterial({ color: '#e8604a', flatShading: true, roughness: 0.8 });
-  for (const [x, s2] of [[-0.95, 0.3], [1.05, 0.24]] as [number, number][]) for (let i = 0; i < 4; i++) {
-    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, s2 * 1.4, 5), coralM);
-    br.position.set(x + (i - 1.5) * 0.06, -0.75 + s2 * 0.6, 0.3); br.rotation.z = (i - 1.5) * 0.35; set.add(br);
-  }
-  const star = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 5), new THREE.MeshStandardMaterial({ color: '#f08a26', flatShading: true }));
-  star.position.set(0.75, -0.8, 0.7); set.add(star);
-  const bubM = new THREE.MeshStandardMaterial({ color: '#e8fbff', roughness: 0.1, transparent: true, opacity: 0.5 });
-  for (const [x, y, r] of [[-0.6, 0.6, 0.06], [-0.5, 0.9, 0.04], [0.6, 0.75, 0.05], [0.7, 1.05, 0.035], [-0.2, 1.2, 0.03]] as [number, number, number][]) { const b = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), bubM); b.position.set(x, y, 0.5); set.add(b); }
-  // a far shoal of fish silhouettes
-  const fishM = new THREE.MeshBasicMaterial({ color: '#2a5a7a', toneMapped: false });
-  for (let i = 0; i < 6; i++) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 3), fishM); f.position.set(-1.2 + i * 0.22 + (i % 2) * 0.1, 1.1 + (i % 3) * 0.12, -1.6); f.rotation.z = Math.PI / 2; set.add(f); }
-  build(set);
-  const out = photoSet(set, w, h);
-  dioCache.set(key, out);
-  return out;
-}
-function photoSet(set: THREE.Object3D, w: number, h: number): HTMLCanvasElement {
-  const out = document.createElement('canvas'); out.width = w; out.height = h;
-  const r = renderer();
-  if (!r) return out;
-  r.setSize(w * 2, h * 2, false);
-  scene.add(set);
-  cam.fov = 34; cam.aspect = w / h; cam.position.set(0, 0.2, 3.0); cam.lookAt(0, -0.05, 0); cam.near = 0.1; cam.far = 20; cam.updateProjectionMatrix();
-  r.setClearColor('#0a2a4a', 1);
-  r.render(scene, cam);
-  scene.remove(set);
-  out.getContext('2d')!.drawImage(r.domElement, 0, 0, w, h);
-  return out;
-}

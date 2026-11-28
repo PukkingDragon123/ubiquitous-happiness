@@ -8,17 +8,16 @@
 //                      full the pack is, gulps when something lands in it, and the newest things poke out of its mouth
 //   buildCrate()       the driftwood crate it sits on;  buildLantern() the lantern post (its warm light flickers)
 //   rayCard() / kelpStrip()   additive light shafts, swaying kelp ribbons (foreground framing)
-// 2D (chunky 1x pixel art, the kit's ramps, hand-placed detail, no noise):
-//   satchelArt(bulge)  the satchel panel: the flap thrown back with its buckle tongue, a rolled stitched rim, gusset
-//                      folds that bow out as it fills, the oilcloth lining with 8 x 6 stitched pockets, a front pocket
-//                      band with two buckled straps, a kelp frond tucked under a strap, a barnacle on a corner
+// 2D (the v8b deep-ink kit, flat):
+//   satchelArt(bulge)  the satchel panel: the kit's main panel round the 8 x 6 pocket grid
 import * as THREE from 'three';
 import { Kit } from './kit';
 import { MAT, TEX } from './tex';
 import { retro } from '../gfx/retro';
 import { damp } from '../core/math';
-import { Px, R, hx, hash, stamp, SPR, kelpBlade, bladePath, rivet, type C } from '../ui/pixel/decor';
+import { Px, hx, hash, type C } from '../ui/pixel/decor';
 import { GRID_W, GRID_H } from '../game/items';
+import { skin, C as KC } from '../ui/pixel/skins';
 
 // ------------------------------------------------------------------ 3D helpers
 const canvasTex = (cv: HTMLCanvasElement) => { const t = new THREE.CanvasTexture(cv); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace; return t; };
@@ -299,114 +298,21 @@ export class Satchel3D {
 // ------------------------------------------------------------------ 2D: the satchel panel
 /** the satchel panel's layout (UI px): grid origin, cell, the pocket band's top */
 export const SAT = { w: 176, h: 174, cell: 17, gx: 20, gy: 30, pocketY: 138 } as const;
-const L6 = LEATHER;
-const LINING: C[] = ['#050c0f', '#0a171c', '#102229', '#173138', '#21434a', '#2f5b60'].map(hx);
-const INK: C = hx('#0b0606');
 const artCache = new Map<string, HTMLCanvasElement>();
 
-/** the satchel panel art for a bulge (0..3 px the gussets bow out); its width is SAT.w + 2 * bulge */
+/** the satchel panel (v8b kit, flat): the kit's main panel with the 8 x 6 pocket grid in a well; `bulge` widens it
+ *  by 2 * bulge px as it fills (a quiet hint that it is getting full) */
 export function satchelArt(bulge: number): HTMLCanvasElement {
   const key = `sat|${bulge}`;
   const hit = artCache.get(key); if (hit) return hit;
-  const b = bulge, W = SAT.w + b * 2, H = SAT.h, px = new Px(W, H);
-  const FY = 18, RIM = 6, BODY0 = FY + RIM, gx0 = SAT.gx + b, gy0 = SAT.gy, gw = GRID_W * SAT.cell, gh = GRID_H * SAT.cell, PY = SAT.pocketY;
-  const cxm = W / 2;
-  // the silhouette: the flap (a trapezoid, wider at its top, rounded corners) over the bag (sides bowing out by b)
-  const left = (y: number): number => {
-    if (y < FY) { const k = (FY - y) / FY; return Math.round(b + 7 - k * 5); }
-    const k = (y - FY) / (H - FY);
-    let x = Math.round(b - Math.sin(Math.PI * Math.min(1, k * 1.15)) * b) + 2;
-    const r = 8, yb = H - 1 - y;
-    if (yb < r) x += Math.round(r - Math.sqrt(Math.max(0, r * r - (r - yb) * (r - yb))));
-    return x;
-  };
-  const inside = (x: number, y: number) => {
-    if (y < 2 || y >= H) return false;
-    const l = left(y), rr = W - 1 - l;
-    if (x < l || x > rr) return false;
-    if (y < 5) { const d = Math.min(x - l, rr - x); if (d < 5 - y) return false; }
-    return true;
-  };
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (!inside(x, y)) continue;
-    const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
-    if (edge) { px.set(x, y, INK); continue; }
-    const l = left(y), rr = W - 1 - l, dl = x - l, dr = rr - x;
-    let c: C;
-    if (y < FY) {
-      // the flap thrown back (its inside: a darker, smoother hide), lit along its top edge
-      const t = y <= 3 ? 5 : y === 4 ? 4 : y >= FY - 2 ? 1 : 2 + ((x + y * 3) % 19 === 0 ? 1 : 0);
-      c = L6[dl <= 1 ? Math.min(t + 1, 6) : dr <= 1 ? Math.max(1, t - 1) : t];
-      if ((y === 6 || y === FY - 4) && dl > 4 && dr > 4 && x % 3 !== 0) c = THREAD;
-      if ((dl === 4 || dr === 4) && y > 6 && y < FY - 4 && y % 3 !== 0) c = THREAD;
-    } else if (y < BODY0) {
-      // the rolled rim round the mouth
-      const r = y - FY;
-      c = L6[[6, 5, 4, 3, 2, 1][r]];
-      if (r === 2 && x % 4 === 1 && dl > 3 && dr > 3) c = THREAD;
-    } else if (dl < 14 + Math.round((b * (y - BODY0)) / (H - BODY0)) || dr < 14 + Math.round((b * (y - BODY0)) / (H - BODY0))) {
-      // the gussets: accordion folds, darker toward the back
-      const d = dl < dr ? dl : dr;
-      const f = d % 4;
-      c = L6[(f === 0 ? 1 : f === 1 ? 4 : f === 2 ? 3 : 2) - (d > 10 ? 0 : 0)];
-      if (dl < dr && d === 1) c = L6[5];
-      if (y > PY && d > 12) c = L6[3];
-    } else if (y >= PY) {
-      // the front pocket band: paler hide, stitched round
-      const py = y - PY;
-      c = L6[py === 0 ? 6 : py === 1 ? 5 : y >= H - 4 ? 2 : (x * 7 + y * 5) % 29 === 0 ? 3 : 4];
-      if ((py === 3 || y === H - 5) && x % 3 !== 1 && dl > 16 && dr > 16) c = THREAD;
-    } else {
-      // the oilcloth lining, darker into the depths
-      const dy = y - BODY0;
-      c = LINING[dy < 2 ? 0 : dy < 4 ? 1 : 2];
-    }
-    px.set(x, y, c);
-  }
-  // the pockets: 8 x 6 stitched cells (a shadowed seam top / left, a lit fold bottom / right, a stitch row)
-  for (let j = 0; j < GRID_H; j++) for (let i = 0; i < GRID_W; i++) {
-    const X = gx0 + i * SAT.cell, Y = gy0 + j * SAT.cell, S = SAT.cell;
-    for (let v = 0; v < S; v++) for (let u = 0; u < S; u++) {
-      let c = LINING[(i + j) % 2 ? 2 : 3];
-      if (u === 0 || v === 0) c = LINING[0];
-      else if (u === 1 || v === 1) c = LINING[1];
-      else if (u === S - 1 || v === S - 1) c = LINING[4];
-      else if (v >= S - 4 && (u + v) % 5 === 0) c = LINING[3];
-      px.set(X + u, Y + v, c);
-    }
-    for (let u = 3; u < S - 2; u += 3) px.set(X + u, Y + 1, hx('#5a6a5a'));
-  }
-  // the grid's stitched surround
-  for (let x = gx0 - 2; x <= gx0 + gw + 1; x++) { if (x % 2) { px.set(x, gy0 - 2, hx('#8a8060')); px.set(x, gy0 + gh + 1, hx('#8a8060')); } }
-  for (let y = gy0 - 1; y <= gy0 + gh; y++) { if (y % 2) { px.set(gx0 - 2, y, hx('#8a8060')); px.set(gx0 + gw + 1, y, hx('#8a8060')); } }
-  // the buckle tongue hanging from the flap's middle (punched holes) and its brass buckle
-  for (let y = 3; y < FY + 3; y++) for (let x = Math.round(cxm) - 5; x < Math.round(cxm) + 5; x++) {
-    const e = x === Math.round(cxm) - 5 || x === Math.round(cxm) + 4;
-    px.set(x, y, e ? INK : L6[y < 5 ? 4 : 3]);
-  }
-  for (const hy of [7, 11]) { px.set(Math.round(cxm) - 1, hy, INK); px.set(Math.round(cxm), hy, INK); px.set(Math.round(cxm) - 1, hy + 1, L6[1]); }
-  const bx = Math.round(cxm) - 7, by = FY - 3;
-  for (let y = 0; y < 8; y++) for (let x = 0; x < 14; x++) {
-    const ring = x === 0 || x === 13 || y === 0 || y === 7, inner = x >= 2 && x <= 11 && y >= 2 && y <= 5;
-    if (inner && !(x === 6 || x === 7)) continue;
-    const t = ring ? (x === 0 || y === 0 ? 0 : 0) : x < 2 || y < 2 ? 6 : x > 11 || y > 5 ? 3 : 5;
-    px.set(bx + x, by + y, ring ? hx('#24100a') : R.brass[t]);
-  }
-  // the pocket's two buckled straps
-  for (const sx of [gx0 + 18, gx0 + gw - 26]) {
-    for (let y = PY - 6; y < H - 3; y++) for (let x = sx; x < sx + 8; x++) px.set(x, y, x === sx || x === sx + 7 ? INK : L6[y < PY ? 2 : 1 + ((y >> 1) % 2)]);
-    for (let y = PY + 6; y < PY + 13; y++) for (let x = sx - 2; x < sx + 10; x++) {
-      const ring = x === sx - 2 || x === sx + 9 || y === PY + 6 || y === PY + 12;
-      px.set(x, y, ring ? hx('#24100a') : R.brass[x < sx + 1 || y < PY + 8 ? 6 : 4]);
-    }
-    rivet(px, sx + 2, PY - 4);
-  }
-  // a kelp frond tucked under the right strap, a barnacle on the bottom-left corner, wear on the flap
-  kelpBlade(px, bladePath(gx0 + gw - 24, PY + 2, 0.35, 1, 30, 1.6, 2), 3, { free: false });
-  stamp(px, SPR.barnacleM, left(H - 10) + 3, H - 11, { onlyOn: true });
-  stamp(px, SPR.barnacleS, left(H - 7) + 9, H - 8, { onlyOn: true });
-  for (const [sx, sy, n] of [[b + 26, 9, 4], [W - b - 40, 12, 3], [b + 40, PY + 18, 5]] as [number, number, number][]) for (let i = 0; i < n; i++) px.shade(sx + i, sy + (i % 2), 1.12);
-  const cv = px.done();
+  const b = bulge, W = SAT.w + b * 2, H = SAT.h;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d')!;
+  const f = (px: number, py: number, w: number, h: number, col: string) => { x.fillStyle = col; x.fillRect(px, py, w, h); };
+  x.drawImage(skin('wood', W, H - 6), 0, 6);
+  const c = SAT.cell, gx0 = SAT.gx + b, gy0 = SAT.gy, gw = GRID_W * c, gh = GRID_H * c;
+  f(gx0 - 2, gy0 - 2, gw + 4, gh + 4, KC.line); f(gx0 - 1, gy0 - 1, gw + 2, gh + 2, '#0c121c');
+  for (let j = 0; j < GRID_H; j++) for (let i = 0; i < GRID_W; i++) { f(gx0 + i * c + 1, gy0 + j * c + 1, c - 1, c - 1, '#1f2939'); f(gx0 + i * c + 2, gy0 + j * c + 2, c - 3, c - 3, KC.well); }
   artCache.set(key, cv);
   return cv;
 }

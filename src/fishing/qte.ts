@@ -1,5 +1,5 @@
-// Struggle QTEs, drawn diegetically next to the blobfish: hand-painted pixel keycaps inside wobbling bubbles,
-// a brass ring gauge with a sweet-spot wedge, popping bubbles for each correct press. No panels, no bars.
+// Struggle QTEs, drawn next to the blobfish in the v8b kit's look: flat bone keycaps inside a faint ring, a flat
+// navy ring gauge with a sage sweet-spot wedge, a ring that pops for each correct press. No panels, no bars.
 //
 //   mash   – tap SPACE fast: each tap squashes the keycap and fills the ring of pearls
 //   hold   – hold SPACE: a needle sweeps the gauge; release inside the wedge
@@ -8,7 +8,7 @@
 // v8 touch: a tap anywhere (or DASH / ATTACK / USE) is SPACE / E, holding a finger holds; the move stick pushes the
 // arrows (src/ui/touch.ts). The keycaps say TAP / HOLD.
 import * as THREE from 'three';
-import { Px, hex, ramp, mix } from '../gfx/px';
+import { Px, hex } from '../gfx/px';
 import type { Input } from '../core/input';
 import { audio } from '../audio/audio';
 import { easeOutBack, clamp01, TAU } from '../core/math';
@@ -20,29 +20,21 @@ const KEY_LABEL: Record<Key, string> = { Space: 'SPACE', ArrowUp: '↑', ArrowDo
 const KEY_ALT: Partial<Record<Key, string>> = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
 
 const keyTex = new Map<string, THREE.Texture>();
-/** a chunky pixel keycap: bevelled cream plastic with a shadowed side, painted label */
+/** a flat keycap (the kit's light cap): a bone face, a 1 px slate border, a 1 px front edge, the label in ink */
 function keycap(label: string, wide: boolean, pressed: boolean): THREE.Texture {
   const k = label + wide + pressed;
   const hit = keyTex.get(k);
   if (hit) return hit;
   const W = wide ? 56 : 28, H = 28;
-  const p = new Px(W, H);
-  const off = pressed ? 2 : 0;
-  const face = ramp(['#b8a888', '#e8dcc0', '#fff8e6'], 3);
-  // shadow / side
-  p.rect(1, 4, W - 2, H - 5, '#5a4a38');
-  p.rect(2, 3, W - 4, H - 4, '#8a7656');
-  // top face
-  for (let y = 2 + off; y < H - 6 + off; y++) for (let x = 3; x < W - 3; x++) {
-    const t = 1 - (y - 2 - off) / (H - 8);
-    p.set(x, y, face(0.35 + t * 0.6, x, y));
-  }
-  p.rect(4, 3 + off, W - 8, 1, '#ffffff');
-  p.outline('#1c140c');
-  const cv = p.canvas();
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
-  const t = textTexture(label, { font: 'Alagard', px: 16, fill: '#1a1d26' });
+  const off = pressed ? 2 : 0;
+  const f = (x: number, y: number, w: number, h: number, c: string) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+  f(2, 4, W - 4, H - 6, '#0b111c');
+  f(3, 3 + off, W - 6, H - 8 - off, pressed ? '#b9ae96' : '#d8cfba');
+  if (!pressed) f(3, H - 6, W - 6, 1, '#a99f8a');
+  const t = textTexture(label, { font: 'Alagard', px: 16, fill: '#1b1e27' });
   const img = t.tex.image as HTMLCanvasElement;
   ctx.drawImage(img, Math.round((W - img.width) / 2), Math.round((H - 6 - img.height) / 2) + off + 1);
   const tx = new THREE.CanvasTexture(cv);
@@ -52,12 +44,12 @@ function keycap(label: string, wide: boolean, pressed: boolean): THREE.Texture {
 }
 
 let bubbleTex: THREE.Texture | null = null;
+/** a faint ring (a calm stand-in for the old glossy bubble): a 1 px pale rim over a barely-there navy disc */
 function bubble(): THREE.Texture {
   if (bubbleTex) return bubbleTex;
   const p = new Px(48, 48);
-  p.ellipse(24, 24, 23, 23, (nx, ny) => { const d = Math.hypot(nx, ny); return d > 0.9 ? [200, 250, 255] : d > 0.82 ? [120, 210, 240] : null; });
-  p.ellipse(24, 24, 20, 20, (nx, ny) => mix([60, 150, 200], [150, 230, 255], clamp01(-ny * 0.5 + 0.3)), 50);
-  p.rect(11, 10, 5, 2, '#ffffff'); p.rect(10, 12, 2, 4, '#ffffff'); p.rect(34, 35, 2, 2, '#e0fbff');
+  p.ellipse(24, 24, 23, 23, (nx, ny) => { const d = Math.hypot(nx, ny); return d > 0.93 ? [179, 198, 226] : null; });
+  p.ellipse(24, 24, 21, 21, () => [19, 27, 40], 90);
   bubbleTex = p.texture({ mip: false });
   return bubbleTex;
 }
@@ -231,26 +223,28 @@ export class QTE {
         for (let t = 0; t < th; t++) put(32 + Math.sin(a) * (r + t), 32 - Math.cos(a) * (r + t), cc);
       }
     };
-    const brass: [number, number, number] = hex('#c8a050'), dark: [number, number, number] = hex('#4a3010'), lit: [number, number, number] = hex('#ffe8a0');
-    ring(29, () => dark, 2);
-    ring(27, (a) => (a < Math.PI ? lit : brass), 2);
+    // the kit: an ink rim, a navy track; gold for progress, sage for the sweet spot, bone for the needle
+    const ink = hex('#0b111c'), track = hex('#1a2434'), gold = hex('#d4b273'), sage = hex('#8fb391'), bone = hex('#f6f0e2'), well = hex('#0e141f');
+    ring(29, () => ink, 1);
+    ring(26, () => track, 3);
     if (this.kind === 'mash') {
       const n = 12;
       for (let i = 0; i < n; i++) {
         const a = (i / n) * TAU, on = i / n < this.fill;
         const px = 32 + Math.sin(a) * 27, py = 32 - Math.cos(a) * 27;
-        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx * dx + dy * dy <= 4) put(px + dx, py + dy, on ? (dx < 0 && dy < 0 ? [255, 255, 255] : hex('#ffd0e0')) : hex('#3a2a20'));
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) put(px + dx, py + dy, on ? gold : well);
       }
     } else if (this.kind === 'hold') {
       const w0 = (this.wedge - this.wedgeW / 2) * TAU, w1 = (this.wedge + this.wedgeW / 2) * TAU;
-      ring(23, (a) => (a >= w0 && a <= w1 ? (Math.floor(time * 10) % 2 ? hex('#7dff8a') : hex('#3ad060')) : hex('#2a3a4a')), 4);
+      ring(22, (a) => (a >= w0 && a <= w1 ? sage : well), 3);
       const na = this.needle * TAU;
-      for (let r = 6; r < 28; r++) put(32 + Math.sin(na) * r, 32 - Math.cos(na) * r, r > 24 ? [255, 255, 255] : hex('#ff3a3a'));
+      for (let r = 6; r < 28; r++) put(32 + Math.sin(na) * r, 32 - Math.cos(na) * r, r > 24 ? gold : bone);
+      void time;
     } else if (this.kind === 'timing') {
       const target = (1 - this.timingTarget);
       const cur = 1 - this.t / this.dur;
-      ring(8 + target * 20, () => hex('#7dff8a'), 2);
-      ring(8 + cur * 20, () => [255, 255, 255], 1);
+      ring(8 + target * 20, () => sage, 2);
+      ring(8 + cur * 20, () => bone, 1);
     }
     c.putImageData(img, 0, 0);
     this.gaugeTex.needsUpdate = true;

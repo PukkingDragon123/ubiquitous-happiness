@@ -1,4 +1,4 @@
-// The CODEX (v4): a field journal of every fish and every giant human you have met. Entries unlock the first time
+// The CODEX (v8b kit panel): a field journal of every fish and every giant human you have met. Entries unlock the first time
 // you meet the creature; the page shows a photograph of the real model, a line of field notes, how many you have
 // met and beaten and how deep you first saw one.
 //
@@ -14,7 +14,7 @@ import type { PixelUI } from './pixel/ui';
 import { photo } from './obj/studio';
 import { SPECS } from '../fish/species';
 import { buildFish } from '../fish';
-import { kelp, bubbles } from '../hideout/seaFx';
+import { C, sectionHead } from './pixel/skins';
 
 export type CodexKind = 'fish' | 'giant';
 export interface CodexEntry {
@@ -112,7 +112,7 @@ function silhouetteOf(e: CodexEntry, size: number): HTMLCanvasElement | null {
   if (!src) return null;
   c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
   const x = c.getContext('2d')!;
-  x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#3a2a1a'; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = C.line2; x.fillRect(0, 0, c.width, c.height);
   photos.set(k, c);
   return c;
 }
@@ -132,81 +132,72 @@ export class CodexBook {
   draw(ui: PixelUI, dt: number): boolean {
     if (!this.on) return false;
     this.t += dt;
-    const W = Math.min(ui.w - 24, 520), H = Math.min(ui.h - 30, 300);
-    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2) + Math.round((1 - Math.min(1, this.t * 6)) ** 2 * 30);
-    ui.fill(0, 0, ui.w, ui.h, '#02060c', 0.55 * Math.min(1, this.t * 6));
+    const W = Math.min(ui.w - 24, 540), H = Math.min(ui.h - 30, 310);
+    const x = Math.round((ui.w - W) / 2), y = Math.round((ui.h - H) / 2);
+    ui.fill(0, 0, ui.w, ui.h, C.ink, 0.5 * Math.min(1, this.t * 6));
     // close: Esc, the button, a click outside the book
     if (ui.input?.keyHit('Escape') || (ui.pressed && !ui.hover(x - 8, y - 16, W + 20, H + 24))) { this.close(); return false; }
     ui.block(0, 0, ui.w, ui.h);
-    // leather cover (burnished rim, stitched edge, brass corner caps), two parchment pages, the spine
-    ui.fill(x - 8, y - 8, W + 16, H + 16, '#1a0a06'); ui.fill(x - 7, y - 7, W + 14, H + 14, '#5a3018');
-    ui.fill(x - 7, y - 7, W + 14, 1, '#a8703c'); ui.fill(x - 7, y - 7, 1, H + 14, '#8a5a30'); ui.fill(x - 7, y + H + 6, W + 14, 1, '#3a1c0c'); ui.fill(x + W + 6, y - 7, 1, H + 14, '#3a1c0c');
-    for (let i = 0; i < W + 6; i += 4) { ui.fill(x - 3 + i, y - 5, 2, 1, '#e6c28a'); ui.fill(x - 3 + i, y + H + 4, 2, 1, '#e6c28a'); }
-    for (let i = 0; i < H + 6; i += 4) { ui.fill(x - 5, y - 3 + i, 1, 2, '#e6c28a'); ui.fill(x + W + 4, y - 3 + i, 1, 2, '#e6c28a'); }
-    for (const [cx, cy, dx, dy] of [[x - 7, y - 7, 1, 1], [x + W + 6, y - 7, -1, 1], [x - 7, y + H + 6, 1, -1], [x + W + 6, y + H + 6, -1, -1]]) {
-      for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) if (i < 3 || j < 3) ui.fill(cx + dx * i, cy + dy * j, 1, 1, i === 0 || j === 0 ? '#2e1404' : i + j < 5 ? '#f2c66d' : '#c8913a');
-      ui.fill(cx + dx * 1, cy + dy * 1, 1, 1, '#fff1c2');
-    }
-    const half = Math.floor(W / 2);
-    ui.frame('paper', x, y, half - 2, H); ui.frame('paper', x + half + 2, y, W - half - 2, H);
-    ui.fill(x + half - 2, y, 4, H, '#3a1c0a'); ui.fill(x + half - 1, y, 1, H, '#7a4a20');
-    // header + tabs
+    // the kit's main panel, two panes: the grid of entries (left), the page you are reading (right)
+    ui.panel('wood', x, y, W, H, 'CODEX', { id: 'codex' });
+    if (ui.closeButton('codex:close', x + W - 24, y + 8, { size: 15, key: null })) { this.close(); return false; }
+    const half = Math.floor(W * 0.5);
     const cnt = codexCount();
-    ui.text('CODEX', x + 12, y + 10, { font: 'title', color: '#3a2008', shadow: null });
-    ui.text(`${cnt.known}/${cnt.total} met`, x + half - 12, y + 12, { font: 'small', color: '#7a5a3a', shadow: null, align: 'right' });
     const tabs: [CodexKind, string][] = [['fish', 'FISH'], ['giant', 'GIANTS']];
     let tx = x + 12;
     for (const [k, label] of tabs) {
       const c = codexCount(k);
-      if (ui.button('codex:tab:' + k, `${label} ${c.known}/${c.total}`, tx, y + 26, 92, 16, { style: this.tab === k ? 'gold' : 'wood', font: 'small', on: this.tab === k })) { this.tab = k; this.scroll = 0; this.sel = ''; }
-      tx += 96;
+      if (ui.button('codex:tab:' + k, `${label} ${c.known}/${c.total}`, tx, y + 14, 96, 18, { style: 'dark', font: 'small', on: this.tab === k })) { this.tab = k; this.scroll = 0; this.sel = ''; }
+      tx += 100;
     }
-    // the sea's life on the old book: kelp caught on its cover, bubbles drifting up off it
-    kelp(ui, x + 22, y - 6, 24, this.t, 3, 1); kelp(ui, x + W - 40, y - 6, 16, this.t, 8, -1);
-    bubbles(ui, x + 30, y - 8, W - 60, this.t, 13, 4, 26);
-    if (ui.closeButton('codex:close', x + W - 12, y - 14, { size: 20, key: null })) { this.close(); return false; }
-    // the entry grid (left page)
+    ui.text(`${cnt.known}/${cnt.total} MET`, x + half + 8, y + 19, { font: 'small', color: C.dim, shadow: null });
+    // the entry grid (left pane)
     const list = codexEntries(this.tab);
-    const cell = 46, cols = Math.max(1, Math.floor((half - 24) / cell));
-    const gx = x + 12, gy = y + 48, rows = Math.ceil(list.length / cols), viewH = H - 58;
+    const cell = 46, cols = Math.max(1, Math.floor((half - 20) / cell));
+    const gx = x + 12, gy = y + 40, rows = Math.ceil(list.length / cols), viewH = H - 52;
+    ui.frame('inset', gx - 3, gy - 3, cols * cell + 4, viewH + 6);
     this.scroll = Math.max(0, Math.min(Math.max(0, rows * cell - viewH), this.scroll - (ui.hover(gx, gy, cols * cell, viewH) ? ui.wheel * 0.3 : 0)));
-    ui.clip(gx - 2, gy - 2, cols * cell + 4, viewH + 2);
+    ui.clip(gx - 2, gy - 2, cols * cell + 2, viewH + 4);
     list.forEach((e, i) => {
       const cx = gx + (i % cols) * cell, cy = gy + Math.floor(i / cols) * cell - this.scroll;
       if (cy < gy - cell || cy > gy + viewH) return;
       const known = !!seen[e.id];
       const hov = ui.hover(cx, cy, cell - 4, cell - 4) && ui.hover(gx, gy, cols * cell, viewH);
       const selNow = this.sel === e.id;
-      // a photo print on the page: a white border, a little shadow, red ink round the one you're reading
-      ui.fill(cx + 1, cy + 2, cell - 4, cell - 4, '#b8a47a');
-      ui.fill(cx, cy, cell - 4, cell - 4, selNow ? '#a8342c' : hov ? '#8a6a44' : '#c8b488');
-      ui.fill(cx + 1, cy + 1, cell - 6, cell - 6, '#fbf4e2');
-      ui.fill(cx + 3, cy + 3, cell - 10, cell - 10, known ? '#cfdcd2' : '#e4d6b4');
+      // a slot per entry: gold-bordered when it is the page you are reading
+      ui.fill(cx, cy, cell - 4, cell - 4, selNow || hov ? C.navy2 : C.navy);
+      ui.rect(cx, cy, cell - 4, cell - 4, selNow ? C.gold : hov ? C.slate : C.line);
       const pic = known ? photoOf(e, 84) : silhouetteOf(e, 84);
-      if (pic) ui.img(pic, cx + 2, cy + 6, { w: cell - 8, h: Math.round((cell - 8) * 0.66), alpha: known ? 1 : 0.8 });
-      else ui.text('?', cx + (cell - 4) / 2, cy + 12, { font: 'title', color: '#6a5a4a', shadow: null, align: 'center' });
-      if (!known) ui.text('?', cx + cell - 12, cy + cell - 16, { font: 'small', color: '#8a7a6a', shadow: null });
+      if (pic) ui.img(pic, cx + 2, cy + 7, { w: cell - 8, h: Math.round((cell - 8) * 0.66) });
+      else ui.text('?', cx + (cell - 4) / 2, cy + 14, { font: 'title', color: C.faint, shadow: null, align: 'center' });
       if (hov) { ui.cursor = 'point'; if (ui.pressed) this.sel = e.id; }
     });
     ui.unclip();
     if (!this.sel && list.length) this.sel = (list.find((e) => seen[e.id]) ?? list[0]).id;
-    // the selected page (right)
+    // the selected page (right pane)
     const e = REG.get(this.sel);
-    const px = x + half + 12, pw = W - half - 26;
+    const px = x + half + 8, pw = W - half - 20;
+    ui.fill(px - 8, y + 14, 1, H - 26, C.line);
     if (e) {
       const known = !!seen[e.id], s = seen[e.id];
       const pic = known ? photoOf(e, 180) : silhouetteOf(e, 180);
-      const ph = Math.round(pw * 0.62);
-      ui.fill(px, y + 12, pw, ph, '#d8c49a'); ui.rect(px, y + 12, pw, ph, '#8a6a44');
-      if (pic) ui.img(pic, px + 2, y + 14, { w: pw - 4, h: ph - 4 });
-      let yy = y + 20 + ph;
-      ui.text(known ? e.name : '???', px, yy, { font: 'title', color: '#2a1408', shadow: null }); yy += 16;
-      if (e.habitat || known) { ui.text(known ? (e.habitat ?? (e.kind === 'fish' ? 'open water' : '')) : 'not yet met', px, yy, { font: 'small', color: '#7a5a3a', shadow: null }); yy += 12; }
-      const dg = e.danger ?? 1;
-      for (let i = 0; i < 5; i++) { const on = i < dg; ui.fill(px + i * 10, yy + 1, 7, 6, on ? '#7a1a10' : '#c8b088'); ui.fill(px + i * 10 + 1, yy + 2, 2, 2, on ? '#f0e0c0' : '#d8c49a'); ui.fill(px + i * 10 + 4, yy + 2, 2, 2, on ? '#f0e0c0' : '#d8c49a'); }
-      ui.text('danger', px + 54, yy, { font: 'small', color: '#7a5a3a', shadow: null }); yy += 14;
-      yy += ui.textBox(known ? e.desc : 'Meet it out there and the page fills itself in.', px, yy, pw, { font: 'small', color: '#3a2810', shadow: null }) + 6;
-      if (known && s) ui.text(`met ${s.n}  ·  beaten ${s.beaten}  ·  first at -${s.depth} m`, px, Math.min(yy, y + H - 16), { font: 'small', color: '#5a3a1c', shadow: null });
+      const ph = Math.round(pw * 0.5), py = y + 34;
+      ui.frame('inset', px, py, pw, ph);
+      if (pic) { const iw = Math.round((ph - 6) / 0.66); ui.img(pic, px + Math.round((pw - Math.min(pw - 4, iw)) / 2), py + 3, { w: Math.min(pw - 4, iw), h: ph - 6 }); }
+      let yy = py + 10 + ph;
+      ui.text(known ? e.name : '???', px, yy, { font: 'title', color: C.bone2, shadow: C.ink }); yy += ui.lh('title');
+      ui.text(known ? (e.habitat ?? (e.kind === 'fish' ? 'open water' : '')) : 'not yet met', px, yy, { font: 'small', color: C.dim, shadow: null });
+      // danger: five small squares, red up to the rating
+      const dg = e.danger ?? 1, dx0 = px + pw - 5 * 8 + 2;
+      ui.text('DANGER', dx0 - 6, yy, { font: 'small', color: C.faint, shadow: null, align: 'right' });
+      for (let i = 0; i < 5; i++) { ui.fill(dx0 + i * 8, yy + 1, 6, 6, i < dg ? C.red : C.well); if (i >= dg) ui.rect(dx0 + i * 8, yy + 1, 6, 6, C.line2); }
+      yy += ui.lh('small') + 6;
+      yy += ui.textBox(known ? e.desc : 'Meet it out there and the page fills itself in.', px, yy, pw, { font: 'body', color: known ? C.bone : C.dim, shadow: C.ink }) + 6;
+      if (known && s) {
+        const sy = Math.min(yy, y + H - 30);
+        sectionHead(ui, 'FIELD NOTES', px, sy, pw);
+        ui.text(`met ${s.n}  ·  beaten ${s.beaten}  ·  first at -${s.depth} m`, px, sy + 13, { font: 'small', color: C.dim, shadow: null });
+      }
     }
     return true;
   }

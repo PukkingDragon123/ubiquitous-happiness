@@ -1,6 +1,6 @@
 // World text (v7): NO 3D text. The API is the old bubble-text one (Text3DLayer / Text3D / T3D / Float3D /
 // bubbleWord), but every word is now 2D pixel-font text drawn on the screen's UI canvas (src/ui/seaText.ts), placed
-// over the scene by projecting its world point each frame: crisp Jersey glyphs at whole-pixel sizes with a clean
+// over the scene by projecting its world point each frame: crisp Alagard glyphs at whole-pixel sizes with a clean
 // two-tone fill and a soft dark outline, that float -- they rise into place letter by letter, bob and drift gently
 // like things in water, and leave by fading up while a few small, real-looking air bubbles rise off them and pop.
 // Bubbles are accents only; the letters themselves are plain, readable text.
@@ -39,21 +39,22 @@ export interface T3DStyle extends SeaStyle {
 }
 
 export const T3D = {
-  title: { font: 'title', top: '#fff7d6', bottom: '#ffc04a', edge: '#3a1606', glow: 0.35 },
-  gold: { font: 'title', top: '#fffbe0', bottom: '#f4bc3c', edge: '#3a2200', glow: 0.4 },
-  danger: { font: 'title', top: '#ffe6e2', bottom: '#ff6a58', edge: '#34040a', glow: 0.35 },
-  blood: { font: 'title', top: '#ff8a7a', bottom: '#d8283a', edge: '#1a0004', glow: 0.25, depth: 6 },
-  hint: { font: 'small', top: '#f0fdff', bottom: '#a6ecff', edge: '#06283a', glow: 0.45 },
-  item: { font: 'title', top: '#ffffff', bottom: '#b4e0ff', edge: '#0c2440', glow: 0.45 },
-  name: { font: 'title', top: '#fff4d2', bottom: '#ffd888', edge: '#2a1408', glow: 0.35 },
-  damage: { font: 'title', top: '#ffffff', bottom: '#ffd2c8', edge: '#4a0612', glow: 0.5 },
-  crit: { font: 'title', top: '#fff8b0', bottom: '#ff9a2a', edge: '#3e0c00', glow: 0.6 },
-  heal: { font: 'title', top: '#f4fff6', bottom: '#78e8a0', edge: '#073a22', glow: 0.5 },
-  magic: { font: 'title', top: '#ffffff', bottom: '#cfa4ff', edge: '#240a40', glow: 0.5 },
-  logo: { font: 'title', top: '#fff6c8', bottom: '#ffbe4a', edge: '#321200', glow: 0.3, depth: 6 },
-  sub: { font: 'small', top: '#e6faff', bottom: '#8ad6ff', edge: '#03203a', glow: 0.45 },
-  shout: { font: 'title', top: '#ffffff', bottom: '#ffd65a', edge: '#3a1600', glow: 0.4 },
-  body: { font: 'small', top: '#f6f9ff', bottom: '#d2e2f2', edge: '#0b1626', glow: 0.3 },
+  // v8b: the deep-ink kit's calm two-tone fills (bone to gold, danger red, sage, steel), one ink edge
+  title: { font: 'title', top: '#f6f0e2', bottom: '#d4b273', edge: '#14100a', glow: 0.35 },
+  gold: { font: 'title', top: '#f6f0e2', bottom: '#d4b273', edge: '#14100a', glow: 0.4 },
+  danger: { font: 'title', top: '#f6e6de', bottom: '#e48a74', edge: '#2a0c08', glow: 0.35 },
+  blood: { font: 'title', top: '#e48a74', bottom: '#c4553f', edge: '#1a0606', glow: 0.25, depth: 6 },
+  hint: { font: 'small', top: '#e6ebf2', bottom: '#b9c4d4', edge: '#0b111c', glow: 0.45 },
+  item: { font: 'title', top: '#f3ecdc', bottom: '#b3c6e2', edge: '#0b111c', glow: 0.45 },
+  name: { font: 'title', top: '#f6f0e2', bottom: '#efe1bd', edge: '#14100a', glow: 0.35 },
+  damage: { font: 'title', top: '#f6f0e2', bottom: '#e8d2c8', edge: '#2a0c08', glow: 0.5 },
+  crit: { font: 'title', top: '#f6f0e2', bottom: '#e48a74', edge: '#2a0c08', glow: 0.6 },
+  heal: { font: 'title', top: '#eef4ea', bottom: '#8fb391', edge: '#13231a', glow: 0.5 },
+  magic: { font: 'title', top: '#f0ecf6', bottom: '#a993c9', edge: '#1a1228', glow: 0.5 },
+  logo: { font: 'title', top: '#f6f0e2', bottom: '#d4b273', edge: '#14100a', glow: 0.3, depth: 6 },
+  sub: { font: 'small', top: '#e6ebf2', bottom: '#b3c6e2', edge: '#0b111c', glow: 0.45 },
+  shout: { font: 'title', top: '#f6f0e2', bottom: '#efe1bd', edge: '#14100a', glow: 0.4 },
+  body: { font: 'small', top: '#f3ecdc', bottom: '#d6d0c2', edge: '#0b111c', glow: 0.3 },
 } satisfies Record<string, T3DStyle>;
 export type T3DName = keyof typeof T3D;
 

@@ -85,7 +85,7 @@ import { rollClearReward, rollGear, rollShop, rollMaterial, rollChest, rollKillD
 import { DungeonHud, type DungeonHudState, type HudAnchor, type MailState, type Prompt, type DepthHud } from '../dungeon/hud';
 import type { PixelUI } from '../ui/pixel/ui';
 import { runSpec, type TouchSpec } from '../ui/touch';
-import { plate, PAL } from '../ui/obj/plates';
+import { C as KC } from '../ui/pixel/skins';
 import { Pedestal, ShopStock, Chest, type ShopStand } from '../dungeon/contents';
 import { Critters, registerCritterCodex, type CritterHost } from '../dungeon/critters';
 
@@ -581,7 +581,7 @@ export class DungeonScreen implements Screen {
       const stage = deeper ? 'THE DEEP' : `STAGE ${i + 1} OF ${this.planned}`;
       const R = routeOf(plan.route);
       const sub = i === 0 && farM === 0 ? `${stage} - OUTSIDE YOUR FRONT DOOR` : plan.route !== 'main' ? `${stage} - ${R.note} - ${farM} M FROM HOME` : `${stage} - ${farM} M FROM HOME - ${ZONE_NAME[zoneOf(dTop)]}`;
-      this.hud.l.areaCard(AREA_NAME(area).toUpperCase(), sub, deeper ? '#ff9a84' : '#f3e7c9');
+      this.hud.l.areaCard(AREA_NAME(area).toUpperCase(), sub, deeper ? KC.red2 : KC.bone2);
       this.game.addShake(0.15);
     });
     audio.play('jin_biome', { vol: 0.5 });
@@ -680,7 +680,7 @@ export class DungeonScreen implements Screen {
       say: (who, text, life) => { if (this.critters) this.critters.talker = who; this.dlg.bark('hermit', text, life); },
       pearls: (y) => depthPearls(depthOf(this.plan, y)),
       fighting: () => !!this.fight,
-      title: (n, sub, col) => this.hud.l.title(n, sub, col ?? '#f3e7c9', 2.6),
+      title: (n, sub, col) => this.hud.l.title(n, sub, col ?? KC.bone2, 2.6),
       hint: (t, l, k) => this.hint(t, l, k),
       refresh: () => { this.installStats(); this.applyStats(); },
       save: () => this.save(),
@@ -869,7 +869,7 @@ export class DungeonScreen implements Screen {
     // safety: a long fight down to its last stragglers (hiding in rock, wandering off) ends with them fleeing
     if (alive > 0 && alive <= 2 && f.t > 100 && !f.pending.length) {
       for (const e of f.ents) if (e.alive && e.team === 'enemy' && !isHelper(e)) { e.alive = false; this.world.fx.burst('bubble', e.x, e.y, 14, 2); this.world.emit('escaped', { kind: e.kind, x: e.x, y: e.y }); }
-      this.hud.l.title('THEY FLED', '', '#9fe8ff', 1.6);
+      this.hud.l.title('THEY FLED', '', '#b3c6e2', 1.6);
     }
     if (alive === 0 && !f.pending.length) { f.clearT += dt; if (f.clearT > 0.7) this.arenaCleared(); } else f.clearT = 0;
   }
@@ -1394,7 +1394,7 @@ export class DungeonScreen implements Screen {
       f.chosen = i;
       this.commitBeat(f, i);
       const l = f.lanes[i], other = f.lanes.find((_, j) => j !== i);
-      this.hud.l.title(l.name, other ? `${other.name} IS SEALED BEHIND YOU` : l.note, l.danger >= 2 ? '#ffb09a' : '#bfefff', 2.6);
+      this.hud.l.title(l.name, other ? `${other.name} IS SEALED BEHIND YOU` : l.note, l.danger >= 2 ? '#e48a74' : '#b3c6e2', 2.6);
       this.world.emit('forkChosen', { fork: f.id, kind: f.kind, lane: l.side, x: p.x });
       this.save();
       return;
@@ -1412,7 +1412,7 @@ export class DungeonScreen implements Screen {
     this.game.addShake(0.2);
     audio.play('k_bong', { vol: 0.45 }); audio.play('thud_heavy1', { vol: 0.35 }); audio.play('flood_rush1', { vol: 0.3 });
     this.world.fx.burst('bubble', p.x, p.y, 14, 2.2);
-    if (l.side === 'pit') this.hud.l.title(l.name, l.note, '#bfefff', 2.4);
+    if (l.side === 'pit') this.hud.l.title(l.name, l.note, '#b3c6e2', 2.4);
   }
   private updateBeat(dt: number) {
     const b = this.beat;
@@ -1465,14 +1465,16 @@ export class DungeonScreen implements Screen {
     const flip = hud(y);
     if (flip) y = Math.round(under.y + 10);
     y = Math.max(6, Math.min(ui.h - h - 46, y)) + Math.round((1 - pop) * (flip ? -6 : 6));
-    const rim = s.danger >= 2 ? PAL.coral : PAL.brass;
-    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x + 2, y + 2, { alpha: 0.35 * a });
-    ui.img(plate(w, h, 'lacquer', { rim, corners: false }), x, y, { alpha: a });
-    ui.text(s.name, x + Math.round((w - ui.measure(s.name, 'title')) / 2), y + 6, { font: 'title', color: PAL.cream, alpha: a });
-    ui.text(s.note, x + Math.round((w - ui.measure(s.note, 'body')) / 2), y + 6 + ui.lh('title'), { font: 'body', color: s.danger >= 2 ? PAL.coral2 : PAL.kelp2, alpha: a });
+    // the kit's flat tag: navy face, a 1 px border (red when it is dangerous), the place in bone, the route words
+    const rim = s.danger >= 2 ? KC.red : KC.line2;
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22 * a);
+    ui.fill(x, y, w, h, KC.navy, 0.96 * a);
+    ui.rect(x, y, w, h, rim);
+    ui.text(s.name, x + Math.round((w - ui.measure(s.name, 'title')) / 2), y + 6, { font: 'title', color: KC.bone2, shadow: KC.ink, alpha: a });
+    ui.text(s.note, x + Math.round((w - ui.measure(s.note, 'body')) / 2), y + 6 + ui.lh('title'), { font: 'body', color: s.danger >= 2 ? KC.red2 : KC.dim, shadow: null, alpha: a });
     // a little pointer to the board (down from over it, up from under it)
     const px = Math.round(Math.max(x + 8, Math.min(x + w - 9, at.x)));
-    for (let i = 0; i < 4; i++) ui.fill(px - 3 + i, flip ? y - i : y + h - 1 + i, 7 - i * 2, 1, PAL.ink2, a);
+    for (let i = 0; i < 3; i++) ui.fill(px - 2 + i, flip ? y - 1 - i : y + h + i, 5 - i * 2, 1, rim, a);
   }
 
   /** an undecided fork whose choice the player is at: the camera frames its lanes */
@@ -1671,7 +1673,7 @@ export class DungeonScreen implements Screen {
         if (!lid.blast(d.x, d.y as number, (d.r as number) ?? 2)) continue;
         const p = this.plan.pois[pid];
         p.opened = true; p.known = true;
-        this.hud.l.title('A SECRET!', 'SOMETHING GLITTERS BELOW', '#e0c0ff', 2.4);
+        this.hud.l.title('A SECRET!', 'SOMETHING GLITTERS BELOW', '#cdbfe0', 2.4);
         audio.play('jin_rare2', { vol: 0.5 });
         this.world.emit('secretFound', { x: p.x });
         this.save();
@@ -1851,7 +1853,7 @@ export class DungeonScreen implements Screen {
       if (m > this.maxDepth + 0.5) {
         const prevZone = zoneOf(this.maxDepth);
         this.maxDepth = m;
-        if (zoneOf(m) !== prevZone && this.maxDepth > 1) { this.world.emit('depthZone', { zone: zoneOf(m), depth: Math.round(m) }); this.hud.l.title(ZONE_NAME[zoneOf(m)], `-${Math.round(m)} M`, '#9fe8ff', 2.6); }
+        if (zoneOf(m) !== prevZone && this.maxDepth > 1) { this.world.emit('depthZone', { zone: zoneOf(m), depth: Math.round(m) }); this.hud.l.title(ZONE_NAME[zoneOf(m)], `-${Math.round(m)} M`, '#b3c6e2', 2.6); }
         const rec = META as unknown as { records?: { maxDepth: number; deepestFloor: number; hadal: number } };
         rec.records ??= { maxDepth: 0, deepestFloor: 0, hadal: 0 };
         if (m > rec.records.maxDepth && !this.dev) {

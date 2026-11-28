@@ -1,5 +1,4 @@
-// WARDROBE (v5): the open door of a green-black lacquered wardrobe (gold trim, bevelled panels) on the left of the
-// room, a row per cosmetic slot (hat, skin, sword, scarf, trail). Hover an item to try it on (locked ones too: the
+// WARDROBE (v8b kit): a panel on the left of the room, a row per cosmetic slot (hat, skin, sword, scarf, trail). Hover an item to try it on (locked ones too: the
 // hero wears it as a preview, and the tooltip says which achievement unlocks it), click an owned one to wear it (the
 // hero does a little gear-up hop). The blobfish stays in view on the right, wearing what you point at.
 import { PixelUI, type TipLine } from '../ui/pixel/ui';
@@ -7,10 +6,8 @@ import { SLOTS, SLOT_NAME, bySlot, owned, equippedLook, equip, COSMETIC, type Sl
 import { cosmeticIcon } from '../cosmetics/icons';
 import { achFor, progress } from '../achievements';
 import { audio } from '../audio/audio';
-import { K, brassPlate } from './itemCard';
-import { panelArt, PANEL_IN, drawerArt, cellArt } from './panelArt';
-import { wobble, SeaFx } from './seaFx';
-import { panelLife } from './panels';
+import { PANEL_IN, cellArt } from './panelArt';
+import { C, tag } from '../ui/pixel/skins';
 
 const CELL = 28, ROW = 46;
 export const WARD_W = PANEL_IN.wardrobe[0] + PANEL_IN.wardrobe[2] + 12 * CELL + 14;
@@ -25,8 +22,6 @@ export class WardrobePanel {
   /** an item was equipped this frame */
   equipped: string | null = null;
   private t = 0;
-  private fx = new SeaFx();
-  private lastHover: string | null = null;
   open() { this.t = 0; this.hover = null; }
   /** returns true to close */
   draw(ui: PixelUI, x: number, y: number, dt: number): boolean {
@@ -34,48 +29,41 @@ export class WardrobePanel {
     this.hover = null; this.equipped = null;
     const look = equippedLook();
     const r = wardRect(ui), W = r.w, H = r.h;
-    // bobbing up into place like something surfacing
-    y += wobble(this.t);
-    ui.block(x, y - 10, W, H + 10);
-    ui.fill(x + 4, y + 5, W, H, '#000000', 0.4);
-    ui.img(panelArt('wardrobe', W, H), x, y);
-    brassPlate(ui, 'WARDROBE', x + W / 2, y - 9, { font: 'title' });
-    let close = ui.closeButton('ward:x', x + W - 16, y - 6, { size: 20, key: null });
+    ui.panel('wood', x, y, W, H, 'WARDROBE', { id: 'home:wardrobe' });
+    let close = ui.closeButton('ward:x', x + W - 24, y + 8, { size: 15, key: null });
     const [il, it] = PANEL_IN.wardrobe;
     const ix = x + il + 2, iw = W - il * 2 - 4;
     const n = SLOTS.reduce((a, s) => a + bySlot(s).filter((c) => owned(c.id)).length, 0), tot = SLOTS.reduce((a, s) => a + bySlot(s).length, 0);
     const rowsH = H - it - PANEL_IN.wardrobe[3] - 24, rowH = Math.min(ROW, Math.floor(rowsH / SLOTS.length));
     SLOTS.forEach((slot: Slot, si) => {
       const ry = y + it + 2 + si * rowH;
-      // a drawer per slot (painted 1x: a plank rim, a kelp-paper bed, a lit front lip): its name, what you wear, the items
-      ui.img(drawerArt(iw + 4, rowH - 3), ix - 2, ry);
-      ui.text(SLOT_NAME[slot].toUpperCase(), ix + 3, ry + 3, { font: 'body', color: K.brass2, shadow: '#060c0a' });
+      // a row per slot: its name, what you wear, the items; a 1 px rule between rows
+      if (si) ui.fill(ix, ry - 2, iw, 1, C.line);
+      ui.text(SLOT_NAME[slot].toUpperCase(), ix + 2, ry + 3, { font: 'small', color: C.gold, shadow: null });
       const cur = COSMETIC[look[slot]];
-      ui.text(cur ? cur.name : '', ix + iw - 3, ry + 4, { font: 'small', color: K.cream2, shadow: '#060c0a', align: 'right' });
-      const cy = ry + 4 + ui.lh('body');
+      ui.text(cur ? cur.name : '', ix + iw - 2, ry + 3, { font: 'small', color: C.dim, shadow: null, align: 'right' });
+      const cy = ry + 5 + ui.lh('small');
       bySlot(slot).forEach((c, i) => {
         const cx = ix + 2 + i * CELL;
         const own = owned(c.id), on = look[slot] === c.id;
         const over = ui.hover(cx, cy, CELL - 2, CELL - 2);
         ui.mark('ward:' + c.id, cx, cy, CELL - 2, CELL - 2);
         ui.block(cx, cy, CELL - 2, CELL - 2);
-        // a cubby per piece (wooden rim, water, a sand bed; brass when worn); the icon at 1x like the kit
+        // a slot per piece (gold when worn); the icon at 1x like the kit
         ui.img(cellArt(CELL - 2, on ? 'on' : over ? 'hover' : 'off'), cx, cy);
         const S = CELL - 6;
         ui.img(cosmeticIcon(c.id, S), cx + 2, cy + 2, { w: S, h: S, alpha: own ? 1 : 0.3 });
         if (!own) ui.icon('lock', cx + CELL - 12, cy + CELL - 13);
-        if (on && Math.sin(this.t * 4 + i) > 0.6) { ui.fill(cx + CELL - 6, cy + 1, 1, 3, '#ffffff'); ui.fill(cx + CELL - 7, cy + 2, 3, 1, '#ffffff'); }
         if (over) {
-          ui.rect(cx - 1, cy - 1, CELL, CELL, '#bff0ff');
           ui.cursor = own ? 'point' : 'arrow';
           this.hover = c.id;
-          const tip: TipLine[] = [{ text: c.name, font: 'title', color: own ? '#2a1808' : '#5a4a3a' }, { text: c.desc, color: '#3a2810', gap: 1 }];
+          const tip: TipLine[] = [{ text: c.name, font: 'title', color: own ? C.inkT : C.inkT2 }, { text: c.desc, color: C.inkT, gap: 1 }];
           if (!own) {
             const a = achFor(c.id);
-            if (a) { tip.push({ text: `LOCKED: ${a.name.toUpperCase()}`, font: 'small', color: '#a01a1a', gap: 3 }); tip.push({ text: `${a.desc} (${progress(a)}/${a.goal})`, font: 'small', color: '#5a2a1a' }); }
-            tip.push({ text: 'trying it on', font: 'small', color: '#1a4a7a', gap: 2 });
-          } else if (!on) tip.push({ text: 'click to wear', font: 'small', color: '#1a4a7a', gap: 3 });
-          else tip.push({ text: 'wearing it', font: 'small', color: '#2a6a2a', gap: 3 });
+            if (a) { tip.push({ text: `LOCKED: ${a.name.toUpperCase()}`, font: 'small', color: '#8a3a2e', gap: 3 }); tip.push({ text: `${a.desc} (${progress(a)}/${a.goal})`, font: 'small', color: C.inkT2 }); }
+            tip.push({ text: 'trying it on', font: 'small', color: C.steel0, gap: 2 });
+          } else if (!on) tip.push({ text: 'click to wear', font: 'small', color: C.steel0, gap: 3 });
+          else tip.push({ text: 'wearing it', font: 'small', color: C.sage0, gap: 3 });
           ui.tooltip(tip, { maxW: 180 });
           if (ui.pressed) {
             if (own && !on && equip(c.id)) { this.equipped = c.id; audio.play('k_confirm1', { vol: 0.5, dry: true }); audio.play('cloth1', { vol: 0.4 }); }
@@ -86,15 +74,11 @@ export class WardrobePanel {
     });
     const by = y + H - PANEL_IN.wardrobe[3] - 21;
     let hx = ix + 2;
-    hx += ui.hint('LMB', 'wear', hx, by + 4, { color: K.cream2 });
-    ui.hint('RMB', 'spin him', hx, by + 4, { color: K.cream2 });
-    if (this.hover && this.hover !== this.lastHover) this.fx.burst(ui.mx, ui.my - 4, 4);
-    this.lastHover = this.hover;
-    panelLife(ui, this.fx, { x, y, w: W, h: H }, { x: ix, y: y + it, w: iw, h: H - it - PANEL_IN.wardrobe[3] }, 5, dt);
-    // the tally on a little brass plate on the bottom rail, beside BACK (clear of the close X)
-    const tally = `${n}/${tot} OWNED`, tw = Math.ceil(ui.measure(tally, 'small')) + 16, tx = x + W - il - 90 - tw;
-    ui.frame('brass', tx, by + 3, tw, 15);
-    ui.text(tally, tx + tw / 2, by + 3 + Math.round((15 - ui.cap('small')) / 2), { font: 'small', color: '#3a2008', shadow: '#f8dc90', align: 'center' });
+    hx += ui.hint('LMB', 'wear', hx, by + 4, { color: C.dim });
+    ui.hint('RMB', 'spin him', hx, by + 4, { color: C.dim });
+    // the tally, a small tag on the bottom rail beside BACK
+    const tally = `${n}/${tot} OWNED`, tw = Math.ceil(ui.measure(tally, 'small')) + 8;
+    tag(ui, tally, x + W - il - 92 - tw, by + 4, 'dim');
     if (ui.button('ward:back', 'BACK', x + W - il - 84, by, 82, 20, { style: 'dark', key: 'Escape', keyLabel: 'ESC', sfx: '' })) close = true;
     return close;
   }

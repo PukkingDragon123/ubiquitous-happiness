@@ -21,7 +21,7 @@ import type { Input } from '../../core/input';
 import { audio } from '../../audio/audio';
 import { itemIcon, getItem, ITEMS, RARITY_COLOR } from '../../game/items';
 import { drawText, measure, wrap, lineH, capH, setTextDensity, type FontName, type TextOpts } from './font';
-import { skin, btnSkin, btnFace, btnText, PAD, LIP, KIT, C, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, bubbleArt, causticTile, type SkinKind, type BtnStyle, type BtnState } from './skins';
+import { skin, btnSkin, btnFace, btnText, PAD, LIP, KIT, C, KEYCAP_H, keycapBody, closeArt, tabSkin, knobArt, checkArt, bubbleArt, type SkinKind, type BtnStyle, type BtnState } from './skins';
 import { icon, iconTex, mouseTex, cursorTex, type CursorName } from './art';
 import { easeOutBack } from '../../core/math';
 import { iconAt } from '../../backpack/icons';
@@ -466,26 +466,6 @@ export class PixelUI {
       this.ctx.globalAlpha = a; this.ctx.drawImage(b, Math.round(p.x - p.r), Math.round(p.y - p.r), S, S); this.ctx.globalAlpha = 1;
     }
   }
-  /**
-   * a slow caustic-light shimmer over a rect (two layers of the caustic web sliding past each other). Cheap: two
-   * pattern fills. Draw it over a skin's inset, under the content.
-   */
-  caustic(_x: number, _y: number, _w: number, _h: number, _alpha = 0.1) { /* v8b: retired (the kit has no texture) */ void causticTile; }
-  /**
-   * a kelp frond draped over an edge at (x, y), hanging down and swaying (side -1 hangs out to the left, +1 right): a
-   * ruffled ribbon one UI px per row (ink rim, a lit left margin, a paler midrib, a shaded right margin), a cast
-   * shadow, a gas bladder at its stipe, all on whole UI pixels so the motion steps chunkily
-   */
-  kelp(_x: number, _y: number, _side: -1 | 1, _len = 12, _phase = 0) { /* v8b: retired */ }
-  /** v6: a loose rope end. v8b: retired (draws nothing) */
-  ropeEnd(_x: number, _y: number, _len = 6, _phase = 0) { /* v8b: retired */ }
-  /**
-   * the living decorations of a panel (called by panel(); call it yourself after ui.frame() for a hand-drawn panel):
-   * the caustic shimmer over the inset, and on big plank frames a swaying kelp strand draped over a side, a rope end
-   * dangling from a bottom lashing, and a bubble now and then rising off the top edge. `key` keeps them steady.
-   */
-  panelFx(_kind: SkinKind, _x: number, _y: number, _w: number, _h: number, _key = '', _alpha = 1) { /* v8b: retired: panels are calm */ }
-
   // ---------------------------------------------------------------- primitives
   fill(x: number, y: number, w: number, h: number, col: string, alpha = 1) {
     const c = this.ctx; c.globalAlpha = alpha * this.fadeK; c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y + this.liftY), Math.round(w), Math.round(h)); c.globalAlpha = 1;

@@ -34,7 +34,8 @@ import { setArena } from '../combat/arena';
 import { clamp, damp } from '../core/math';
 import { POST } from '../gfx/post';
 import { rigOf, type Look, type LampHandle } from '../gfx/lighting';
-import { onScreenUI, seaText, SEA } from '../ui/seaText';
+import { onScreenUI } from '../ui/seaText';
+import { C as KC } from '../ui/pixel/skins';
 import { audio, type LoopHandle } from '../audio/audio';
 import { itemModel } from '../backpack/models';
 import { Stomach, buildBottle } from './whaleStomach';
@@ -828,12 +829,20 @@ export class WhaleShark extends BossBase {
     this.beat -= dt;
     if (this.beat <= 0) { this.beat = 1.15; w.sfx('heartbeat', p.x, 0.55, 0.55); POST.uPulse.value = Math.max(POST.uPulse.value, 0.35); }
     s.update(dt);
-    // ---- the SURVIVE timer and the valve count: 2D words floating over the stomach, no box
+    // ---- the SURVIVE timer and the valve count: a small flat HUD panel, top centre (the kit's look)
     const secs = Math.max(0, Math.ceil(left));
     onScreenUI((ui) => {
       const pulse = left < 5 && Math.floor(left * 4) % 2 === 0;
-      seaText(ui, `SURVIVE  ${secs}`, ui.w / 2, 22, pulse ? { top: '#ffffff', bottom: '#ff8a7a', edge: '#3a0408' } : SEA.title, 'big', { align: 'center' });
-      seaText(ui, `TEAR THE VALVE  ${Math.min(this.valveHits, this.valveNeed)} / ${this.valveNeed}`, ui.w / 2, 48, { top: '#e8fff8', bottom: '#7affd8', edge: '#04281e' }, 'body', { align: 'center' });
+      const w = 184, h = 54, x = Math.round(ui.w / 2 - w / 2), y = 10;
+      ui.fill(x + 2, y + 3, w, h, '#000000', 0.22);
+      ui.fill(x, y, w, h, KC.navy, 0.95);
+      ui.rect(x, y, w, h, pulse ? KC.red : KC.line2);
+      ui.text('SURVIVE', x + 10, y + 9, { font: 'small', color: pulse ? KC.red2 : KC.gold, shadow: null });
+      ui.text(`${secs}`, x + w - 10, y + 6, { font: 'big', color: pulse ? KC.red2 : KC.bone2, shadow: KC.ink, align: 'right' });
+      ui.fill(x + 10, y + 34, w - 20, 1, KC.line);
+      ui.text('OR TEAR THE VALVE', x + 10, y + 40, { font: 'small', color: KC.dim, shadow: null });
+      const n = this.valveNeed, ps = 6;
+      for (let i = 0; i < n; i++) { const px = x + w - 10 - (n - i) * (ps + 3) + 3; ui.fill(px, y + 40, ps, ps, i < this.valveHits ? KC.gold : KC.well); if (i >= this.valveHits) ui.rect(px, y + 40, ps, ps, KC.line2); }
     });
     this.title = `SURVIVE ${secs}`;
     if (left <= 0) this.beginCough(w, 'time');

@@ -1,6 +1,5 @@
-// The MAILBOX panel (v7): what Marge brought home, parcel by parcel, in a sea-post frame (teal-painted driftwood, an
-// airmail chevron border, brass corners). Each row is the parcel's photo in a cubby (a count on material stacks, its
-// rarity gem), its name in its rarity colour, what it is and how it came home, what it is worth, and two buttons:
+// The MAILBOX panel (v8b kit): what Marge brought home, parcel by parcel. Each row is the parcel's photo in a slot (a
+// count on material stacks, its rarity pip), its name, what it is and how it came home, what it is worth, and two buttons:
 //   RECEIVE  into the sea chest (gear) / onto the materials shelf: the row slides off toward the chest
 //   DISPOSE  Marge takes it back and pays in PEARLS: the row flashes, pearls fly in an arc into the purse (top right),
 //            which counts up as each one lands (coin ticks, a bump, a sparkle)
@@ -11,13 +10,13 @@
 //   mp.onMail = (kind, parcel, pearls) => ...      (the screen rings the mailbox bell, Mr. Crab reacts)
 import type { PixelUI } from '../ui/pixel/ui';
 import { META, type MailItem } from '../meta/meta';
-import { ITEMS, getItem, RARITY_COLOR } from '../game/items';
+import { ITEMS, getItem } from '../game/items';
+import { C, RARITY_UI, sectionHead } from '../ui/pixel/skins';
 import { audio } from '../audio/audio';
 import { easeInOut } from '../core/math';
 import { K, KIND_LABEL, itemPhoto } from './itemCard';
 import { wellArt, rowArt, pearlArt, emptyMailArt } from './panelArt';
-import { bubbles, SeaFx } from './seaFx';
-import { pop, panelLife, panelRect, frame, detail } from './panels';
+import { pop, panelRect, frame, detail } from './panels';
 import { mailValue, receiveMail, disposeMail, pearls, isMaterial, mailTotal } from './mail';
 
 export const MAIL_SIZE: [number, number] = [520, 300];
@@ -35,7 +34,6 @@ const OUT = 0.28;
 export class MailPanel {
   /** a parcel was received / disposed of (pearls gained); the screen rings the bell, Mr. Crab reacts */
   onMail?: (kind: Kind, m: MailItem, v: number) => void;
-  private fx = new SeaFx();
   private sel: number | null = null;
   private leaving = new Map<number, Leaving>();
   private flyers: Flyer[] = [];
@@ -80,7 +78,6 @@ export class MailPanel {
       this.floaters.push({ text: lab, x, y: y - 4, t: -delay, col: K.kelpL });
       if (!delay || delay < 0.02) audio.play(isMaterial(m) ? 'bag_zip1' : 'chest_creak', { vol: 0.35, dry: true });
     }
-    this.fx.burst(x, y, kind === 'dispose' ? 8 : 5);
   }
 
   /** returns true when the panel wants to close */
@@ -95,11 +92,11 @@ export class MailPanel {
     const live = list.filter((m) => !this.leaving.has(m.uid));
     // ---- header: the count, the purse
     const hy = inner.y + 3;
-    ui.icon('mail', inner.x + 10, hy + 3);
+    ui.icon('mail', inner.x + 4, hy + 3);
     const head = live.length ? `${live.length} PARCEL${live.length > 1 ? 'S' : ''} FROM THE SEA` : 'NOTHING WAITING';
-    ui.text(head, inner.x + 24, hy + 1, { font: 'body', color: K.cream, shadow: K.ink2 });
-    ui.text(live.length ? 'mailed with Marge, or carried home' : 'Marge brings what you send from her post office', inner.x + 24 + ui.measure(head, 'body') + 8, hy + 3, { font: 'small', color: K.dim2, shadow: K.ink2 });
-    this.drawPurse(ui, inner.x + inner.w - 104, inner.y, 104, 22, dt);
+    ui.text(head, inner.x + 18, hy + 1, { font: 'body', color: C.bone2, shadow: C.ink });
+    ui.text(live.length ? 'mailed with Marge, or carried home' : 'Marge brings what you send from her post office', inner.x + 18 + ui.measure(head, 'body') + 8, hy + 3, { font: 'small', color: C.faint, shadow: null });
+    this.drawPurse(ui, inner.x + inner.w - 128, inner.y - 1, 100, 20, dt);
     // ---- the list and the detail pane
     const ly = inner.y + 27, lh = inner.h - 27 - 27, lw = 312;
     const dx = inner.x + lw + 6, dw = inner.x + inner.w - dx;
@@ -111,7 +108,7 @@ export class MailPanel {
       ui.img(wellArt(dw, lh), dx, ly);
       const show = hov ?? list.find((m) => m.uid === this.sel && !this.leaving.has(m.uid)) ?? live[0];
       if (show) this.info(ui, show, dx, ly, dw, lh);
-      else ui.text('All sorted!', dx + dw / 2, ly + lh / 2 - 6, { font: 'title', color: K.kelpL, outline: K.ink2, align: 'center' });
+      else ui.text('All sorted!', dx + dw / 2, ly + lh / 2 - 6, { font: 'title', color: C.bone2, shadow: C.ink, align: 'center' });
     }
     // ---- the bottom bar: hints, RECEIVE ALL, DISPOSE ALL
     const by = inner.y + inner.h - 22;
@@ -127,22 +124,22 @@ export class MailPanel {
       audio.play('coins_many1', { vol: 0.45, dry: true });
     }
     if (live.length) this.price(ui, total, dxb - 4, by + 4, 'right');
-    ui.text('RECEIVE: into your sea chest', inner.x + 4, by + 1, { font: 'small', color: K.dim, shadow: K.ink2 });
-    ui.text('DISPOSE: Marge pays you in pearls', inner.x + 4, by + 11, { font: 'small', color: K.dim, shadow: K.ink2 });
-    // ---- the juice on top: flying pearls, rising labels, bubbles
+    ui.text('RECEIVE: into your sea chest', inner.x + 4, by, { font: 'small', color: C.faint, shadow: null });
+    ui.text('DISPOSE: Marge pays you in pearls', inner.x + 4, by + 11, { font: 'small', color: C.faint, shadow: null });
+    // ---- on top: flying pearls, rising labels
     this.drawFlyers(ui, dt);
     for (const f of this.floaters) {
       f.t += dt;
       if (f.t < 0) continue;
       const k = f.t / 1.1, a = k < 0.7 ? 1 : Math.max(0, 1 - (k - 0.7) / 0.3);
-      ui.text(f.text, f.x, f.y - Math.round(easeInOut(Math.min(1, k)) * 18), { font: 'body', color: f.col, outline: K.ink2, align: 'center', alpha: a });
+      ui.text(f.text, f.x, f.y - Math.round(easeInOut(Math.min(1, k)) * 18), { font: 'body', color: f.col, shadow: C.ink, align: 'center', alpha: a });
     }
     this.floaters = this.floaters.filter((f) => f.t < 1.1);
-    panelLife(ui, this.fx, r, inner, 9, dt);
+    void r;
     return close;
   }
 
-  /** the purse: a dark plaque with a pearl and the count (counting up as pearls land, bumping on each) */
+  /** the purse: a well with a pearl and the count (counting up as pearls land, bumping on each) */
   private drawPurse(ui: PixelUI, x: number, y: number, w: number, h: number, dt: number) {
     this.bump = Math.max(0, this.bump - dt * 4);
     ui.img(wellArt(w, h), x, y);
@@ -151,15 +148,14 @@ export class MailPanel {
     ui.img(pa, px, py);
     this.purseAt = [px + 4, py + 4];
     const shown = Math.round(Math.min(this.purse, pearls() + 999));
-    ui.text(String(shown), px + 14, y + Math.round((h - ui.cap('title')) / 2) - b, { font: 'title', color: this.bump > 0.5 ? K.brassW : K.brass2, outline: K.ink2 });
-    ui.text('PEARLS', x + w - 5, y + Math.round((h - ui.cap('small')) / 2) + 1, { font: 'small', color: K.dim, shadow: K.ink2, align: 'right' });
-    if (this.bump > 0.6) { ui.fill(px + 4, py - 3, 1, 2, K.brassW); ui.fill(px - 3, py + 4, 2, 1, K.brassW); ui.fill(px + 10, py + 4, 2, 1, K.brassW); }
+    ui.text(String(shown), px + 14, y + Math.round((h - ui.cap('title')) / 2) - b, { font: 'title', color: this.bump > 0.5 ? C.gold2 : C.gold, shadow: C.ink });
+    ui.text('PEARLS', x + w - 5, y + Math.round((h - ui.cap('small')) / 2) + 1, { font: 'small', color: C.dim, shadow: null, align: 'right' });
   }
   /** "+N (pearl)" price tag; align right: ends at x */
   private price(ui: PixelUI, v: number, x: number, y: number, align: 'left' | 'right' = 'left', dim = false, font: 'body' | 'small' = 'body') {
     const t = `+${v}`, tw = ui.measure(t, font), pa = pearlArt(font === 'small' ? 6 : 7);
     const x0 = align === 'right' ? x - tw - pa.width - 2 : x;
-    ui.text(t, x0, y, { font, color: dim ? K.brass1 : K.brass2, shadow: K.ink2 });
+    ui.text(t, x0, y, { font, color: dim ? C.dim : C.gold, shadow: C.ink });
     ui.img(pa, x0 + tw + 2, y + Math.round((ui.cap(font) - pa.height) / 2) + 1);
     return tw + pa.width + 2;
   }
@@ -191,7 +187,7 @@ export class MailPanel {
     ui.unclip();
     if (sbW) {
       const tx = x + w - sbW - 3, th = Math.max(16, Math.round((h * h) / content)), tyy = y + 3 + Math.round(((h - 6 - th) * this.scroll) / maxS);
-      ui.fill(tx, y + 3, sbW, h - 6, K.ink2); ui.fill(tx + 1, tyy, sbW - 2, th, K.brass1); ui.fill(tx + 1, tyy, sbW - 2, 1, K.brass2);
+      ui.fill(tx + 1, y + 3, 3, h - 6, C.ink); ui.fill(tx + 1, tyy, 3, th, C.slate);
     }
     return hov;
   }
@@ -202,22 +198,23 @@ export class MailPanel {
     const sel = this.sel === m.uid;
     const st = sel ? 'sel' : hov ? 'hover' : 'off';
     ui.img(rowArt(w, ROW - 2, st, i, 26), x, y, { alpha });
-    if (l?.kind === 'dispose') ui.fill(x + 1, y + 1, w - 2, ROW - 4, K.coral, 0.4 * (1 - alpha) + 0.25 * Math.max(0, Math.sin(alpha * Math.PI)));
-    if (l?.kind === 'receive') ui.fill(x + 1, y + 1, w - 2, ROW - 4, K.kelp, 0.3 * (1 - alpha));
-    // the photo in its cubby, a rarity gem, the stack count
-    const pic = known ? itemPhoto(m.id, m.level, 24 * ui.hd) : null;
-    if (pic) ui.img(pic, x + 3, y + 3, { w: 24, h: 24, alpha }); else ui.item(m.id, x + 5, y + 5, 20, 20, m.level, alpha);
-    if (d) { const g = RARITY_COLOR[d.rarity]; ui.fill(x + 23, y + 3, 4, 4, K.ink2, alpha); ui.fill(x + 24, y + 4, 2, 2, g, alpha); }
-    if (m.n > 1) ui.text(`x${m.n}`, x + 27, y + 19, { font: 'small', color: K.cream, outline: K.ink2, align: 'right', alpha });
+    if (l?.kind === 'dispose') ui.fill(x + 1, y + 1, w - 2, ROW - 4, C.red0, 0.6 * (1 - alpha));
+    if (l?.kind === 'receive') ui.fill(x + 1, y + 1, w - 2, ROW - 4, C.sage0, 0.6 * (1 - alpha));
+    // the photo in its slot, a rarity pip, the stack count
+    const pic = known ? itemPhoto(m.id, m.level, 22 * ui.hd) : null;
+    if (pic) ui.img(pic, x + 5, y + 3, { w: 22, h: 22, alpha }); else ui.item(m.id, x + 6, y + 5, 20, 20, m.level, alpha);
+    if (d) { ui.fill(x + 24, y + 4, 4, 4, C.ink, alpha); ui.fill(x + 25, y + 5, 2, 2, RARITY_UI[d.rarity], alpha); }
+    if (m.n > 1) ui.text(`x${m.n}`, x + 28, y + 19, { font: 'small', color: C.bone, shadow: C.ink, align: 'right', alpha });
     // name (its rarity colour), and under it what it is ... what Marge pays for it
     const BW = 52, rbx = x + w - BW - 6, dbx = rbx - BW - 4;
     const tx = x + 33, nameW = dbx - 6 - tx;
     let name = d ? d.name + (m.level > 1 ? ` +${m.level - 1}` : '') : m.id;
     while (name.length > 4 && ui.measure(name, 'body') > nameW) name = name.slice(0, -2) + '…';
-    const col = d ? (d.rarity === 'common' ? K.cream : RARITY_COLOR[d.rarity]) : K.dim;
-    ui.text(name, tx, y + 5, { font: 'body', color: col, shadow: K.ink2, alpha });
-    const what = d ? (isMaterial(m) ? `${d.rarity} material` : `${d.rarity} ${KIND_LABEL[d.kind] ?? d.kind}`).toUpperCase() : 'UNKNOWN';
-    ui.text(what, tx, y + 18, { font: 'small', color: K.dim2, shadow: K.ink2, alpha });
+    ui.text(name, tx, y + 5, { font: 'body', color: d ? C.bone : C.dim, shadow: C.ink, alpha });
+    if (d) {
+      const rw = ui.text(d.rarity.toUpperCase(), tx, y + 18, { font: 'small', color: RARITY_UI[d.rarity], shadow: null, alpha });
+      ui.text(isMaterial(m) ? 'MATERIAL' : KIND_LABEL[d.kind] ?? d.kind.toUpperCase(), tx + rw + 4, y + 18, { font: 'small', color: C.faint, shadow: null, alpha });
+    } else ui.text('UNKNOWN', tx, y + 18, { font: 'small', color: C.faint, shadow: null, alpha });
     if (l) return;
     this.price(ui, mailValue(m), dbx - 5, y + 16, 'right', !hov && !sel, 'small');
     // DISPOSE, RECEIVE
@@ -228,28 +225,26 @@ export class MailPanel {
 
   /** the detail pane: the parcel up close, then its worth and how it came home */
   private info(ui: PixelUI, m: MailItem, x: number, y: number, w: number, h: number) {
-    if (!ITEMS[m.id]) { ui.textBox('A soggy parcel nobody can read. Dispose of it?', x + 8, y + 8, w - 16, { font: 'body', color: K.cream, shadow: K.ink2 }); return; }
+    if (!ITEMS[m.id]) { ui.textBox('A soggy parcel nobody can read. Dispose of it?', x + 8, y + 8, w - 16, { font: 'body', color: C.bone, shadow: C.ink }); return; }
     const foot = 36;
     detail(ui, m.id, m.level, x + 8, y + 8, w - 16, h - 16 - foot, { n: m.n });
     const fy = y + h - foot;
-    ui.fill(x + 8, fy, w - 16, 1, K.teal2);
-    ui.text('WORTH', x + 8, fy + 5, { font: 'small', color: K.brass2, shadow: K.ink2 });
-    this.price(ui, mailValue(m), x + 8 + ui.measure('WORTH', 'small') + 6, fy + 3);
-    ui.text(m.from === 'home' ? 'Carried home by you' : 'Mailed home with Marge', x + 8, fy + 18, { font: 'small', color: K.dim, shadow: K.ink2 });
+    sectionHead(ui, 'WORTH', x + 8, fy, w - 16);
+    this.price(ui, mailValue(m), x + 8, fy + 13);
+    ui.text(m.from === 'home' ? 'carried home by you' : 'mailed home with Marge', x + w - 8, fy + 15, { font: 'small', color: C.faint, shadow: null, align: 'right' });
   }
 
-  /** no mail: the mailbox with its flag down on the sand, and how mail gets here */
+  /** no mail: the mailbox with its flag down, and how mail gets here */
   private empty(ui: PixelUI, x: number, y: number, w: number, h: number) {
     ui.img(wellArt(w, h), x, y);
     const art = emptyMailArt();
-    const ax = x + Math.round((w - art.width) / 2), ay = y + 10;
+    const ax = x + Math.round((w - art.width) / 2), ay = y + 26;
     ui.img(art, ax, ay);
-    bubbles(ui, ax + 30, ay + 10, 40, ui.t, 5, 3, 24);
-    let yy = ay + art.height + 6;
-    ui.text('NO MAIL TODAY', x + w / 2, yy, { font: 'title', color: K.brass2, outline: K.ink2, align: 'center' });
-    yy += ui.lh('title') + 2;
+    let yy = ay + art.height + 14;
+    ui.text('NO MAIL TODAY', x + w / 2, yy, { font: 'title', color: C.bone2, shadow: C.ink, align: 'center' });
+    yy += ui.lh('title') + 6;
     const lines = ['On a dive, Marge waits at her post office buoy: mail loot home and it lands here, safe even if you sink.', 'Beat the last boss and everything you carry comes home here too.'];
-    for (const l of lines) yy += ui.textBox(l, x + w / 2 - 150, yy, 300, { font: 'small', color: K.cream2, shadow: K.ink2, align: 'center' }) + 3;
+    for (const l of lines) yy += ui.textBox(l, x + w / 2 - 160, yy, 320, { font: 'small', color: C.dim, shadow: null, align: 'center' }) + 4;
     void mailTotal;
   }
 
@@ -264,14 +259,12 @@ export class MailPanel {
         if (f.v > 0) {
           this.purse += f.v; f.v = 0; this.bump = 1;
           audio.play('coin', { vol: 0.16, dry: true, rate: 1.1 + (this.purse % 7) * 0.04 });
-          this.fx.burst(tx, ty, 2);
         }
         continue;
       }
       const e = easeInOut(k);
       const px = f.x0 + (tx - f.x0) * e, py = f.y0 + (ty - f.y0) * e - Math.sin(Math.PI * k) * f.arc;
       ui.img(pa, Math.round(px - 3), Math.round(py - 3));
-      if (((f.t * 30) | 0) % 3 === 0) ui.fill(Math.round(px - 1), Math.round(py + 4), 1, 1, '#ffffff', 0.5);
     }
     this.flyers = this.flyers.filter((f) => f.t - f.delay < f.dur + 0.05);
     if (!this.flyers.length && Math.abs(this.purse - pearls()) > 0 && !this.leaving.size) this.purse = pearls();

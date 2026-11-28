@@ -1,7 +1,7 @@
 // The BUILD SCENE: a short animated rebuild of one piece. The camera pushes in on the spot; Mr. Crab scuttles over
 // and the blobfish waddles up; planks and stones fly in on arcs and thunk into place (dust, a knock, a little
 // shake) while the crab hammers with his big claw; the piece grows out of its blueprint ghost, pops, sparkles and a
-// pinned BUILT card (drawUi, a stamped cream card with a photo of the piece) says what it unlocks and what is next. Click / Esc / Space skips to the end; it always finishes (nothing to get stuck in).
+// BUILT card (drawUi, the kit's panel with a photo of the piece) says what it unlocks and what is next. Click / Esc / Space skips to the end; it always finishes (nothing to get stuck in).
 //
 //   const b = new BuildScene(...); b.start('stash');  each frame: if (b.active) b.update(dt)
 //   b.onDone = () => ...   (the piece is already built in the save when the scene starts)
@@ -16,9 +16,7 @@ import type { Motes } from './ocean';
 import { PIECE, nextGoal } from './rebuild';
 import type { PixelUI } from '../ui/pixel/ui';
 import { photo } from '../ui/obj/studio';
-import { K } from './itemCard';
-import { wellArt } from './panelArt';
-import { rope, bubbles, wobble, SeaFx } from './seaFx';
+import { C, tag } from '../ui/pixel/skins';
 import { audio } from '../audio/audio';
 import { clamp01, easeOutBack } from '../core/math';
 
@@ -37,7 +35,6 @@ export class BuildScene {
   private nextHit = 0;
   /** the BUILT card: what was built, what it unlocks, what's next, a studio photo of the piece */
   private card: { name: string; unlock: string; next: string; pic: HTMLCanvasElement | null; t: number; stamped?: boolean } | null = null;
-  private fx = new SeaFx();
   private crabFrom = new THREE.Vector3();
   private crabTo = new THREE.Vector3();
   onDone?: () => void;
@@ -159,8 +156,8 @@ export class BuildScene {
   }
 
   /**
-   * the BUILT card, pinned near the bottom of the letterboxed shot: a cream card with a brass pin, the piece's photo
-   * in a frame, its name, a red BUILT stamp that slams on, what it unlocks and what's next. Call inside ui.begin/end.
+   * the BUILT card near the bottom of the letterboxed shot (the kit's panel, a 6 px rise + fade): the piece's photo
+   * in a well, a gold BUILT tag, its name, what it unlocks and what's next. Call inside ui.begin/end.
    */
   drawUi(ui: PixelUI, dt: number) {
     const c = this.card;
@@ -168,52 +165,27 @@ export class BuildScene {
     c.t += dt;
     const k = Math.min(1, c.t / 0.28), e = 1 - (1 - k) ** 3;
     const P = 64, w = Math.min(ui.w - 24, 340);
-    const tx0 = 14 + P + 12, tw = w - tx0 - 14;
+    const tx0 = 12 + P + 12, tw = w - tx0 - 12;
     const unlockH = ui.textBox(c.unlock, -9999, -9999, tw, { font: 'body' });
-    const h = Math.max(P + 22, 12 + ui.lh('small') + ui.lh('title') + 2 + ui.lh('small') + unlockH + (c.next ? ui.lh('small') + 3 : 0) + 12);
+    const h = Math.max(P + 24, 12 + 16 + ui.lh('title') + 2 + ui.lh('small') + unlockH + (c.next ? ui.lh('small') + 3 : 0) + 12);
     const bar = Math.round(ui.h * 0.6 * Math.max(0, 1 - (ui.w / ui.h) / 2.39) * 0.5);
-    // it surfaces from below with a little water bob
-    const x = Math.round((ui.w - w) / 2), y = Math.round(ui.h - bar - h - 12 + (1 - e) * 34 + wobble(c.t) * 0.5);
-    if (!c.stamped) { c.stamped = true; this.fx.burst(x + w / 2, y + 6, 14); this.fx.burst(x + 14 + P / 2, y + h / 2, 8); }
-    // two ropes it hangs from, a carved driftwood plaque
-    const sway = Math.round(Math.sin(c.t * 1.4) * 1.5);
-    for (const rx of [x + 22, x + w - 26]) rope(ui, rx + sway, y - 14, 16, true);
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35 * e);
-    ui.img(wellArt(w, h, 'plank'), x, y);
-    // a starfish clinging to the top-left corner
-    const sx = x + 4, sy = y + 3;
-    for (const [dx, dy] of [[0, -3], [3, -1], [2, 2], [-2, 2], [-3, -1]]) { ui.fill(sx + 4 + Math.round(dx * 0.6), sy + 4 + Math.round(dy * 0.6), 2, 2, '#c8582c'); ui.fill(sx + 4 + dx, sy + 4 + dy, 1, 1, '#e8783c'); }
-    ui.fill(sx + 4, sy + 4, 2, 2, '#f09a5a');
-    // the piece's photo behind a brass porthole
-    if (!c.pic || c.pic.width !== P * ui.hd) c.pic = this.porthole(P * ui.hd);
-    const fx = x + 14, fy = y + Math.round((h - P) / 2);
+    const x = Math.round((ui.w - w) / 2), y = Math.round(ui.h - bar - h - 12 + (1 - e) * 6);
+    if (!c.stamped) c.stamped = true;
+    ui.panel('wood', x, y, w, h, undefined, { id: 'build:card' });
+    // the piece's photo in a well
+    if (!c.pic || c.pic.width !== P * ui.hd) c.pic = this.photo(P * ui.hd, P * ui.hd);
+    const fx = x + 12, fy = y + Math.round((h - P) / 2);
+    ui.frame('inset', fx - 1, fy - 1, P + 2, P + 2);
     if (c.pic) ui.img(c.pic, fx, fy, { w: P, h: P });
-    ui.img(portholeRing(P), fx - 4, fy - 4);
-    // the words, carved into the wood
+    // the words
     const tx = x + tx0;
     let yy = y + 10;
-    ui.text('BUILT!', tx, yy, { font: 'small', color: K.kelpL, outline: K.ink2 }); yy += ui.lh('small');
-    ui.text(c.name, tx, yy, { font: 'title', color: K.brass2, outline: K.ink2 }); yy += ui.lh('title') + 2;
-    ui.text('UNLOCKS', tx, yy, { font: 'small', color: K.cream2, outline: K.ink2 }); yy += ui.lh('small');
-    yy += ui.textBox(c.unlock, tx, yy, tw, { font: 'body', color: K.cream, outline: K.ink2 }) + 3;
-    if (c.next) ui.text(`next up: ${c.next}`, tx, yy, { font: 'small', color: K.dim, outline: K.ink2 });
-    bubbles(ui, x + 30, y - 1, w - 60, c.t, 21, 4, 24);
-    if (c.t > 0.3 && c.t - dt <= 0.3) { audio.play('bubbles_a', { vol: 0.3 }); audio.play('k_confirm2', { vol: 0.3, dry: true }); }
-    this.fx.draw(ui, dt);
-  }
-  /** the photo cut to a circle (for the porthole) */
-  private porthole(px: number): HTMLCanvasElement | null {
-    const src = this.photo(px, px);
-    if (!src) return null;
-    const ctx = src.getContext('2d')!;
-    const d = ctx.getImageData(0, 0, px, px), r = px / 2;
-    for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) {
-      const i = (y * px + x) * 4, dd = Math.hypot(x - r + 0.5, y - r + 0.5);
-      if (dd > r) d.data[i + 3] = 0;
-      else if (d.data[i + 3] < 255) { const a = d.data[i + 3] / 255, bg = y < px * 0.66 ? [184, 214, 210] : [150, 182, 172]; for (let k = 0; k < 3; k++) d.data[i + k] = Math.round(d.data[i + k] * a + bg[k] * (1 - a)); d.data[i + 3] = 255; }
-    }
-    ctx.putImageData(d, 0, 0);
-    return src;
+    tag(ui, 'BUILT', tx, yy, 'sage'); yy += 16;
+    ui.text(c.name, tx, yy, { font: 'title', color: C.gold2, shadow: C.ink }); yy += ui.lh('title') + 2;
+    ui.text('UNLOCKS', tx, yy, { font: 'small', color: C.dim, shadow: null }); yy += ui.lh('small');
+    yy += ui.textBox(c.unlock, tx, yy, tw, { font: 'body', color: C.bone, shadow: C.ink }) + 3;
+    if (c.next) ui.text(`next up: ${c.next}`, tx, yy, { font: 'small', color: C.faint, shadow: null });
+    if (c.t > 0.3 && c.t - dt <= 0.3) audio.play('k_confirm2', { vol: 0.3, dry: true });
   }
   /** a studio photo of the finished piece (a clone, so the house keeps its model) */
   private photo(w: number, h: number): HTMLCanvasElement | null {
@@ -221,25 +193,4 @@ export class BuildScene {
     try { if (s?.built) { const c = s.built.clone(true); c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); c.scale.set(1, 1, 1); return photo(c, w, h, { yaw: -0.5, pitch: 0.35, fill: 1, ss: 2 }); } } catch { /* no GL */ }
     return null;
   }
-}
-
-/** a brass porthole ring (bolted) around an s x s circle, cached */
-let ringCache: { s: number; cv: HTMLCanvasElement } | null = null;
-function portholeRing(s: number): HTMLCanvasElement {
-  if (ringCache?.s === s) return ringCache.cv;
-  const W = s + 8, cv = document.createElement('canvas'); cv.width = W; cv.height = W;
-  const x = cv.getContext('2d')!;
-  const f = (px: number, py: number, c: string) => { x.fillStyle = c; x.fillRect(px, py, 1, 1); };
-  const r0 = s / 2, c = W / 2;
-  for (let py = 0; py < W; py++) for (let px = 0; px < W; px++) {
-    const d = Math.hypot(px - c + 0.5, py - c + 0.5);
-    if (d > r0 + 4 || d < r0 - 1) continue;
-    const lit = (px - c) + (py - c) < 0;
-    f(px, py, d > r0 + 3 ? '#2e1404' : d < r0 ? '#2e1404' : d > r0 + 2 ? (lit ? '#f2c66d' : '#8a5a24') : lit ? '#c8913a' : '#6a4014');
-  }
-  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2, bx = Math.round(c + Math.cos(a) * (r0 + 2) - 1), by = Math.round(c + Math.sin(a) * (r0 + 2) - 1); x.fillStyle = '#4a2c0c'; x.fillRect(bx, by, 2, 2); x.fillStyle = '#fff1c2'; x.fillRect(bx, by, 1, 1); }
-  // a glint across the glass
-  for (let i = 0; i < 10; i++) f(Math.round(c - r0 * 0.5 + i), Math.round(c - r0 * 0.55 + i * 0.4), 'rgba(255,255,255,0.35)');
-  ringCache = { s, cv };
-  return cv;
 }

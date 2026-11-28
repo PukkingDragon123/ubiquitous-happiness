@@ -10,9 +10,8 @@
 //     satchel repacks itself (biggest first) before it refuses.
 //   - the TALLY under it: HP / attack / speed / mana / crit / luck count up or down as the gear changes (a flash and
 //     an arrow on whatever just moved), and the sets the packed gear starts
-//   - ABILITIES: the medallions (src/ui/obj/medallion.ts) the packed gear grants hang on a rope (bottom left); a new
-//     one drops onto the rope with a burst of bubbles
-//   - MASTERY: a brass plate (◄ ► / - and +); HOME (Esc) top left; SWIM OUT (Enter) bottom right -> the swim-out
+//   - ABILITIES: the skills the packed gear grants, a row of flat slots (bottom left); a new one rises into place
+//   - MASTERY: a small panel (◄ ► / - and +); HOME (Esc) top left; SWIM OUT (Enter) bottom right -> the swim-out
 //     cinematic (src/hideout/exitCine.ts) -> onDive(cfg)
 //   - hover anything (or focus it with the arrows / WASD, Tab between wall and satchel, Q / E page the wall): an
 //     elegant compact card beside it; the blobfish turns to look at what you are looking at
@@ -27,17 +26,14 @@ import * as THREE from 'three';
 import { damp, dampAngle, easeOutBack, clamp01 } from '../core/math';
 import { META, saveMeta, type RunConfig } from '../meta/meta';
 import { MASTERY, MAX_MASTERY, masteryMods } from './mastery';
-import { ITEMS, getItem, GRID_W, GRID_H, fits, instCells, findSpot, stackCap, shapeSize, setBonuses, setCounts, applyItems, SKILL_NAMES, ABILITY_NAME, RARITY_COLOR, skillItem } from '../game/items';
+import { ITEMS, getItem, GRID_W, GRID_H, fits, instCells, findSpot, stackCap, shapeSize, setBonuses, setCounts, applyItems, SKILL_NAMES, ABILITY_NAME, skillItem } from '../game/items';
 import { BASE_STATS, type ItemInst, type Stats } from '../game/run';
 import { itemModel } from '../backpack/models';
 import { itemIconBox, keyName, PixelUI } from '../ui/pixel/ui';
 import type { Input } from '../core/input';
-import { UiStage } from '../ui/obj/stage';
-import { AbilityMedallion } from '../ui/obj/medallion';
 import { audio } from '../audio/audio';
 import { K, itemHead, itemBody } from './itemCard';
-import { wellArt } from './panelArt';
-import { bubbles, rope } from './seaFx';
+import { C, RARITY_UI, soft, sectionHead, tag } from '../ui/pixel/skins';
 import { Kit } from './kit';
 import { MAT } from './tex';
 import { Px } from '../ui/pixel/decor';
@@ -140,8 +136,7 @@ export class Packing {
   private uiK = 0;
   private focus: Focus = null;
   private kbd = false;
-  private stage = new UiStage();
-  private medals: { id: string; c: AbilityMedallion; born: number }[] = [];
+  private medals: { id: string; born: number }[] = [];
   private statShown = new Map<string, number>();
   private statFlash = new Map<string, { t: number; up: boolean }>();
   private lastUi: PixelUI | null = null;
@@ -251,8 +246,6 @@ export class Packing {
     if (this.cine.active) this.cine.stop();
     this.clearFlights();
     this.drag = null;
-    this.stage.detach();
-    for (const m of this.medals) m.c.root.removeFromParent();
     this.medals = [];
     this.placeSatchel();
     this.phase = 'off'; this.door = 1; this.look = null;
@@ -546,7 +539,7 @@ export class Packing {
     // the blobfish eyes whatever you are looking at (or the thing in flight)
     const fl = this.flights[this.flights.length - 1];
     this.look = fl ? this.set.localToWorld(fl.m.position.clone()) : hot >= 0 && pageList[hot] ? this.local(this.hooks[hot].x, this.hooks[hot].y - 0.2, this.hooks[hot].z) : null;
-    if (!pick) { this.stage.detach(); return; }
+    if (!pick) return;
     // ---- the 2D layer
     const k = easeOutBack(Math.min(1, this.uiK * 1.1)), kIn = (d: number) => easeOutBack(clamp01((this.uiK - d) / (1 - d)));
     // the wall rects (UI px) of this page's pegs, for cards, counts, focus
@@ -568,8 +561,7 @@ export class Packing {
     this.drawMastery(ui, ui.w - SAT.w - 10 - 118 - 30, by, live);
     const kk = 0.5 + 0.5 * Math.sin(this.t * 3.2);
     const bx = ui.w - SAT.w - 10, bw = SAT.w, bh = 30;
-    if (!this.drag) { ui.fill(bx - 3, by - 3, bw + 6, bh + 6, '#8ee06a', 0.1 + 0.12 * kk); ui.rect(bx - 2, by - 2, bw + 4, bh + 4, '#5fae3f'); }
-    bubbles(ui, bx + 10, by - 2, bw - 20, this.t, 4, 3, 18);
+    void kk;
     const canAct = live && !this.drag && this.uiK > 0.6;
     const dive = canAct && ui.button('pack:swim', 'SWIM OUT', bx, by, bw, bh, { style: 'green', font: 'title', key: 'Enter', keyLabel: 'ENTER' });
     const home = canAct && ui.button('pack:home', 'HOME', 10, 8 + Math.round((1 - k) * -40), 78, 22, { style: 'dark', font: 'body', key: 'Escape', keyLabel: 'ESC' });
@@ -744,15 +736,14 @@ export class Packing {
     ui.img(art, ax, y);
     ui.block(ax, y, art.width, art.height);
     ui.mark('pack:satchel', ax, y, art.width, art.height);
-    // the flap's embossed name, the brass count plate on the pocket
-    ui.text('THE', x + SAT.w / 2 - 30, y + 6, { font: 'small', color: '#2a120c', shadow: '#a8653a', align: 'center' });
-    ui.text('SATCHEL', x + SAT.w / 2 + 32, y + 6, { font: 'small', color: '#2a120c', shadow: '#a8653a', align: 'center' });
-    const used = this.cellsUsed(), cnt = ui.count('pack:cells', used, { dur: 0.35 });
-    const pw = 66, ph = 20, px = Math.round(x + SAT.w / 2 - pw / 2), py = y + SAT.pocketY + 8;
-    ui.fill(px + 2, py + 2, pw, ph, '#000000', 0.35);
-    ui.frame('brass', px, py, pw, ph);
-    const pulse = ui.countPulse('pack:cells');
-    ui.text(`${cnt}/${GRID_W * GRID_H}`, px + pw / 2, py + Math.round((ph - ui.cap('body')) / 2) - (pulse > 0.5 ? 1 : 0), { font: 'body', color: used >= GRID_W * GRID_H ? '#8a1a10' : '#3a2008', shadow: '#f8dc90', align: 'center' });
+    // the title in the top border (the kit's legend), the pockets in use as a bar and a count under the grid
+    const tw = Math.ceil(ui.measure('SATCHEL', 'title')), tcap = Math.round(ui.cap('title')), lx = Math.round(ax + art.width / 2 - tw / 2), ly = y + 6;
+    ui.fill(lx - 7, ly, tw + 14, 1, C.navy); ui.fill(lx - 8, ly - 1, 2, 3, C.gold); ui.fill(lx + tw + 6, ly - 1, 2, 3, C.gold);
+    ui.text('SATCHEL', lx, ly - Math.round(tcap / 2), { font: 'title', color: C.gold2, shadow: C.ink });
+    const used = this.cellsUsed(), cnt = ui.count('pack:cells', used, { dur: 0.35 }), full = used >= GRID_W * GRID_H;
+    const by0 = y + SAT.pocketY + 10, bw0 = GRID_W * CELL;
+    ui.bar(ax + SAT.gx + bulge, by0, bw0 - 46, 4, used / (GRID_W * GRID_H), full ? C.red : C.gold, C.well, { id: 'pack:cellsBar' });
+    ui.text(`${cnt}/${GRID_W * GRID_H}`, ax + SAT.gx + bulge + bw0, by0 - 3, { font: 'small', color: full ? C.red2 : C.dim, shadow: null, align: 'right' });
     // what is in the pockets
     const [gx0, gy0] = [x + SAT.gx, y + SAT.gy];
     this.gridAt = [gx0 + shake, gy0];
@@ -772,14 +763,13 @@ export class Packing {
       const cells = instCells(it), xs = cells.map((q) => q[0]), ys = cells.map((q) => q[1]);
       const X = gx0 + Math.min(...xs) * CELL, Y = gy0 + Math.min(...ys) * CELL;
       const hot = it.uid === hotUid;
-      if (hot) for (const [cx, cy] of cells) ui.fill(gx0 + cx * CELL + 1, gy0 + cy * CELL + 1, CELL - 1, CELL - 1, '#f2c66d', 0.2);
-      else { const col = RARITY_COLOR[getItem(it.id).rarity]; for (const [cx, cy] of cells) { ui.fill(gx0 + cx * CELL + 2, gy0 + cy * CELL + CELL - 2, CELL - 3, 1, col, 0.55); } }
+      if (hot) for (const [cx, cy] of cells) ui.fill(gx0 + cx * CELL + 1, gy0 + cy * CELL + 1, CELL - 1, CELL - 1, C.gold, 0.14);
+      else { const col = RARITY_UI[getItem(it.id).rarity]; for (const [cx, cy] of cells) { ui.fill(gx0 + cx * CELL + 2, gy0 + cy * CELL + CELL - 2, CELL - 3, 1, col, 0.6); } }
       const pt = this.popT.get(it.uid);
-      if (pt !== undefined && pt < 0.02) ui.splash(X + ((Math.max(...xs) - Math.min(...xs) + 1) * CELL) / 2, Y + 4, 6);
       const pop = pt !== undefined ? 1 + Math.sin(Math.min(1, pt / 0.35) * Math.PI) * 0.28 : 1;
       this.drawIcon(ui, it.id, it.level ?? 1, it.rot, X, Y, 1, pop * (hot ? 1.06 : 1));
-      if ((it.n ?? 1) > 1) ui.text(String(it.n), X + (Math.max(...xs) - Math.min(...xs) + 1) * CELL - 2, Y + (Math.max(...ys) - Math.min(...ys) + 1) * CELL - ui.lh('small') + 1, { font: 'small', color: K.brassW, outline: K.ink2, align: 'right' });
-      if (hot) { const r = this.itemRect(it); ui.brackets(r[0] - 1, r[1] - 1, r[2] + 1, r[3] + 1, '#f2c66d', 4); }
+      if ((it.n ?? 1) > 1) ui.text(String(it.n), X + (Math.max(...xs) - Math.min(...xs) + 1) * CELL - 2, Y + (Math.max(...ys) - Math.min(...ys) + 1) * CELL - ui.lh('small') + 1, { font: 'small', color: C.bone2, shadow: C.ink, align: 'right' });
+      if (hot) { const r = this.itemRect(it); ui.rect(r[0], r[1], r[2] + 1, r[3] + 1, C.gold); }
     }
     for (let j = 0; j < GRID_H; j++) for (let i = 0; i < GRID_W; i++) ui.mark(`pack:bag:${i},${j}`, gx0 + i * CELL, gy0 + j * CELL, CELL, CELL);
     // the cells a dragged thing would take: green where it fits, red where it does not
@@ -788,10 +778,9 @@ export class Packing {
       if (g) {
         const others = this.pack.filter((p) => p.uid !== d.it.uid || d.from === 'wall');
         const ok = fits(others, { ...d.it, gx: -1, gy: -1, rot: d.rot }, g.gx, g.gy, d.rot) || (stackCap(d.it.id) > 1 && others.some((p) => p.id === d.it.id && p.uid < 0 && instCells(p).some(([cx, cy]) => cx === g.cx && cy === g.cy)));
-        for (const [cx, cy] of instCells({ ...d.it, gx: g.gx, gy: g.gy, rot: d.rot })) if (cx >= 0 && cy >= 0 && cx < GRID_W && cy < GRID_H) ui.fill(gx0 + cx * CELL + 1, gy0 + cy * CELL + 1, CELL - 1, CELL - 1, ok ? '#7ef08a' : '#ff5a4a', 0.35);
+        for (const [cx, cy] of instCells({ ...d.it, gx: g.gx, gy: g.gy, rot: d.rot })) if (cx >= 0 && cy >= 0 && cx < GRID_W && cy < GRID_H) ui.fill(gx0 + cx * CELL + 1, gy0 + cy * CELL + 1, CELL - 1, CELL - 1, ok ? C.sage : C.red, 0.3);
       }
     }
-    bubbles(ui, x + 24, y + SAT.h - 2, SAT.w - 48, this.t, 11, 3, 16);
     return hover;
   }
   /** the dragged thing under the cursor */
@@ -799,12 +788,12 @@ export class Packing {
     const d = this.drag!;
     const sz = shapeSize(getItem(d.it.id).shape), fw = (d.rot % 2 ? sz.h : sz.w) * CELL, fh = (d.rot % 2 ? sz.w : sz.h) * CELL;
     this.drawIcon(ui, d.it.id, d.it.level ?? 1, d.rot, ui.mx - fw / 2, ui.my - fh / 2 - 2, 0.92, 1.12);
-    if (!PixelUI.touch) ui.text('R  turn', ui.mx + fw / 2 + 4, ui.my - 4, { font: 'small', color: K.cream2, outline: K.ink2 });
+    if (!PixelUI.touch) ui.text('R  turn', ui.mx + fw / 2 + 4, ui.my - 4, { font: 'small', color: C.bone, shadow: C.ink });
   }
   /** the tally: what the packed gear makes of you, counting as it changes */
   private drawTally(ui: PixelUI, x: number, y: number, w: number) {
     const h = 56;
-    ui.img(wellArt(w, h, 'plank'), x, y);
+    ui.frame('dark', x, y, w, h);
     ui.block(x, y, w, h);
     const packed = this.pack.filter((p) => p.gx >= 0 && !this.bagArrive.has(p.uid));
     const s = applyItems({ ...BASE_STATS, abilities: [], skills: [], sets: {}, gear: {} }, packed);
@@ -817,12 +806,12 @@ export class Packing {
       this.statShown.set(row.k, v);
       const fl = this.statFlash.get(row.k);
       if (fl) { fl.t -= ui.dt; if (fl.t <= 0) this.statFlash.delete(row.k); }
-      if (fl) ui.fill(cx - 3, cy - 1, cw + 6, 13, fl.up ? '#7ef08a' : '#ff7a6a', 0.14 * Math.min(1, fl.t * 2));
+      if (fl) ui.fill(cx - 3, cy - 1, cw + 6, 13, fl.up ? C.sage : C.red, 0.12 * Math.min(1, fl.t * 2));
       ui.icon(row.icon, cx, cy + 1);
-      ui.text(row.label, cx + 12, cy + 1, { font: 'small', color: K.dim, shadow: K.ink2 });
+      ui.text(row.label, cx + 12, cy + 1, { font: 'small', color: C.dim, shadow: null });
       const shown = ui.count('pack:st:' + row.k, v, { sfx: false });
       const color = v > b ? K.kelpL : v < b ? K.coralL : K.cream;
-      ui.text(row.fmt(shown), cx + cw, cy, { font: 'body', color, outline: K.ink2, align: 'right' });
+      ui.text(row.fmt(shown), cx + cw, cy, { font: 'body', color, shadow: C.ink, align: 'right' });
       if (fl && Math.sin(fl.t * 18) > -0.3) {
         const ax = cx + cw - ui.measure(row.fmt(shown), 'body') - 7, ay = cy + 3;
         const c = fl.up ? K.kelpL : K.coralL;
@@ -837,75 +826,55 @@ export class Packing {
       const lab = `${st.name.toUpperCase()} ${st.count}${st.next ? '/' + st.next : ''}`;
       const cw = ui.measure(lab, 'small') + 14;
       if (sx + cw > x + w) { sx = x; sy += 14; }
-      ui.fill(sx, sy, cw, 12, K.ink2, 0.9); ui.rect(sx, sy, cw, 12, st.color);
-      ui.fill(sx + 3, sy + 4, 4, 4, st.color); if (st.tier) ui.fill(sx + 3, sy + 4, 2, 1, '#ffffff', 0.7);
-      ui.text(lab, sx + 9, sy + 2, { font: 'small', color: st.tier ? st.color : K.cream2, shadow: null });
+      const sc = soft(st.color);
+      ui.fill(sx, sy, cw, 12, C.navy, 0.95); ui.rect(sx, sy, cw, 12, sc);
+      ui.fill(sx + 3, sy + 4, 4, 4, sc);
+      ui.text(lab, sx + 9, sy + 2, { font: 'small', color: st.tier ? sc : C.bone, shadow: null });
       sx += cw + 3;
     }
   }
-  /** the abilities: medallions hanging on a rope, bottom left (y0: slide-in offset) */
+  /** the abilities: the skills the packed gear grants, a row of flat slots bottom left (y0: slide-in offset) */
   private drawMedals(ui: PixelUI, dt: number, y0: number) {
+    void dt;
     const packed = this.pack.filter((p) => p.gx >= 0 && !this.bagArrive.has(p.uid));
     const stats = applyItems({ ...BASE_STATS, abilities: [], skills: [], sets: {}, gear: {} }, packed);
-    // the skills the gear deals and the ability cores it grants: both are cast from the run's medallions
+    // the skills the gear deals and the ability cores it grants: both are cast from the run's skill slots
     const skills = [...new Set([...(stats.skills ?? []), ...(stats.abilities ?? [])])].filter((s) => SKILL_NAMES[s] || (ABILITY_NAME as Record<string, string>)[s]).slice(0, 6);
-    // keep the ones still granted, add the new ones (they drop onto the rope)
-    for (const m of this.medals) if (!skills.includes(m.id)) m.c.root.removeFromParent();
     this.medals = this.medals.filter((m) => skills.includes(m.id));
     for (const id of skills) if (!this.medals.some((m) => m.id === id)) {
-      const c = new AbilityMedallion(id, { d: 34 });
-      this.medals.push({ id, c, born: this.t });
-      if (this.uiK > 0.9) { audio.play('shimmer2', { vol: 0.3, dry: true, delay: 0.15 }); audio.play('k_glass1', { vol: 0.2, dry: true, delay: 0.25 }); }
+      this.medals.push({ id, born: this.t });
+      if (this.uiK > 0.9) audio.play('k_glass1', { vol: 0.2, dry: true, delay: 0.1 });
     }
     this.medals.sort((a, b) => skills.indexOf(a.id) - skills.indexOf(b.id));
-    this.stage.attach(ui);
-    const ry = ui.h - 66 + y0, x0 = 14, step = 42, n = Math.max(3, this.medals.length);
-    const rw = n * step + 10;
-    // the label tag and the rope (sagging between the hang points; never drawn over a medallion)
-    ui.text('ABILITIES', x0 + 2, ry - 13, { font: 'small', color: K.brass2, outline: K.ink2 });
-    for (let xx = 0; xx < rw; xx++) {
-      const u = (xx % step) / step, sag = Math.round(Math.sin(u * Math.PI) * 3);
-      const yy = ry + sag;
-      const C = ['#1e1309', '#b49250', '#8c6e38', '#3e2b12'];
-      for (let k = 0; k < 4; k++) ui.fill(x0 + xx, yy + k - 1, 1, 1, k === 1 && (xx % 3 === 0) ? '#d6b874' : C[k]);
-    }
-    rope(ui, x0 - 4, ry - 6, 10, true);
+    const S = 30, G = 6, n = Math.max(3, this.medals.length);
+    const x0 = 12, ry = ui.h - 12 - S + y0;
+    sectionHead(ui, 'ABILITIES', x0, ry - 16, n * (S + G) - G);
     for (let i = 0; i < n; i++) {
-      const hx = x0 + Math.round(step / 2) + i * step;
-      const m = this.medals[i];
-      if (!m) {
-        // an empty brass hook waiting
-        ui.fill(hx - 2, ry + 2, 4, 5, '#4a2c0e'); ui.fill(hx - 1, ry + 3, 2, 3, '#c8913a'); ui.fill(hx - 1, ry + 3, 1, 1, '#f2c66d');
-        continue;
-      }
-      const age = this.t - m.born, drop = age < 0.45 ? (1 - easeOutBack(age / 0.45)) * -40 : 0;
-      const sway = Math.sin(this.t * 1.4 + i * 1.3) * 1.2;
-      const cy = ry + 24 + drop;
-      ui.fill(hx, ry + 2, 1, Math.max(0, cy - 17 - ry - 2), '#8c6e38');
-      const hov = !this.drag && ui.hover(hx - 17, cy - 17, 34, 34) ? 1 : 0;
-      this.stage.put(m.c.root, hx + sway, cy, 10);
-      m.c.update(Math.min(dt, 1 / 40), { hover: hov, ready: true, selected: age < 0.8 });
-      if (age < 0.05) m.c.bump();
-      ui.block(hx - 17, cy - 17, 34, 34);
-      if (hov) { const it = skillItem(m.id); ui.tooltip([{ text: SKILL_NAMES[m.id] ?? (ABILITY_NAME as Record<string, string>)[m.id] ?? m.id, font: 'title', color: K.brass2 }, { text: it ? `from your ${it.name}` : 'granted by your gear', color: K.cream2, font: 'small' }], { kind: 'dark', maxW: 170 }); }
+      const x = x0 + i * (S + G), m = this.medals[i];
+      if (!m) { ui.fill(x, ry, S, S, C.well, 0.85); ui.rect(x, ry, S, S, C.line); continue; }
+      const age = this.t - m.born, k = Math.min(1, age / 0.25), y = ry + Math.round((1 - k) * 4);
+      const hov = !this.drag && ui.hover(x, y, S, S);
+      ui.fill(x, y, S, S, hov ? C.navy2 : C.navy, 0.95 * k);
+      const it = skillItem(m.id);
+      if (it) ui.item(it.id, x + 3, y + 3, S - 6, S - 6, 1, k);
+      ui.rect(x, y, S, S, hov ? C.gold : age < 0.8 ? C.gold0 : C.line2);
+      ui.block(x, y, S, S);
+      if (hov) ui.tooltip([{ text: SKILL_NAMES[m.id] ?? (ABILITY_NAME as Record<string, string>)[m.id] ?? m.id, font: 'title', color: C.gold }, { text: it ? `from your ${it.name}` : 'granted by your gear', color: C.dim, font: 'small' }], { kind: 'dark', maxW: 170 });
     }
-    if (!this.medals.length) ui.text('pack gear to gain abilities', x0 + 4, ry + 12, { font: 'small', color: K.dim2, outline: K.ink2 });
+    if (!this.medals.length) ui.text('pack gear to gain abilities', x0 + n * (S + G) + 4, ry + Math.round((S - ui.cap('small')) / 2), { font: 'small', color: C.bone, shadow: C.ink });
   }
   /** the kit wall's name board, hung over the wall; page knobs when there is more than one page */
   private drawWallSign(ui: PixelUI, onPage: number, total: number, pages: number, dy: number): [number, number, number, number] | null {
     const top = this.scr(new THREE.Vector3(WALL.x, WALL.y0 + WALL.h + 0.34, WALL.z + 0.1), ui);
     if (!top) return null;
-    const w = 150, h = 30, x = Math.round(top[0] - w / 2), y = Math.max(34, top[1] - h) + dy;
-    for (const rx of [x + 14, x + w - 18]) rope(ui, rx, 0, y + 2, true);
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.3);
-    ui.img(wellArt(w, h, 'plank'), x, y);
-    ui.block(x, y, w, h);
-    ui.text('THE KIT WALL', x + w / 2, y + 4, { font: 'title', color: K.brass2, outline: K.ink2, align: 'center' });
+    const w = 150, h = 32, x = Math.round(top[0] - w / 2), y = Math.max(34, top[1] - h) + dy;
+    ui.panel('dark', x, y, w, h, undefined, { id: 'pack:wallSign' });
+    ui.text('THE KIT WALL', x + w / 2, y + 5, { font: 'title', color: C.gold2, shadow: C.ink, align: 'center' });
     const sub = total ? (pages > 1 ? `page ${this.page + 1} of ${pages}  ·  ${total} things` : `${total} thing${total > 1 ? 's' : ''} to take`) : 'nothing hanging';
-    ui.text(sub, x + w / 2, y + 4 + ui.lh('title') - 3, { font: 'small', color: K.cream2, outline: K.ink2, align: 'center' });
+    ui.text(sub, x + w / 2, y + 5 + ui.lh('title') - 3, { font: 'small', color: C.dim, shadow: null, align: 'center' });
     if (pages > 1 && !this.drag) {
-      if (ui.button('pack:pageL', '', x - 22, y + 6, 18, 18, { style: 'brass', icon: 'left', disabled: this.page <= 0 })) { this.page--; this.focus = null; audio.play('page1', { vol: 0.3 }); }
-      if (ui.button('pack:pageR', '', x + w + 4, y + 6, 18, 18, { style: 'brass', icon: 'right', disabled: this.page >= pages - 1 })) { this.page++; this.focus = null; audio.play('page1', { vol: 0.3 }); }
+      if (ui.button('pack:pageL', '', x - 24, y + 7, 18, 18, { style: 'dark', icon: 'left', disabled: this.page <= 0 })) { this.page--; this.focus = null; audio.play('page1', { vol: 0.3 }); }
+      if (ui.button('pack:pageR', '', x + w + 6, y + 7, 18, 18, { style: 'dark', icon: 'right', disabled: this.page >= pages - 1 })) { this.page++; this.focus = null; audio.play('page1', { vol: 0.3 }); }
     }
     void onPage;
     return [x, y, w, h];
@@ -915,12 +884,11 @@ export class Packing {
     list.forEach((e, i) => {
       const r = this.wallRects[i];
       if (!r || !e || e.kind !== 'mat' || this.hookArrive.has(e.key)) return;
-      const s = `x${e.n}`, w = ui.measure(s, 'small') + 6, x = r[0] + r[2] - w + 2, y = r[1] - 4;
-      ui.fill(x, y, w, 11, '#0b1622', 0.75); ui.fill(x, y, w, 1, '#c8913a', 0.8);
-      ui.text(s, x + 3, y + 2, { font: 'small', color: K.brass2, shadow: null });
+      const s = `x${e.n}`, w = Math.ceil(ui.measure(s, 'small')) + 8;
+      tag(ui, s, r[0] + r[2] - w + 2, r[1] - 6, 'dim');
     });
     // the keyboard focus on the wall
-    if (this.kbd && this.focus?.area === 'wall') { const r = this.wallRects[this.focus.i]; if (r) { const p = Math.round(Math.sin(this.t * 6) * 1.5); ui.brackets(r[0] - 3 - p, r[1] - 3 - p, r[2] + 6 + p * 2, r[3] + 6 + p * 2, '#f2c66d', 5); } }
+    if (this.kbd && this.focus?.area === 'wall') { const r = this.wallRects[this.focus.i]; if (r) { const p = Math.round(Math.sin(this.t * 6) * 1.5); ui.rect(r[0] - 3 - p, r[1] - 3 - p, r[2] + 6 + p * 2, r[3] + 6 + p * 2, C.gold); } }
   }
   /** the brass mastery plate: MASTERY n, its name, ◄ ►, - / + keys, the wheel */
   private drawMastery(ui: PixelUI, x: number, y: number, live: boolean) {
@@ -931,12 +899,12 @@ export class Packing {
       if (nm === this.mastery) { audio.play('k_err1', { vol: 0.25, dry: true }); return; }
       this.mastery = nm; audio.play('k_tick2', { vol: 0.4, dry: true, rate: 0.8 + nm * 0.05 }); audio.play('clank2', { vol: 0.15 });
     };
-    ui.fill(x + 2, y + 2, w, h, '#000000', 0.35);
-    ui.frame('brass', x, y, w, h);
-    ui.text('MASTERY', x + 8, y + 4, { font: 'small', color: '#5a3410', shadow: null });
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22);
+    ui.frame('dark', x, y, w, h);
+    ui.text('MASTERY', x + 8, y + 5, { font: 'small', color: C.dim, shadow: null });
     const num = ui.count('pack:mastery', this.mastery, { dur: 0.2, sfx: false });
-    ui.text(String(num), x + w - 16, y + Math.round((h - ui.cap('title')) / 2) - 1, { font: 'title', color: this.mastery ? '#8a1a10' : '#3a2008', shadow: '#f8dc90', align: 'center' });
-    ui.text(m.name, x + 8, y + 4 + ui.lh('small'), { font: 'small', color: '#3a2008', shadow: '#f0cc80' });
+    ui.text(String(num), x + w - 14, y + Math.round((h - ui.cap('title')) / 2), { font: 'title', color: this.mastery ? C.red2 : C.gold, shadow: C.ink, align: 'center' });
+    ui.text(m.name, x + 8, y + 5 + ui.lh('small'), { font: 'small', color: C.bone, shadow: null });
     const hov = ui.hover(x, y, w, h);
     if (live && !this.drag) {
       if (ui.button('pack:mLess', '', x - 18, y + 6, 16, 18, { style: 'dark', icon: 'left', disabled: this.mastery <= 0, sfx: '' })) setM(this.mastery - 1);
@@ -947,7 +915,7 @@ export class Packing {
       if (hov && ui.wheel) setM(this.mastery - Math.sign(ui.wheel));
     }
     ui.block(x, y, w, h);
-    if (hov) ui.tooltip([{ text: `MASTERY ${this.mastery}: ${m.name}`, font: 'title', color: K.brass2 }, ...(this.mastery ? masteryMods(this.mastery).map((t) => ({ text: '· ' + t, font: 'small' as const })) : [{ text: 'the sea as it is. Win a run to unlock the next.', font: 'small' as const }])], { kind: 'dark', maxW: 210 });
+    if (hov) ui.tooltip([{ text: `MASTERY ${this.mastery}: ${m.name}`, font: 'title', color: C.gold }, ...(this.mastery ? masteryMods(this.mastery).map((t) => ({ text: '· ' + t, font: 'small' as const })) : [{ text: 'the sea as it is. Win a run to unlock the next.', font: 'small' as const }])], { kind: 'dark', maxW: 210 });
   }
   /** the compact item card beside a thing (side 1: to its right, -1: to its left), with a notch pointing at it */
   private card(ui: PixelUI, s: { id: string; level: number; n?: number; from: 'wall' | 'bag' }, r: [number, number, number, number], side: 1 | -1) {
@@ -962,43 +930,42 @@ export class Packing {
     x = Math.max(6, Math.min(ui.w - w - 6, x));
     const y = Math.max(6, Math.min(ui.h - h - 6, Math.round(r[1] + r[3] / 2 - h / 2)));
     const a = Math.min(1, ui.anim('pack:card:' + s.id + s.from) * 8);
-    const col = RARITY_COLOR[getItem(s.id).rarity];
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35 * a);
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22 * a);
     ui.frame('dark', x, y, w, h, a);
-    ui.fill(x + 4, y + 2, w - 8, 1, col, 0.8 * a);
     // the notch toward the thing
     const ny = Math.max(y + 8, Math.min(y + h - 10, Math.round(r[1] + r[3] / 2)));
     const nx = x + w / 2 < r[0] + r[2] / 2 ? x + w : x - 1;
     const dir = nx > x ? 1 : -1;
-    for (let i = 0; i < 4; i++) ui.fill(nx + dir * i, ny - 3 + i, 1, 7 - i * 2, i === 0 ? '#2a3a40' : '#16232f', a);
+    for (let i = 0; i < 4; i++) ui.fill(nx + dir * i, ny - 3 + i, 1, 7 - i * 2, i === 0 ? C.line : C.navy, a);
     let yy = y + 7;
     yy += itemHead(ui, s.id, x + 8, yy, w - 16, opts);
     yy += itemBody(ui, s.id, x + 8, yy, w - 16, opts);
-    if ((s.n ?? 1) > 1 && s.from === 'wall') ui.text(`x${s.n}`, x + w - 8, y + 7, { font: 'title', color: K.brass2, shadow: K.ink2, align: 'right' });
+    if ((s.n ?? 1) > 1 && s.from === 'wall') ui.text(`x${s.n}`, x + w - 8, y + 7, { font: 'title', color: C.gold, shadow: C.ink, align: 'right' });
     const verb = s.from === 'bag' ? 'unpack' : 'pack it';
     const kx = x + 8, ky = y + h - ui.lh('small') - 5;
     const kw = ui.keycap(this.kbd ? 'SPC' : keyName('CLICK'), kx, ky - 1, true);
-    ui.text(verb, kx + kw + 4, ky + 1, { font: 'small', color: K.dim, shadow: null });
-    ui.text(s.from === 'bag' ? 'drag: move' : 'drag: place', x + w - 8, ky + 1, { font: 'small', color: K.dim2, shadow: null, align: 'right' });
+    ui.text(verb, kx + kw + 4, ky + 1, { font: 'small', color: C.dim, shadow: null });
+    ui.text(s.from === 'bag' ? 'drag: move' : 'drag: place', x + w - 8, ky + 1, { font: 'small', color: C.faint, shadow: null, align: 'right' });
   }
   private flashCard(ui: PixelUI, cx: number, cy: number, title: string, sub = '') {
     const w = Math.max(ui.measure(title, 'title'), ui.measure(sub, 'small')) + 22, h = ui.lh('title') + (sub ? ui.lh('small') : 0) + 12;
     const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
-    ui.fill(x + 3, y + 4, w, h, '#000000', 0.35);
+    ui.fill(x + 2, y + 3, w, h, '#000000', 0.22);
     ui.frame('dark', x, y, w, h);
-    ui.text(title, x + w / 2, y + 6, { font: 'title', color: K.coralL, shadow: K.ink2, align: 'center' });
-    if (sub) ui.text(sub, x + w / 2, y + 6 + ui.lh('title'), { font: 'small', color: K.dim, shadow: K.ink2, align: 'center' });
+    ui.rect(x, y, w, h, C.red);
+    ui.text(title, x + w / 2, y + 6, { font: 'title', color: C.red2, shadow: C.ink, align: 'center' });
+    if (sub) ui.text(sub, x + w / 2, y + 6 + ui.lh('title'), { font: 'small', color: C.dim, shadow: null, align: 'center' });
   }
   private emptyNote(ui: PixelUI) {
     const p = this.scr(new THREE.Vector3(WALL.x, WALL.y0 + WALL.h * 0.5, WALL.z + 0.2), ui);
     if (!p) return;
-    ui.text('THE WALL IS BARE', p[0], p[1] - 10, { font: 'title', color: K.cream, outline: K.ink2, align: 'center' });
-    ui.text('bring loot home from your dives', p[0], p[1] + 10, { font: 'small', color: K.dim, outline: K.ink2, align: 'center' });
+    ui.text('THE WALL IS BARE', p[0], p[1] - 10, { font: 'title', color: C.bone2, shadow: C.ink, align: 'center' });
+    ui.text('bring loot home from your dives', p[0], p[1] + 10, { font: 'small', color: C.bone, shadow: C.ink, align: 'center' });
   }
   private keyHints(ui: PixelUI) {
     const parts: [string, string][] = [['WASD', 'move'], ['SPC', 'pack'], ['TAB', 'satchel'], ['Q E', 'page'], ['- +', 'mastery']];
     let x = 96; const y = 10;
-    for (const [k, l] of parts) { const kw = ui.keycap(k, x, y - 1, true); ui.text(l, x + kw + 3, y + 1, { font: 'small', color: K.cream2, outline: K.ink2 }); x += kw + 3 + ui.measure(l, 'small') + 8; }
+    for (const [k, l] of parts) { const kw = ui.keycap(k, x, y - 1, true); ui.text(l, x + kw + 3, y + 1, { font: 'small', color: C.bone, shadow: C.ink }); x += kw + 3 + ui.measure(l, 'small') + 8; }
   }
 
   private dive() {
@@ -1009,8 +976,6 @@ export class Packing {
     // whatever is still in flight lands at once
     for (const f of this.flights) if (f.dir === 'in') this.landIn(f.uids, f.id);
     this.clearFlights(); this.hookArrive.clear(); this.bagArrive.clear();
-    this.stage.detach();
-    for (const m of this.medals) m.c.root.removeFromParent();
     this.medals = [];
     (this.glow.material as THREE.MeshBasicMaterial).opacity = 0;
     this.phase = 'cine';

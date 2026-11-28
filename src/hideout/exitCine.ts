@@ -26,8 +26,7 @@ import { POST } from '../gfx/post';
 import { AREAS, masteryScalars } from './mastery';
 import { floorAreas, floorsForMastery } from '../dungeon/level';
 import { biomeDef } from '../dungeon/biomes';
-import { drawText, setTextDensity } from '../ui/pixel/font';
-import { K } from './itemCard';
+import { C } from '../ui/pixel/skins';
 import { rayCard } from './kitWall';
 
 export interface CineEnv {
@@ -235,66 +234,43 @@ export class ExitCine {
       const a = Math.min(1, (t - 0.2) * 3) * 0.75;
       const lbl = 'skip', key = keyName('ESC') === 'ESC' ? 'ESC' : 'TAP', kw = ui.keycapW(key), x = ui.w - 14 - ui.measure(lbl, 'small') - kw - 4, y = ui.h - 22;
       ui.keycap(key, x, y, true);
-      ui.text(lbl, x + kw + 4, y + 2, { font: 'small', color: K.cream2, shadow: '#000000', alpha: a });
+      ui.text(lbl, x + kw + 4, y + 2, { font: 'small', color: C.dim, shadow: C.ink, alpha: a });
     }
     return false;
   }
   private titleFrom: THREE.Vector3 | null = null;
 
-  // ---------------------------------------------------------------- the title card (2D floating words, no box)
-  private big = new Map<string, HTMLCanvasElement>();
-  /** a string in the 'big' role blown up 2x (chunky), outlined; cached */
-  private bigText(ui: PixelUI, s: string, color: string): HTMLCanvasElement {
-    const key = `${ui.hd}|${s}|${color}`;
-    let c = this.big.get(key);
-    if (c) return c;
-    c = document.createElement('canvas');
-    const ctx0 = c.getContext('2d')!;
-    setTextDensity(ctx0, ui.hd);
-    const w = Math.ceil(ui.measure(s, 'big')) + 6, h = ui.lh('big') + 6;
-    c.width = w * ui.hd; c.height = h * ui.hd;
-    const ctx = c.getContext('2d')!;
-    setTextDensity(ctx, ui.hd);
-    ctx.setTransform(ui.hd, 0, 0, ui.hd, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    drawText(ctx, s, 3, 3, { font: 'big', color, color2: '#f2c66d', outline: '#0b1622' });
-    this.big.set(key, c);
-    return c;
-  }
+  // ---------------------------------------------------------------- the title card (the HUD's area-card look)
+  /** the kicker in small caps, the name in the big role letter by letter (a 3 px rise + fade each) between two gold
+   *  rules, the sub and the description under it */
   private drawTitle(ui: PixelUI, t: number) {
     const t0 = T.title + 0.1;
     if (t < t0) return;
     const k = t - t0;
     const a = Math.min(1, k / 0.35) * (1 - smooth(T.end - 0.25, T.end, t) * 0.4);
-    const cx = Math.round(ui.w / 2), cy = Math.round(ui.h * 0.36);
-    const bob = Math.round(Math.sin(t * 2.2) * 1.5);
-    // the kicker, letter by letter
-    const kick = this.title.kicker.slice(0, Math.floor(k * 40));
-    ui.text(kick, cx, cy - 40 + bob, { font: 'small', color: K.cream2, outline: '#0b1622', align: 'center', alpha: a });
-    // the name: chunky 2x, revealed letter by letter with each letter popping up
-    const name = this.title.name, n = Math.min(name.length, Math.floor(Math.max(0, k - 0.12) * 26) + 1);
-    const full = this.bigText(ui, name, '#fff4d8');
-    const part = this.bigText(ui, name.slice(0, n), '#fff4d8');
-    const W = full.width / ui.hd * 2, H = full.height / ui.hd * 2;
-    const pop = n < name.length ? 1 : Math.max(0, 1 - (k - 0.12 - name.length / 26) * 4);
-    const x0 = Math.round(cx - W / 2), y0 = Math.round(cy - H / 2 + bob - pop * 2);
-    const c = ui.ctx;
-    c.save(); c.globalAlpha = a; c.imageSmoothingEnabled = false;
-    c.drawImage(part, 0, 0, part.width, part.height, x0, y0, part.width / ui.hd * 2, part.height / ui.hd * 2);
-    c.restore();
-    // a brass rule that grows out from the middle, a bubble set in it
-    const rw = Math.round(Math.min(1, Math.max(0, k - 0.3) / 0.4) * (W * 0.42));
-    if (rw > 2) {
-      const ry = y0 + H + 3;
-      ui.fill(cx - rw, ry, rw * 2, 1, '#f2c66d', a); ui.fill(cx - rw, ry + 1, rw * 2, 1, '#8a5a24', a);
-      ui.fill(cx - 3, ry - 2, 6, 5, '#0b1622', a); ui.fill(cx - 2, ry - 1, 4, 3, '#8fd0ff', a); ui.fill(cx - 2, ry - 1, 1, 1, '#ffffff', a);
+    const ease = (v: number) => 1 - (1 - Math.max(0, Math.min(1, v))) ** 3;
+    const cx = Math.round(ui.w / 2), cy = Math.round(ui.h * 0.32);
+    const capBig = Math.round(ui.cap('big'));
+    ui.text(this.title.kicker.toUpperCase(), cx, cy - 20, { font: 'small', color: C.gold, shadow: C.ink, align: 'center', alpha: a * Math.min(1, k * 3) });
+    const name = this.title.name.toUpperCase();
+    const tw = Math.ceil(ui.measure(name, 'big'));
+    let lx = Math.round(cx - tw / 2);
+    [...name].forEach((ch, i) => {
+      const kk = Math.max(0, Math.min(1, (k - 0.12 - i * 0.035) * 5));
+      const w = ui.measure(ch, 'big');
+      if (kk > 0 && ch !== ' ') ui.text(ch, lx, cy - Math.round((1 - ease(kk)) * 3), { font: 'big', color: C.bone2, shadow: C.ink, alpha: kk * a });
+      lx += w;
+    });
+    const ra = Math.max(0, Math.min(1, (k - 0.3) * 3)) * a, rl = Math.round(Math.min(60, (ui.w - tw) / 2 - 24) * ease((k - 0.3) * 2));
+    const ry = cy + Math.round(capBig / 2);
+    if (rl > 0) {
+      ui.fill(Math.round(cx - tw / 2 - 14 - rl), ry, rl, 1, C.gold, ra); ui.fill(Math.round(cx - tw / 2 - 16), ry - 1, 2, 3, C.gold, ra);
+      ui.fill(Math.round(cx + tw / 2 + 14), ry, rl, 1, C.gold, ra); ui.fill(Math.round(cx + tw / 2 + 14), ry - 1, 2, 3, C.gold, ra);
     }
     if (k > 0.5) {
       const b = Math.min(1, (k - 0.5) / 0.3) * a;
-      ui.text(this.title.sub, cx, y0 + H + 9 + bob, { font: 'body', color: K.cream, outline: '#0b1622', align: 'center', alpha: b });
-      if (this.title.desc) ui.text(this.title.desc, cx, y0 + H + 9 + ui.lh('body') + bob, { font: 'small', color: K.seaL, outline: '#0b1622', align: 'center', alpha: b * 0.9 });
+      ui.text(this.title.sub.toUpperCase(), cx, cy + capBig + 10, { font: 'small', color: C.bone, shadow: C.ink, align: 'center', alpha: b });
+      if (this.title.desc) ui.text(this.title.desc, cx, cy + capBig + 10 + ui.lh('small') + 2, { font: 'small', color: C.dim, shadow: C.ink, align: 'center', alpha: b * 0.9 });
     }
-    // real little bubbles rising off the words
-    if (k < 1.2 && Math.random() < 0.5) ui.bubble(x0 + Math.random() * W, y0 + H * 0.3, { r: Math.random() < 0.3 ? 2 : 1, vy: -14 - Math.random() * 10, life: 1.1 });
   }
 }

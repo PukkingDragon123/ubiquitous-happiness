@@ -41,8 +41,7 @@ import { pearls } from './mail';
 import { FLOAT, drawFloat } from './tag';
 import { Dialogue } from '../story/dialogue';
 import { CodexBook, codexCount } from '../ui/codex';
-import { brassPlate } from './itemCard';
-import { bubbles } from './seaFx';
+import { C } from '../ui/pixel/skins';
 import { IN, outlineOf, setGhostHot, setGhostState, pulseGhosts } from './pieces';
 import { PIECE, PIECES, isBuilt, canAfford, costLines, costOf, buildPiece, nextGoal, ensureHome } from './rebuild';
 import { BuildScene } from './buildscene';
@@ -702,7 +701,7 @@ export class HideoutScreen implements Screen {
     // first visit: a hint about the controls, painted on the bottom of the screen briefly
     if (this.hintT < 14 && META.runs === 0) {
       const a = Math.min(1, (14 - this.hintT) / 2);
-      ui.text(input.touchMode ? 'tap the floor to walk  ·  tap things to use them' : 'click the floor to walk  ·  click things to use them', ui.w / 2, ui.h - 18, { font: 'small', color: '#f0e4cc', shadow: '#000', align: 'center', alpha: a });
+      ui.text(input.touchMode ? 'tap the floor to walk  ·  tap things to use them' : 'click the floor to walk  ·  click things to use them', ui.w / 2, ui.h - 18, { font: 'small', color: C.bone, shadow: C.ink, align: 'center', alpha: a });
     }
   }
   /** walking out of the doorway onto the porch starts the packing scene */
@@ -796,20 +795,20 @@ export class HideoutScreen implements Screen {
     const bob = Math.round(Math.sin(this.t * 3) * 2);
     const y = Math.max(14, ay - 12 + bob);
     this.chevron(ax, y, ready ? FLOAT.good : FLOAT.brassL);
-    if (ready) ui.text('READY', ax, y - 12, { font: 'small', color: FLOAT.good, outline: FLOAT.ink, align: 'center', alpha: 0.75 + 0.25 * Math.sin(this.t * 5) });
+    if (ready) ui.text('READY', ax, y - 12, { font: 'small', color: FLOAT.good, shadow: FLOAT.ink, align: 'center', alpha: 0.8 + 0.2 * Math.sin(this.t * 3) });
     this.markRect = [ax - 14, y - 14, 28, 22];
   }
-  /** a chunky down-pointing chevron (ink rim, a lit left face, a shaded right face) centred on x, tip at y + 7 */
+  /** a flat down-pointing chevron (a 1 px ink rim) centred on x, tip at y + 5 */
   private chevron(x: number, y: number, col: string) {
     const ui = this.ui;
-    for (let i = 0; i < 7; i++) {
-      const w = 13 - i * 2;
-      ui.fill(x - 7 + i, y + i - 1, w + 2, 1, FLOAT.ink);
-      if (w > 0) { ui.fill(x - 6 + i, y + i, Math.ceil(w / 2), 1, col); ui.fill(x - 6 + i + Math.ceil(w / 2), y + i, Math.floor(w / 2), 1, '#000000', 0.25); ui.fill(x - 6 + i + Math.ceil(w / 2), y + i, Math.floor(w / 2), 1, col, 0.7); }
+    for (let i = 0; i < 5; i++) {
+      const w = 9 - i * 2;
+      ui.fill(x - 5 + i, y + i - 1, w + 2, 1, FLOAT.ink);
+      if (w > 0) ui.fill(x - 4 + i, y + i, w, 1, col);
     }
-    ui.fill(x - 1, y + 6, 3, 1, FLOAT.ink);
+    ui.fill(x, y + 4, 1, 1, FLOAT.ink);
   }
-  /** v7: a wax-seal badge over the mailbox counting the parcels in it (bobbing; a bubble now and then) */
+  /** a small badge over the mailbox counting the parcels in it (navy, gold border, a gentle bob) */
   private mailMarker() {
     const ui = this.ui, n = mailCount();
     if (!n || this.hoverThing?.id === 'mailbox' || this.fadeIn > 0.3) return;
@@ -817,20 +816,13 @@ export class HideoutScreen implements Screen {
     if (v.z > 1) return;
     const ax = Math.round((v.x * 0.5 + 0.5) * ui.w), ay = Math.round((-v.y * 0.5 + 0.5) * ui.h);
     const bob = Math.round(Math.sin(this.t * 2.6 + 1) * 2), pulse = Math.max(0, Math.sin(this.t * 4)) ** 8;
-    const txt = String(Math.min(99, n)), tw = ui.measure(txt, 'small');
-    const r = 6 + (tw > 6 ? 1 : 0), cx = ax, cy = ay - 10 + bob;
-    // the seal: an ink rim, a brass ring, the red wax with a lit top-left, the count in cream
-    for (let y = -r - 1; y <= r + 1; y++) for (let x = -r - 1; x <= r + 1; x++) {
-      const d = Math.hypot(x, y);
-      if (d > r + 1) continue;
-      const c = d > r ? FLOAT.ink : d > r - 1.2 ? (x + y < 0 ? '#f2c66d' : '#a86a24') : x + y < -r * 0.6 ? '#e8644a' : x + y > r * 0.7 ? '#8e2420' : '#c03a2a';
-      ui.fill(cx + x, cy + y, 1, 1, c);
-    }
-    if (pulse > 0.1) ui.rect(cx - r - 2, cy - r - 2, 2 * r + 5, 2 * r + 5, '#f2c66d');
-    ui.text(txt, cx + 1, cy - Math.round(ui.cap('small') / 2), { font: 'small', color: '#fff4e0', shadow: '#5c1418', align: 'center' });
-    // a little tail pointing down at the box
-    ui.fill(cx - 1, cy + r + 1, 3, 1, FLOAT.ink); ui.fill(cx, cy + r + 2, 1, 1, FLOAT.ink);
-    bubbles(ui, cx - 4, cy - r, 8, this.t, 21, 2, 14);
+    const txt = String(Math.min(99, n)), tw = Math.ceil(ui.measure(txt, 'small'));
+    const r = Math.max(6, Math.ceil(tw / 2) + 3), cx = ax, cy = ay - 10 + bob;
+    // the badge: a navy square with a gold border (it brightens on a slow pulse), the count in bone, a tick below
+    ui.fill(cx - r, cy - r, 2 * r + 1, 2 * r + 1, C.navy);
+    ui.rect(cx - r, cy - r, 2 * r + 1, 2 * r + 1, pulse > 0.1 ? C.gold2 : C.gold);
+    ui.text(txt, cx + 1, cy - Math.round(ui.cap('small') / 2), { font: 'small', color: C.bone2, shadow: null, align: 'center' });
+    ui.fill(cx - 1, cy + r + 1, 3, 1, C.gold); ui.fill(cx, cy + r + 2, 1, 1, C.gold);
     ui.tagRects.push([cx - r - 3, cy - r - 3, 2 * r + 7, 2 * r + 8]);
   }
 
@@ -864,8 +856,8 @@ export class HideoutScreen implements Screen {
     const r = drawFloat(ui, lines, 220, x + dx, y, Math.min(1, t / 0.15), -1);
     ui.mark(id, r.x, r.y, r.w, r.h);
     const hov = !!act && ui.hover(r.x, r.y, r.w, r.h);
-    if (glow) { ui.rect(r.x - 1, r.y - 1, r.w + 2, r.h + 2, glow); ui.fill(r.x - 1, r.y - 1, r.w + 2, r.h + 2, glow, 0.05 + 0.05 * Math.sin(this.t * 4)); }
-    if (hov) { ui.block(r.x, r.y, r.w, r.h); ui.cursor = 'point'; ui.rect(r.x - 1, r.y - 1, r.w + 2, r.h + 2, FLOAT.brassL); if (ui.pressed) { audio.play('k_select1', { vol: 0.3, dry: true }); act!(); } }
+    if (glow) ui.rect(r.x, r.y, r.w, r.h, glow);
+    if (hov) { ui.block(r.x, r.y, r.w, r.h); ui.cursor = 'point'; ui.rect(r.x, r.y, r.w, r.h, FLOAT.brassL); if (ui.pressed) { audio.play('k_select1', { vol: 0.3, dry: true }); act!(); } }
     else if (ui.hover(r.x, r.y, r.w, r.h)) ui.block(r.x, r.y, r.w, r.h);
     return r.h;
   }
